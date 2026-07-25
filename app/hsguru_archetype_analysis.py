@@ -334,7 +334,7 @@ def _negative_cache_entry(
     archetype: str,
     reason: str,
     checked_at: datetime,
-) -> dict[str, str]:
+) -> dict[str, Any]:
     return {
         "format": format_name,
         "archetype": archetype,
