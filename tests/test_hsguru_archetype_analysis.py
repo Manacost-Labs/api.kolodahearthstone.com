@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlparse
 
 from app.hsguru_archetype_analysis import (
     analysis_urls,
@@ -114,12 +115,15 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
 
     def test_builds_legend_past_week_urls_for_requested_format(self) -> None:
         urls = analysis_urls("Void Soul DH", "standard")
+        card_filters = parse_qs(urlparse(urls["cards"]).query)
 
         self.assertIn("/archetype/Void%20Soul%20DH?", urls["matchups"])
         self.assertIn("format=2", urls["matchups"])
         self.assertIn("rank=legend", urls["matchups"])
         self.assertIn("period=past_week", urls["matchups"])
         self.assertIn("show_counts=yes", urls["cards"])
+        self.assertEqual(card_filters["min_mull_count"], ["25"])
+        self.assertEqual(card_filters["min_drawn_count"], ["25"])
 
     def test_refresh_publishes_both_analysis_surfaces(self) -> None:
         async def fetch_html(url: str):
@@ -223,6 +227,8 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
             "archetype": "Small Sample Priest",
             "kind": "card_stats",
             "state": "upstream_unavailable",
+            "min_mull_count": 25,
+            "min_drawn_count": 25,
             "checked_at": (now - timedelta(days=1)).isoformat(),
             "retry_after": (now + timedelta(days=6)).isoformat(),
             "reason": "HSGuru card_stats page has no data for the requested sample",
@@ -269,6 +275,69 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
         self.assertEqual(
             saved["payload"]["data"]["structured"]["negative_cache"],
             [cached_gap],
+        )
+
+    def test_refresh_retries_negative_cache_from_stricter_card_filters(self) -> None:
+        now = datetime(2026, 7, 24, 12, 0, tzinfo=UTC)
+        calls: list[str] = []
+
+        async def fetch_html(url: str):
+            calls.append(url)
+            if "/archetype/" in url:
+                return MATCHUPS_HTML, {"backend": "firecrawl", "request_credits": 1}
+            return CARD_STATS_HTML, {"backend": "firecrawl", "request_credits": 1}
+
+        legacy_gap = {
+            "format": "wild",
+            "archetype": "Small Sample Priest",
+            "kind": "card_stats",
+            "state": "upstream_unavailable",
+            "checked_at": (now - timedelta(days=1)).isoformat(),
+            "retry_after": (now + timedelta(days=6)).isoformat(),
+            "reason": "HSGuru card_stats page has no data for the requested sample",
+        }
+        saved = {}
+        with (
+            patch(
+                "app.hsguru_archetype_analysis._previous_analysis",
+                return_value={},
+            ),
+            patch(
+                "app.hsguru_archetype_analysis._previous_negative_cache",
+                return_value={
+                    ("wild", "small sample priest", "card_stats"): legacy_gap
+                },
+            ),
+            patch(
+                "app.hsguru_archetype_analysis._utc_now",
+                return_value=now,
+            ),
+            patch(
+                "app.hsguru_archetype_analysis.save_dataset",
+                side_effect=lambda source_id, payload: saved.update(
+                    {"source_id": source_id, "payload": payload}
+                ),
+            ),
+            patch("app.hsguru_archetype_analysis.save_status"),
+        ):
+            import asyncio
+
+            result = asyncio.run(
+                refresh_hsguru_archetype_analysis(
+                    archetypes=[
+                        {"format": "wild", "archetype": "Small Sample Priest"}
+                    ],
+                    fetch_html=fetch_html,
+                )
+            )
+
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(result["card_stats_requests_skipped"], 0)
+        row = saved["payload"]["data"]["structured"]["archetypes"][0]
+        self.assertEqual(len(row["card_stats"]), 1)
+        self.assertEqual(
+            saved["payload"]["data"]["structured"]["negative_cache"],
+            [],
         )
 
     def test_refresh_retries_expired_negative_cache_and_clears_it_on_success(self) -> None:

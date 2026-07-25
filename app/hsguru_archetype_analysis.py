@@ -21,6 +21,8 @@ SOURCE_ID = "hsguru_archetype_analysis"
 SCHEMA_VERSION = 2
 ANALYSIS_RANK = "legend"
 ANALYSIS_PERIOD = "past_week"
+CARD_STATS_MIN_MULL_COUNT = 25
+CARD_STATS_MIN_DRAWN_COUNT = 25
 FORMAT_IDS = {"standard": 2, "wild": 1}
 CARD_STATS_UNAVAILABLE_RETRY = timedelta(days=7)
 
@@ -245,6 +247,8 @@ def analysis_urls(archetype: str, format_name: str) -> dict[str, str]:
                 {
                     "archetype": archetype,
                     **filters,
+                    "min_mull_count": CARD_STATS_MIN_MULL_COUNT,
+                    "min_drawn_count": CARD_STATS_MIN_DRAWN_COUNT,
                     "show_counts": "yes",
                 }
             )
@@ -310,6 +314,11 @@ def _previous_negative_cache() -> dict[tuple[str, str, str], dict[str, Any]]:
 def _retry_is_pending(entry: dict[str, Any] | None, now: datetime) -> bool:
     if not entry or entry.get("state") != "upstream_unavailable":
         return False
+    if (
+        entry.get("min_mull_count") != CARD_STATS_MIN_MULL_COUNT
+        or entry.get("min_drawn_count") != CARD_STATS_MIN_DRAWN_COUNT
+    ):
+        return False
     try:
         retry_after = datetime.fromisoformat(str(entry.get("retry_after") or ""))
     except ValueError:
@@ -331,6 +340,8 @@ def _negative_cache_entry(
         "archetype": archetype,
         "kind": "card_stats",
         "state": "upstream_unavailable",
+        "min_mull_count": CARD_STATS_MIN_MULL_COUNT,
+        "min_drawn_count": CARD_STATS_MIN_DRAWN_COUNT,
         "checked_at": checked_at.isoformat(),
         "retry_after": (checked_at + CARD_STATS_UNAVAILABLE_RETRY).isoformat(),
         "reason": reason,
@@ -600,6 +611,8 @@ async def refresh_hsguru_archetype_analysis(
         "criteria": {
             "rank": ANALYSIS_RANK,
             "period": ANALYSIS_PERIOD,
+            "card_stats_min_mull_count": CARD_STATS_MIN_MULL_COUNT,
+            "card_stats_min_drawn_count": CARD_STATS_MIN_DRAWN_COUNT,
             "formats": list(FORMAT_IDS),
             "requires_decks": True,
         },
