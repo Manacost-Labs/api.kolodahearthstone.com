@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 from app.hsguru_archetype_analysis import (
@@ -201,6 +202,135 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
         self.assertEqual(row["state"], "partial")
         self.assertEqual(len(row["class_matchups"]), 2)
         self.assertEqual(row["card_stats"], [])
+        negative_cache = saved["payload"]["data"]["structured"]["negative_cache"]
+        self.assertEqual(len(negative_cache), 1)
+        self.assertEqual(negative_cache[0]["kind"], "card_stats")
+        self.assertEqual(negative_cache[0]["state"], "upstream_unavailable")
+        checked_at = datetime.fromisoformat(negative_cache[0]["checked_at"])
+        retry_after = datetime.fromisoformat(negative_cache[0]["retry_after"])
+        self.assertEqual(retry_after - checked_at, timedelta(days=7))
+
+    def test_refresh_skips_card_stats_while_negative_cache_is_fresh(self) -> None:
+        now = datetime(2026, 7, 24, 12, 0, tzinfo=UTC)
+        calls: list[str] = []
+
+        async def fetch_html(url: str):
+            calls.append(url)
+            return MATCHUPS_HTML, {"backend": "firecrawl", "request_credits": 1}
+
+        cached_gap = {
+            "format": "wild",
+            "archetype": "Small Sample Priest",
+            "kind": "card_stats",
+            "state": "upstream_unavailable",
+            "checked_at": (now - timedelta(days=1)).isoformat(),
+            "retry_after": (now + timedelta(days=6)).isoformat(),
+            "reason": "HSGuru card_stats page has no data for the requested sample",
+        }
+        saved = {}
+        with (
+            patch(
+                "app.hsguru_archetype_analysis._previous_analysis",
+                return_value={},
+            ),
+            patch(
+                "app.hsguru_archetype_analysis._previous_negative_cache",
+                return_value={
+                    ("wild", "small sample priest", "card_stats"): cached_gap
+                },
+            ),
+            patch(
+                "app.hsguru_archetype_analysis._utc_now",
+                return_value=now,
+            ),
+            patch(
+                "app.hsguru_archetype_analysis.save_dataset",
+                side_effect=lambda source_id, payload: saved.update(
+                    {"source_id": source_id, "payload": payload}
+                ),
+            ),
+            patch("app.hsguru_archetype_analysis.save_status"),
+        ):
+            import asyncio
+
+            result = asyncio.run(
+                refresh_hsguru_archetype_analysis(
+                    archetypes=[
+                        {"format": "wild", "archetype": "Small Sample Priest"}
+                    ],
+                    fetch_html=fetch_html,
+                )
+            )
+
+        self.assertEqual(len(calls), 1)
+        self.assertIn("/archetype/", calls[0])
+        self.assertEqual(result["card_stats_requests_skipped"], 1)
+        self.assertEqual(result["firecrawl_credits_used"], 1)
+        self.assertEqual(
+            saved["payload"]["data"]["structured"]["negative_cache"],
+            [cached_gap],
+        )
+
+    def test_refresh_retries_expired_negative_cache_and_clears_it_on_success(self) -> None:
+        now = datetime(2026, 7, 24, 12, 0, tzinfo=UTC)
+        calls: list[str] = []
+
+        async def fetch_html(url: str):
+            calls.append(url)
+            if "/archetype/" in url:
+                return MATCHUPS_HTML, {"backend": "firecrawl", "request_credits": 1}
+            return CARD_STATS_HTML, {"backend": "firecrawl", "request_credits": 1}
+
+        cached_gap = {
+            "format": "standard",
+            "archetype": "Void Soul DH",
+            "kind": "card_stats",
+            "state": "upstream_unavailable",
+            "checked_at": (now - timedelta(days=8)).isoformat(),
+            "retry_after": (now - timedelta(days=1)).isoformat(),
+            "reason": "HSGuru card_stats page has no data for the requested sample",
+        }
+        saved = {}
+        with (
+            patch(
+                "app.hsguru_archetype_analysis._previous_analysis",
+                return_value={},
+            ),
+            patch(
+                "app.hsguru_archetype_analysis._previous_negative_cache",
+                return_value={
+                    ("standard", "void soul dh", "card_stats"): cached_gap
+                },
+            ),
+            patch(
+                "app.hsguru_archetype_analysis._utc_now",
+                return_value=now,
+            ),
+            patch(
+                "app.hsguru_archetype_analysis.save_dataset",
+                side_effect=lambda source_id, payload: saved.update(
+                    {"source_id": source_id, "payload": payload}
+                ),
+            ),
+            patch("app.hsguru_archetype_analysis.save_status"),
+        ):
+            import asyncio
+
+            result = asyncio.run(
+                refresh_hsguru_archetype_analysis(
+                    archetypes=[
+                        {"format": "standard", "archetype": "Void Soul DH"}
+                    ],
+                    fetch_html=fetch_html,
+                )
+            )
+
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(result["card_stats_requests_skipped"], 0)
+        self.assertEqual(
+            saved["payload"]["data"]["structured"]["negative_cache"],
+            [],
+        )
 
 
 if __name__ == "__main__":

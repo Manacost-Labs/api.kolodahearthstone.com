@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import parse_qs, quote, urlencode, urlparse
 
@@ -18,10 +18,11 @@ from .storage import load_dataset, save_dataset, save_status
 
 
 SOURCE_ID = "hsguru_archetype_analysis"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 ANALYSIS_RANK = "legend"
 ANALYSIS_PERIOD = "past_week"
 FORMAT_IDS = {"standard": 2, "wild": 1}
+CARD_STATS_UNAVAILABLE_RETRY = timedelta(days=7)
 
 CLASS_KEYS = {
     "death knight": "deathknight",
@@ -251,8 +252,12 @@ def analysis_urls(archetype: str, format_name: str) -> dict[str, str]:
     }
 
 
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
 def _now() -> str:
-    return datetime.now(UTC).isoformat()
+    return _utc_now().isoformat()
 
 
 def _active_archetypes() -> list[dict[str, str]]:
@@ -282,6 +287,53 @@ def _previous_analysis() -> dict[tuple[str, str], dict[str, Any]]:
         (str(row.get("format") or ""), str(row.get("archetype") or "").casefold()): dict(row)
         for row in rows
         if isinstance(row, dict)
+    }
+
+
+def _previous_negative_cache() -> dict[tuple[str, str, str], dict[str, Any]]:
+    dataset = load_dataset(SOURCE_ID) or {}
+    entries = (
+        ((dataset.get("data") or {}).get("structured") or {}).get("negative_cache")
+        or []
+    )
+    return {
+        (
+            str(entry.get("format") or ""),
+            str(entry.get("archetype") or "").casefold(),
+            str(entry.get("kind") or ""),
+        ): dict(entry)
+        for entry in entries
+        if isinstance(entry, dict)
+    }
+
+
+def _retry_is_pending(entry: dict[str, Any] | None, now: datetime) -> bool:
+    if not entry or entry.get("state") != "upstream_unavailable":
+        return False
+    try:
+        retry_after = datetime.fromisoformat(str(entry.get("retry_after") or ""))
+    except ValueError:
+        return False
+    if retry_after.tzinfo is None:
+        retry_after = retry_after.replace(tzinfo=UTC)
+    return retry_after > now
+
+
+def _negative_cache_entry(
+    *,
+    format_name: str,
+    archetype: str,
+    reason: str,
+    checked_at: datetime,
+) -> dict[str, str]:
+    return {
+        "format": format_name,
+        "archetype": archetype,
+        "kind": "card_stats",
+        "state": "upstream_unavailable",
+        "checked_at": checked_at.isoformat(),
+        "retry_after": (checked_at + CARD_STATS_UNAVAILABLE_RETRY).isoformat(),
+        "reason": reason,
     }
 
 
@@ -366,10 +418,12 @@ async def refresh_hsguru_archetype_analysis(
         raise RuntimeError("No active HSGuru archetypes with cached decks")
 
     previous = _previous_analysis()
+    negative_cache = _previous_negative_cache()
     semaphore = asyncio.Semaphore(max(1, min(concurrency, 10)))
     acquisitions: list[dict[str, Any]] = []
     errors: list[dict[str, str]] = []
     unavailable: list[dict[str, str]] = []
+    card_stats_requests_skipped = 0
 
     async def fetch_and_parse(
         url: str,
@@ -399,10 +453,17 @@ async def refresh_hsguru_archetype_analysis(
         return rows, fetched_at
 
     async def enrich(target: dict[str, str]) -> dict[str, Any]:
+        nonlocal card_stats_requests_skipped
         format_name = target["format"]
         archetype = target["archetype"]
         urls = analysis_urls(archetype, format_name)
         cached = previous.get((format_name, archetype.casefold()), {})
+        card_stats_cache_key = (
+            format_name,
+            archetype.casefold(),
+            "card_stats",
+        )
+        cached_gap = negative_cache.get(card_stats_cache_key)
         entry = {
             "format": format_name,
             "archetype": archetype,
@@ -424,7 +485,11 @@ async def refresh_hsguru_archetype_analysis(
                     kind="matchups",
                 )
             ),
-            "cards": asyncio.create_task(
+        }
+        if _retry_is_pending(cached_gap, _utc_now()):
+            card_stats_requests_skipped += 1
+        else:
+            tasks["card_stats"] = asyncio.create_task(
                 fetch_and_parse(
                     urls["cards"],
                     parse_card_stats_html,
@@ -432,8 +497,7 @@ async def refresh_hsguru_archetype_analysis(
                     archetype=archetype,
                     kind="card_stats",
                 )
-            ),
-        }
+            )
         fresh = 0
         for kind, task in tasks.items():
             try:
@@ -444,8 +508,16 @@ async def refresh_hsguru_archetype_analysis(
                 else:
                     entry["card_stats"] = rows
                     entry["card_stats_updated_at"] = fetched_at
+                    negative_cache.pop(card_stats_cache_key, None)
                 fresh += 1
             except HSGuruAnalysisUnavailable as exc:
+                if kind == "card_stats":
+                    negative_cache[card_stats_cache_key] = _negative_cache_entry(
+                        format_name=format_name,
+                        archetype=archetype,
+                        reason=str(exc),
+                        checked_at=_utc_now(),
+                    )
                 unavailable.append(
                     {
                         "format": format_name,
@@ -488,6 +560,14 @@ async def refresh_hsguru_archetype_analysis(
     ]
     rows = [*refreshed, *retained]
     rows.sort(key=lambda row: (str(row.get("format")), str(row.get("archetype")).casefold()))
+    negative_cache_rows = sorted(
+        negative_cache.values(),
+        key=lambda row: (
+            str(row.get("format")),
+            str(row.get("archetype")).casefold(),
+            str(row.get("kind")),
+        ),
+    )
     coverage = {
         format_name: {
             "archetypes": sum(1 for row in rows if row.get("format") == format_name),
@@ -524,6 +604,7 @@ async def refresh_hsguru_archetype_analysis(
             "requires_decks": True,
         },
         "coverage": coverage,
+        "negative_cache": negative_cache_rows,
         "archetypes": rows,
     }
     payload = {
@@ -542,6 +623,7 @@ async def refresh_hsguru_archetype_analysis(
                 "pages": acquisitions,
                 "firecrawl_credits_used": firecrawl_credits,
                 "scrape_do_credits_used": scrape_do_credits,
+                "card_stats_requests_skipped": card_stats_requests_skipped,
             },
         },
     }
@@ -558,6 +640,8 @@ async def refresh_hsguru_archetype_analysis(
         "coverage": coverage,
         "errors": errors[:50],
         "unavailable": unavailable[:500],
+        "negative_cache_entries": len(negative_cache_rows),
+        "card_stats_requests_skipped": card_stats_requests_skipped,
         "firecrawl_credits_used": firecrawl_credits,
         "scrape_do_credits_used": scrape_do_credits,
     }
@@ -570,6 +654,8 @@ async def refresh_hsguru_archetype_analysis(
         "coverage": coverage,
         "errors": errors,
         "unavailable": unavailable,
+        "negative_cache_entries": len(negative_cache_rows),
+        "card_stats_requests_skipped": card_stats_requests_skipped,
         "firecrawl_credits_used": firecrawl_credits,
         "scrape_do_credits_used": scrape_do_credits,
     }
