@@ -35,7 +35,6 @@ RANKS = (
     "top_100",
 )
 ROLLING_PERIODS = (
-    "past_6_hours",
     "past_day",
     "past_3_days",
     "past_week",

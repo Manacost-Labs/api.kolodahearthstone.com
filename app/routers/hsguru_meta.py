@@ -57,6 +57,30 @@ def hsguru_meta(
         if int(row.get("games") or 0) >= min_games
     ]
     fetched_at = dataset.get("fetched_at") or structured.get("fetched_at")
+    discovered_patch = str(
+        (structured.get("patch_discovery") or {}).get("selected_period") or ""
+    )
+    if discovered_patch not in allowed_periods or not discovered_patch.startswith("patch_"):
+        discovered_patch = next(
+            (
+                candidate
+                for candidate in reversed(allowed_periods)
+                if str(candidate).startswith("patch_")
+            ),
+            "",
+        )
+    response_meta = ApiMeta(
+        source_id=SOURCE_ID,
+        fetched_at=fetched_at,
+        stale=timestamp_is_stale(fetched_at, max_age_hours=36),
+        count=len(items),
+    ).model_dump(exclude_none=True)
+    response_meta.update(
+        {
+            "available_periods": allowed_periods,
+            "current_patch_period": discovered_patch or None,
+        }
+    )
     return {
         "data": {
             "format": format_name,
@@ -67,12 +91,7 @@ def hsguru_meta(
             "source_url": selected.get("source_url"),
             "items": items,
         },
-        "meta": ApiMeta(
-            source_id=SOURCE_ID,
-            fetched_at=fetched_at,
-            stale=timestamp_is_stale(fetched_at, max_age_hours=36),
-            count=len(items),
-        ).model_dump(exclude_none=True),
+        "meta": response_meta,
     }
 
 

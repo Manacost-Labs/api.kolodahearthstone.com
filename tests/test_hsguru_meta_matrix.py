@@ -27,19 +27,18 @@ HSGURU_TABLE = """
 """
 
 
-def test_matrix_has_126_remote_slices_and_six_local_min_game_filters() -> None:
+def test_matrix_has_108_remote_slices_and_six_local_min_game_filters() -> None:
     from app.hsguru_meta_matrix import MIN_GAMES, iter_slice_specs
 
     specs = list(iter_slice_specs())
 
     assert MIN_GAMES == (100, 250, 500, 1000, 2500, 5000)
     assert 7500 not in MIN_GAMES
-    assert len(specs) == 126
-    assert len({spec.key for spec in specs}) == 126
+    assert len(specs) == 108
+    assert len({spec.key for spec in specs}) == 108
     assert all("min_games=100" in spec.url for spec in specs)
     assert all("7500" not in spec.url for spec in specs)
     assert {spec.period for spec in specs} == {
-        "past_6_hours",
         "past_day",
         "past_3_days",
         "past_week",
@@ -205,7 +204,7 @@ def test_deck_catalog_refresh_can_rejoin_builds_without_refetching_meta() -> Non
     save_dataset.assert_called_once_with("hsguru_meta_matrix", dataset)
 
 
-def test_refresh_publishes_one_unified_dataset_after_126_firecrawl_pages() -> None:
+def test_refresh_publishes_one_unified_dataset_after_108_firecrawl_pages() -> None:
     from app.firecrawl_backend import FirecrawlScrape
     from app.hsguru_meta_matrix import refresh_hsguru_meta_matrix
 
@@ -270,11 +269,11 @@ def test_refresh_publishes_one_unified_dataset_after_126_firecrawl_pages() -> No
         )
 
     assert result["ok"] is True
-    assert result["base_slices"] == 126
-    assert result["logical_slices"] == 756
-    assert result["firecrawl_credits_used"] == 128
+    assert result["base_slices"] == 108
+    assert result["logical_slices"] == 648
+    assert result["firecrawl_credits_used"] == 110
     assert result["current_catalog_archetypes"] == 2
-    assert len(calls) == 126
+    assert len(calls) == 108
     save_dataset.assert_called_once()
     dataset = save_dataset.call_args.args[1]
     assert dataset["data"]["structured"]["dimensions"]["min_games"] == [
@@ -294,7 +293,6 @@ def test_runtime_periods_replace_previous_patch_with_discovered_patch() -> None:
     from app.hsguru_meta_matrix import matrix_periods, patch_periods_from_html
 
     assert matrix_periods("patch_36.0.4") == (
-        "past_6_hours",
         "past_day",
         "past_3_days",
         "past_week",
@@ -336,7 +334,7 @@ def test_v1_hsguru_meta_filters_unified_dataset_by_min_games() -> None:
                         "top_500",
                         "top_100",
                     ],
-                    "periods": ["past_6_hours", "past_day", "past_3_days", "past_week", "past_2_weeks"],
+                    "periods": ["past_day", "past_3_days", "past_week", "past_2_weeks"],
                     "coins": ["any_player"],
                     "min_games": [100, 250, 500, 1000, 2500, 5000],
                 },
@@ -371,6 +369,13 @@ def test_v1_hsguru_meta_filters_unified_dataset_by_min_games() -> None:
     assert body["data"]["min_games"] == 2500
     assert body["meta"]["source_id"] == "hsguru_meta_matrix"
     assert body["meta"]["count"] == 1
+    assert body["meta"]["available_periods"] == [
+        "past_day",
+        "past_3_days",
+        "past_week",
+        "past_2_weeks",
+    ]
+    assert body["meta"]["current_patch_period"] is None
 
 
 def test_v1_hsguru_archetypes_returns_current_patch_catalog() -> None:
@@ -526,27 +531,6 @@ def test_v1_hsguru_meta_accepts_extended_diamond_ranks(rank: str) -> None:
     assert response.json()["data"]["rank"] == rank
 
 
-def test_v1_hsguru_meta_accepts_past_six_hours() -> None:
-    fetched_at = datetime.now(UTC).isoformat()
-    dataset = {
-        "source_id": "hsguru_meta_matrix",
-        "fetched_at": fetched_at,
-        "data": {"structured": {"slices": [{
-            "key": "wild|top_legend|past_6_hours|any_player",
-            "source_url": "https://www.hsguru.com/meta?format=1&rank=top_legend&period=past_6_hours&min_games=100",
-            "rows": [{"archetype": "Quest Mage", "games": 742, "winrate": 51.1}],
-        }]}},
-    }
-
-    with patch("app.routers.hsguru_meta.load_dataset", return_value=dataset):
-        response = client.get(
-            "/v1/hsguru/meta?format=wild&rank=top_legend&period=past_6_hours&coin=any_player&min_games=100"
-        )
-
-    assert response.status_code == 200
-    assert response.json()["data"]["period"] == "past_6_hours"
-
-
 @pytest.mark.parametrize("period", ["patch_36.0.3", "violet_hold"])
 def test_v1_hsguru_meta_accepts_extended_periods(period: str) -> None:
     fetched_at = datetime.now(UTC).isoformat()
@@ -555,6 +539,7 @@ def test_v1_hsguru_meta_accepts_extended_periods(period: str) -> None:
         "fetched_at": fetched_at,
         "data": {"structured": {
             "dimensions": {"periods": ["past_day", "patch_36.0.3", "violet_hold"]},
+            "patch_discovery": {"selected_period": "patch_36.0.3"},
             "slices": [{
                 "key": f"standard|legend|{period}|any_player",
                 "source_url": (
@@ -573,7 +558,14 @@ def test_v1_hsguru_meta_accepts_extended_periods(period: str) -> None:
         )
 
     assert response.status_code == 200
-    assert response.json()["data"]["period"] == period
+    body = response.json()
+    assert body["data"]["period"] == period
+    assert body["meta"]["available_periods"] == [
+        "past_day",
+        "patch_36.0.3",
+        "violet_hold",
+    ]
+    assert body["meta"]["current_patch_period"] == "patch_36.0.3"
 
 
 def test_v1_hsguru_meta_rejects_period_outside_published_dimensions() -> None:
