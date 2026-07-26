@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 import asyncio
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from starlette.testclient import TestClient
@@ -119,6 +119,88 @@ def test_hsguru_table_parser_rejects_incomplete_statistics() -> None:
 
     with pytest.raises(ValueError, match="invalid statistics"):
         parse_meta_rows(broken)
+
+
+def test_hsguru_table_parser_merges_same_identity_duplicate_archetypes() -> None:
+    from app.hsguru_meta_matrix import parse_meta_table
+
+    duplicated = """
+    <table><thead><tr>
+      <th>Archetype</th><th>Winrate</th><th>Popularity</th>
+      <th>Turns</th><th>Duration</th><th>Climbing Speed</th>
+    </tr></thead><tbody>
+      <tr>
+        <td class="decklist-info deathknight"><a href="/archetype/Thal%27ena%20DK?period=past_week&amp;rank=all">Thal'ena DK</a></td>
+        <td>41.1</td><td>0.1% (3378)</td><td>8.8</td><td>8.8</td><td>-1.22⭐/h</td>
+      </tr>
+      <tr>
+        <td class="decklist-info deathknight"><a href="https://www.hsguru.com/archetype/Thal%27ena%20DK?rank=all&amp;period=past_week">Thal'ena DK</a></td>
+        <td>26.9</td><td>0.0% (145)</td><td>9.1</td><td>8.6</td><td>-3.21⭐/h</td>
+      </tr>
+    </tbody></table>
+    """
+
+    parsed = parse_meta_table(duplicated)
+
+    assert len(parsed.rows) == 1
+    assert parsed.rows[0] == {
+        "archetype": "Thal'ena DK",
+        "winrate": pytest.approx(40.515555),
+        "popularity": pytest.approx(0.1),
+        "games": 3523,
+        "turns": pytest.approx(8.812347),
+        "duration_minutes": pytest.approx(8.791768),
+        "climbing_speed": pytest.approx(-1.301904),
+    }
+    assert parsed.duplicate_rows_merged == 1
+    assert parsed.duplicate_groups == [{
+        "archetype": "Thal'ena DK",
+        "rows": 2,
+        "games": 3523,
+        "class": "deathknight",
+        "source_url": (
+            "https://www.hsguru.com/archetype/Thal%27ena%20DK"
+            "?period=past_week&rank=all"
+        ),
+    }]
+
+
+def test_hsguru_table_parser_rejects_same_name_with_different_identity() -> None:
+    from app.hsguru_meta_matrix import HSGuruMetaDataError, parse_meta_rows
+
+    ambiguous = """
+    <table><thead><tr>
+      <th>Archetype</th><th>Winrate</th><th>Popularity</th>
+      <th>Turns</th><th>Duration</th><th>Climbing Speed</th>
+    </tr></thead><tbody>
+      <tr>
+        <td class="decklist-info deathknight"><a href="/archetype/thalena-one">Thal'ena DK</a></td>
+        <td>41.1</td><td>0.1% (3378)</td><td>8.8</td><td>8.8</td><td>-1.22</td>
+      </tr>
+      <tr>
+        <td class="decklist-info deathknight"><a href="/archetype/thalena-two">Thal'ena DK</a></td>
+        <td>26.9</td><td>0.0% (145)</td><td>9.1</td><td>8.6</td><td>-3.21</td>
+      </tr>
+    </tbody></table>
+    """
+
+    with pytest.raises(HSGuruMetaDataError, match="conflicting identities.*Thal'ena DK"):
+        parse_meta_rows(ambiguous)
+
+
+def test_hsguru_table_parser_distinguishes_missing_from_empty_table() -> None:
+    from app.hsguru_meta_matrix import HSGuruMetaSchemaError, parse_meta_rows
+
+    with pytest.raises(HSGuruMetaSchemaError, match="meta table was not found"):
+        parse_meta_rows("<html><body><p>Cloudflare challenge</p></body></html>")
+
+    empty = """
+    <table><thead><tr>
+      <th>Archetype</th><th>Winrate</th><th>Popularity</th>
+      <th>Turns</th><th>Duration</th><th>Climbing Speed</th>
+    </tr></thead><tbody></tbody></table>
+    """
+    assert parse_meta_rows(empty) == []
 
 
 def test_current_archetypes_reuse_cached_deck_catalog_without_scraping() -> None:
@@ -287,6 +369,148 @@ def test_refresh_publishes_one_unified_dataset_after_108_firecrawl_pages() -> No
         "formats": ["standard", "wild"],
     }
     save_status.assert_called_once()
+
+
+def test_refresh_does_not_retry_data_errors_and_counts_failed_parse_request() -> None:
+    from app.firecrawl_backend import FirecrawlScrape
+    from app.hsguru_meta_matrix import SliceSpec, refresh_hsguru_meta_matrix
+
+    specs = (
+        SliceSpec(
+            "standard",
+            "all",
+            "past_week",
+            "any_player",
+            "standard|all|past_week|any_player",
+            "https://www.hsguru.com/meta?format=2&rank=all&period=past_week&min_games=100",
+        ),
+        SliceSpec(
+            "standard",
+            "legend",
+            "past_week",
+            "any_player",
+            "standard|legend|past_week|any_player",
+            "https://www.hsguru.com/meta?format=2&rank=legend&period=past_week&min_games=100",
+        ),
+    )
+    conflicting = """
+    <table><thead><tr>
+      <th>Archetype</th><th>Winrate</th><th>Popularity</th>
+      <th>Turns</th><th>Duration</th><th>Climbing Speed</th>
+    </tr></thead><tbody>
+      <tr>
+        <td class="deathknight"><a href="/archetype/one">Thal'ena DK</a></td>
+        <td>41.1</td><td>0.1% (3378)</td><td>8.8</td><td>8.8</td><td>-1.22</td>
+      </tr>
+      <tr>
+        <td class="deathknight"><a href="/archetype/two">Thal'ena DK</a></td>
+        <td>26.9</td><td>0.0% (145)</td><td>9.1</td><td>8.6</td><td>-3.21</td>
+      </tr>
+    </tbody></table>
+    """
+    calls: list[str] = []
+
+    async def scrape(spec):
+        calls.append(spec.key)
+        return FirecrawlScrape(
+            html=conflicting if spec.rank == "all" else HSGURU_TABLE,
+            markdown="",
+            screenshot=None,
+            metadata={"creditsUsed": 1},
+            status_code=200,
+            final_url=spec.url,
+        )
+
+    async def scrape_current(format_name, period):
+        return [{
+            "format": format_name,
+            "archetype": f"Current {format_name}",
+            "games": 100,
+            "period": period,
+            "rank": "all",
+            "decks": [],
+        }], {
+            "format": format_name,
+            "backend": "firecrawl",
+            "request_credits": 1,
+            "rows": 1,
+        }
+
+    async def discover_patch(_cached):
+        return "patch_36.0.3", None
+
+    with (
+        patch("app.hsguru_meta_matrix.iter_slice_specs", return_value=specs),
+        patch("app.hsguru_meta_matrix.load_dataset", return_value={}),
+        patch("app.hsguru_meta_matrix.enrich_current_rows_with_cached_decks"),
+        patch("app.hsguru_meta_matrix.save_dataset") as save_dataset,
+        patch("app.hsguru_meta_matrix.save_status") as save_status,
+        patch("app.hsguru_meta_matrix.asyncio.sleep", new_callable=AsyncMock),
+    ):
+        result = asyncio.run(
+            refresh_hsguru_meta_matrix(
+                concurrency=2,
+                attempts=3,
+                scrape=scrape,
+                scrape_current=scrape_current,
+                discover_patch=discover_patch,
+            )
+        )
+
+    assert result["ok"] is False
+    assert calls.count("standard|all|past_week|any_player") == 1
+    assert result["firecrawl_credits_used"] == 4
+    save_dataset.assert_not_called()
+    status = save_status.call_args.args[1]
+    assert status["firecrawl_requests"] == 4
+    assert "conflicting identities" in status["errors"][0]["error"]
+
+
+def test_missing_slice_can_be_carried_forward_from_last_stable_dataset() -> None:
+    from app.hsguru_meta_matrix import SliceSpec, _carry_forward_missing_slices
+
+    spec = SliceSpec(
+        "standard",
+        "all",
+        "past_week",
+        "any_player",
+        "standard|all|past_week|any_player",
+        "https://www.hsguru.com/meta?format=2&rank=all&period=past_week&min_games=100",
+    )
+    cached = {
+        "fetched_at": "2026-07-25T10:00:03+00:00",
+        "data": {
+            "structured": {
+                "slices": [{
+                    "key": spec.key,
+                    "format": "standard",
+                    "rank": "all",
+                    "period": "past_week",
+                    "coin": "any_player",
+                    "rows": [{"archetype": "Cached Mage", "games": 500}],
+                }]
+            }
+        },
+    }
+    errors = [{
+        "key": spec.key,
+        "error": "HSGuruMetaDataError: conflicting identities",
+    }]
+
+    slices, carried = _carry_forward_missing_slices(
+        specs=(spec,),
+        fresh_slices=[],
+        cached_dataset=cached,
+        errors=errors,
+    )
+
+    assert carried == 1
+    assert slices[0]["rows"] == [{"archetype": "Cached Mage", "games": 500}]
+    assert slices[0]["fetched_at"] == "2026-07-25T10:00:03+00:00"
+    assert slices[0]["quality"]["serving_cached_slice"] is True
+    assert slices[0]["quality"]["last_refresh_error"] == (
+        "HSGuruMetaDataError: conflicting identities"
+    )
 
 
 def test_runtime_periods_replace_previous_patch_with_discovered_patch() -> None:

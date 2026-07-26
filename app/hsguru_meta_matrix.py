@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from itertools import product
 from typing import Any, Awaitable, Callable
-from urllib.parse import parse_qs, quote, urlencode, urlparse
+from urllib.parse import parse_qs, parse_qsl, quote, urlencode, urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
@@ -56,6 +57,33 @@ _REQUIRED_HEADERS = {
     "duration": "duration_minutes",
     "climbing speed": "climbing_speed",
 }
+_CLASS_TOKENS = frozenset(
+    {
+        "deathknight",
+        "demonhunter",
+        "druid",
+        "hunter",
+        "mage",
+        "paladin",
+        "priest",
+        "rogue",
+        "shaman",
+        "warlock",
+        "warrior",
+    }
+)
+
+
+class HSGuruMetaValidationError(ValueError):
+    """HSGuru returned HTML that cannot be published safely."""
+
+
+class HSGuruMetaSchemaError(HSGuruMetaValidationError):
+    """The expected HSGuru table structure was not rendered."""
+
+
+class HSGuruMetaDataError(HSGuruMetaValidationError):
+    """The rendered HSGuru table contains contradictory row data."""
 
 
 @dataclass(frozen=True)
@@ -66,6 +94,13 @@ class SliceSpec:
     coin: str
     key: str
     url: str
+
+
+@dataclass(frozen=True)
+class MetaTableParseResult:
+    rows: list[dict[str, Any]]
+    duplicate_groups: list[dict[str, Any]]
+    duplicate_rows_merged: int
 
 
 def matrix_periods(current_patch_period: str) -> tuple[str, ...]:
@@ -131,6 +166,23 @@ def _header(value: str) -> str:
     return re.sub(r"[^a-z]+", " ", value.lower()).strip()
 
 
+def _canonical_archetype_url(value: str) -> str:
+    parsed = urlparse(urljoin(HSGURU_META_URL, value))
+    query = urlencode(sorted(parse_qsl(parsed.query, keep_blank_values=True)))
+    return parsed._replace(query=query, fragment="").geturl()
+
+
+def _archetype_class(cell: Any) -> str:
+    classes = {
+        str(value).casefold()
+        for value in (cell.get("class") or [])
+    }
+    return next(
+        (name for name in sorted(_CLASS_TOKENS) if name in classes),
+        "",
+    )
+
+
 def _validate_row(row: dict[str, Any]) -> bool:
     return (
         bool(row["archetype"])
@@ -148,7 +200,14 @@ def _validate_row(row: dict[str, Any]) -> bool:
     )
 
 
-def parse_meta_rows(page_html: str) -> list[dict[str, Any]]:
+def _weighted_value(rows: list[dict[str, Any]], field: str, total_games: int) -> float:
+    return round(
+        sum(float(row[field]) * int(row["games"]) for row in rows) / total_games,
+        6,
+    )
+
+
+def parse_meta_table(page_html: str) -> MetaTableParseResult:
     soup = BeautifulSoup(page_html, "lxml")
     selected = None
     indexes: dict[str, int] = {}
@@ -165,19 +224,24 @@ def parse_meta_rows(page_html: str) -> list[dict[str, Any]]:
             indexes = candidate
             break
     if selected is None:
-        return []
+        raise HSGuruMetaSchemaError("HSGuru meta table was not found")
 
-    rows: list[dict[str, Any]] = []
+    parsed_rows: list[dict[str, Any]] = []
     table_rows = selected.select("tbody tr") or selected.find_all("tr")[1:]
     for row_number, tr in enumerate(table_rows, start=1):
-        cells = [cell.get_text(" ", strip=True) for cell in tr.find_all(["th", "td"])]
+        cell_nodes = tr.find_all(["th", "td"])
+        cells = [cell.get_text(" ", strip=True) for cell in cell_nodes]
         if len(cells) <= max(indexes.values()):
-            raise ValueError(f"HSGuru meta row {row_number} has missing columns")
+            raise HSGuruMetaDataError(
+                f"HSGuru meta row {row_number} has missing columns"
+            )
         archetype = re.sub(r"\s+", " ", cells[indexes["archetype"]]).strip()
         popularity_cell = cells[indexes["popularity"]]
         games = _games(popularity_cell)
         if not archetype or games is None:
-            raise ValueError(f"HSGuru meta row {row_number} has no archetype or game count")
+            raise HSGuruMetaDataError(
+                f"HSGuru meta row {row_number} has no archetype or game count"
+            )
         row = {
             "archetype": archetype,
             "winrate": _number(cells[indexes["winrate"]]),
@@ -188,12 +252,160 @@ def parse_meta_rows(page_html: str) -> list[dict[str, Any]]:
             "climbing_speed": _number(cells[indexes["climbing_speed"]]),
         }
         if not _validate_row(row):
-            raise ValueError(f"HSGuru meta row {row_number} has invalid statistics")
-        rows.append(row)
-    archetypes = [row["archetype"].casefold() for row in rows]
-    if len(archetypes) != len(set(archetypes)):
-        raise ValueError("HSGuru meta table contains duplicate archetypes")
-    return rows
+            raise HSGuruMetaDataError(
+                f"HSGuru meta row {row_number} has invalid statistics"
+            )
+        archetype_cell = cell_nodes[indexes["archetype"]]
+        link = archetype_cell.find("a", href=True)
+        parsed_rows.append(
+            {
+                "row": row,
+                "row_number": row_number,
+                "source_url": (
+                    _canonical_archetype_url(str(link.get("href") or ""))
+                    if link
+                    else ""
+                ),
+                "class": _archetype_class(archetype_cell),
+            }
+        )
+
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for item in parsed_rows:
+        key = str(item["row"]["archetype"]).casefold()
+        grouped.setdefault(key, []).append(item)
+
+    rows: list[dict[str, Any]] = []
+    duplicate_groups: list[dict[str, Any]] = []
+    duplicate_rows_merged = 0
+    for group in grouped.values():
+        if len(group) == 1:
+            rows.append(group[0]["row"])
+            continue
+
+        identities = {
+            (str(item["source_url"]), str(item["class"]))
+            for item in group
+        }
+        archetype = str(group[0]["row"]["archetype"])
+        missing_identity = any(
+            not source_url or not class_name
+            for source_url, class_name in identities
+        )
+        if len(identities) != 1 or missing_identity:
+            rendered = ", ".join(
+                f"row {item['row_number']} url={item['source_url'] or 'missing'} "
+                f"class={item['class'] or 'missing'}"
+                for item in group
+            )
+            raise HSGuruMetaDataError(
+                f"HSGuru meta table contains conflicting identities for "
+                f"{archetype}: {rendered}"
+            )
+
+        source_url, class_name = next(iter(identities))
+        source_rows = [item["row"] for item in group]
+        total_games = sum(int(row["games"]) for row in source_rows)
+        if total_games <= 0:
+            raise HSGuruMetaDataError(
+                f"HSGuru duplicate archetype {archetype} has no games"
+            )
+        merged = {
+            "archetype": archetype,
+            "winrate": _weighted_value(source_rows, "winrate", total_games),
+            "popularity": round(
+                sum(float(row["popularity"]) for row in source_rows),
+                6,
+            ),
+            "games": total_games,
+            "turns": _weighted_value(source_rows, "turns", total_games),
+            "duration_minutes": _weighted_value(
+                source_rows,
+                "duration_minutes",
+                total_games,
+            ),
+            "climbing_speed": _weighted_value(
+                source_rows,
+                "climbing_speed",
+                total_games,
+            ),
+        }
+        if not _validate_row(merged):
+            raise HSGuruMetaDataError(
+                f"HSGuru duplicate archetype {archetype} produced invalid merged statistics"
+            )
+        rows.append(merged)
+        duplicate_rows_merged += len(group) - 1
+        duplicate_groups.append(
+            {
+                "archetype": archetype,
+                "rows": len(group),
+                "games": total_games,
+                "class": class_name,
+                "source_url": source_url,
+            }
+        )
+
+    return MetaTableParseResult(
+        rows=rows,
+        duplicate_groups=duplicate_groups,
+        duplicate_rows_merged=duplicate_rows_merged,
+    )
+
+
+def parse_meta_rows(page_html: str) -> list[dict[str, Any]]:
+    return parse_meta_table(page_html).rows
+
+
+def _carry_forward_missing_slices(
+    *,
+    specs: tuple[SliceSpec, ...],
+    fresh_slices: list[dict[str, Any]],
+    cached_dataset: dict[str, Any] | None,
+    errors: list[dict[str, str]],
+) -> tuple[list[dict[str, Any]], int]:
+    cached_structured = (
+        (((cached_dataset or {}).get("data") or {}).get("structured") or {})
+    )
+    cached_by_key = {
+        str(item.get("key") or ""): item
+        for item in cached_structured.get("slices") or []
+        if isinstance(item, dict) and item.get("key")
+    }
+    error_by_key = {
+        str(item.get("key") or ""): str(item.get("error") or "")
+        for item in errors
+    }
+    slices = list(fresh_slices)
+    fresh_keys = {str(item.get("key") or "") for item in fresh_slices}
+    carried = 0
+    cached_fetched_at = str((cached_dataset or {}).get("fetched_at") or "")
+    for spec in specs:
+        if spec.key in fresh_keys:
+            continue
+        previous = cached_by_key.get(spec.key)
+        if not previous:
+            continue
+        fallback = deepcopy(previous)
+        fallback["fetched_at"] = str(
+            fallback.get("fetched_at") or cached_fetched_at
+        )
+        fallback["quality"] = {
+            **(
+                fallback.get("quality")
+                if isinstance(fallback.get("quality"), dict)
+                else {}
+            ),
+            "serving_cached_slice": True,
+            "last_refresh_error": error_by_key.get(
+                spec.key,
+                "slice was not refreshed",
+            ),
+        }
+        slices.append(fallback)
+        carried += 1
+    slices.sort(key=lambda item: str(item.get("key") or ""))
+    return slices, carried
 
 
 def resolve_current_patch_period(cached_dataset: dict[str, Any] | None = None) -> str:
@@ -468,11 +680,11 @@ async def _scrape_current_page(
             wait_ms=5_000,
             timeout_ms=120_000,
         )
-        rows = parse_meta_rows(result.html)
-        if not rows:
+        parsed = parse_meta_table(result.html)
+        if not parsed.rows:
             raise RuntimeError("Firecrawl page contained no current-patch meta rows")
         return _normalize_current_rows(
-            rows,
+            parsed.rows,
             format_name=format_name,
             period=period,
             source_url=url,
@@ -480,8 +692,12 @@ async def _scrape_current_page(
             "format": format_name,
             "backend": result.backend,
             "request_credits": result.request_credits,
-            "rows": len(rows),
+            "rows": len(parsed.rows),
+            "duplicate_rows_merged": parsed.duplicate_rows_merged,
+            "duplicate_groups": parsed.duplicate_groups,
         }
+    except HSGuruMetaDataError:
+        raise
     except Exception as exc:
         firecrawl_error = exc
 
@@ -492,11 +708,11 @@ async def _scrape_current_page(
         for attempt in range(1, attempts + 1):
             try:
                 result = await scrape_url(url, render=True, super_proxy=super_proxy)
-                rows = parse_meta_rows(result.html)
-                if not rows:
+                parsed = parse_meta_table(result.html)
+                if not parsed.rows:
                     raise RuntimeError("rendered page contained no meta rows")
                 return _normalize_current_rows(
-                    rows,
+                    parsed.rows,
                     format_name=format_name,
                     period=period,
                     source_url=url,
@@ -504,9 +720,13 @@ async def _scrape_current_page(
                     "format": format_name,
                     "backend": "scrape_do_super" if super_proxy else "scrape_do",
                     "request_credits": result.request_cost,
-                    "rows": len(rows),
+                    "rows": len(parsed.rows),
+                    "duplicate_rows_merged": parsed.duplicate_rows_merged,
+                    "duplicate_groups": parsed.duplicate_groups,
                     "attempt": attempt,
                 }
+            except HSGuruMetaDataError:
+                raise
             except Exception as exc:
                 errors.append(
                     f"{'super' if super_proxy else 'standard'} attempt {attempt}: {exc}"
@@ -631,6 +851,7 @@ async def refresh_hsguru_meta_matrix(
     specs = iter_slice_specs(periods)
     semaphore = asyncio.Semaphore(max(1, min(concurrency, 5)))
     errors: list[dict[str, str]] = list(discovery_errors)
+    slice_acquisition: list[dict[str, Any]] = []
 
     async def fetch_one(spec: SliceSpec) -> dict[str, Any] | None:
         last_error: Exception | None = None
@@ -638,7 +859,17 @@ async def refresh_hsguru_meta_matrix(
             try:
                 async with semaphore:
                     result = await scrape(spec)
-                rows = parse_meta_rows(result.html)
+                slice_acquisition.append(
+                    {
+                        "key": spec.key,
+                        "attempt": attempt,
+                        "backend": result.backend,
+                        "content_length": result.content_length,
+                        "firecrawl_credits_used": result.firecrawl_credits_used,
+                        "scrape_do_credits_used": result.scrape_do_credits_used,
+                    }
+                )
+                parsed = parse_meta_table(result.html)
                 # Sparse premium ranks (Top-100/Top-500) can legitimately return an
                 # empty table for short periods; still publish the slice.
                 return {
@@ -648,16 +879,30 @@ async def refresh_hsguru_meta_matrix(
                     "period": spec.period,
                     "coin": spec.coin,
                     "source_url": spec.url,
-                    "rows": rows,
+                    "fetched_at": fetched_at,
+                    "rows": parsed.rows,
                     "row_counts": {
-                        str(min_games): sum(1 for row in rows if int(row["games"]) >= min_games)
+                        str(min_games): sum(
+                            1
+                            for row in parsed.rows
+                            if int(row["games"]) >= min_games
+                        )
                         for min_games in MIN_GAMES
                     },
-                    "content_length": result.content_length,
                     "backend": result.backend,
-                    "firecrawl_credits_used": result.firecrawl_credits_used,
-                    "scrape_do_credits_used": result.scrape_do_credits_used,
+                    "quality": {
+                        "duplicate_rows_merged": parsed.duplicate_rows_merged,
+                        "duplicate_groups": parsed.duplicate_groups,
+                    },
                 }
+            except HSGuruMetaDataError as exc:
+                last_error = exc
+                break
+            except HSGuruMetaSchemaError as exc:
+                last_error = exc
+                if attempt >= min(max(1, attempts), 2):
+                    break
+                await asyncio.sleep(min(2 ** (attempt - 1), 4))
             except Exception as exc:
                 last_error = exc
                 if attempt < attempts:
@@ -670,14 +915,29 @@ async def refresh_hsguru_meta_matrix(
         )
         return None
 
-    slices = [item for item in await asyncio.gather(*(fetch_one(spec) for spec in specs)) if item]
-    slices.sort(key=lambda item: item["key"])
-    content_length = sum(int(item.pop("content_length", 0)) for item in slices)
+    fresh_slices = [
+        item
+        for item in await asyncio.gather(*(fetch_one(spec) for spec in specs))
+        if item
+    ]
+    fresh_slices.sort(key=lambda item: item["key"])
+    slices, cached_slice_count = _carry_forward_missing_slices(
+        specs=specs,
+        fresh_slices=fresh_slices,
+        cached_dataset=cached_dataset,
+        errors=errors,
+    )
+    content_length = sum(
+        int(item.get("content_length") or 0)
+        for item in slice_acquisition
+    )
     firecrawl_credits_used = sum(
-        float(item.pop("firecrawl_credits_used") or 0) for item in slices
+        float(item.get("firecrawl_credits_used") or 0)
+        for item in slice_acquisition
     )
     scrape_do_credits_used = sum(
-        int(item.pop("scrape_do_credits_used") or 0) for item in slices
+        int(item.get("scrape_do_credits_used") or 0)
+        for item in slice_acquisition
     )
     current_rows: list[dict[str, Any]] = []
     current_acquisition: list[dict[str, Any]] = []
@@ -717,6 +977,34 @@ async def refresh_hsguru_meta_matrix(
         current_period is not None
         and all(current_coverage[name]["archetypes"] > 0 for name in FORMATS)
     )
+    duplicate_groups: list[dict[str, Any]] = []
+    duplicate_rows_merged = 0
+    for item in slices:
+        quality = item.get("quality") or {}
+        duplicate_rows_merged += int(quality.get("duplicate_rows_merged") or 0)
+        duplicate_groups.extend(
+            {
+                "key": item["key"],
+                **group,
+            }
+            for group in quality.get("duplicate_groups") or []
+            if isinstance(group, dict)
+        )
+    for acquisition in current_acquisition:
+        duplicate_rows_merged += int(
+            acquisition.get("duplicate_rows_merged") or 0
+        )
+        duplicate_groups.extend(
+            {
+                "key": (
+                    f"current|{acquisition.get('format') or 'unknown'}"
+                    f"|{current_period}"
+                ),
+                **group,
+            }
+            for group in acquisition.get("duplicate_groups") or []
+            if isinstance(group, dict)
+        )
     firecrawl_credits_used += sum(
         float(item.get("request_credits") or 0) for item in current_acquisition
         if item.get("backend") == "firecrawl"
@@ -736,7 +1024,7 @@ async def refresh_hsguru_meta_matrix(
         elif backend.startswith("scrape_do"):
             scrape_do_credits_used += request_credits
     firecrawl_requests = sum(
-        1 for item in slices if item.get("backend") == "firecrawl"
+        1 for item in slice_acquisition if item.get("backend") == "firecrawl"
     ) + sum(
         1 for item in current_acquisition if item.get("backend") == "firecrawl"
     )
@@ -747,7 +1035,7 @@ async def refresh_hsguru_meta_matrix(
         firecrawl_requests += 1
     scrape_do_requests = sum(
         1
-        for item in slices
+        for item in slice_acquisition
         if str(item.get("backend") or "").startswith("scrape_do")
     ) + sum(
         1
@@ -763,16 +1051,26 @@ async def refresh_hsguru_meta_matrix(
         scrape_do_requests += 1
     active_backends = {
         str(item.get("backend"))
-        for item in [*slices, *current_acquisition]
+        for item in [*slice_acquisition, *current_acquisition]
         if item.get("backend")
     }
     if patch_discovery_acquisition and patch_discovery_acquisition.get("backend"):
         active_backends.add(str(patch_discovery_acquisition["backend"]))
     dataset_backend = "+".join(sorted(active_backends)) or "cache"
-    complete = len(slices) == len(specs) and not errors and current_complete
+    fatal_errors = [
+        item
+        for item in errors
+        if str(item.get("key") or "").startswith("current|")
+    ]
+    publishable = (
+        len(slices) == len(specs)
+        and current_complete
+        and not fatal_errors
+    )
+    complete = publishable and cached_slice_count == 0 and not errors
     structured = {
         "type": "hsguru_meta_matrix",
-        "schema_version": 7,
+        "schema_version": 8,
         "fetched_at": fetched_at,
         "dimensions": {
             "formats": list(FORMATS),
@@ -782,6 +1080,8 @@ async def refresh_hsguru_meta_matrix(
             "min_games": list(MIN_GAMES),
         },
         "base_slice_count": len(slices),
+        "fresh_base_slice_count": len(fresh_slices),
+        "cached_base_slice_count": cached_slice_count,
         "logical_slice_count": len(slices) * len(MIN_GAMES),
         "slices": slices,
         "firecrawl": {
@@ -796,6 +1096,12 @@ async def refresh_hsguru_meta_matrix(
         "scrape_do": {
             "requests": scrape_do_requests,
             "credits_used": scrape_do_credits_used,
+        },
+        "quality": {
+            "duplicate_rows_merged": duplicate_rows_merged,
+            "duplicate_groups": duplicate_groups,
+            "cached_slices": cached_slice_count,
+            "errors": errors,
         },
         "patch_discovery": patch_discovery_acquisition,
         "current_catalog": {
@@ -822,7 +1128,7 @@ async def refresh_hsguru_meta_matrix(
     }
     dataset = {
         "source_id": SOURCE_ID,
-        "state": SourceState.OK,
+        "state": SourceState.OK if complete else SourceState.PARTIAL,
         "fetched_at": fetched_at,
         "http_status": 200,
         "final_url": HSGURU_META_URL,
@@ -830,7 +1136,7 @@ async def refresh_hsguru_meta_matrix(
         "backend": dataset_backend,
         "data": {"structured": structured},
     }
-    if complete:
+    if publishable:
         _record_current_history(current_rows, fetched_at)
         save_dataset(SOURCE_ID, dataset)
     save_status(
@@ -845,7 +1151,8 @@ async def refresh_hsguru_meta_matrix(
             "http_status": 200 if complete else None,
             "backend": dataset_backend,
             "detail": (
-                f"HSGuru matrix: {len(slices)}/{len(specs)} slices, "
+                f"HSGuru matrix: {len(fresh_slices)} fresh + "
+                f"{cached_slice_count} cached / {len(specs)} slices, "
                 f"{len(slices) * len(MIN_GAMES)}/{len(specs) * len(MIN_GAMES)} logical slices."
             ),
             "errors": errors[:20],
@@ -856,22 +1163,31 @@ async def refresh_hsguru_meta_matrix(
             "scrape_do_requests": scrape_do_requests,
             "firecrawl_credits_used": structured["firecrawl"]["credits_used"],
             "scrape_do_credits_used": scrape_do_credits_used,
+            "duplicate_rows_merged": duplicate_rows_merged,
+            "duplicate_groups": duplicate_groups[:20],
+            "cached_slices": cached_slice_count,
+            "published": publishable,
             "current_catalog_archetypes": len(current_rows),
             "current_catalog_period": current_period,
         },
     )
     return {
-        "ok": complete,
-        "published": complete,
+        "ok": publishable,
+        "published": publishable,
+        "complete": complete,
         "serving_cached_dataset": bool(cached_dataset) and not complete,
         "source_id": SOURCE_ID,
         "fetched_at": fetched_at,
         "base_slices": len(slices),
+        "fresh_base_slices": len(fresh_slices),
+        "cached_base_slices": cached_slice_count,
         "logical_slices": len(slices) * len(MIN_GAMES),
         "current_catalog_archetypes": len(current_rows),
         "current_catalog_period": current_period,
         "firecrawl_credits_used": structured["firecrawl"]["credits_used"],
         "scrape_do_credits_used": scrape_do_credits_used,
+        "duplicate_rows_merged": duplicate_rows_merged,
+        "duplicate_groups": duplicate_groups,
         "content_length": content_length,
         "errors": errors,
     }
