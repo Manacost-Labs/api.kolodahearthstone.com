@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh HSReplay Legend card statistics periods every four hours
+
+[Timer]
+OnCalendar=*-*-* 00,04,08,12,16,20:35:00 UTC
+AccuracySec=5min
+RandomizedDelaySec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

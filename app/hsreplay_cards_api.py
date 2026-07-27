@@ -338,15 +338,28 @@ async def fetch_hsreplay_ranked_cards(source: Source, *, locale: str = "ruRU") -
 
     sort_mode = _sort_mode(source)
     api_url = _analytics_card_list_url(source)
-    api_payload = await fetch_hsreplay_json(
-        api_url,
-        source_id=source.id,
-        cache_key=(
-            f"cards:{(_query_param(source, 'gameType') or 'RANKED_STANDARD').upper()}:"
-            f"{(_query_param(source, 'rankRange') or 'GOLD').upper()}:"
-            f"{_query_param(source, 'timeRange') or 'LAST_14_DAYS'}"
-        ),
-    )
+    proxy_attempts: list[dict[str, str]] = []
+    try:
+        api_payload = await fetch_hsreplay_json(
+            api_url,
+            source_id=source.id,
+            cache_key=(
+                f"cards:{(_query_param(source, 'gameType') or 'RANKED_STANDARD').upper()}:"
+                f"{(_query_param(source, 'rankRange') or 'GOLD').upper()}:"
+                f"{_query_param(source, 'timeRange') or 'LAST_14_DAYS'}"
+            ),
+        )
+        backend = "hsreplay_cards_api"
+    except Exception as direct_error:
+        from .hsreplay_card_periods import fetch_hsreplay_card_period_json
+
+        fallback = await fetch_hsreplay_card_period_json(api_url)
+        api_payload = fallback.payload
+        backend = f"hsreplay_cards_api+{fallback.backend}"
+        proxy_attempts = [
+            {"backend": "direct", "state": "failed", "error_type": type(direct_error).__name__},
+            *fallback.attempts,
+        ]
     cards = parse_cards_from_api_payloads(
         [(api_url, api_payload)], sort_mode=sort_mode, locale=locale
     )
@@ -362,6 +375,7 @@ async def fetch_hsreplay_ranked_cards(source: Source, *, locale: str = "ruRU") -
         "blocked_marker": False,
         "final_url": api_url,
         "http_status": 200,
+        "proxy_attempts": proxy_attempts,
     }
     if len(cards) < 30 or metrics < 20:
         from .refresh_log import log_action
@@ -391,7 +405,7 @@ async def fetch_hsreplay_ranked_cards(source: Source, *, locale: str = "ruRU") -
         "source": {
             "key": "hsreplay",
             "url": source.url,
-            "backend": "hsreplay_cards_api",
+            "backend": backend,
             "api_calls": 1,
             "cards_with_metrics": metrics,
             "diagnostics": diagnostics,
