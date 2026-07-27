@@ -12,6 +12,7 @@ from app.parser_control_schedule import (
     build_schedule_inventory,
 )
 from app.parser_control_registry import SECTION_BY_ID, SOURCE_TO_SECTION
+from app.hsreplay_card_periods import HSREPLAY_CARD_PERIOD_SOURCE_IDS
 from app.sources import SOURCE_BY_ID
 
 
@@ -72,18 +73,9 @@ def test_schedule_inventory_calculates_nominal_next_runs_in_utc() -> None:
     assert _schedule(inventory, "refresh-hsreplay-card-periods")["nextRunAt"] == (
         "2026-07-21T00:35:00+00:00"
     )
-    assert set(_schedule(inventory, "refresh-hsreplay-card-periods")["sourceIds"]) == {
-        "hsreplay_cards_legend_1d",
-        "hsreplay_cards_legend_3d",
-        "hsreplay_cards_legend_7d",
-        "hsreplay_cards_legend_14d",
-        "hsreplay_cards_legend_patch",
-        "hsreplay_cards_wild_legend_1d",
-        "hsreplay_cards_wild_legend_3d",
-        "hsreplay_cards_wild_legend_7d",
-        "hsreplay_cards_wild_legend_14d",
-        "hsreplay_cards_wild_legend_patch",
-    }
+    assert set(_schedule(inventory, "refresh-hsreplay-card-periods")["sourceIds"]) == set(
+        HSREPLAY_CARD_PERIOD_SOURCE_IDS
+    )
     assert _schedule(inventory, "refresh-hsreplay-archetypes")["nextRunAt"] == (
         "2026-07-23T01:20:00+00:00"
     )

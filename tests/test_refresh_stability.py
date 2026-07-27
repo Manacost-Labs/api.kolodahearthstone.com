@@ -376,7 +376,11 @@ class RefreshStabilityTest(unittest.TestCase):
     def test_hsreplay_cards_legend_1d_source_is_api_first(self) -> None:
         source = next(s for s in SOURCES if s.id == "hsreplay_cards_legend_1d")
 
-        self.assertEqual(source.fragment, "rankRange=LEGEND&timeRange=LAST_1_DAY")
+        self.assertEqual(
+            source.fragment,
+            "rankRange=LEGEND&sortBy=includedPopularity"
+            "&timeRange=LAST_1_DAY&gameType=RANKED_STANDARD",
+        )
         self.assertEqual(tier_for(source.id), SourceTier.MEDIUM_API)
         self.assertTrue(blocks_browser_fallback(source.id))
 
@@ -385,7 +389,8 @@ class RefreshStabilityTest(unittest.TestCase):
 
         self.assertEqual(
             source.fragment,
-            "rankRange=LEGEND&timeRange=LAST_1_DAY&gameType=RANKED_WILD",
+            "rankRange=LEGEND&sortBy=includedPopularity"
+            "&timeRange=LAST_1_DAY&gameType=RANKED_WILD",
         )
         self.assertEqual(
             _analytics_card_list_url(source),
