@@ -11,6 +11,7 @@ import pytest
 
 from app.hsreplay_card_periods import (
     CardPeriodFetch,
+    HSREPLAY_CARD_PERIOD_SOURCE_SPECS,
     HSREPLAY_CARD_PERIOD_SOURCE_IDS,
     fetch_hsreplay_card_period_json,
 )
@@ -38,14 +39,21 @@ class _Response:
 
 def test_period_sources_cover_standard_and_wild() -> None:
     expected = {
-        f"hsreplay_cards_{wild}legend_{period}"
+        f"hsreplay_cards_{wild}{rank}_{period}"
         for wild in ("", "wild_")
+        for rank in ("legend", "diamond_4_1", "diamond", "platinum")
         for period in ("1d", "3d", "7d", "14d", "patch")
     }
+    assert expected == set(HSREPLAY_CARD_PERIOD_SOURCE_IDS)
     assert expected.issubset(SOURCE_BY_ID)
     for source_id in expected:
         source = SOURCE_BY_ID[source_id]
-        assert "rankRange=LEGEND" in source.fragment
+        expected_rank_range = next(
+            spec.rank_range
+            for spec in HSREPLAY_CARD_PERIOD_SOURCE_SPECS
+            if spec.source_id == source_id
+        )
+        assert f"rankRange={expected_rank_range}" in source.fragment
         assert "timeRange=" in source.fragment
         assert ("gameType=RANKED_WILD" in source.fragment) == ("wild_" in source_id)
 

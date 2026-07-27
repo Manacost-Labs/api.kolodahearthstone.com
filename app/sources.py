@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from urllib.parse import urldefrag
 
+from .hsreplay_card_periods import HSREPLAY_CARD_PERIOD_SOURCE_SPECS
 from .trinket_slices import TRINKET_SLICE_PARAMETERS, trinket_slice_source_id
 
 
@@ -229,75 +230,15 @@ SOURCES: tuple[Source, ...] = (
         "ranked",
         description="HSReplay cards, Gold rank, 14 days, sorted by included popularity.",
     ),
-    Source(
-        "hsreplay_cards_legend_1d",
-        "https://hsreplay.net/cards/#rankRange=LEGEND&timeRange=LAST_1_DAY",
-        "hsreplay",
-        "ranked",
-        description="HSReplay cards, Legend rank, last 1 day.",
-    ),
-    Source(
-        "hsreplay_cards_wild_legend_1d",
-        "https://hsreplay.net/cards/#rankRange=LEGEND&timeRange=LAST_1_DAY&gameType=RANKED_WILD",
-        "hsreplay",
-        "ranked",
-        description="HSReplay Wild cards, Legend rank, last 1 day.",
-    ),
-    Source(
-        "hsreplay_cards_legend_3d",
-        "https://hsreplay.net/cards/#rankRange=LEGEND&sortBy=includedPopularity&timeRange=LAST_3_DAYS&gameType=RANKED_STANDARD",
-        "hsreplay",
-        "ranked",
-        description="HSReplay Standard cards, Legend rank, last 3 days.",
-    ),
-    Source(
-        "hsreplay_cards_legend_7d",
-        "https://hsreplay.net/cards/#rankRange=LEGEND&sortBy=includedPopularity&timeRange=LAST_7_DAYS&gameType=RANKED_STANDARD",
-        "hsreplay",
-        "ranked",
-        description="HSReplay Standard cards, Legend rank, last 7 days.",
-    ),
-    Source(
-        "hsreplay_cards_legend_14d",
-        "https://hsreplay.net/cards/#rankRange=LEGEND&sortBy=includedPopularity&timeRange=LAST_14_DAYS&gameType=RANKED_STANDARD",
-        "hsreplay",
-        "ranked",
-        description="HSReplay Standard cards, Legend rank, last 14 days.",
-    ),
-    Source(
-        "hsreplay_cards_legend_patch",
-        "https://hsreplay.net/cards/#rankRange=LEGEND&sortBy=includedPopularity&timeRange=CURRENT_PATCH&gameType=RANKED_STANDARD",
-        "hsreplay",
-        "ranked",
-        description="HSReplay Standard cards, Legend rank, current patch.",
-    ),
-    Source(
-        "hsreplay_cards_wild_legend_3d",
-        "https://hsreplay.net/cards/#rankRange=LEGEND&sortBy=includedPopularity&timeRange=LAST_3_DAYS&gameType=RANKED_WILD",
-        "hsreplay",
-        "ranked",
-        description="HSReplay Wild cards, Legend rank, last 3 days.",
-    ),
-    Source(
-        "hsreplay_cards_wild_legend_7d",
-        "https://hsreplay.net/cards/#rankRange=LEGEND&sortBy=includedPopularity&timeRange=LAST_7_DAYS&gameType=RANKED_WILD",
-        "hsreplay",
-        "ranked",
-        description="HSReplay Wild cards, Legend rank, last 7 days.",
-    ),
-    Source(
-        "hsreplay_cards_wild_legend_14d",
-        "https://hsreplay.net/cards/#rankRange=LEGEND&sortBy=includedPopularity&timeRange=LAST_14_DAYS&gameType=RANKED_WILD",
-        "hsreplay",
-        "ranked",
-        description="HSReplay Wild cards, Legend rank, last 14 days.",
-    ),
-    Source(
-        "hsreplay_cards_wild_legend_patch",
-        "https://hsreplay.net/cards/#rankRange=LEGEND&sortBy=includedPopularity&timeRange=CURRENT_PATCH&gameType=RANKED_WILD",
-        "hsreplay",
-        "ranked",
-        description="HSReplay Wild cards, Legend rank, current patch.",
+    *tuple(
+        Source(
+            spec.source_id,
+            spec.url,
+            "hsreplay",
+            "ranked",
+            description=spec.description,
+        )
+        for spec in HSREPLAY_CARD_PERIOD_SOURCE_SPECS
     ),
     Source(
         "hsreplay_meta_archetypes_legend_eu_1d",

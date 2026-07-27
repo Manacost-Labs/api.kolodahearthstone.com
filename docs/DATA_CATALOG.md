@@ -99,22 +99,25 @@ admin/ops endpoints и правила авторизации находятся 
 
 Источники:
 
-| Source ID | Формат и выборка |
+| Формат и ранг | Source ID для 1/3/7/14 дней и текущего патча |
 | --- | --- |
-| `hsreplay_cards_legend_1d` | Standard, Legend, последние сутки. |
-| `hsreplay_cards_legend_3d` | Standard, Legend, последние 3 дня. |
-| `hsreplay_cards_legend_7d` | Standard, Legend, последние 7 дней. |
-| `hsreplay_cards_legend_14d` | Standard, Legend, последние 14 дней. |
-| `hsreplay_cards_legend_patch` | Standard, Legend, текущий патч. |
-| `hsreplay_cards_wild_legend_1d` | Wild, Legend, последние сутки. |
-| `hsreplay_cards_wild_legend_3d` | Wild, Legend, последние 3 дня. |
-| `hsreplay_cards_wild_legend_7d` | Wild, Legend, последние 7 дней. |
-| `hsreplay_cards_wild_legend_14d` | Wild, Legend, последние 14 дней. |
-| `hsreplay_cards_wild_legend_patch` | Wild, Legend, текущий патч. |
+| Standard, Legend | `hsreplay_cards_legend_1d`, `hsreplay_cards_legend_3d`, `hsreplay_cards_legend_7d`, `hsreplay_cards_legend_14d`, `hsreplay_cards_legend_patch` |
+| Standard, Diamond 4–1 | `hsreplay_cards_diamond_4_1_1d`, `hsreplay_cards_diamond_4_1_3d`, `hsreplay_cards_diamond_4_1_7d`, `hsreplay_cards_diamond_4_1_14d`, `hsreplay_cards_diamond_4_1_patch` |
+| Standard, Diamond | `hsreplay_cards_diamond_1d`, `hsreplay_cards_diamond_3d`, `hsreplay_cards_diamond_7d`, `hsreplay_cards_diamond_14d`, `hsreplay_cards_diamond_patch` |
+| Standard, Platinum | `hsreplay_cards_platinum_1d`, `hsreplay_cards_platinum_3d`, `hsreplay_cards_platinum_7d`, `hsreplay_cards_platinum_14d`, `hsreplay_cards_platinum_patch` |
+| Wild, Legend | `hsreplay_cards_wild_legend_1d`, `hsreplay_cards_wild_legend_3d`, `hsreplay_cards_wild_legend_7d`, `hsreplay_cards_wild_legend_14d`, `hsreplay_cards_wild_legend_patch` |
+| Wild, Diamond 4–1 | `hsreplay_cards_wild_diamond_4_1_1d`, `hsreplay_cards_wild_diamond_4_1_3d`, `hsreplay_cards_wild_diamond_4_1_7d`, `hsreplay_cards_wild_diamond_4_1_14d`, `hsreplay_cards_wild_diamond_4_1_patch` |
+| Wild, Diamond | `hsreplay_cards_wild_diamond_1d`, `hsreplay_cards_wild_diamond_3d`, `hsreplay_cards_wild_diamond_7d`, `hsreplay_cards_wild_diamond_14d`, `hsreplay_cards_wild_diamond_patch` |
+| Wild, Platinum | `hsreplay_cards_wild_platinum_1d`, `hsreplay_cards_wild_platinum_3d`, `hsreplay_cards_wild_platinum_7d`, `hsreplay_cards_wild_platinum_14d`, `hsreplay_cards_wild_platinum_patch` |
 | `hsreplay_cards_legend_included_winrate` | Standard, Gold, 14 дней, сортировка по included winrate. |
 | `hsreplay_cards_legend_included_popularity` | Standard, Gold, 14 дней, сортировка по included popularity. |
 
 Путь к строкам: `data.structured.cards[]`.
+
+Для каждого рангового среза parser передаёт HSReplay `rankRange`
+(`LEGEND`, `DIAMOND_FOUR_THROUGH_DIAMOND_ONE`, `DIAMOND` или `PLATINUM`),
+`gameType` и соответствующий `timeRange`. Все 40 наборов обновляются одним
+четырёхчасовым production timer.
 
 | Поле | Описание |
 | --- | --- |

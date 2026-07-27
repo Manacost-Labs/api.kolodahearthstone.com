@@ -17,19 +17,79 @@ from .config import firecrawl_api_key
 FIRECRAWL_SCRAPE_URL = "https://api.firecrawl.dev/v2/scrape"
 SCRAPE_DO_URL = "https://api.scrape.do/"
 
-STANDARD_HSREPLAY_CARD_PERIOD_SOURCE_IDS = (
-    "hsreplay_cards_legend_1d",
-    "hsreplay_cards_legend_3d",
-    "hsreplay_cards_legend_7d",
-    "hsreplay_cards_legend_14d",
-    "hsreplay_cards_legend_patch",
+HSREPLAY_CARD_FORMATS = (
+    ("standard", "RANKED_STANDARD", "Standard"),
+    ("wild", "RANKED_WILD", "Wild"),
 )
-WILD_HSREPLAY_CARD_PERIOD_SOURCE_IDS = (
-    "hsreplay_cards_wild_legend_1d",
-    "hsreplay_cards_wild_legend_3d",
-    "hsreplay_cards_wild_legend_7d",
-    "hsreplay_cards_wild_legend_14d",
-    "hsreplay_cards_wild_legend_patch",
+HSREPLAY_CARD_RANKS = (
+    ("legend", "LEGEND", "Legend"),
+    (
+        "diamond_4_1",
+        "DIAMOND_FOUR_THROUGH_DIAMOND_ONE",
+        "Diamond 4-1",
+    ),
+    ("diamond", "DIAMOND", "Diamond"),
+    ("platinum", "PLATINUM", "Platinum"),
+)
+HSREPLAY_CARD_PERIODS = (
+    ("1d", "LAST_1_DAY", "last 1 day"),
+    ("3d", "LAST_3_DAYS", "last 3 days"),
+    ("7d", "LAST_7_DAYS", "last 7 days"),
+    ("14d", "LAST_14_DAYS", "last 14 days"),
+    ("patch", "CURRENT_PATCH", "current patch"),
+)
+
+
+@dataclass(frozen=True)
+class CardPeriodSourceSpec:
+    source_id: str
+    format_id: str
+    rank_id: str
+    period_id: str
+    rank_range: str
+    time_range: str
+    game_type: str
+    url: str
+    description: str
+
+
+def _card_period_source_id(format_id: str, rank_id: str, period_id: str) -> str:
+    format_fragment = "_wild" if format_id == "wild" else ""
+    return f"hsreplay_cards{format_fragment}_{rank_id}_{period_id}"
+
+
+HSREPLAY_CARD_PERIOD_SOURCE_SPECS = tuple(
+    CardPeriodSourceSpec(
+        source_id=_card_period_source_id(format_id, rank_id, period_id),
+        format_id=format_id,
+        rank_id=rank_id,
+        period_id=period_id,
+        rank_range=rank_range,
+        time_range=time_range,
+        game_type=game_type,
+        url=(
+            "https://hsreplay.net/cards/"
+            f"#rankRange={rank_range}&sortBy=includedPopularity"
+            f"&timeRange={time_range}&gameType={game_type}"
+        ),
+        description=(
+            f"HSReplay {format_label} cards, {rank_label}, {period_label}."
+        ),
+    )
+    for format_id, game_type, format_label in HSREPLAY_CARD_FORMATS
+    for rank_id, rank_range, rank_label in HSREPLAY_CARD_RANKS
+    for period_id, time_range, period_label in HSREPLAY_CARD_PERIODS
+)
+
+STANDARD_HSREPLAY_CARD_PERIOD_SOURCE_IDS = tuple(
+    spec.source_id
+    for spec in HSREPLAY_CARD_PERIOD_SOURCE_SPECS
+    if spec.format_id == "standard"
+)
+WILD_HSREPLAY_CARD_PERIOD_SOURCE_IDS = tuple(
+    spec.source_id
+    for spec in HSREPLAY_CARD_PERIOD_SOURCE_SPECS
+    if spec.format_id == "wild"
 )
 HSREPLAY_CARD_PERIOD_SOURCE_IDS = (
     *STANDARD_HSREPLAY_CARD_PERIOD_SOURCE_IDS,
