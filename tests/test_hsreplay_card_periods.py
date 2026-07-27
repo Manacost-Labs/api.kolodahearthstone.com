@@ -11,9 +11,12 @@ import pytest
 
 from app.hsreplay_card_periods import (
     CardPeriodFetch,
+    HSREPLAY_CARD_PERIOD_SOURCE_IDS,
     fetch_hsreplay_card_period_json,
 )
 from app.hsreplay_cards_api import fetch_hsreplay_ranked_cards
+from app.source_contracts import get_contract
+from app.source_tiers import SourceTier, tier_for
 from app.sources import SOURCE_BY_ID, Source
 
 
@@ -45,6 +48,15 @@ def test_period_sources_cover_standard_and_wild() -> None:
         assert "rankRange=LEGEND" in source.fragment
         assert "timeRange=" in source.fragment
         assert ("gameType=RANKED_WILD" in source.fragment) == ("wild_" in source_id)
+
+
+def test_period_sources_have_quality_contracts_and_refresh_tiers() -> None:
+    for source_id in HSREPLAY_CARD_PERIOD_SOURCE_IDS:
+        contract = get_contract(source_id)
+        assert contract is not None
+        assert contract.structured_type == "card_stats"
+        assert contract.allow_browser_fallback is False
+        assert tier_for(source_id) is SourceTier.MEDIUM_API
 
 
 def test_firecrawl_reads_raw_json_body(monkeypatch: pytest.MonkeyPatch) -> None:

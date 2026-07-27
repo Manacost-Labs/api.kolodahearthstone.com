@@ -3,6 +3,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import NamedTuple
 
+from .hsreplay_card_periods import HSREPLAY_CARD_PERIOD_SOURCE_IDS
 from .sources import SOURCES, Source
 from .trinket_slices import TRINKET_SLICE_SOURCE_IDS
 
@@ -49,8 +50,7 @@ MEDIUM_API_IDS: frozenset[str] = frozenset(
         "hsreplay_battlegrounds_compositions",
         "hsreplay_battlegrounds_heroes",
         "hsreplay_battlegrounds_minions",
-        "hsreplay_cards_legend_1d",
-        "hsreplay_cards_wild_legend_1d",
+        *HSREPLAY_CARD_PERIOD_SOURCE_IDS,
         "hsreplay_meta_archetypes_legend_eu_1d",
         "hsreplay_meta_top_1000_legend_1d_firecrawl",
         "hsreplay_meta_legend_1d_firecrawl",

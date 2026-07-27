@@ -17,6 +17,25 @@ from .config import firecrawl_api_key
 FIRECRAWL_SCRAPE_URL = "https://api.firecrawl.dev/v2/scrape"
 SCRAPE_DO_URL = "https://api.scrape.do/"
 
+STANDARD_HSREPLAY_CARD_PERIOD_SOURCE_IDS = (
+    "hsreplay_cards_legend_1d",
+    "hsreplay_cards_legend_3d",
+    "hsreplay_cards_legend_7d",
+    "hsreplay_cards_legend_14d",
+    "hsreplay_cards_legend_patch",
+)
+WILD_HSREPLAY_CARD_PERIOD_SOURCE_IDS = (
+    "hsreplay_cards_wild_legend_1d",
+    "hsreplay_cards_wild_legend_3d",
+    "hsreplay_cards_wild_legend_7d",
+    "hsreplay_cards_wild_legend_14d",
+    "hsreplay_cards_wild_legend_patch",
+)
+HSREPLAY_CARD_PERIOD_SOURCE_IDS = (
+    *STANDARD_HSREPLAY_CARD_PERIOD_SOURCE_IDS,
+    *WILD_HSREPLAY_CARD_PERIOD_SOURCE_IDS,
+)
+
 
 @dataclass(frozen=True)
 class CardPeriodFetch:

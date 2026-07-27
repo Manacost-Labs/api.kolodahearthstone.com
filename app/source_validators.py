@@ -6,6 +6,7 @@ import math
 import re
 from typing import Any, Callable
 
+from .hsreplay_card_periods import STANDARD_HSREPLAY_CARD_PERIOD_SOURCE_IDS
 from .parsing_normalize import parse_decimal, parse_percent
 from .post_patch_policy import (
     effective_arena_card_minimum,
@@ -964,7 +965,7 @@ def _validate_card_stats(source_id: str, structured: dict[str, Any]) -> Validati
             f"card stats missing metrics ({with_metrics}/{len(cards)}; minimum 20)",
             field="deck_winrate,deck_popularity",
         )
-    if source_id == "hsreplay_cards_legend_1d":
+    if source_id in STANDARD_HSREPLAY_CARD_PERIOD_SOURCE_IDS:
         # HSReplay Standard statistics currently contain roughly one thousand
         # rows.  A much larger payload is not an early-meta expansion: it is a
         # format/filter failure (usually Wild/all-cards data under the Standard

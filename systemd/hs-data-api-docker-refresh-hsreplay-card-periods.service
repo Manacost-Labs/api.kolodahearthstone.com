@@ -6,4 +6,4 @@ After=hs-data-api-docker.service network-online.target
 [Service]
 Type=oneshot
 WorkingDirectory=/srv/hs-data-api
-ExecStart=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm api python -m app.cli refresh --require-all-ok --source hsreplay_cards_legend_1d --source hsreplay_cards_legend_3d --source hsreplay_cards_legend_7d --source hsreplay_cards_legend_14d --source hsreplay_cards_legend_patch --source hsreplay_cards_wild_legend_1d --source hsreplay_cards_wild_legend_3d --source hsreplay_cards_wild_legend_7d --source hsreplay_cards_wild_legend_14d --source hsreplay_cards_wild_legend_patch
+ExecStart=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm api python -m app.cli refresh --scheduled --require-all-ok --source hsreplay_cards_legend_1d --source hsreplay_cards_legend_3d --source hsreplay_cards_legend_7d --source hsreplay_cards_legend_14d --source hsreplay_cards_legend_patch --source hsreplay_cards_wild_legend_1d --source hsreplay_cards_wild_legend_3d --source hsreplay_cards_wild_legend_7d --source hsreplay_cards_wild_legend_14d --source hsreplay_cards_wild_legend_patch

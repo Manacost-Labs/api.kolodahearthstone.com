@@ -102,7 +102,15 @@ admin/ops endpoints и правила авторизации находятся 
 | Source ID | Формат и выборка |
 | --- | --- |
 | `hsreplay_cards_legend_1d` | Standard, Legend, последние сутки. |
+| `hsreplay_cards_legend_3d` | Standard, Legend, последние 3 дня. |
+| `hsreplay_cards_legend_7d` | Standard, Legend, последние 7 дней. |
+| `hsreplay_cards_legend_14d` | Standard, Legend, последние 14 дней. |
+| `hsreplay_cards_legend_patch` | Standard, Legend, текущий патч. |
 | `hsreplay_cards_wild_legend_1d` | Wild, Legend, последние сутки. |
+| `hsreplay_cards_wild_legend_3d` | Wild, Legend, последние 3 дня. |
+| `hsreplay_cards_wild_legend_7d` | Wild, Legend, последние 7 дней. |
+| `hsreplay_cards_wild_legend_14d` | Wild, Legend, последние 14 дней. |
+| `hsreplay_cards_wild_legend_patch` | Wild, Legend, текущий патч. |
 | `hsreplay_cards_legend_included_winrate` | Standard, Gold, 14 дней, сортировка по included winrate. |
 | `hsreplay_cards_legend_included_popularity` | Standard, Gold, 14 дней, сортировка по included popularity. |
 

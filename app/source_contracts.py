@@ -3,6 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterable
 
+from .hsreplay_card_periods import (
+    STANDARD_HSREPLAY_CARD_PERIOD_SOURCE_IDS,
+    WILD_HSREPLAY_CARD_PERIOD_SOURCE_IDS,
+)
 from .post_patch_policy import effective_contract_min_rows
 from .trinket_slices import TRINKET_SLICE_SOURCE_IDS
 
@@ -433,6 +437,36 @@ for _sid in (
             recommendation="Investigate HSGuru embedded/internal API and migrate away from hydrated browser pages.",
             min_html_bytes=8_000 if "streamer_decks" in _sid else 25_000,
         ),
+)
+
+for source_id in STANDARD_HSREPLAY_CARD_PERIOD_SOURCE_IDS[1:]:
+    CONTRACTS[source_id] = SourceContract(
+        source_id=source_id,
+        structured_type="card_stats",
+        preferred_channels=HSREPLAY_JSON_CHANNELS,
+        allow_browser_fallback=False,
+        min_rows=600,
+        critical_fields=("deck_winrate", "deck_popularity"),
+        min_field_fill_rate=0.55,
+        regression_drop_ratio=0.50,
+        volatility="daily",
+        fallback_policy="api_only",
+        recommendation="Preserve the previous valid Standard period snapshot on severe metric or row-count regression.",
+    )
+
+for source_id in WILD_HSREPLAY_CARD_PERIOD_SOURCE_IDS[1:]:
+    CONTRACTS[source_id] = SourceContract(
+        source_id=source_id,
+        structured_type="card_stats",
+        preferred_channels=HSREPLAY_JSON_CHANNELS,
+        allow_browser_fallback=False,
+        min_rows=700,
+        critical_fields=("deck_winrate", "deck_popularity"),
+        min_field_fill_rate=0.45,
+        regression_drop_ratio=0.50,
+        volatility="daily",
+        fallback_policy="api_only",
+        recommendation="Preserve the previous valid Wild period snapshot on severe metric or row-count regression.",
     )
 
 

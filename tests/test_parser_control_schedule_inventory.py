@@ -69,6 +69,21 @@ def test_schedule_inventory_calculates_nominal_next_runs_in_utc() -> None:
     assert _schedule(inventory, "refresh-hsguru-meta-matrix")["nextRunAt"] == (
         "2026-07-21T10:00:00+00:00"
     )
+    assert _schedule(inventory, "refresh-hsreplay-card-periods")["nextRunAt"] == (
+        "2026-07-21T00:35:00+00:00"
+    )
+    assert set(_schedule(inventory, "refresh-hsreplay-card-periods")["sourceIds"]) == {
+        "hsreplay_cards_legend_1d",
+        "hsreplay_cards_legend_3d",
+        "hsreplay_cards_legend_7d",
+        "hsreplay_cards_legend_14d",
+        "hsreplay_cards_legend_patch",
+        "hsreplay_cards_wild_legend_1d",
+        "hsreplay_cards_wild_legend_3d",
+        "hsreplay_cards_wild_legend_7d",
+        "hsreplay_cards_wild_legend_14d",
+        "hsreplay_cards_wild_legend_patch",
+    }
     assert _schedule(inventory, "refresh-hsreplay-archetypes")["nextRunAt"] == (
         "2026-07-23T01:20:00+00:00"
     )

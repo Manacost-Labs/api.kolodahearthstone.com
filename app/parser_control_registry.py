@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .hsreplay_card_periods import HSREPLAY_CARD_PERIOD_SOURCE_IDS
 from .sources import SOURCE_BY_ID
 from .trinket_slices import TRINKET_SLICE_SOURCE_IDS
 
@@ -13,7 +14,6 @@ EARLY_SOURCE_IDS = frozenset(
         "firestone_arena_cards_normal",
     }
 )
-
 
 @dataclass(frozen=True)
 class ParserSection:
@@ -82,8 +82,7 @@ SECTIONS: tuple[ParserSection, ...] = (
         source_ids=(
             "hsreplay_cards_legend_included_winrate",
             "hsreplay_cards_legend_included_popularity",
-            "hsreplay_cards_legend_1d",
-            "hsreplay_cards_wild_legend_1d",
+            *HSREPLAY_CARD_PERIOD_SOURCE_IDS,
         ),
     ),
     ParserSection(
@@ -232,7 +231,15 @@ SOURCE_LABELS_RU: dict[str, str] = {
     "hsreplay_cards_legend_included_winrate": "HSReplay · карты по винрейту колод",
     "hsreplay_cards_legend_included_popularity": "HSReplay · карты по популярности",
     "hsreplay_cards_legend_1d": "HSReplay · карты Standard, Легенда",
+    "hsreplay_cards_legend_3d": "HSReplay · карты Standard, Легенда, 3 дня",
+    "hsreplay_cards_legend_7d": "HSReplay · карты Standard, Легенда, 7 дней",
+    "hsreplay_cards_legend_14d": "HSReplay · карты Standard, Легенда, 14 дней",
+    "hsreplay_cards_legend_patch": "HSReplay · карты Standard, текущий патч",
     "hsreplay_cards_wild_legend_1d": "HSReplay · карты Wild, Легенда",
+    "hsreplay_cards_wild_legend_3d": "HSReplay · карты Wild, Легенда, 3 дня",
+    "hsreplay_cards_wild_legend_7d": "HSReplay · карты Wild, Легенда, 7 дней",
+    "hsreplay_cards_wild_legend_14d": "HSReplay · карты Wild, Легенда, 14 дней",
+    "hsreplay_cards_wild_legend_patch": "HSReplay · карты Wild, текущий патч",
     "hsreplay_meta_archetypes_legend_eu_1d": "HSReplay · архетипы Standard, Легенда EU",
     "hsreplay_meta_top_1000_legend_1d_firecrawl": "HSReplay · мета топ-1000 Легенды",
     "hsreplay_meta_legend_1d_firecrawl": "HSReplay · мета Легенды",

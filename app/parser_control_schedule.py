@@ -13,6 +13,7 @@ from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
 from .config import data_dir
+from .hsreplay_card_periods import HSREPLAY_CARD_PERIOD_SOURCE_IDS
 from .parser_control_registry import SOURCE_TO_SECTION
 from .source_tiers import LIGHT_API_IDS, MEDIUM_API_IDS
 from .sources import SOURCE_BY_ID
@@ -146,6 +147,22 @@ _SCHEDULES: tuple[_ScheduleSpec, ...] = (
         ),
         recurrence="daily",
         local_times=_times((3, 5)),
+    ),
+    _ScheduleSpec(
+        id="refresh-hsreplay-card-periods",
+        label="Каждые 4 часа в :35",
+        systemd_unit="hs-data-api-docker-refresh-hsreplay-card-periods.timer",
+        on_calendar=("*-*-* 00,04,08,12,16,20:35:00 UTC",),
+        source_ids=frozenset(HSREPLAY_CARD_PERIOD_SOURCE_IDS),
+        recurrence="daily",
+        local_times=_times(
+            (2, 35),
+            (6, 35),
+            (10, 35),
+            (14, 35),
+            (18, 35),
+            (22, 35),
+        ),
     ),
     _ScheduleSpec(
         id="refresh-hsreplay-arena-classes-firecrawl",
