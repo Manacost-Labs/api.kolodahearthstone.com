@@ -478,6 +478,49 @@ async def refresh_bg_hero_details(
     cached_dataset = load_dataset(SOURCE_ID)
     if quality_ok:
         save_dataset(SOURCE_ID, dataset)
+        heroes_dataset = {
+            "state": SourceState.OK,
+            "fetched_at": fetched_at,
+            "http_status": 200,
+            "final_url": HEROES_API,
+            "content_length": None,
+            "backend": "hsreplay_json_api",
+            "data": {
+                "structured": {
+                    "type": "bg_heroes",
+                    "fetched_at": fetched_at,
+                    "heroes": heroes,
+                    "blocked": False,
+                    "filters": payload["filters"],
+                    "source": {
+                        "backend": "hsreplay_json_api",
+                        "url": solo_index.get("source", {}).get("api_url") or HEROES_API,
+                        "mirrored_from": SOURCE_ID,
+                    },
+                }
+            },
+        }
+        save_dataset(HEROES_SOURCE_ID, heroes_dataset)
+        save_status(
+            HEROES_SOURCE_ID,
+            {
+                "source_id": HEROES_SOURCE_ID,
+                "site": "hsreplay",
+                "category": "battlegrounds",
+                "url": HEROES_API,
+                "state": SourceState.OK,
+                "fetched_at": fetched_at,
+                "http_status": 200,
+                "backend": "hsreplay_json_api",
+                "detail": (
+                    f"BG hero index mirrored from {SOURCE_ID}: "
+                    f"{len(heroes)} solo heroes."
+                ),
+                "serving_cached_dataset": False,
+                "last_refresh_state": SourceState.OK,
+                "last_refresh_at": fetched_at,
+            },
+        )
     save_status(
         SOURCE_ID,
         {

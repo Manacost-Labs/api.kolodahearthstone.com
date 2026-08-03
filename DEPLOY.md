@@ -134,6 +134,10 @@ Production refresh schedule:
   and `all`. Successful catalogs are persisted independently; the job exits
   non-zero with a structured `errors` map when any catalog remains unavailable.
 - `hs-data-api-docker-refresh-hsreplay-archetypes.timer`: HSReplay Standard archetype SQLite snapshots at `03:20 Europe/Warsaw` on Mondays and Thursdays.
+- `hs-data-api-docker-refresh-bg-hero-details.timer` publishes both the detailed
+  hero dataset and the compatible `hsreplay_battlegrounds_heroes` index from
+  the same quality-gated HSReplay JSON response. Premium HTML failure therefore
+  cannot leave the public hero index stale while fresh detail data is serving.
 - `scripts/install-docker-systemd.sh`: автоматически устанавливает и включает все
   `hs-data-api-docker-*.timer`, поэтому новый pipeline timer не останется только
   в репозитории после следующего деплоя.

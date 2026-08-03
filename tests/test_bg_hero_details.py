@@ -206,7 +206,16 @@ class BattlegroundsHeroDetailsTest(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertTrue(result["published"])
         self.assertEqual(result["detail_coverage"], 1.0)
-        save_dataset.assert_called_once()
+        self.assertEqual(save_dataset.call_count, 2)
+        mirror_call = save_dataset.call_args_list[1]
+        self.assertEqual(mirror_call.args[0], "hsreplay_battlegrounds_heroes")
+        mirror = mirror_call.args[1]
+        self.assertEqual(mirror["data"]["structured"]["type"], "bg_heroes")
+        self.assertEqual(len(mirror["data"]["structured"]["heroes"]), 30)
+        self.assertEqual(
+            mirror["data"]["structured"]["source"]["backend"],
+            "hsreplay_json_api",
+        )
 
 
 if __name__ == "__main__":
