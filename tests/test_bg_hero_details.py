@@ -199,7 +199,7 @@ class BattlegroundsHeroDetailsTest(unittest.TestCase):
             patch("app.hsreplay_bg_hero_details.fetch_hero_detail", side_effect=detail),
             patch("app.hsreplay_bg_hero_details.load_dataset", return_value={"fetched_at": "old"}),
             patch("app.hsreplay_bg_hero_details.save_dataset") as save_dataset,
-            patch("app.hsreplay_bg_hero_details.save_status"),
+            patch("app.hsreplay_bg_hero_details.save_status") as save_status,
         ):
             result = asyncio.run(refresh_bg_hero_details())
 
@@ -216,6 +216,18 @@ class BattlegroundsHeroDetailsTest(unittest.TestCase):
             mirror["data"]["structured"]["source"]["backend"],
             "hsreplay_json_api",
         )
+        hero_status = next(
+            call.args[1]
+            for call in save_status.call_args_list
+            if call.args[0] == "hsreplay_battlegrounds_heroes"
+        )
+        self.assertEqual(hero_status["rows_total"], 30)
+        detail_status = next(
+            call.args[1]
+            for call in save_status.call_args_list
+            if call.args[0] == "hsreplay_battlegrounds_hero_details"
+        )
+        self.assertEqual(detail_status["rows_total"], 30)
 
 
 if __name__ == "__main__":

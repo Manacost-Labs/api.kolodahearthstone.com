@@ -512,6 +512,7 @@ async def refresh_bg_hero_details(
                 "fetched_at": fetched_at,
                 "http_status": 200,
                 "backend": "hsreplay_json_api",
+                "rows_total": len(heroes),
                 "detail": (
                     f"BG hero index mirrored from {SOURCE_ID}: "
                     f"{len(heroes)} solo heroes."
@@ -532,6 +533,7 @@ async def refresh_bg_hero_details(
             "fetched_at": fetched_at,
             "http_status": 200,
             "backend": "hsreplay_json_api",
+            "rows_total": len(details),
             "detail": (
                 f"BG hero details: {len(details)}/{requested_details} requested, "
                 f"{solo_count} solo heroes, {duos_count} duos heroes."

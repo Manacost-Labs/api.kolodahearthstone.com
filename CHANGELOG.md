@@ -5,6 +5,8 @@
 - Accepted title-less structured API snapshots during last-known-good
   validation, so a temporary HSReplay premium-session failure no longer turns
   a valid Battlegrounds hero dataset into a hard parser error.
+- Exposed Battlegrounds hero and detail row counts directly in parser status
+  metadata after JSON refreshes.
 - Calibrated the Standard Legend 24-hour card contract for its lower sample
   size while retaining field-fill and regression protection.
 - Made the unified HSGuru matrix use the verified Scrape.do super-render
