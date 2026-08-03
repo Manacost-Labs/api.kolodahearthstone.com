@@ -408,6 +408,58 @@ def _carry_forward_missing_slices(
     return slices, carried
 
 
+def _carry_forward_current_catalog(
+    *,
+    current_period: str,
+    fresh_rows: list[dict[str, Any]],
+    acquisitions: list[dict[str, Any]],
+    cached_dataset: dict[str, Any] | None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str]]:
+    """Fill a failed current-format scrape from the same patch snapshot."""
+    cached_catalog = (
+        (((cached_dataset or {}).get("data") or {}).get("structured") or {})
+        .get("current_catalog", {})
+    )
+    cached_period = str(
+        ((cached_catalog.get("criteria") or {}).get("period") or "")
+    )
+    if cached_period != current_period:
+        return fresh_rows, acquisitions, []
+
+    present_formats = {
+        str(row.get("format") or "")
+        for row in fresh_rows
+        if isinstance(row, dict)
+    }
+    rows = list(fresh_rows)
+    acquisition_rows = list(acquisitions)
+    cached_formats: list[str] = []
+    previous_rows = cached_catalog.get("archetypes") or []
+    for format_name in FORMATS:
+        if format_name in present_formats:
+            continue
+        carried = [
+            deepcopy(row)
+            for row in previous_rows
+            if isinstance(row, dict)
+            and str(row.get("format") or "") == format_name
+        ]
+        if not carried:
+            continue
+        rows.extend(carried)
+        cached_formats.append(format_name)
+        acquisition_rows.append(
+            {
+                "format": format_name,
+                "backend": "cache",
+                "rows": len(carried),
+                "period": current_period,
+                "serving_cached_catalog": True,
+            }
+        )
+    return rows, acquisition_rows, cached_formats
+
+
 def resolve_current_patch_period(cached_dataset: dict[str, Any] | None = None) -> str:
     configured = hsguru_current_patch_period()
     if configured:
@@ -968,6 +1020,14 @@ async def refresh_hsguru_meta_matrix(
                 "error": f"{type(exc).__name__}: {str(exc)[:300]}",
             }
         )
+    current_rows, current_acquisition, cached_current_formats = (
+        _carry_forward_current_catalog(
+            current_period=current_period,
+            fresh_rows=current_rows,
+            acquisitions=current_acquisition,
+            cached_dataset=cached_dataset,
+        )
+    )
     current_rows.sort(
         key=lambda row: (row["format"], -int(row["games"]), row["archetype"])
     )
@@ -1057,15 +1117,9 @@ async def refresh_hsguru_meta_matrix(
     if patch_discovery_acquisition and patch_discovery_acquisition.get("backend"):
         active_backends.add(str(patch_discovery_acquisition["backend"]))
     dataset_backend = "+".join(sorted(active_backends)) or "cache"
-    fatal_errors = [
-        item
-        for item in errors
-        if str(item.get("key") or "").startswith("current|")
-    ]
     publishable = (
         len(slices) == len(specs)
         and current_complete
-        and not fatal_errors
     )
     complete = publishable and cached_slice_count == 0 and not errors
     structured = {
@@ -1101,6 +1155,7 @@ async def refresh_hsguru_meta_matrix(
             "duplicate_rows_merged": duplicate_rows_merged,
             "duplicate_groups": duplicate_groups,
             "cached_slices": cached_slice_count,
+            "cached_current_formats": cached_current_formats,
             "errors": errors,
         },
         "patch_discovery": patch_discovery_acquisition,
@@ -1137,7 +1192,12 @@ async def refresh_hsguru_meta_matrix(
         "data": {"structured": structured},
     }
     if publishable:
-        _record_current_history(current_rows, fetched_at)
+        fresh_current_rows = [
+            row
+            for row in current_rows
+            if str(row.get("format") or "") not in cached_current_formats
+        ]
+        _record_current_history(fresh_current_rows, fetched_at)
         save_dataset(SOURCE_ID, dataset)
     save_status(
         SOURCE_ID,
@@ -1166,6 +1226,7 @@ async def refresh_hsguru_meta_matrix(
             "duplicate_rows_merged": duplicate_rows_merged,
             "duplicate_groups": duplicate_groups[:20],
             "cached_slices": cached_slice_count,
+            "cached_current_formats": cached_current_formats,
             "published": publishable,
             "current_catalog_archetypes": len(current_rows),
             "current_catalog_period": current_period,
@@ -1181,6 +1242,7 @@ async def refresh_hsguru_meta_matrix(
         "base_slices": len(slices),
         "fresh_base_slices": len(fresh_slices),
         "cached_base_slices": cached_slice_count,
+        "cached_current_formats": cached_current_formats,
         "logical_slices": len(slices) * len(MIN_GAMES),
         "current_catalog_archetypes": len(current_rows),
         "current_catalog_period": current_period,

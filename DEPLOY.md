@@ -125,6 +125,14 @@ Production refresh schedule:
   matrix at `00:00` and `12:00 Europe/Warsaw`; every rank includes rolling,
   active-patch and Violet Hold periods. A newly advertised HSGuru `patch_*`
   becomes active only after the complete matrix passes its publication gate.
+- The HSGuru matrix carries forward an unavailable slice and an unavailable
+  Standard/Wild current catalog only from the last published snapshot for the
+  same patch. The refresh remains `partial`, exposes `cached_slices` and
+  `cached_current_formats`, and never replaces current-patch data with a
+  different patch.
+- The HSGuru deck-catalog job always attempts Standard/Wild for both `legend`
+  and `all`. Successful catalogs are persisted independently; the job exits
+  non-zero with a structured `errors` map when any catalog remains unavailable.
 - `hs-data-api-docker-refresh-hsreplay-archetypes.timer`: HSReplay Standard archetype SQLite snapshots at `03:20 Europe/Warsaw` on Mondays and Thursdays.
 - `scripts/install-docker-systemd.sh`: автоматически устанавливает и включает все
   `hs-data-api-docker-*.timer`, поэтому новый pipeline timer не останется только

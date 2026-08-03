@@ -513,6 +513,57 @@ def test_missing_slice_can_be_carried_forward_from_last_stable_dataset() -> None
     )
 
 
+def test_failed_current_format_uses_same_period_cached_catalog() -> None:
+    from app.hsguru_meta_matrix import _carry_forward_current_catalog
+
+    cached = {
+        "data": {
+            "structured": {
+                "current_catalog": {
+                    "criteria": {"period": "patch_36.0.3"},
+                    "archetypes": [
+                        {
+                            "format": "wild",
+                            "archetype": "Cached Wild Deck",
+                            "games": 321,
+                            "period": "patch_36.0.3",
+                            "rank": "all",
+                        },
+                        {
+                            "format": "standard",
+                            "archetype": "Old Standard Deck",
+                            "games": 123,
+                            "period": "patch_36.0.3",
+                            "rank": "all",
+                        },
+                    ],
+                }
+            }
+        }
+    }
+
+    rows, acquisitions, cached_formats = _carry_forward_current_catalog(
+        current_period="patch_36.0.3",
+        fresh_rows=[{
+            "format": "standard",
+            "archetype": "Fresh Standard Deck",
+            "games": 999,
+            "period": "patch_36.0.3",
+            "rank": "all",
+        }],
+        acquisitions=[{"format": "standard", "backend": "scrape_do"}],
+        cached_dataset=cached,
+    )
+
+    assert [row["archetype"] for row in rows] == [
+        "Fresh Standard Deck",
+        "Cached Wild Deck",
+    ]
+    assert cached_formats == ["wild"]
+    assert acquisitions[-1]["backend"] == "cache"
+    assert acquisitions[-1]["serving_cached_catalog"] is True
+
+
 def test_runtime_periods_replace_previous_patch_with_discovered_patch() -> None:
     from app.hsguru_meta_matrix import matrix_periods, patch_periods_from_html
 
