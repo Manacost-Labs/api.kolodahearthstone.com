@@ -412,6 +412,10 @@ def test_matrix_slices_use_scrape_do_before_firecrawl() -> None:
     assert result.backend == "scrape_do_super"
     assert result.request_credits == 25
     scrape_do.assert_awaited_once()
+    assert scrape_do.await_args.kwargs == {
+        "render": True,
+        "super_proxy": True,
+    }
     firecrawl.assert_not_awaited()
 
 

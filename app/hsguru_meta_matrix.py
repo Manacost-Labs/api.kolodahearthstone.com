@@ -865,9 +865,6 @@ async def _default_scrape(spec: SliceSpec) -> FirecrawlScrape:
                 spec.url,
                 render=True,
                 super_proxy=True,
-                headers=hsguru_firecrawl_headers(),
-                wait_ms=5_000,
-                timeout_ms=120_000,
             )
             return FirecrawlScrape(
                 html=scraped.html,

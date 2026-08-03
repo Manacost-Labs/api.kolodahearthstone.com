@@ -7,8 +7,9 @@
   a valid Battlegrounds hero dataset into a hard parser error.
 - Calibrated the Standard Legend 24-hour card contract for its lower sample
   size while retaining field-fill and regression protection.
-- Made the unified HSGuru matrix use Scrape.do before Firecrawl, and exposed
-  logical/base/fresh/cached slice counts to parser monitoring.
+- Made the unified HSGuru matrix use the verified Scrape.do super-render
+  profile before Firecrawl, and exposed logical/base/fresh/cached slice counts
+  to parser monitoring.
 - Made the four HSGuru deck catalogs refresh independently so one upstream
   failure no longer prevents the remaining format/rank datasets from updating.
 - Allowed the unified HSGuru matrix to publish a clearly marked partial
