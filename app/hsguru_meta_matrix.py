@@ -858,7 +858,34 @@ async def _default_scrape(spec: SliceSpec) -> FirecrawlScrape:
         site="hsguru",
         category="meta_matrix_slice",
     )
-    return await scrape_source_with_options(
+    primary_error: Exception | None = None
+    if scrape_do_token():
+        try:
+            scraped = await scrape_url(
+                spec.url,
+                render=True,
+                super_proxy=True,
+                headers=hsguru_firecrawl_headers(),
+                wait_ms=5_000,
+                timeout_ms=120_000,
+            )
+            return FirecrawlScrape(
+                html=scraped.html,
+                markdown="",
+                screenshot=scraped.screenshot,
+                metadata={
+                    "backend": "scrape_do_super",
+                    "creditsUsed": 0,
+                    "scrapeDoCreditsUsed": scraped.request_cost,
+                    "scrapeDoRemainingCredits": scraped.credits_remaining,
+                },
+                status_code=scraped.status_code,
+                final_url=scraped.final_url,
+            )
+        except Exception as exc:
+            primary_error = exc
+
+    fallback = await scrape_source_with_options(
         source,
         formats=["html"],
         only_main_content=True,
@@ -866,6 +893,25 @@ async def _default_scrape(spec: SliceSpec) -> FirecrawlScrape:
         max_age_ms=0,
         wait_ms=5_000,
         timeout_ms=120_000,
+    )
+    if primary_error is None:
+        return fallback
+    metadata = dict(fallback.metadata)
+    metadata["providerChain"] = [
+        {
+            "backend": "scrape_do_super",
+            "state": "failed",
+            "error_type": type(primary_error).__name__,
+        },
+        {"backend": fallback.backend, "state": "ok"},
+    ]
+    return FirecrawlScrape(
+        html=fallback.html,
+        markdown=fallback.markdown,
+        screenshot=fallback.screenshot,
+        metadata=metadata,
+        status_code=fallback.status_code,
+        final_url=fallback.final_url,
     )
 
 
@@ -1225,6 +1271,12 @@ async def refresh_hsguru_meta_matrix(
             "scrape_do_credits_used": scrape_do_credits_used,
             "duplicate_rows_merged": duplicate_rows_merged,
             "duplicate_groups": duplicate_groups[:20],
+            # Parser monitoring uses rows_total as its generic record count.
+            # One base slice produces one row for every local min-games view.
+            "rows_total": len(slices) * len(MIN_GAMES),
+            "base_slices": len(slices),
+            "fresh_base_slices": len(fresh_slices),
+            "cached_base_slices": cached_slice_count,
             "cached_slices": cached_slice_count,
             "cached_current_formats": cached_current_formats,
             "published": publishable,

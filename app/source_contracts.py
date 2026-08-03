@@ -60,7 +60,10 @@ CONTRACTS: dict[str, SourceContract] = {
         structured_type="card_stats",
         preferred_channels=HSREPLAY_JSON_CHANNELS,
         allow_browser_fallback=False,
-        min_rows=600,
+        # Legend/24h is sample-limited and legitimately contains fewer cards
+        # than the other Standard rank windows. Regression and field-fill
+        # checks still reject truncated or malformed payloads.
+        min_rows=450,
         critical_fields=("deck_winrate", "deck_popularity"),
         min_field_fill_rate=0.55,
         regression_drop_ratio=0.50,

@@ -369,6 +369,95 @@ def test_refresh_publishes_one_unified_dataset_after_108_firecrawl_pages() -> No
         "formats": ["standard", "wild"],
     }
     save_status.assert_called_once()
+    status = save_status.call_args.args[1]
+    assert status["rows_total"] == 648
+    assert status["base_slices"] == 108
+    assert status["fresh_base_slices"] == 108
+    assert status["cached_base_slices"] == 0
+
+
+def test_matrix_slices_use_scrape_do_before_firecrawl() -> None:
+    from app.hsguru_meta_matrix import SliceSpec, _default_scrape
+    from app.scrape_do_backend import ScrapeDoScrape
+
+    spec = SliceSpec(
+        "standard",
+        "legend",
+        "past_day",
+        "any_player",
+        "standard|legend|past_day|any_player",
+        "https://www.hsguru.com/meta?format=2&rank=legend&period=past_day",
+    )
+    scrape_do_result = ScrapeDoScrape(
+        html=HSGURU_TABLE,
+        status_code=200,
+        final_url=spec.url,
+        request_cost=25,
+        credits_remaining=10_000,
+        super_proxy=True,
+    )
+    with (
+        patch("app.hsguru_meta_matrix.scrape_do_token", return_value="configured"),
+        patch(
+            "app.hsguru_meta_matrix.scrape_url",
+            new=AsyncMock(return_value=scrape_do_result),
+        ) as scrape_do,
+        patch(
+            "app.hsguru_meta_matrix.scrape_source_with_options",
+            new=AsyncMock(),
+        ) as firecrawl,
+    ):
+        result = asyncio.run(_default_scrape(spec))
+
+    assert result.backend == "scrape_do_super"
+    assert result.request_credits == 25
+    scrape_do.assert_awaited_once()
+    firecrawl.assert_not_awaited()
+
+
+def test_matrix_slice_falls_back_after_scrape_do_failure() -> None:
+    from app.firecrawl_backend import FirecrawlScrape
+    from app.hsguru_meta_matrix import SliceSpec, _default_scrape
+
+    spec = SliceSpec(
+        "wild",
+        "legend",
+        "past_week",
+        "any_player",
+        "wild|legend|past_week|any_player",
+        "https://www.hsguru.com/meta?format=1&rank=legend&period=past_week",
+    )
+    fallback_result = FirecrawlScrape(
+        html=HSGURU_TABLE,
+        markdown="",
+        screenshot=None,
+        metadata={"backend": "firecrawl", "creditsUsed": 1},
+        status_code=200,
+        final_url=spec.url,
+    )
+    with (
+        patch("app.hsguru_meta_matrix.scrape_do_token", return_value="configured"),
+        patch(
+            "app.hsguru_meta_matrix.scrape_url",
+            new=AsyncMock(side_effect=RuntimeError("temporary 503")),
+        ),
+        patch(
+            "app.hsguru_meta_matrix.scrape_source_with_options",
+            new=AsyncMock(return_value=fallback_result),
+        ) as firecrawl,
+    ):
+        result = asyncio.run(_default_scrape(spec))
+
+    assert result.backend == "firecrawl"
+    assert result.metadata["providerChain"] == [
+        {
+            "backend": "scrape_do_super",
+            "state": "failed",
+            "error_type": "RuntimeError",
+        },
+        {"backend": "firecrawl", "state": "ok"},
+    ]
+    firecrawl.assert_awaited_once()
 
 
 def test_refresh_does_not_retry_data_errors_and_counts_failed_parse_request() -> None:

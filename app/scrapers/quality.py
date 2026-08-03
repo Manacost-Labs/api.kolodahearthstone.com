@@ -92,7 +92,11 @@ def quality_metrics(source: Source, parsed: dict[str, Any]) -> dict[str, Any]:
 
 def validate_parsed_data(source: Source, parsed: dict[str, Any]) -> tuple[bool, str]:
     title = (parsed.get("title") or "").lower()
-    if "just a moment" in title or not title:
+    structured = parsed.get("structured") or parsed.get("hsreplay_extracted") or {}
+    # JSON/API collectors intentionally publish structured payloads without an
+    # HTML page title. A missing title is only an error for page-based results;
+    # an explicit Cloudflare challenge title remains invalid in either case.
+    if "just a moment" in title or (not title and not structured):
         return False, "invalid title"
 
     tables = parsed.get("tables") or []
@@ -100,7 +104,6 @@ def validate_parsed_data(source: Source, parsed: dict[str, Any]) -> tuple[bool, 
     deck_codes = parsed.get("deck_codes") or []
     json_scripts = parsed.get("json_scripts") or []
     text_lines = parsed.get("text_preview") or []
-    structured = parsed.get("structured") or parsed.get("hsreplay_extracted") or {}
     if structured:
         contract_ok, contract_reason, _contract_report = contract_quality_ok(
             source.id, structured

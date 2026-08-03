@@ -193,6 +193,65 @@ class SourceContractsTest(unittest.TestCase):
         self.assertEqual(metrics["quality_score"], 1.0)
         self.assertIn("deck_winrate", metrics["critical_fields"])
 
+    def test_structured_api_candidate_does_not_require_html_title(self) -> None:
+        source = SOURCE_BY_ID["hsreplay_battlegrounds_heroes"]
+        parsed = {
+            "structured": {
+                "type": "bg_heroes",
+                "heroes": [
+                    {
+                        "hero": f"Hero {idx}",
+                        "dbfId": idx,
+                        "pick_rate": "10.0%",
+                        "avg_placement": f"{3.0 + idx / 20:.2f}",
+                        "tier": ("A", "B", "C", "D")[idx % 4],
+                        "placement_distribution": ["12.50%"] * 8,
+                    }
+                    for idx in range(30)
+                ],
+            }
+        }
+
+        ok, reason = validate_parsed_data(source, parsed)
+
+        self.assertTrue(ok, reason)
+
+    def test_daily_standard_legend_accepts_complete_low_sample_payload(self) -> None:
+        cards = [
+            {
+                "id": idx,
+                "deck_winrate": "52.0%",
+                "deck_popularity": "1.0%",
+            }
+            for idx in range(485)
+        ]
+
+        report = contract_quality_report(
+            "hsreplay_cards_legend_1d",
+            {"type": "card_stats", "cards": cards},
+        )
+
+        self.assertTrue(report["ok"], report["warnings"])
+        self.assertEqual(report["minimum_rows"], 450)
+
+    def test_daily_standard_legend_still_rejects_truncated_payload(self) -> None:
+        cards = [
+            {
+                "id": idx,
+                "deck_winrate": "52.0%",
+                "deck_popularity": "1.0%",
+            }
+            for idx in range(449)
+        ]
+
+        report = contract_quality_report(
+            "hsreplay_cards_legend_1d",
+            {"type": "card_stats", "cards": cards},
+        )
+
+        self.assertFalse(report["ok"])
+        self.assertIn("too few rows (449 < 450)", report["warnings"])
+
     def test_daily_source_uses_contract_regression_ratio(self) -> None:
         source = SOURCE_BY_ID["hsreplay_cards_wild_legend_1d"]
         prev = {"structured": {"type": "card_stats", "cards": [{"id": idx} for idx in range(1000)]}}
