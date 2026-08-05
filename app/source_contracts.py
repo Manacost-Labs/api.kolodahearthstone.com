@@ -443,21 +443,26 @@ for _sid in (
 )
 
 for source_id in STANDARD_HSREPLAY_CARD_PERIOD_SOURCE_IDS[1:]:
+    is_current_patch = source_id.endswith("_patch")
     CONTRACTS[source_id] = SourceContract(
         source_id=source_id,
         structured_type="card_stats",
         preferred_channels=HSREPLAY_JSON_CHANNELS,
         allow_browser_fallback=False,
-        min_rows=600,
+        # A fresh patch initially contains only cards that have accumulated a
+        # sample since the reset. Keep an absolute floor, but do not compare it
+        # to mature rolling windows.
+        min_rows=450 if is_current_patch else 600,
         critical_fields=("deck_winrate", "deck_popularity"),
         min_field_fill_rate=0.55,
-        regression_drop_ratio=0.50,
+        regression_drop_ratio=0.85 if is_current_patch else 0.50,
         volatility="daily",
         fallback_policy="api_only",
         recommendation="Preserve the previous valid Standard period snapshot on severe metric or row-count regression.",
     )
 
 for source_id in WILD_HSREPLAY_CARD_PERIOD_SOURCE_IDS[1:]:
+    is_current_patch = source_id.endswith("_patch")
     CONTRACTS[source_id] = SourceContract(
         source_id=source_id,
         structured_type="card_stats",
@@ -466,7 +471,7 @@ for source_id in WILD_HSREPLAY_CARD_PERIOD_SOURCE_IDS[1:]:
         min_rows=700,
         critical_fields=("deck_winrate", "deck_popularity"),
         min_field_fill_rate=0.45,
-        regression_drop_ratio=0.50,
+        regression_drop_ratio=0.85 if is_current_patch else 0.50,
         volatility="daily",
         fallback_policy="api_only",
         recommendation="Preserve the previous valid Wild period snapshot on severe metric or row-count regression.",

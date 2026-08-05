@@ -102,6 +102,27 @@ class DatasetRegressionTest(unittest.TestCase):
         self.assertEqual(extra["rows_before"], 3489)
         self.assertEqual(extra["rows_after"], 2069)
 
+    @patch("app.dataset_regression.dataset_regression_drop_ratio", return_value=0.30)
+    def test_current_patch_reset_uses_absolute_quality_floor(self, _ratio: object) -> None:
+        source = SOURCE_BY_ID["hsreplay_cards_wild_legend_patch"]
+        prev = {
+            "structured": {
+                "type": "card_stats",
+                "cards": [{"id": idx, "deck_popularity": "1%"} for idx in range(4965)],
+            }
+        }
+        new = {
+            "structured": {
+                "type": "card_stats",
+                "cards": [{"id": idx, "deck_popularity": "1%"} for idx in range(1036)],
+            }
+        }
+
+        reg, _, extra = check_dataset_regression(source, previous_data=prev, new_data=new)
+
+        self.assertFalse(reg)
+        self.assertEqual(extra["drop_ratio"], 0.85)
+
     @patch("app.dataset_regression.dataset_regression_drop_ratio", return_value=0.10)
     def test_hsguru_meta_allows_rank_slice_volatility(self, _ratio: object) -> None:
         # Rank-slice volatility is now expressed via the per-source contract:

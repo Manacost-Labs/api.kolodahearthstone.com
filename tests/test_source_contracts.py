@@ -262,6 +262,21 @@ class SourceContractsTest(unittest.TestCase):
         self.assertFalse(reg)
         self.assertEqual(extra["drop_ratio"], 0.5)
 
+    def test_current_patch_contract_accepts_safe_early_patch_reset(self) -> None:
+        report = contract_quality_report(
+            "hsreplay_cards_legend_patch",
+            {
+                "type": "card_stats",
+                "cards": [
+                    {"id": idx, "deck_winrate": "52%", "deck_popularity": "1%"}
+                    for idx in range(574)
+                ],
+            },
+        )
+
+        self.assertTrue(report["ok"], report["warnings"])
+        self.assertEqual(report["minimum_rows"], 450)
+
     def test_contract_report_flags_too_few_rows(self) -> None:
         report = contract_quality_report(
             "hsreplay_meta_archetypes_legend_eu_1d",
