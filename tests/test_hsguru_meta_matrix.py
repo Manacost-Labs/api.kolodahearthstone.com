@@ -43,7 +43,7 @@ def test_matrix_has_108_remote_slices_and_six_local_min_game_filters() -> None:
         "past_3_days",
         "past_week",
         "past_2_weeks",
-        "patch_36.0.3",
+        "patch_36.2.0",
         "violet_hold",
     }
     assert {spec.rank for spec in specs} == {
