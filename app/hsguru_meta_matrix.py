@@ -41,7 +41,7 @@ ROLLING_PERIODS = (
     "past_week",
     "past_2_weeks",
 )
-DEFAULT_PATCH_PERIOD = "patch_36.0.3"
+DEFAULT_PATCH_PERIOD = "patch_36.2.0"
 NAMED_PERIODS = ("violet_hold",)
 PERIODS = (*ROLLING_PERIODS, DEFAULT_PATCH_PERIOD, *NAMED_PERIODS)
 COINS = ("any_player",)
@@ -465,10 +465,9 @@ def resolve_current_patch_period(cached_dataset: dict[str, Any] | None = None) -
     if configured:
         return configured
     try:
-        from scripts.seed_hs_manacost_patches import latest_official_patches
+        from scripts.seed_hs_manacost_patches import current_patch_version
 
-        latest = latest_official_patches(1)
-        version = str((latest[0] if latest else {}).get("version") or "")
+        version = current_patch_version()
         if re.fullmatch(r"\d+(?:\.\d+){1,3}", version):
             return f"patch_{version}"
     except Exception:

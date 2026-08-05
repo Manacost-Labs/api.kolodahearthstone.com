@@ -195,6 +195,21 @@ def combined_patch_catalog(limit: int | None) -> list[dict[str, str]]:
     return catalog
 
 
+def current_patch_version() -> str:
+    """Return the current public patch without the Hearthstone build suffix.
+
+    Blizzard's news index can lag behind the game client for several hours.  The
+    combined catalog also consults wiki.gg, which publishes client builds such as
+    ``36.2.0.248348``.  Site filters and HSGuru use the public ``36.2.0`` form.
+    """
+    latest = combined_patch_catalog(1)
+    version = str((latest[0] if latest else {}).get("version") or "")
+    if not re.fullmatch(r"\d+(?:\.\d+){1,3}", version):
+        raise RuntimeError("Patch catalog returned no valid current version")
+    parts = version.split(".")
+    return ".".join(parts[:3]) if len(parts) == 4 else version
+
+
 def validate_full_catalog(catalog: list[dict[str, str]], *, existing_count: int) -> None:
     versions = [str(item.get("version") or "") for item in catalog]
     unique_versions = {version for version in versions if version}

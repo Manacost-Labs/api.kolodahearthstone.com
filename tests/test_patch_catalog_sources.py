@@ -6,6 +6,7 @@ import pytest
 
 from scripts.seed_hs_manacost_patches import (
     combined_patch_catalog,
+    current_patch_version,
     latest_official_patches,
     validate_full_catalog,
 )
@@ -66,6 +67,14 @@ def test_combined_catalog_puts_official_new_patch_before_lagging_wiki() -> None:
     ]
     assert catalog[0]["official_url"] == "https://official.test/36"
     assert catalog[1]["official_url"] == "https://official.test/35-6-2"
+
+
+def test_current_patch_version_uses_newer_wiki_build_when_news_index_lags() -> None:
+    with patch(
+        "scripts.seed_hs_manacost_patches.combined_patch_catalog",
+        return_value=[{"version": "36.2.0.248348"}],
+    ):
+        assert current_patch_version() == "36.2.0"
 
 
 def test_full_catalog_guard_rejects_layout_truncation_before_deletion() -> None:
