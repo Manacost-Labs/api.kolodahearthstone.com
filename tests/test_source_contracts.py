@@ -178,6 +178,40 @@ class SourceContractsTest(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("hero fill rate", reason)
 
+    def test_firestone_comps_accepts_small_post_patch_strategy_set(self) -> None:
+        comps = [
+            {
+                "name": f"Patch strategy {idx}",
+                "main_cards": [{"card_id": f"BG36_{idx:03d}"}],
+            }
+            for idx in range(7)
+        ]
+
+        report = contract_quality_report(
+            "firestone_battlegrounds_comps",
+            {"type": "bg_comps", "comps": comps},
+        )
+
+        self.assertTrue(report["ok"], report["warnings"])
+        self.assertEqual(report["minimum_rows"], 5)
+
+    def test_firestone_comps_still_rejects_truncated_post_patch_response(self) -> None:
+        comps = [
+            {
+                "name": f"Truncated strategy {idx}",
+                "main_cards": [{"card_id": f"BG36_{idx:03d}"}],
+            }
+            for idx in range(4)
+        ]
+
+        report = contract_quality_report(
+            "firestone_battlegrounds_comps",
+            {"type": "bg_comps", "comps": comps},
+        )
+
+        self.assertFalse(report["ok"])
+        self.assertIn("too few rows (4 < 5)", report["warnings"])
+
     def test_quality_metrics_include_contract_report(self) -> None:
         source = SOURCE_BY_ID["hsreplay_cards_legend_1d"]
         parsed = {

@@ -40,7 +40,7 @@ Sites: `firestone` (7), `heartharena` (1), `hearthstone-decks` (1), `hsguru` (14
 | `hsreplay_battlegrounds_comps` | hsreplay | battlegrounds | scrape | global | HSReplay Battlegrounds comps. |
 | `hsreplay_battlegrounds_hero_details` | hsreplay | battlegrounds | pipeline | 120 | BG hero detail cache built twice weekly by the systemd timer hs-data-api-docker-refresh-bg-hero-details.timer (Mon,Thu 04:35 Europe/Warsaw); stale_hours = 96h maximum gap + 24h slack. |
 | `hsreplay_battlegrounds_heroes` | hsreplay | battlegrounds | scrape | global | HSReplay premium Battlegrounds heroes tier list. |
-| `hsreplay_battlegrounds_minions` | hsreplay | battlegrounds | scrape | global | HSReplay premium Battlegrounds minions advanced stats. |
+| `hsreplay_battlegrounds_minions` | hsreplay | battlegrounds | scrape | global | HSReplay premium Battlegrounds minions advanced stats for `CURRENT_BATTLEGROUNDS_PATCH`, preventing the previous pool from leaking into post-patch tiers. |
 | `hsreplay_battlegrounds_trinkets_all_current_battlegrounds_patch` | hsreplay | battlegrounds | scrape | global | HSReplay lesser and greater trinkets, ALL, CURRENT_BATTLEGROUNDS_PATCH. |
 | `hsreplay_battlegrounds_trinkets_all_last_7_days` | hsreplay | battlegrounds | scrape | global | HSReplay lesser and greater trinkets, ALL, LAST_7_DAYS. |
 | `hsreplay_battlegrounds_trinkets_greater` | hsreplay | battlegrounds | scrape | global | HSReplay greater trinkets, Top 1% MMR, last 7 days. |

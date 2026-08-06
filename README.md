@@ -64,7 +64,7 @@ HSReplay - главный источник premium/ranked/Battlegrounds/Arena с
 | `hsreplay_arena_legendaries` | Arena legendary groups | `type=arena_legendary_groups`, группы легендарок, key card, related cards, stats/labels для оценки выбора. |
 | `hsreplay_arena` | Arena overview | Overview HTML/structured extraction: общие блоки арены, ссылки, tables/json snippets; используется как обзорный источник. |
 | `hsreplay_battlegrounds_heroes` | Premium Battlegrounds heroes tier list | `type=bg_heroes`, `heroes`: hero name, `dbfId`, `pick_rate`, `best_comp`, `best_composition_id`, `avg_placement`, `tier`, `placement_distribution`. |
-| `hsreplay_battlegrounds_minions` | Premium Battlegrounds minions advanced stats | `type=bg_minions`, `minions`: minion/card id, name, impact, `win_share`, popularity, tier/card metadata. |
+| `hsreplay_battlegrounds_minions` | Premium Battlegrounds minions advanced stats for the current BG patch | `type=bg_minions`, `minions`: minion/card id, name, impact, `win_share`, popularity, tier/card metadata. The query is patch-scoped so a rolling seven-day window cannot mix old and new pools. |
 | `hsreplay_battlegrounds_compositions` | Premium Battlegrounds compositions stats | `type=bg_compositions`, comps/tribes: name/type, `first_place`, `avg_placement`, popularity, `placement_distribution`, main/additional cards when available. |
 | `hsreplay_battlegrounds_comps` | Battlegrounds comps listing/detail pages | `type=bg_comps`, compositions with `main_cards`, `additional_cards`, minions, source URLs; detail pages are cached to reduce protected-page failures. |
 | `hsreplay_battlegrounds_trinkets_lesser` | Battlegrounds lesser trinkets | `type=bg_trinkets`, trinket rows: name, id/card metadata, pick rate and page-derived stats. |

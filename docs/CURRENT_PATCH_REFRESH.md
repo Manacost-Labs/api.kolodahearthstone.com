@@ -19,3 +19,50 @@ the old patch without allowing empty or malformed payloads onto the site.
 The HSGuru current patch is discovered from the combined Blizzard and wiki.gg
 catalog. Build versions such as `36.2.0.248348` are normalized to `36.2.0` for
 HSGuru queries and site labels.
+
+## Battlegrounds: do not use a rolling window for the live minion pool
+
+The HSReplay Battlegrounds minion tier list must request:
+
+```text
+BattlegroundsMMRPercentile=TOP_50_PERCENT
+BattlegroundsTimeRange=CURRENT_BATTLEGROUNDS_PATCH
+```
+
+Do not replace `CURRENT_BATTLEGROUNDS_PATCH` with `LAST_7_DAYS`. During a pool
+rotation the rolling window can contain mostly cards from the previous patch
+while still carrying a fresh HTTP response and `fetched_at` timestamp. On patch
+36.2 this produced 264 apparently fresh rows but only three `BG36_*` cards; the
+patch-scoped query produced 229 rows and all 62 `BG36_*` cards.
+
+Freshness checks for this dataset must therefore validate both dimensions:
+
+1. **Temporal freshness:** `fetched_at` is within the scheduled refresh window.
+2. **Content freshness:** the returned card identities overlap the active pool
+   from the current Hearthstone card index. A new timestamp alone is not proof
+   that the tier list belongs to the current patch.
+
+After a Battlegrounds patch, run the targeted refresh before the normal daily
+schedule if the public tier list still contains the previous pool:
+
+```bash
+docker compose run --rm api \
+  python -m app.cli refresh \
+  --source hsreplay_battlegrounds_minions \
+  --source firestone_battlegrounds_comps \
+  --source firestone_battlegrounds_spells \
+  --require-all-ok
+```
+
+Then verify `/api/bg/tier-lists?list=minions`, `strategies`, and `spells` by
+checking the source timestamp, row count, unique card IDs, duplicate IDs,
+missing images/metrics, and current-patch card coverage.
+
+## Battlegrounds strategies immediately after a patch
+
+Firestone can initially publish fewer than ten compositions. The source
+contract accepts five or more complete rows, including the seven strategies
+seen at the start of patch 36.2. Responses with fewer than five rows, missing
+strategy names, or missing core cards remain blocked. This keeps the first
+useful post-patch list visible without allowing an empty or malformed response
+to overwrite the last-known-good dataset.

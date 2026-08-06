@@ -11,7 +11,10 @@ from .hsreplay_client import fetch_hsreplay_json, fetch_text_via_flaresolverr
 from .sources import Source
 
 BG_MMR = "TOP_50_PERCENT"
-BG_TIME_RANGE = "LAST_7_DAYS"
+# The rolling seven-day window can mix the previous and current Battlegrounds
+# card pools immediately after a patch.  The tier list must only rank minions
+# that are legal in the live patch, so use HSReplay's patch-scoped window.
+BG_TIME_RANGE = "CURRENT_BATTLEGROUNDS_PATCH"
 BG_ANALYTICS_BASE = "https://hsreplay.net/analytics/query"
 BG_COMPOSITION_NAMES_API = "https://hsreplay.net/api/v1/battlegrounds/compositions/?hl=en"
 COMPOSITION_RU_NAMES = {

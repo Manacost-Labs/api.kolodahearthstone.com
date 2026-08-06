@@ -290,7 +290,10 @@ CONTRACTS: dict[str, SourceContract] = {
         source_id="firestone_battlegrounds_comps",
         structured_type="bg_comps",
         allow_browser_fallback=False,
-        min_rows=10,
+        # Firestone initially publishes a deliberately small composition set
+        # after a Battlegrounds patch. Five rows still reject an empty or
+        # truncated response while allowing the first seven live strategies.
+        min_rows=5,
         critical_fields=("name", "main_cards"),
         min_field_fill_rate=0.80,
         regression_drop_ratio=0.35,
