@@ -96,6 +96,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     freshness.add_argument("--since-hours", type=float, default=24.0)
     freshness.add_argument("--alert", action="store_true", help="Send configured stale Telegram alerts.")
+    game_audit = sub.add_parser(
+        "game-change-audit",
+        help="Compare patch, HearthstoneJSON, wiki changes and critical site feeds.",
+    )
+    game_audit.add_argument("--alert", action="store_true", help="Send a Telegram alert when attention is required.")
     quality = sub.add_parser(
         "quality-check",
         help="Audit cached datasets with parser validation, source contracts and quality scores.",
@@ -301,6 +306,29 @@ def main(argv: list[str] | None = None) -> int:
             payload["alerts"] = asyncio.run(_send_freshness_alerts(cached_after_failure_sources))
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0 if payload["ok"] else 1
+    if args.command == "game-change-audit":
+        from .game_change_audit import run_game_change_audit
+
+        result = run_game_change_audit()
+        if args.alert and result.get("requires_attention"):
+            from .fetcher import send_telegram_alert
+
+            patch = result.get("patch") or {}
+            detail = (
+                f"patch={patch.get('current')} changed={patch.get('changed')}; "
+                f"card changes={result.get('card_changes')}; "
+                f"source issues={result.get('source_issue_count')}"
+            )
+            asyncio.run(
+                send_telegram_alert(
+                    "_game_change_audit",
+                    "attention",
+                    detail[:1000],
+                    "https://arena.hs-manacost.ru/admin",
+                )
+            )
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0 if result.get("ok") else 1
     if args.command == "quality-check":
         from collections import Counter
 

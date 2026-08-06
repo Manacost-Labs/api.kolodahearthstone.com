@@ -1,0 +1,9 @@
+[Unit]
+Description=Audit Hearthstone patch, cards, wiki changes and critical feeds
+Requires=hs-data-api-docker.service
+After=hs-data-api-docker.service network-online.target hs-data-api-docker-refresh-patches.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/srv/hs-data-api
+ExecStart=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm api python -m app.cli game-change-audit --alert
