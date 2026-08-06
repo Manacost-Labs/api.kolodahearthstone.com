@@ -194,6 +194,9 @@ class SourceContractsTest(unittest.TestCase):
 
         self.assertTrue(report["ok"], report["warnings"])
         self.assertEqual(report["minimum_rows"], 5)
+        contract = get_contract("firestone_battlegrounds_comps")
+        self.assertIsNotNone(contract)
+        self.assertEqual(contract.regression_drop_ratio, 0.85)  # type: ignore[union-attr]
 
     def test_firestone_comps_still_rejects_truncated_post_patch_response(self) -> None:
         comps = [

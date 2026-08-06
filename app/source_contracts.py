@@ -296,7 +296,10 @@ CONTRACTS: dict[str, SourceContract] = {
         min_rows=5,
         critical_fields=("name", "main_cards"),
         min_field_fill_rate=0.80,
-        regression_drop_ratio=0.35,
+        # A confirmed patch reset can shrink the curated strategy list from
+        # about 30 rows to seven. Keep the five-row floor as the hard guard,
+        # while allowing that expected one-time 76.7% contraction.
+        regression_drop_ratio=0.85,
         fallback_policy="api_only",
     ),
     "firestone_battlegrounds_cards": SourceContract(

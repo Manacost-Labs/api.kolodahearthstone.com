@@ -66,3 +66,9 @@ seen at the start of patch 36.2. Responses with fewer than five rows, missing
 strategy names, or missing core cards remain blocked. This keeps the first
 useful post-patch list visible without allowing an empty or malformed response
 to overwrite the last-known-good dataset.
+
+The regression guard allows up to an 85% row-count contraction for this source
+because a verified patch reset can reduce the curated list from about 30 rows
+to seven. The five-row contract remains the hard lower bound, so a truncated
+four-row response is still rejected. When changing either value, test both the
+first valid post-patch sample and a deliberately incomplete sample.
