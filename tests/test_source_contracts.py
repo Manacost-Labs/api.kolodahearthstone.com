@@ -198,6 +198,13 @@ class SourceContractsTest(unittest.TestCase):
         self.assertIsNotNone(contract)
         self.assertEqual(contract.regression_drop_ratio, 0.85)  # type: ignore[union-attr]
 
+    def test_hsreplay_comps_allows_hidden_guide_cleanup_after_patch(self) -> None:
+        contract = get_contract("hsreplay_battlegrounds_comps")
+
+        self.assertIsNotNone(contract)
+        self.assertEqual(contract.min_rows, 5)  # type: ignore[union-attr]
+        self.assertEqual(contract.regression_drop_ratio, 0.85)  # type: ignore[union-attr]
+
     def test_firestone_comps_still_rejects_truncated_post_patch_response(self) -> None:
         comps = [
             {

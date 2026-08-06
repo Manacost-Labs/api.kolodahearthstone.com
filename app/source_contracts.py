@@ -283,7 +283,9 @@ CONTRACTS: dict[str, SourceContract] = {
         min_rows=5,
         critical_fields=("name",),
         min_field_fill_rate=0.80,
-        regression_drop_ratio=0.35,
+        # HSReplay hides retired guides during a patch reset. Publishing only
+        # visible live guides can legitimately shrink the catalog from 27 to 8.
+        regression_drop_ratio=0.85,
         fallback_policy="html_allowed",
     ),
     "firestone_battlegrounds_comps": SourceContract(

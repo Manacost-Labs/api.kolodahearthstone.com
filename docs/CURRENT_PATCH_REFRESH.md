@@ -85,6 +85,9 @@ empty even while that JSON contains the current guides. Parse only entries
 where `comp_hidden` is false, resolve `comp_core_cards` DBF IDs through the
 current HearthstoneJSON index, and retain `comp_last_updated` for diagnostics.
 Never publish hidden historical guides merely to preserve the old row count.
+The HSReplay contract permits an 85% contraction because removing hidden
+retired guides reduced the live catalog from 27 rows to eight on patch 36.2;
+the five-row minimum continues to reject incomplete responses.
 
 If Firecrawl returns fewer than three live guides, the fetcher must continue to
 the authenticated HTML fallback instead of accepting the empty result. Verify
