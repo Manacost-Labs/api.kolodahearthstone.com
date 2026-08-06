@@ -11,6 +11,7 @@ import urllib.request
 
 from .cards_index import cards_by_id
 from .config import data_dir
+from .patches_db import list_patches
 from .source_state import SourceState
 from .storage import load_dataset, load_status, read_json, write_json
 
@@ -217,13 +218,20 @@ def audit_paths() -> tuple[Path, Path, Path]:
     )
 
 
-def run_game_change_audit() -> dict[str, Any]:
-    from scripts.seed_hs_manacost_patches import current_patch_version
+def current_patch_from_catalog() -> str:
+    rows = list_patches(limit=1).get("patches") or []
+    version = str((rows[0] if rows else {}).get("version") or "")
+    if not re.fullmatch(r"\d+(?:\.\d+){1,3}", version):
+        raise RuntimeError("Patch catalog returned no valid current version")
+    parts = version.split(".")
+    return ".".join(parts[:3]) if len(parts) == 4 else version
 
+
+def run_game_change_audit() -> dict[str, Any]:
     now = datetime.now(UTC)
     baseline_path, latest_path, history_path = audit_paths()
     baseline = read_json(baseline_path) or {}
-    patch = current_patch_version()
+    patch = current_patch_from_catalog()
     card_snapshot = build_card_snapshot(cards_by_id("enUS"), cards_by_id("ruRU"))
     card_changes = compare_card_snapshots(baseline.get("cards"), card_snapshot)
     wiki_rows = fetch_wiki_recent_changes(since=now - timedelta(hours=36))

@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 import unittest
+from unittest.mock import patch
 
 from app.game_change_audit import (
     CRITICAL_SOURCES,
     audit_critical_sources,
     build_card_snapshot,
     compare_card_snapshots,
+    current_patch_from_catalog,
     relevant_wiki_changes,
 )
 
@@ -43,6 +45,13 @@ class GameChangeAuditTest(unittest.TestCase):
         ]
 
         self.assertEqual(len(relevant_wiki_changes(rows)), 2)
+
+    def test_patch_catalog_build_suffix_is_removed(self) -> None:
+        with patch(
+            "app.game_change_audit.list_patches",
+            return_value={"patches": [{"version": "36.2.0.248348"}]},
+        ):
+            self.assertEqual(current_patch_from_catalog(), "36.2.0")
 
     def test_each_strategy_provider_is_checked_independently(self) -> None:
         now = datetime(2026, 8, 6, tzinfo=UTC)
