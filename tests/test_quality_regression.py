@@ -157,6 +157,29 @@ class DatasetRegressionTest(unittest.TestCase):
         self.assertEqual(extra["drop_ratio"], 0.30)
 
     @patch("app.dataset_regression.dataset_regression_drop_ratio", return_value=0.30)
+    def test_hsguru_legend_accepts_verified_early_patch_pool(self, _ratio: object) -> None:
+        source = SOURCE_BY_ID["hsguru_meta_wild_legend"]
+        previous = {
+            "structured": {
+                "type": "meta",
+                "strategies": [{"Archetype": f"Old {index}"} for index in range(105)],
+            }
+        }
+        current = {
+            "structured": {
+                "type": "meta",
+                "strategies": [{"Archetype": f"New {index}"} for index in range(29)],
+            }
+        }
+
+        regression, _message, extra = check_dataset_regression(
+            source, previous_data=previous, new_data=current
+        )
+
+        self.assertFalse(regression)
+        self.assertEqual(extra["drop_ratio"], 0.75)
+
+    @patch("app.dataset_regression.dataset_regression_drop_ratio", return_value=0.30)
     def test_bg_trinkets_regression_counts_active_rows_only(self, _ratio: object) -> None:
         source = SOURCE_BY_ID["hsreplay_battlegrounds_trinkets_lesser"]
         prev = {

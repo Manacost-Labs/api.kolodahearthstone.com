@@ -205,6 +205,41 @@ class SourceContractsTest(unittest.TestCase):
         self.assertEqual(contract.min_rows, 5)  # type: ignore[union-attr]
         self.assertEqual(contract.regression_drop_ratio, 0.85)  # type: ignore[union-attr]
 
+    def test_hsguru_legend_patch_reset_keeps_absolute_and_field_guards(self) -> None:
+        rows = [
+            {
+                "Archetype": f"Deck {index}",
+                "Winrate↓": "52.1",
+                "Popularity": "1.2% (120)",
+            }
+            for index in range(23)
+        ]
+
+        report = contract_quality_report(
+            "hsguru_meta_standard_legend",
+            {"type": "meta", "strategies": rows},
+        )
+        contract = get_contract("hsguru_meta_standard_legend")
+
+        self.assertTrue(report["ok"], report["warnings"])
+        self.assertEqual(report["minimum_rows"], 10)
+        self.assertEqual(contract.regression_drop_ratio, 0.75)  # type: ignore[union-attr]
+
+    def test_hsguru_legend_patch_reset_rejects_incomplete_table(self) -> None:
+        report = contract_quality_report(
+            "hsguru_meta_wild_legend",
+            {
+                "type": "meta",
+                "strategies": [
+                    {"Archetype": f"Deck {index}", "Popularity": "1%"}
+                    for index in range(9)
+                ],
+            },
+        )
+
+        self.assertFalse(report["ok"])
+        self.assertIn("too few rows (9 < 10)", report["warnings"])
+
     def test_firestone_comps_still_rejects_truncated_post_patch_response(self) -> None:
         comps = [
             {

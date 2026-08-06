@@ -89,6 +89,12 @@ The HSReplay contract permits an 85% contraction because removing hidden
 retired guides reduced the live catalog from 27 rows to eight on patch 36.2;
 the five-row minimum continues to reject incomplete responses.
 
+HSGuru Standard/Wild Legend can also contract immediately after a patch because
+only archetypes above `min_games=100` are returned. On patch 36.2 the complete
+tables changed from 65 to 23 Standard rows and from 105 to 29 Wild rows. These
+two feeds allow a 75% contraction only when at least ten unique visible rows
+remain and at least 95% contain `Archetype`, `Winrate↓`, and `Popularity`.
+
 If Firecrawl returns fewer than three live guides, the fetcher must continue to
 the authenticated HTML fallback instead of accepting the empty result. Verify
 HSReplay and Firestone separately through `list=strategies&source=hsreplay` and

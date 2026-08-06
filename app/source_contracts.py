@@ -398,6 +398,23 @@ for _sid in (
         ),
     )
 
+# The first days of a constructed patch legitimately contain fewer archetypes
+# above HSGuru's min_games=100 threshold. Keep a stronger absolute/field gate
+# for the two public Legend views while allowing the verified patch reset.
+for _sid in ("hsguru_meta_standard_legend", "hsguru_meta_wild_legend"):
+    CONTRACTS[_sid] = SourceContract(
+        source_id=_sid,
+        structured_type="meta",
+        allow_browser_fallback=True,
+        min_rows=10,
+        critical_fields=("Archetype", "Winrate↓", "Popularity"),
+        min_field_fill_rate=0.95,
+        regression_drop_ratio=0.75,
+        fallback_policy="html_allowed",
+        recommendation="Accept a verified early-patch archetype reset only when every visible row retains its identity and performance metrics.",
+        min_html_bytes=25_000,
+    )
+
 for _sid in (
     "firestone_arena_legendaries_normal",
     "firestone_arena_legendaries_underground",
