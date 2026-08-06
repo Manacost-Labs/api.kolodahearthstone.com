@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+from html import unescape as html_unescape
+import json
 import re
 from pathlib import Path
 from typing import Any
@@ -333,12 +335,103 @@ def _dedupe_additional(
     return out
 
 
+_REACT_CONTEXT_TIER = {1: "S", 2: "A", 3: "B", 4: "C", 5: "D"}
+_REACT_CONTEXT_DIFFICULTY = {1: "Easy", 2: "Medium", 3: "Hard"}
+
+
+def _comps_from_react_context(soup: Any) -> list[dict[str, Any]]:
+    """Parse the current HSReplay comps embedded JSON.
+
+    HSReplay stopped rendering the live composition list as ordinary links in
+    August 2026. The authoritative list is now embedded in `#react_context`;
+    hidden historical guides remain in the payload and must not be published.
+    """
+    script = soup.find("script", id="react_context")
+    if script is None:
+        return []
+    raw_text = script.string or script.get_text() or ""
+    try:
+        payload = json.loads(html_unescape(raw_text))
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return []
+    if not isinstance(payload, list):
+        return []
+
+    card_index = cards_by_dbfid()
+    comps: list[dict[str, Any]] = []
+    for item in payload:
+        if not isinstance(item, dict) or item.get("comp_hidden") is True:
+            continue
+        try:
+            comp_id = int(item.get("comp_id") or 0)
+        except (TypeError, ValueError):
+            continue
+        slug = str(item.get("comp_slug") or "").strip()
+        title = str(item.get("comp_name") or "").strip()
+        if comp_id <= 0 or not slug or not title:
+            continue
+
+        main_cards: list[dict[str, Any]] = []
+        for raw_dbf_id in item.get("comp_core_cards") or []:
+            try:
+                dbf_id = int(raw_dbf_id)
+            except (TypeError, ValueError):
+                continue
+            metadata = card_label(card_index.get(dbf_id))
+            card_id = str(metadata.get("id") or "").strip()
+            if not card_id:
+                continue
+            main_cards.append(
+                _card_from_hsjson(str(metadata.get("name") or ""), card_id, dbf_id)
+            )
+
+        name, strategy_title = _split_comp_title(title)
+        try:
+            tier_number = int(item.get("comp_tier") or 0)
+        except (TypeError, ValueError):
+            tier_number = 0
+        try:
+            difficulty_number = int(item.get("comp_difficulty") or 0)
+        except (TypeError, ValueError):
+            difficulty_number = 0
+        url = f"{HSREPLAY_ORIGIN}/battlegrounds/comps/{comp_id}/{slug}/"
+        comps.append(
+            {
+                "id": f"hsreplay-{comp_id}",
+                "comp_id": comp_id,
+                "source": "hsreplay",
+                "source_id": str(comp_id),
+                "slug": slug,
+                "name": name,
+                "title": strategy_title,
+                "strategy_title": strategy_title,
+                "tier": _REACT_CONTEXT_TIER.get(tier_number),
+                "difficulty": _REACT_CONTEXT_DIFFICULTY.get(difficulty_number),
+                "description": str(item.get("comp_summary") or "").strip(),
+                "main_cards": main_cards,
+                "core_cards": main_cards,
+                "additional_cards": [],
+                "addon_cards": [],
+                "minions": [card.get("name") for card in main_cards if card.get("name")],
+                "url": url,
+                "last_updated": item.get("comp_last_updated"),
+                "_fetch_detail": False,
+                "_detail_url": url,
+            }
+        )
+    return comps
+
+
 def _comps_from_html(html: str) -> list[dict[str, Any]]:
     from bs4 import BeautifulSoup
 
     from .hsreplay_extract import extract_bg_comps, extract_bg_comps_from_links
 
     soup = BeautifulSoup(html, "html.parser")
+    embedded = _comps_from_react_context(soup)
+    if len(embedded) >= 3:
+        return embedded
+
     raw = extract_bg_comps(soup)
     if len(raw) < 3:
         links = [
@@ -597,7 +690,12 @@ async def fetch_battlegrounds_comps(
     errors: list[str] = []
     comps: list[dict[str, Any]] = []
     try:
-        return await fetch_battlegrounds_comps_firecrawl(source_id=source_id, detail_limit=detail_limit)
+        firecrawl_result = await fetch_battlegrounds_comps_firecrawl(
+            source_id=source_id, detail_limit=detail_limit
+        )
+        if len(firecrawl_result.get("comps") or []) >= 3:
+            return firecrawl_result
+        errors.append("firecrawl: listing returned fewer than three live comps")
     except Exception as exc:
         errors.append(f"firecrawl: {type(exc).__name__}: {str(exc)[:180]}")
     try:

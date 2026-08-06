@@ -72,3 +72,22 @@ because a verified patch reset can reduce the curated list from about 30 rows
 to seven. The five-row contract remains the hard lower bound, so a truncated
 four-row response is still rejected. When changing either value, test both the
 first valid post-patch sample and a deliberately incomplete sample.
+
+## HSReplay strategies use the embedded live guide catalog
+
+The strategies page must refresh **both** independent sources:
+`hsreplay_battlegrounds_comps` and `firestone_battlegrounds_comps`. A successful
+Firestone refresh does not prove that the HSReplay tab is current.
+
+Since August 2026 HSReplay embeds its guide catalog as JSON in the
+`#react_context` script. Ordinary HTML links and Firecrawl Markdown may be
+empty even while that JSON contains the current guides. Parse only entries
+where `comp_hidden` is false, resolve `comp_core_cards` DBF IDs through the
+current HearthstoneJSON index, and retain `comp_last_updated` for diagnostics.
+Never publish hidden historical guides merely to preserve the old row count.
+
+If Firecrawl returns fewer than three live guides, the fetcher must continue to
+the authenticated HTML fallback instead of accepting the empty result. Verify
+HSReplay and Firestone separately through `list=strategies&source=hsreplay` and
+`list=strategies&source=firestone`, including timestamps, unique strategy IDs,
+current-patch core-card IDs and absence of hidden guides.
