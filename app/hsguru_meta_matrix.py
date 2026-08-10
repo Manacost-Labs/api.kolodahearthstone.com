@@ -678,7 +678,7 @@ def _current_catalog_coverage(
     }
 
 
-def refresh_current_catalog_deck_join() -> dict[str, Any]:
+def _refresh_current_catalog_deck_join_unlocked() -> dict[str, Any]:
     """Rejoin refreshed deck catalogs into the current archetype snapshot."""
     dataset = load_dataset(SOURCE_ID)
     structured = (((dataset or {}).get("data") or {}).get("structured") or {})
@@ -709,6 +709,28 @@ def refresh_current_catalog_deck_join() -> dict[str, Any]:
         "decks": sum(int(row.get("deck_count") or 0) for row in rows),
         "coverage": catalog["coverage"],
     }
+
+
+def refresh_current_catalog_deck_join() -> dict[str, Any]:
+    """Rejoin decks unless the matrix dataset is being refreshed elsewhere."""
+    locks = ResourceLockSet(
+        [SOURCE_ID],
+        metadata={"operation": "refresh_current_catalog_deck_join"},
+    )
+    try:
+        locks.acquire()
+    except ResourceLocked as exc:
+        return {
+            "ok": True,
+            "joined": False,
+            "source_id": SOURCE_ID,
+            **exc.as_outcome(),
+        }
+
+    try:
+        return _refresh_current_catalog_deck_join_unlocked()
+    finally:
+        locks.release()
 
 
 async def _scrape_current_page(

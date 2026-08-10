@@ -285,6 +285,33 @@ def test_deck_catalog_refresh_can_rejoin_builds_without_refetching_meta() -> Non
     save_dataset.assert_called_once_with("hsguru_meta_matrix", dataset)
 
 
+def test_deck_catalog_join_skips_while_matrix_resource_is_locked(tmp_path) -> None:
+    from app.hsguru_meta_matrix import refresh_current_catalog_deck_join
+    from app.resource_locks import ResourceLockSet
+
+    lock_dir = tmp_path / ".locks"
+    with ResourceLockSet(
+        ["hsguru_meta_matrix"],
+        lock_dir=lock_dir,
+        metadata={"run_id": "matrix-owner"},
+    ):
+        with (
+            patch("app.resource_locks.data_dir", return_value=tmp_path),
+            patch("app.hsguru_meta_matrix.load_dataset") as load_dataset,
+            patch("app.hsguru_meta_matrix.save_dataset") as save_dataset,
+        ):
+            result = refresh_current_catalog_deck_join()
+
+    assert result["ok"] is True
+    assert result["joined"] is False
+    assert result["state"] == "locked"
+    assert result["skipped"] is True
+    assert result["locked_resource"] == "hsguru_meta_matrix"
+    assert result["owner"]["run_id"] == "matrix-owner"
+    load_dataset.assert_not_called()
+    save_dataset.assert_not_called()
+
+
 def test_refresh_publishes_one_unified_dataset_after_108_firecrawl_pages() -> None:
     from app.firecrawl_backend import FirecrawlScrape
     from app.hsguru_meta_matrix import refresh_hsguru_meta_matrix
