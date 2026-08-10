@@ -5,10 +5,9 @@
 wire format of status files, datasets, API responses and log events is
 unchanged byte-for-byte.
 
-NOTE on level sets: ``ERROR_STATES``/``WARN_STATES`` mirror the EXACT
-historical mapping in ``refresh_log._level_for`` — ``quality_error`` is a
-WARN state there (not an error), so it is deliberately excluded from
-``ERROR_STATES``. Do not "fix" this without changing the log-level contract.
+NOTE on level sets: ``ERROR_STATES``/``WARN_STATES`` are the canonical mapping
+used by ``refresh_log._level_for``. ``quality_error`` is a WARN state there
+(not an error), while an exhausted job deadline is an ERROR state.
 """
 
 from __future__ import annotations
@@ -24,6 +23,7 @@ class SourceState(str, Enum):
     BLOCKED_BY_PROTECTION = "blocked_by_protection"
     PROXY_REQUIRED = "proxy_required"
     QUALITY_ERROR = "quality_error"
+    TIMED_OUT = "timed_out"
     NEVER_FETCHED = "never_fetched"
 
     def __str__(self) -> str:  # keep f-strings emitting the raw value
@@ -39,6 +39,7 @@ ERROR_STATES: frozenset[str] = frozenset(
         SourceState.HTTP_ERROR,
         SourceState.BLOCKED_BY_PROTECTION,
         SourceState.PROXY_REQUIRED,
+        SourceState.TIMED_OUT,
     }
 )
 WARN_STATES: frozenset[str] = frozenset(

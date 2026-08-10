@@ -148,7 +148,7 @@ MetaStats - альтернативный public источник ranked коло
 
 ### Общие гарантии качества данных
 
-- Каждый source получает state из `SourceState`: `ok`, `partial`, `fetch_error`, `http_error`, `blocked_by_protection`, `proxy_required`, `quality_error`, `never_fetched`. `ok_cached` используется только как вычисляемый `effective_state`, не как сохранённый source state.
+- Каждый source получает state из `SourceState`: `ok`, `partial`, `fetch_error`, `http_error`, `blocked_by_protection`, `proxy_required`, `quality_error`, `timed_out`, `never_fetched`. `ok_cached` используется только как вычисляемый `effective_state`, не как сохранённый source state.
 - `source_contracts.py` задаёт минимальные строки, обязательные поля, допустимый fallback и regression thresholds для критичных источников.
 - `dataset_regression.py` не даёт перезаписать хороший dataset резко уменьшившимся или неполным payload.
 - Для premium/anti-bot источников parser сохраняет последний хороший dataset, если live refresh временно упал.

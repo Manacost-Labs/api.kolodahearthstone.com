@@ -275,6 +275,7 @@ venv/bin/python -m app.cli proxy-rotation-check
 | `http_error` | 4xx/5xx |
 | `proxy_required` | Нет `HS_FETCH_PROXY_URL` |
 | `partial` | Refresh завершён неполным результатом; хороший cache не перезаписывается |
+| `timed_out` | Deadline запуска исчерпан; новые slices не стартуют, LKG сохраняется |
 | `never_fetched` | Успешного refresh ещё не было |
 
 ### 5.2. Команды мониторинга
