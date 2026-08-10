@@ -7,6 +7,7 @@ const STATE_CLASS = {
   http_error: "badge-err",
   blocked_by_protection: "badge-warn",
   proxy_required: "badge-warn",
+  timed_out: "badge-err",
   never_fetched: "badge-muted",
   partial: "badge-warn",
 };

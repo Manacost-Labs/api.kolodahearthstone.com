@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
 import asyncio
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from starlette.testclient import TestClient
 
 from app.main import app
-
 
 client = TestClient(app)
 
@@ -286,6 +285,33 @@ def test_deck_catalog_refresh_can_rejoin_builds_without_refetching_meta() -> Non
     save_dataset.assert_called_once_with("hsguru_meta_matrix", dataset)
 
 
+def test_deck_catalog_join_skips_while_matrix_resource_is_locked(tmp_path) -> None:
+    from app.hsguru_meta_matrix import refresh_current_catalog_deck_join
+    from app.resource_locks import ResourceLockSet
+
+    lock_dir = tmp_path / ".locks"
+    with ResourceLockSet(
+        ["hsguru_meta_matrix"],
+        lock_dir=lock_dir,
+        metadata={"run_id": "matrix-owner"},
+    ):
+        with (
+            patch("app.resource_locks.data_dir", return_value=tmp_path),
+            patch("app.hsguru_meta_matrix.load_dataset") as load_dataset,
+            patch("app.hsguru_meta_matrix.save_dataset") as save_dataset,
+        ):
+            result = refresh_current_catalog_deck_join()
+
+    assert result["ok"] is True
+    assert result["joined"] is False
+    assert result["state"] == "locked"
+    assert result["skipped"] is True
+    assert result["locked_resource"] == "hsguru_meta_matrix"
+    assert result["owner"]["run_id"] == "matrix-owner"
+    load_dataset.assert_not_called()
+    save_dataset.assert_not_called()
+
+
 def test_refresh_publishes_one_unified_dataset_after_108_firecrawl_pages() -> None:
     from app.firecrawl_backend import FirecrawlScrape
     from app.hsguru_meta_matrix import refresh_hsguru_meta_matrix
@@ -376,9 +402,9 @@ def test_refresh_publishes_one_unified_dataset_after_108_firecrawl_pages() -> No
     assert status["cached_base_slices"] == 0
 
 
-def test_matrix_slices_use_scrape_do_before_firecrawl() -> None:
+def test_matrix_slice_uses_shared_provider_cascade_once_in_exact_order() -> None:
+    from app.firecrawl_backend import FirecrawlScrape
     from app.hsguru_meta_matrix import SliceSpec, _default_scrape
-    from app.scrape_do_backend import ScrapeDoScrape
 
     spec = SliceSpec(
         "standard",
@@ -388,80 +414,128 @@ def test_matrix_slices_use_scrape_do_before_firecrawl() -> None:
         "standard|legend|past_day|any_player",
         "https://www.hsguru.com/meta?format=2&rank=legend&period=past_day",
     )
-    scrape_do_result = ScrapeDoScrape(
-        html=HSGURU_TABLE,
-        status_code=200,
-        final_url=spec.url,
-        request_cost=25,
-        credits_remaining=10_000,
-        super_proxy=True,
-    )
-    with (
-        patch("app.hsguru_meta_matrix.scrape_do_token", return_value="configured"),
-        patch(
-            "app.hsguru_meta_matrix.scrape_url",
-            new=AsyncMock(return_value=scrape_do_result),
-        ) as scrape_do,
-        patch(
-            "app.hsguru_meta_matrix.scrape_source_with_options",
-            new=AsyncMock(),
-        ) as firecrawl,
-    ):
-        result = asyncio.run(_default_scrape(spec))
-
-    assert result.backend == "scrape_do_super"
-    assert result.request_credits == 25
-    scrape_do.assert_awaited_once()
-    assert scrape_do.await_args.kwargs == {
-        "render": True,
-        "super_proxy": True,
-    }
-    firecrawl.assert_not_awaited()
-
-
-def test_matrix_slice_falls_back_after_scrape_do_failure() -> None:
-    from app.firecrawl_backend import FirecrawlScrape
-    from app.hsguru_meta_matrix import SliceSpec, _default_scrape
-
-    spec = SliceSpec(
-        "wild",
-        "legend",
-        "past_week",
-        "any_player",
-        "wild|legend|past_week|any_player",
-        "https://www.hsguru.com/meta?format=1&rank=legend&period=past_week",
-    )
     fallback_result = FirecrawlScrape(
         html=HSGURU_TABLE,
         markdown="",
         screenshot=None,
-        metadata={"backend": "firecrawl", "creditsUsed": 1},
+        metadata={"backend": "scrapfly", "scrapflyCreditsUsed": 3},
         status_code=200,
         final_url=spec.url,
     )
+    provider_calls: list[str] = []
+
+    def fail_scrape_do(*_args, **_kwargs):
+        provider_calls.append("scrape_do")
+        raise RuntimeError("Scrape.do unavailable")
+
+    def fail_firecrawl(*_args, **_kwargs):
+        provider_calls.append("firecrawl")
+        raise RuntimeError("Firecrawl unavailable")
+
+    def use_scrapfly(*_args, **_kwargs):
+        provider_calls.append("scrapfly")
+        return fallback_result
+
     with (
-        patch("app.hsguru_meta_matrix.scrape_do_token", return_value="configured"),
+        patch("app.firecrawl_backend.scrape_do_token", return_value="configured"),
+        patch("app.firecrawl_backend.scrapfly_configured", return_value=True),
+        patch(
+            "app.firecrawl_backend._scrape_via_scrape_do",
+            side_effect=fail_scrape_do,
+        ) as scrape_do,
+        patch(
+            "app.firecrawl_backend._scrape_via_firecrawl",
+            side_effect=fail_firecrawl,
+        ) as firecrawl,
+        patch(
+            "app.firecrawl_backend._scrape_via_scrapfly",
+            side_effect=use_scrapfly,
+        ) as scrapfly,
         patch(
             "app.hsguru_meta_matrix.scrape_url",
-            new=AsyncMock(side_effect=RuntimeError("temporary 503")),
-        ),
+            new=AsyncMock(side_effect=RuntimeError("legacy direct call")),
+            create=True,
+        ) as direct_scrape_do,
         patch(
-            "app.hsguru_meta_matrix.scrape_source_with_options",
-            new=AsyncMock(return_value=fallback_result),
-        ) as firecrawl,
+            "app.hsguru_meta_matrix.scrape_do_token",
+            return_value="configured",
+            create=True,
+        ),
     ):
         result = asyncio.run(_default_scrape(spec))
 
-    assert result.backend == "firecrawl"
-    assert result.metadata["providerChain"] == [
-        {
-            "backend": "scrape_do_super",
-            "state": "failed",
-            "error_type": "RuntimeError",
-        },
-        {"backend": "firecrawl", "state": "ok"},
-    ]
-    firecrawl.assert_awaited_once()
+    assert result.backend == "scrapfly"
+    assert provider_calls == ["scrape_do", "firecrawl", "scrapfly"]
+    assert scrape_do.call_count == 1
+    assert firecrawl.call_count == 1
+    assert scrapfly.call_count == 1
+    direct_scrape_do.assert_not_awaited()
+
+
+def test_current_page_does_not_repeat_paid_providers_after_shared_cascade_fails() -> (
+    None
+):
+    from app.hsguru_meta_matrix import _scrape_current_page
+
+    with (
+        patch(
+            "app.hsguru_meta_matrix.scrape_source_with_options",
+            new=AsyncMock(side_effect=RuntimeError("all shared providers failed")),
+        ) as cascade,
+        patch(
+            "app.hsguru_meta_matrix.scrape_url",
+            new=AsyncMock(side_effect=RuntimeError("legacy direct retry")),
+            create=True,
+        ) as direct_scrape_do,
+        patch(
+            "app.hsguru_meta_matrix.scrape_do_token",
+            return_value="configured",
+            create=True,
+        ),
+        pytest.raises(RuntimeError, match="all shared providers failed"),
+    ):
+        asyncio.run(_scrape_current_page("wild", "patch_36.0.3"))
+
+    cascade.assert_awaited_once()
+    direct_scrape_do.assert_not_awaited()
+
+
+def test_duplicate_matrix_refresh_is_skipped_before_heartbeat_or_storage(
+    tmp_path,
+) -> None:
+    from app.hsguru_meta_matrix import SOURCE_ID, refresh_hsguru_meta_matrix
+    from app.job_run import JobRunContext
+    from app.resource_locks import ResourceLockSet
+
+    lock_dir = tmp_path / ".locks"
+    with (
+        ResourceLockSet(
+            [SOURCE_ID],
+            lock_dir=lock_dir,
+            metadata={"run_id": "existing-run"},
+        ),
+        patch("app.resource_locks.data_dir", return_value=tmp_path),
+        patch.object(
+            JobRunContext,
+            "start",
+            side_effect=AssertionError("heartbeat must not start"),
+        ) as start_run,
+        patch("app.hsguru_meta_matrix.save_dataset") as save_dataset,
+        patch("app.hsguru_meta_matrix.save_status") as save_status,
+    ):
+        result = asyncio.run(refresh_hsguru_meta_matrix())
+
+    assert result["ok"] is True
+    assert result["published"] is False
+    assert result["source_id"] == SOURCE_ID
+    assert result["state"] == "locked"
+    assert result["skipped"] is True
+    assert result["reason"] == "resource_locked"
+    assert result["locked_resource"] == SOURCE_ID
+    assert result["owner"]["run_id"] == "existing-run"
+    start_run.assert_not_called()
+    save_dataset.assert_not_called()
+    save_status.assert_not_called()
 
 
 def test_refresh_does_not_retry_data_errors_and_counts_failed_parse_request() -> None:
@@ -551,12 +625,252 @@ def test_refresh_does_not_retry_data_errors_and_counts_failed_parse_request() ->
         )
 
     assert result["ok"] is False
+    assert result["state"] == "partial"
+    assert result["job_run"]["progress"]["phase"] == "partial"
     assert calls.count("standard|all|past_week|any_player") == 1
     assert result["firecrawl_credits_used"] == 4
     save_dataset.assert_not_called()
     status = save_status.call_args.args[1]
     assert status["firecrawl_requests"] == 4
     assert "conflicting identities" in status["errors"][0]["error"]
+
+
+def test_refresh_timeout_stops_new_slices_and_preserves_last_known_good() -> None:
+    from datetime import timedelta
+
+    from app.firecrawl_backend import FirecrawlScrape
+    from app.hsguru_meta_matrix import SliceSpec, refresh_hsguru_meta_matrix
+    from app.job_run import JobRunContext
+
+    started_at = datetime(2026, 8, 10, 20, 0, tzinfo=UTC)
+
+    class MutableClock:
+        def __init__(self) -> None:
+            self.value = started_at
+
+        def __call__(self) -> datetime:
+            return self.value
+
+        def advance(self, seconds: float) -> None:
+            self.value += timedelta(seconds=seconds)
+
+    specs = (
+        SliceSpec(
+            "standard",
+            "all",
+            "past_week",
+            "any_player",
+            "standard|all|past_week|any_player",
+            "https://www.hsguru.com/meta?format=2&rank=all&period=past_week&min_games=100",
+        ),
+        SliceSpec(
+            "wild",
+            "all",
+            "past_week",
+            "any_player",
+            "wild|all|past_week|any_player",
+            "https://www.hsguru.com/meta?format=1&rank=all&period=past_week&min_games=100",
+        ),
+    )
+    cached = {
+        "source_id": "hsguru_meta_matrix",
+        "fetched_at": "2026-08-09T20:00:00+00:00",
+        "data": {
+            "structured": {
+                "slices": [
+                    {
+                        "key": spec.key,
+                        "format": spec.format,
+                        "rank": spec.rank,
+                        "period": spec.period,
+                        "coin": spec.coin,
+                        "fetched_at": "2026-08-09T20:00:00+00:00",
+                        "rows": [{"archetype": "Cached Mage", "games": 500}],
+                    }
+                    for spec in specs
+                ],
+                "current_catalog": {
+                    "criteria": {"period": "patch_36.0.3"},
+                    "archetypes": [
+                        {
+                            "format": format_name,
+                            "archetype": f"Cached {format_name}",
+                            "games": 500,
+                            "period": "patch_36.0.3",
+                            "rank": "all",
+                        }
+                        for format_name in ("standard", "wild")
+                    ],
+                },
+            }
+        },
+    }
+    clock = MutableClock()
+    heartbeat_snapshots: list[dict] = []
+
+    class RecordingWriter:
+        def write(self, snapshot):
+            heartbeat_snapshots.append(snapshot)
+
+    run = JobRunContext.start(
+        run_id="matrix-timeout-run",
+        timeout_seconds=1,
+        total_slices=0,
+        clock=clock,
+        snapshot_writer=RecordingWriter(),
+        heartbeat_interval_seconds=30,
+    )
+    slice_calls: list[str] = []
+    current_calls: list[str] = []
+
+    async def scrape(spec):
+        slice_calls.append(spec.key)
+        clock.advance(2)
+        return FirecrawlScrape(
+            html=HSGURU_TABLE,
+            markdown="",
+            screenshot=None,
+            metadata={"creditsUsed": 1},
+            status_code=200,
+            final_url=spec.url,
+        )
+
+    async def scrape_current(format_name, period):
+        current_calls.append(format_name)
+        return [], {"format": format_name, "backend": "firecrawl", "rows": 0}
+
+    async def discover_patch(_cached):
+        return "patch_36.0.3", None
+
+    with (
+        patch("app.hsguru_meta_matrix.iter_slice_specs", return_value=specs),
+        patch("app.hsguru_meta_matrix.load_dataset", return_value=cached),
+        patch("app.hsguru_meta_matrix.enrich_current_rows_with_cached_decks"),
+        patch("app.hsguru_meta_matrix._record_current_history") as record_history,
+        patch("app.hsguru_meta_matrix.save_dataset") as save_dataset,
+        patch("app.hsguru_meta_matrix.save_status") as save_status,
+    ):
+        result = asyncio.run(
+            refresh_hsguru_meta_matrix(
+                concurrency=1,
+                attempts=1,
+                scrape=scrape,
+                scrape_current=scrape_current,
+                discover_patch=discover_patch,
+                run_context=run,
+            )
+        )
+
+    assert slice_calls == [specs[0].key]
+    assert current_calls == []
+    save_dataset.assert_not_called()
+    record_history.assert_not_called()
+    assert result["ok"] is False
+    assert result["published"] is False
+    assert result["state"] == "timed_out"
+    assert result["timed_out"] is True
+    assert result["serving_cached_dataset"] is True
+    assert result["job_run"] == {
+        "run_id": "matrix-timeout-run",
+        "started_at": "2026-08-10T20:00:00+00:00",
+        "deadline_at": "2026-08-10T20:00:01+00:00",
+        "heartbeat_at": "2026-08-10T20:00:02+00:00",
+        "timed_out": True,
+        "progress": {
+            "phase": "timed_out",
+            "total_slices": 4,
+            "started_slices": 1,
+            "completed_slices": 1,
+            "succeeded_slices": 1,
+            "failed_slices": 0,
+            "skipped_slices": 3,
+        },
+    }
+    status = save_status.call_args.args[1]
+    assert status["state"] == "timed_out"
+    assert status["timed_out"] is True
+    assert status["published"] is False
+    assert status["job_run"] == result["job_run"]
+    assert len(heartbeat_snapshots) == 2
+    assert heartbeat_snapshots[0]["progress"]["phase"] == "starting"
+    assert heartbeat_snapshots[-1] == result["job_run"]
+
+
+def test_last_current_slice_finishing_after_deadline_is_not_published() -> None:
+    from datetime import timedelta
+
+    from app.hsguru_meta_matrix import refresh_hsguru_meta_matrix
+    from app.job_run import JobRunContext
+
+    started_at = datetime(2026, 8, 10, 20, 0, tzinfo=UTC)
+
+    class MutableClock:
+        def __init__(self) -> None:
+            self.value = started_at
+
+        def __call__(self) -> datetime:
+            return self.value
+
+        def advance(self, seconds: float) -> None:
+            self.value += timedelta(seconds=seconds)
+
+    clock = MutableClock()
+    run = JobRunContext.start(
+        run_id="late-current-slice-run",
+        timeout_seconds=1,
+        total_slices=0,
+        clock=clock,
+    )
+    current_calls: list[str] = []
+
+    async def scrape_current(format_name, period):
+        current_calls.append(format_name)
+        if format_name == "wild":
+            clock.advance(2)
+        return [
+            {
+                "format": format_name,
+                "archetype": f"Current {format_name}",
+                "games": 100,
+                "period": period,
+                "rank": "all",
+                "decks": [],
+            }
+        ], {
+            "format": format_name,
+            "backend": "firecrawl",
+            "request_credits": 1,
+            "rows": 1,
+        }
+
+    async def discover_patch(_cached):
+        return "patch_36.0.3", None
+
+    with (
+        patch("app.hsguru_meta_matrix.iter_slice_specs", return_value=()),
+        patch("app.hsguru_meta_matrix.load_dataset", return_value=None),
+        patch("app.hsguru_meta_matrix.enrich_current_rows_with_cached_decks"),
+        patch("app.hsguru_meta_matrix._record_current_history") as record_history,
+        patch("app.hsguru_meta_matrix.save_dataset") as save_dataset,
+        patch("app.hsguru_meta_matrix.save_status") as save_status,
+    ):
+        result = asyncio.run(
+            refresh_hsguru_meta_matrix(
+                attempts=1,
+                scrape_current=scrape_current,
+                discover_patch=discover_patch,
+                run_context=run,
+            )
+        )
+
+    assert current_calls == ["standard", "wild"]
+    assert result["state"] == "timed_out"
+    assert result["timed_out"] is True
+    assert result["published"] is False
+    assert result["job_run"]["progress"]["completed_slices"] == 2
+    save_dataset.assert_not_called()
+    record_history.assert_not_called()
+    assert save_status.call_args.args[1]["published"] is False
 
 
 def test_missing_slice_can_be_carried_forward_from_last_stable_dataset() -> None:

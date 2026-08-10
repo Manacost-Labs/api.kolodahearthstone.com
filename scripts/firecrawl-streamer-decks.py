@@ -254,16 +254,29 @@ def _save(rows: list[dict[str, Any]], *, html: str, metadata: dict[str, Any], st
 def main() -> int:
     started = time.time()
     _load_env()
-    from app.fetcher import RefreshLock
+    from app.resource_locks import ResourceLocked, ResourceLockSet
 
-    with RefreshLock():
-        source = SOURCE_BY_ID[SOURCE_ID]
-        html, metadata = _scrape_html(source.fetch_url)
-        new_rows = _parse_table(html)
-        if not new_rows:
-            raise RuntimeError("Firecrawl streamer decks returned zero rows")
-        rows = _merge_rows(new_rows, _previous_rows())
-        status = _save(rows, html=html, metadata=metadata, started=started)
+    try:
+        with ResourceLockSet(
+            [SOURCE_ID],
+            metadata={"operation": "firecrawl-streamer-decks"},
+        ):
+            source = SOURCE_BY_ID[SOURCE_ID]
+            html, metadata = _scrape_html(source.fetch_url)
+            new_rows = _parse_table(html)
+            if not new_rows:
+                raise RuntimeError("Firecrawl streamer decks returned zero rows")
+            rows = _merge_rows(new_rows, _previous_rows())
+            status = _save(rows, html=html, metadata=metadata, started=started)
+    except ResourceLocked as exc:
+        print(
+            json.dumps(
+                {"ok": True, "source_id": SOURCE_ID, **exc.as_outcome()},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
     try:
         from app.fun_decks import refresh_fun_decks
 

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -19,14 +21,20 @@ from .config import (
 from .firecrawl_keys import (
     acquire_firecrawl_key,
     is_firecrawl_credit_error,
-    is_firecrawl_pool_unavailable,
     mark_firecrawl_key_exhausted,
     parse_firecrawl_api_keys,
     record_firecrawl_credits,
 )
-from .scrape_do_backend import scrape_url_sync
+from .scrape_do_backend import (
+    ScrapeDoAccountError,
+    ScrapeDoRequestError,
+    ScrapeDoTransientError,
+    scrape_url_sync,
+)
+from .scrapers.http_resilience import is_session_blocked
+from .scrapfly_backend import scrape_url_sync as scrapfly_scrape_url_sync
+from .scrapfly_backend import scrapfly_configured
 from .sources import Source
-
 
 FIRECRAWL_SCRAPE_URL = "https://api.firecrawl.dev/v2/scrape"
 
@@ -67,8 +75,21 @@ class FirecrawlScrape:
             return 0
 
     @property
+    def scrapfly_credits_used(self) -> int:
+        if self.backend != "scrapfly":
+            return 0
+        try:
+            return int(self.metadata.get("scrapflyCreditsUsed") or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    @property
     def request_credits(self) -> int:
-        return self.scrape_do_credits_used or self.firecrawl_credits_used
+        return (
+            self.scrape_do_credits_used
+            or self.scrapfly_credits_used
+            or self.firecrawl_credits_used
+        )
 
 
 def _html_to_markdown(html: str) -> str:
@@ -114,6 +135,64 @@ def _screenshot_options(formats: list[Any] | None) -> tuple[bool, bool]:
     return False, False
 
 
+def _scrape_via_scrapfly(
+    source: Source,
+    *,
+    formats: list[Any] | None,
+    headers: dict[str, str] | None,
+    wait_ms: int | None,
+    timeout_ms: int | None,
+    reason: str,
+) -> FirecrawlScrape:
+    screenshot, full_screenshot = _screenshot_options(formats)
+    profiles = (
+        ((True, True),) if source.site == "hsguru" else ((True, False), (True, True))
+    )
+    errors: list[str] = []
+    scraped = None
+    for render_js, asp in profiles:
+        try:
+            scraped = scrapfly_scrape_url_sync(
+                source.url,
+                render_js=render_js,
+                asp=asp,
+                headers=headers,
+                wait_ms=wait_ms,
+                timeout_ms=timeout_ms,
+                screenshot=screenshot,
+                full_screenshot=full_screenshot,
+            )
+            break
+        except Exception as exc:  # noqa: BLE001 - try the next provider profile
+            errors.append(
+                f"render_js={render_js},asp={asp}: "
+                f"{type(exc).__name__}: {str(exc)[:300]}"
+            )
+    if scraped is None:
+        raise RuntimeError(f"Scrapfly fallback failed: {'; '.join(errors)}")
+
+    requested = formats or ["html", "markdown"]
+    return FirecrawlScrape(
+        html=scraped.html,
+        markdown=(_html_to_markdown(scraped.html) if "markdown" in requested else ""),
+        screenshot=scraped.screenshot,
+        metadata={
+            "backend": "scrapfly",
+            "creditsUsed": 0,
+            "scrapflyCreditsUsed": scraped.request_cost,
+            "scrapflyRemainingCredits": scraped.credits_remaining,
+            "scrapflyAsp": scraped.asp,
+            "scrapflyKeyLabel": scraped.key_label,
+            "scrapflyKeyFingerprint": scraped.key_fingerprint,
+            "scrapflyKeyRotation": scraped.key_rotation,
+            "providerPolicy": "scrape_do_firecrawl_scrapfly",
+            "firecrawlFallbackReason": reason[:500],
+        },
+        status_code=scraped.status_code,
+        final_url=scraped.final_url,
+    )
+
+
 def _scrape_via_scrape_do(
     source: Source,
     *,
@@ -124,33 +203,78 @@ def _scrape_via_scrape_do(
     reason: str,
 ) -> FirecrawlScrape:
     if not scrape_do_token():
-        raise RuntimeError(reason)
+        raise RuntimeError(reason or "Scrape.do is not configured")
     screenshot, full_screenshot = _screenshot_options(formats)
     profiles = (True,) if source.site == "hsguru" else (False, True)
     errors: list[str] = []
     scraped = None
+    attempts = 0
     for super_proxy in profiles:
-        try:
-            scraped = scrape_url_sync(
-                source.url,
-                render=True,
-                super_proxy=super_proxy,
-                headers=headers,
-                wait_ms=wait_ms,
-                timeout_ms=timeout_ms,
-                screenshot=screenshot,
-                full_screenshot=full_screenshot,
-            )
+        for profile_attempt in range(1, 3):
+            attempts += 1
+            try:
+                scraped = scrape_url_sync(
+                    source.url,
+                    render=True,
+                    super_proxy=super_proxy,
+                    headers=headers,
+                    wait_ms=wait_ms,
+                    timeout_ms=timeout_ms,
+                    screenshot=screenshot,
+                    full_screenshot=full_screenshot,
+                )
+                if is_session_blocked(scraped.status_code, scraped.html):
+                    errors.append(
+                        f"{'super' if super_proxy else 'standard'} "
+                        f"attempt {profile_attempt}: blocked_or_challenge_content"
+                    )
+                    scraped = None
+                    break
+                break
+            except ScrapeDoAccountError as exc:
+                errors.append(
+                    f"{'super' if super_proxy else 'standard'} "
+                    f"attempt {profile_attempt}: {type(exc).__name__}: "
+                    f"{str(exc)[:300]}"
+                )
+                # The next Scrape.do profile shares the same subscription.
+                raise
+            except ScrapeDoTransientError as exc:
+                errors.append(
+                    f"{'super' if super_proxy else 'standard'} "
+                    f"attempt {profile_attempt}: {type(exc).__name__}: "
+                    f"{str(exc)[:300]}"
+                )
+                if profile_attempt == 1:
+                    provider_delay = min(
+                        60.0,
+                        max(0.0, float(exc.retry_after_seconds or 0.0)),
+                    )
+                    backoff_delay = 2.0 * random.uniform(0.85, 1.15)
+                    time.sleep(max(provider_delay, backoff_delay))
+                    continue
+                break
+            except ScrapeDoRequestError as exc:
+                errors.append(
+                    f"{'super' if super_proxy else 'standard'} "
+                    f"attempt {profile_attempt}: {type(exc).__name__}: "
+                    f"{str(exc)[:300]}"
+                )
+                # A target 403 may improve with the residential Super profile.
+                if exc.status_code == 403 and not super_proxy:
+                    break
+                raise
+            except Exception as exc:  # noqa: BLE001 - normalize provider failures
+                errors.append(
+                    f"{'super' if super_proxy else 'standard'} "
+                    f"attempt {profile_attempt}: {type(exc).__name__}: "
+                    f"{str(exc)[:300]}"
+                )
+                break
+        if scraped is not None:
             break
-        except Exception as exc:
-            errors.append(
-                f"{'super' if super_proxy else 'standard'}: "
-                f"{type(exc).__name__}: {str(exc)[:300]}"
-            )
     if scraped is None:
-        raise RuntimeError(
-            f"{reason}; Scrape.do fallback failed: {'; '.join(errors)}"
-        )
+        raise RuntimeError(f"Scrape.do failed: {'; '.join(errors)}")
     html = scraped.html
     requested = formats or ["html", "markdown"]
     markdown = _html_to_markdown(html) if "markdown" in requested else ""
@@ -159,12 +283,13 @@ def _scrape_via_scrape_do(
         markdown=markdown,
         screenshot=scraped.screenshot,
         metadata={
-            "backend": (
-                "scrape_do_super" if scraped.super_proxy else "scrape_do"
-            ),
+            "backend": ("scrape_do_super" if scraped.super_proxy else "scrape_do"),
             "creditsUsed": 0,
             "scrapeDoCreditsUsed": scraped.request_cost,
             "scrapeDoRemainingCredits": scraped.credits_remaining,
+            "scrapeDoAttempts": attempts,
+            "providerPolicy": "scrape_do_firecrawl_scrapfly",
+            "providerChainReason": reason[:500],
             "firecrawlFallbackReason": reason[:500],
         },
         status_code=scraped.status_code,
@@ -204,7 +329,9 @@ def _scrape_once(
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=(effective_timeout_ms / 1000) + 30) as response:
+        with urllib.request.urlopen(
+            request, timeout=(effective_timeout_ms / 1000) + 30
+        ) as response:
             body = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
@@ -214,8 +341,10 @@ def _scrape_once(
         raise RuntimeError(f"Firecrawl scrape failed: {body}")
 
     data = body.get("data") or {}
-    html = data.get("html") or ""
-    if not html and any(fmt == "html" for fmt in (formats or ["html", "markdown"])):
+    html = data.get("html") or data.get("rawHtml") or ""
+    if not html and any(
+        fmt in ("html", "rawHtml") for fmt in (formats or ["html", "markdown"])
+    ):
         raise RuntimeError("Firecrawl response did not include html")
     metadata = dict(data.get("metadata") or {})
     metadata.setdefault("backend", "firecrawl")
@@ -227,11 +356,13 @@ def _scrape_once(
         screenshot=data.get("screenshot"),
         metadata=metadata,
         status_code=int(metadata.get("statusCode") or 200),
-        final_url=str(metadata.get("ogUrl") or metadata.get("sourceURL") or source.fetch_url),
+        final_url=str(
+            metadata.get("ogUrl") or metadata.get("sourceURL") or source.fetch_url
+        ),
     )
 
 
-def _scrape_sync(
+def _scrape_via_firecrawl(
     source: Source,
     *,
     formats: list[Any] | None = None,
@@ -242,21 +373,9 @@ def _scrape_sync(
     timeout_ms: int | None = None,
 ) -> FirecrawlScrape:
     errors: list[str] = []
-    attempt_limit = max(8, len(parse_firecrawl_api_keys()))
+    attempt_limit = max(8, len(parse_firecrawl_api_keys()) or 1)
     for _ in range(attempt_limit):
-        try:
-            lease = acquire_firecrawl_key()
-        except Exception as exc:
-            if is_firecrawl_pool_unavailable(exc):
-                return _scrape_via_scrape_do(
-                    source,
-                    formats=formats,
-                    headers=headers,
-                    wait_ms=wait_ms,
-                    timeout_ms=timeout_ms,
-                    reason=str(exc),
-                )
-            raise
+        lease = acquire_firecrawl_key()
         try:
             scraped = _scrape_once(
                 source,
@@ -285,6 +404,7 @@ def _scrape_sync(
         metadata["firecrawl_key_label"] = lease.key.label
         metadata["firecrawl_key_fingerprint"] = lease.key.fingerprint
         metadata["firecrawl_key_rotation"] = rotation
+        metadata["providerPolicy"] = "scrape_do_firecrawl_scrapfly"
         return FirecrawlScrape(
             html=scraped.html,
             markdown=scraped.markdown,
@@ -295,15 +415,66 @@ def _scrape_sync(
         )
 
     detail = "; ".join(errors) if errors else "no available keys"
-    reason = f"Firecrawl scrape failed after key rotation attempts: {detail}"
-    return _scrape_via_scrape_do(
-        source,
-        formats=formats,
-        headers=headers,
-        wait_ms=wait_ms,
-        timeout_ms=timeout_ms,
-        reason=reason,
-    )
+    raise RuntimeError(f"Firecrawl scrape failed after key rotation attempts: {detail}")
+
+
+def _scrape_sync(
+    source: Source,
+    *,
+    formats: list[Any] | None = None,
+    only_main_content: bool = True,
+    headers: dict[str, str] | None = None,
+    max_age_ms: int | None = None,
+    wait_ms: int | None = None,
+    timeout_ms: int | None = None,
+    skip_providers: frozenset[str] | set[str] | None = None,
+) -> FirecrawlScrape:
+    """Fetch through the shared Scrape.do → Firecrawl → Scrapfly policy."""
+    errors: list[str] = []
+    skip = frozenset(skip_providers or ())
+
+    if "scrape_do" not in skip and scrape_do_token():
+        try:
+            return _scrape_via_scrape_do(
+                source,
+                formats=formats,
+                headers=headers,
+                wait_ms=wait_ms,
+                timeout_ms=timeout_ms,
+                reason="primary",
+            )
+        except Exception as exc:  # noqa: BLE001 - provider boundary
+            errors.append(f"scrape_do: {type(exc).__name__}: {str(exc)[:300]}")
+
+    if "firecrawl" not in skip:
+        try:
+            return _scrape_via_firecrawl(
+                source,
+                formats=formats,
+                only_main_content=only_main_content,
+                headers=headers,
+                max_age_ms=max_age_ms,
+                wait_ms=wait_ms,
+                timeout_ms=timeout_ms,
+            )
+        except Exception as exc:  # noqa: BLE001 - provider boundary
+            errors.append(f"firecrawl: {type(exc).__name__}: {str(exc)[:300]}")
+
+    if "scrapfly" not in skip and scrapfly_configured():
+        try:
+            return _scrape_via_scrapfly(
+                source,
+                formats=formats,
+                headers=headers,
+                wait_ms=wait_ms,
+                timeout_ms=timeout_ms,
+                reason="; ".join(errors) or "upstream providers failed",
+            )
+        except Exception as exc:  # noqa: BLE001 - provider boundary
+            errors.append(f"scrapfly: {type(exc).__name__}: {str(exc)[:300]}")
+
+    detail = "; ".join(errors) if errors else "no scrape providers configured"
+    raise RuntimeError(f"All scrape providers failed: {detail}")
 
 
 async def scrape_source(source: Source) -> FirecrawlScrape:
@@ -325,6 +496,7 @@ async def scrape_source_with_options(
     max_age_ms: int | None = None,
     wait_ms: int | None = None,
     timeout_ms: int | None = None,
+    skip_providers: frozenset[str] | set[str] | None = None,
 ) -> FirecrawlScrape:
     return await asyncio.to_thread(
         _scrape_sync,
@@ -335,4 +507,5 @@ async def scrape_source_with_options(
         max_age_ms=max_age_ms,
         wait_ms=wait_ms,
         timeout_ms=timeout_ms,
+        skip_providers=skip_providers,
     )

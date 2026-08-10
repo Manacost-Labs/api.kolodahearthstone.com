@@ -9,13 +9,9 @@ from urllib.parse import parse_qs, quote, urlencode, urlparse
 
 from bs4 import BeautifulSoup, Tag
 
-from .config import scrape_do_token
 from .firecrawl_backend import scrape_source_with_options
-from .firecrawl_keys import peek_firecrawl_key
-from .scrape_do_backend import scrape_url
 from .sources import Source
 from .storage import load_dataset, save_dataset, save_status
-
 
 SOURCE_ID = "hsguru_archetype_analysis"
 SCHEMA_VERSION = 2
@@ -358,59 +354,27 @@ def _firecrawl_headers() -> dict[str, str] | None:
 
 
 async def _fetch_html(url: str) -> tuple[str, dict[str, Any]]:
-    errors: list[str] = []
-    if peek_firecrawl_key() is not None:
-        source = Source(
-            id=f"{SOURCE_ID}:page",
-            url=url,
-            site="hsguru",
-            category="archetype_analysis",
-            kind="pipeline",
-        )
-        try:
-            result = await scrape_source_with_options(
-                source,
-                formats=["html"],
-                only_main_content=True,
-                headers=_firecrawl_headers(),
-                max_age_ms=0,
-                wait_ms=5_000,
-                timeout_ms=120_000,
-            )
-            return result.html, {
-                "backend": result.backend,
-                "request_credits": result.request_credits,
-                "final_url": result.final_url,
-            }
-        except Exception as exc:
-            errors.append(f"firecrawl: {exc}")
-
-    if scrape_do_token():
-        for super_proxy, attempts in ((False, 2), (True, 3)):
-            for attempt in range(1, attempts + 1):
-                try:
-                    result = await scrape_url(
-                        url,
-                        render=True,
-                        super_proxy=super_proxy,
-                    )
-                    return result.html, {
-                        "backend": "scrape_do_super" if super_proxy else "scrape_do",
-                        "request_credits": result.request_cost,
-                        "final_url": result.final_url,
-                        "attempt": attempt,
-                    }
-                except Exception as exc:
-                    errors.append(
-                        f"{'super' if super_proxy else 'standard'} "
-                        f"attempt {attempt}: {exc}"
-                    )
-                    if attempt < attempts:
-                        await asyncio.sleep(min(attempt * 2, 4))
-
-    if not errors:
-        raise RuntimeError("Firecrawl and Scrape.do are not configured")
-    raise RuntimeError("; ".join(errors))
+    source = Source(
+        id=f"{SOURCE_ID}:page",
+        url=url,
+        site="hsguru",
+        category="archetype_analysis",
+        kind="pipeline",
+    )
+    result = await scrape_source_with_options(
+        source,
+        formats=["html"],
+        only_main_content=True,
+        headers=_firecrawl_headers(),
+        max_age_ms=0,
+        wait_ms=5_000,
+        timeout_ms=120_000,
+    )
+    return result.html, {
+        "backend": result.backend,
+        "request_credits": result.request_credits,
+        "final_url": result.final_url,
+    }
 
 
 async def refresh_hsguru_archetype_analysis(
@@ -537,7 +501,7 @@ async def refresh_hsguru_archetype_analysis(
                         "reason": str(exc),
                     }
                 )
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - isolate each remote page
                 errors.append(
                     {
                         "format": format_name,

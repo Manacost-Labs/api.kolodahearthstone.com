@@ -400,6 +400,7 @@ Source ID: `vicious_syndicate_radars`, тип `vicious_syndicate_radars`.
 | `fetch_error`, `http_error` | Ошибка транспорта/upstream HTTP. |
 | `blocked_by_protection` | Источник заблокировал запрос. |
 | `proxy_required` | Для источника требуется рабочий proxy. |
+| `timed_out` | Deadline запуска исчерпан; новые операции не стартуют, последний хороший snapshot сохраняется. |
 | `never_fetched` | Успешного запуска ещё не было. |
 
 `effective_state=ok_cached` означает, что refresh завершился неудачно, но API

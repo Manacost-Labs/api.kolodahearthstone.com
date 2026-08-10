@@ -7,7 +7,6 @@ VENV="$INSTALL_DIR/venv/bin/python"
 export HS_API_DATA_DIR="${HS_API_DATA_DIR:-/var/lib/hs-data-api}"
 
 cd "$INSTALL_DIR"
-rm -f "$HS_API_DATA_DIR/.refresh.lock"
 
 mapfile -t FAILED < <(
   "$VENV" <<'PY'
@@ -25,7 +24,6 @@ PY
 echo "Recovering ${#FAILED[@]} sources..."
 for sid in "${FAILED[@]}"; do
   echo "=== $sid ==="
-  rm -f "$HS_API_DATA_DIR/.refresh.lock"
   if "$VENV" -m app.cli refresh --source "$sid"; then
     echo "OK $sid"
   else

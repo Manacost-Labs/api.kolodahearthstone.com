@@ -27,7 +27,7 @@
 | Путь | Назначение | В git |
 |------|------------|-------|
 | `/srv/hs-data-api` | Код приложения и Docker Compose stack | Да |
-| `/var/lib/hs-data-api` | Кэш `datasets/`, `statuses/`, lock, индексы карт | Нет |
+| `/var/lib/hs-data-api` | Кэш `datasets/`, `statuses/`, persistent resource locks `.locks/`, индексы карт | Нет |
 | `/etc/hs-data-api.env` | Секреты и настройки | **Никогда** |
 | `systemd` units | API + ежедневный refresh | Да (шаблоны) |
 | Docker FlareSolverr | Обход Cloudflare для HSGuru | `docker-compose.yml` |
@@ -43,7 +43,7 @@ flowchart TB
     end
 
     subgraph fetcher [app/fetcher.py]
-        Lock[RefreshLock .refresh.lock]
+        Lock[Per-source ResourceLockSet .locks]
         ProxyCheck[proxy-check]
         Route{Источник}
         API[API-first модули]
@@ -257,7 +257,7 @@ venv/bin/python -m app.cli proxy-rotation-check
 ### 4.4. Этичная нагрузка
 
 - Не уменьшайте delay ниже 6–8 с без необходимости.
-- Не запускайте несколько параллельных `refresh --all` (блокировка `.refresh.lock` только один процесс).
+- Параллельные refresh допустимы для разных источников; занятый source получает `state=locked`, а persistent lock-файл в `.locks/` не удаляется вручную.
 - API-first источники не дублируйте browser-fetch без причины.
 
 ---
@@ -275,6 +275,7 @@ venv/bin/python -m app.cli proxy-rotation-check
 | `http_error` | 4xx/5xx |
 | `proxy_required` | Нет `HS_FETCH_PROXY_URL` |
 | `partial` | Refresh завершён неполным результатом; хороший cache не перезаписывается |
+| `timed_out` | Deadline запуска исчерпан; новые slices не стартуют, LKG сохраняется |
 | `never_fetched` | Успешного refresh ещё не было |
 
 ### 5.2. Команды мониторинга

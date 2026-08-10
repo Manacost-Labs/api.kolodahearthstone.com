@@ -29,7 +29,7 @@ X-API-Key: <HS_API_KEY>
 
 ## Public Endpoints
 
-Сохранённое поле `state` принимает только значения `ok`, `partial`, `fetch_error`, `http_error`, `blocked_by_protection`, `proxy_required`, `quality_error`, `never_fetched`. Значение `ok_cached` встречается только в вычисляемом `effective_state`, когда API продолжает безопасно отдавать предыдущий успешный dataset после неудачного refresh.
+Сохранённое поле `state` принимает только значения `ok`, `partial`, `fetch_error`, `http_error`, `blocked_by_protection`, `proxy_required`, `quality_error`, `timed_out`, `never_fetched`. Значение `ok_cached` встречается только в вычисляемом `effective_state`, когда API продолжает безопасно отдавать предыдущий успешный dataset после неудачного refresh.
 
 | Method | Path | Назначение |
 | --- | --- | --- |

@@ -9,10 +9,12 @@ from unittest.mock import patch
 
 import pytest
 
+from app import firecrawl_backend
+from app.firecrawl_backend import FirecrawlScrape
 from app.hsreplay_card_periods import (
-    CardPeriodFetch,
-    HSREPLAY_CARD_PERIOD_SOURCE_SPECS,
     HSREPLAY_CARD_PERIOD_SOURCE_IDS,
+    HSREPLAY_CARD_PERIOD_SOURCE_SPECS,
+    CardPeriodFetch,
     fetch_hsreplay_card_period_json,
 )
 from app.hsreplay_cards_api import fetch_hsreplay_ranked_cards
@@ -25,7 +27,7 @@ class _Response:
     def __init__(self, payload: object):
         self.payload = payload
 
-    def __enter__(self) -> "_Response":
+    def __enter__(self) -> _Response:  # noqa: PYI034
         return self
 
     def __exit__(self, *_args: object) -> None:
@@ -79,27 +81,54 @@ def test_firecrawl_reads_raw_json_body(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result.attempts == ({"backend": "firecrawl", "state": "ok"},)
 
 
-def test_scrape_do_is_used_after_firecrawl_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("FIRECRAWL_API_KEY", "fc-test-redacted")
-    monkeypatch.setenv("HS_SCRAPE_DO_TOKEN", "scrape-test-redacted")
+def test_firecrawl_rejects_empty_raw_json_body() -> None:
+    source = Source(
+        "hsreplay_card_period_proxy",
+        "https://hsreplay.net/analytics/query/card_list/",
+        "hsreplay",
+        "ranked_cards",
+    )
+    envelope = {"success": True, "data": {"rawHtml": ""}}
+
+    with (
+        patch.object(urllib.request, "urlopen", return_value=_Response(envelope)),
+        pytest.raises(RuntimeError, match="did not include html"),
+    ):
+        firecrawl_backend._scrape_once(
+            source,
+            api_key="fc-canary",
+            formats=["rawHtml"],
+        )
+
+
+def test_shared_cascade_result_preserves_scrape_do_backend() -> None:
+    from app import hsreplay_card_periods
+
     card_list = {"series": {"data": [{"dbfId": 2, "includedPopularity": 3.5}]}}
-    calls = 0
 
-    def urlopen(_request: urllib.request.Request, **_kwargs: object) -> _Response:
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            raise urllib.error.URLError("firecrawl unavailable")
-        return _Response(card_list)
+    async def scrape_card_period_page(_url: str) -> FirecrawlScrape:
+        return FirecrawlScrape(
+            html=json.dumps(card_list),
+            markdown="",
+            screenshot=None,
+            metadata={"backend": "scrape_do", "scrapeDoCreditsUsed": 5},
+            status_code=200,
+            final_url="https://hsreplay.net/analytics/query/card_list/",
+        )
 
-    with patch.object(urllib.request, "urlopen", side_effect=urlopen):
-        result = asyncio.run(fetch_hsreplay_card_period_json("https://hsreplay.net/analytics/query/card_list/"))
+    with patch.object(
+        hsreplay_card_periods,
+        "_scrape_card_period_page",
+        side_effect=scrape_card_period_page,
+    ):
+        result = asyncio.run(
+            fetch_hsreplay_card_period_json(
+                "https://hsreplay.net/analytics/query/card_list/"
+            )
+        )
     assert result.backend == "scrape_do"
     assert result.payload == card_list
-    assert result.attempts == (
-        {"backend": "firecrawl", "state": "failed", "error_type": "URLError"},
-        {"backend": "scrape_do", "state": "ok"},
-    )
+    assert result.attempts == ({"backend": "scrape_do", "state": "ok"},)
 
 
 def test_provider_errors_never_expose_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -115,14 +144,82 @@ def test_provider_errors_never_expose_tokens(monkeypatch: pytest.MonkeyPatch) ->
             io.BytesIO(b"blocked"),
         )
 
-    with patch.object(urllib.request, "urlopen", side_effect=urlopen):
-        with pytest.raises(RuntimeError) as caught:
-            asyncio.run(fetch_hsreplay_card_period_json("https://hsreplay.net/analytics/query/card_list/"))
+    with (
+        patch.object(urllib.request, "urlopen", side_effect=urlopen),
+        pytest.raises(RuntimeError) as caught,
+    ):
+        asyncio.run(
+            fetch_hsreplay_card_period_json(
+                "https://hsreplay.net/analytics/query/card_list/"
+            )
+        )
     message = str(caught.value)
     assert "fc-private-value" not in message
     assert "scrape-private-value" not in message
-    assert "firecrawl=failed" in message
-    assert "scrape_do=failed" in message
+    assert "scrape_do:" in message
+    assert "firecrawl:" in message
+
+
+def test_card_period_uses_one_shared_provider_cascade() -> None:
+    card_list = {"series": {"data": [{"dbfId": 3, "includedPopularity": 4.5}]}}
+    provider_calls: list[str] = []
+
+    def fail_provider(name: str):
+        def fail(*_args: object, **_kwargs: object) -> FirecrawlScrape:
+            provider_calls.append(name)
+            raise RuntimeError(f"{name} unavailable")
+
+        return fail
+
+    def scrapfly_success(*_args: object, **_kwargs: object) -> FirecrawlScrape:
+        provider_calls.append("scrapfly")
+        return FirecrawlScrape(
+            html=json.dumps(card_list),
+            markdown="",
+            screenshot=None,
+            metadata={"backend": "scrapfly", "scrapflyCreditsUsed": 5},
+            status_code=200,
+            final_url="https://hsreplay.net/analytics/query/card_list/",
+        )
+
+    with (
+        patch.object(firecrawl_backend, "scrape_do_token", return_value="configured"),
+        patch.object(firecrawl_backend, "scrapfly_configured", return_value=True),
+        patch.object(
+            firecrawl_backend,
+            "_scrape_via_scrape_do",
+            side_effect=fail_provider("scrape_do"),
+        ),
+        patch.object(
+            firecrawl_backend,
+            "_scrape_via_firecrawl",
+            side_effect=fail_provider("firecrawl"),
+        ),
+        patch.object(
+            firecrawl_backend,
+            "_scrape_via_scrapfly",
+            side_effect=scrapfly_success,
+        ),
+        patch(
+            "app.hsreplay_card_periods.firecrawl_api_key",
+            return_value=None,
+            create=True,
+        ),
+        patch(
+            "app.hsreplay_card_periods._scrape_do_token",
+            return_value=None,
+            create=True,
+        ),
+    ):
+        result = asyncio.run(
+            fetch_hsreplay_card_period_json(
+                "https://hsreplay.net/analytics/query/card_list/"
+            )
+        )
+
+    assert provider_calls == ["scrape_do", "firecrawl", "scrapfly"]
+    assert result.backend == "scrapfly"
+    assert result.payload == card_list
 
 
 def test_ranked_cards_uses_proxy_fallback_after_direct_failure(monkeypatch: pytest.MonkeyPatch) -> None:

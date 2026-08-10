@@ -1,25 +1,26 @@
 from __future__ import annotations
 
 import asyncio
-from copy import deepcopy
 import re
+from collections.abc import Awaitable, Callable
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from itertools import product
-from typing import Any, Awaitable, Callable
+from typing import Any
 from urllib.parse import parse_qs, parse_qsl, quote, urlencode, urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
+from .config import hsguru_current_patch_period
 from .firecrawl_backend import FirecrawlScrape, scrape_source_with_options
-from .config import hsguru_current_patch_period, scrape_do_token
 from .hsguru_auth import hsguru_firecrawl_headers
 from .hsguru_decks import cached_hsguru_catalog_decks
-from .scrape_do_backend import scrape_url
+from .job_run import AtomicJobRunSnapshotWriter, JobRunContext
+from .resource_locks import ResourceLocked, ResourceLockSet
 from .source_state import SourceState
 from .sources import Source
 from .storage import load_dataset, save_dataset, save_status
-
 
 SOURCE_ID = "hsguru_meta_matrix"
 HSGURU_META_URL = "https://www.hsguru.com/meta"
@@ -47,6 +48,7 @@ PERIODS = (*ROLLING_PERIODS, DEFAULT_PATCH_PERIOD, *NAMED_PERIODS)
 COINS = ("any_player",)
 MIN_GAMES = (100, 250, 500, 1000, 2500, 5000)
 CURRENT_MIN_GAMES = 50
+DEFAULT_RUN_DEADLINE_SECONDS = 60 * 60
 
 _FORMAT_QUERY = {"standard": "2", "wild": "1"}
 _REQUIRED_HEADERS = {
@@ -676,7 +678,7 @@ def _current_catalog_coverage(
     }
 
 
-def refresh_current_catalog_deck_join() -> dict[str, Any]:
+def _refresh_current_catalog_deck_join_unlocked() -> dict[str, Any]:
     """Rejoin refreshed deck catalogs into the current archetype snapshot."""
     dataset = load_dataset(SOURCE_ID)
     structured = (((dataset or {}).get("data") or {}).get("structured") or {})
@@ -709,6 +711,28 @@ def refresh_current_catalog_deck_join() -> dict[str, Any]:
     }
 
 
+def refresh_current_catalog_deck_join() -> dict[str, Any]:
+    """Rejoin decks unless the matrix dataset is being refreshed elsewhere."""
+    locks = ResourceLockSet(
+        [SOURCE_ID],
+        metadata={"operation": "refresh_current_catalog_deck_join"},
+    )
+    try:
+        locks.acquire()
+    except ResourceLocked as exc:
+        return {
+            "ok": True,
+            "joined": False,
+            "source_id": SOURCE_ID,
+            **exc.as_outcome(),
+        }
+
+    try:
+        return _refresh_current_catalog_deck_join_unlocked()
+    finally:
+        locks.release()
+
+
 async def _scrape_current_page(
     format_name: str,
     period: str,
@@ -720,74 +744,31 @@ async def _scrape_current_page(
         site="hsguru",
         category="meta_current",
     )
-    firecrawl_error: Exception | None = None
-    try:
-        result = await scrape_source_with_options(
-            source,
-            formats=["html"],
-            only_main_content=True,
-            headers=hsguru_firecrawl_headers(),
-            max_age_ms=0,
-            wait_ms=5_000,
-            timeout_ms=120_000,
-        )
-        parsed = parse_meta_table(result.html)
-        if not parsed.rows:
-            raise RuntimeError("Firecrawl page contained no current-patch meta rows")
-        return _normalize_current_rows(
-            parsed.rows,
-            format_name=format_name,
-            period=period,
-            source_url=url,
-        ), {
-            "format": format_name,
-            "backend": result.backend,
-            "request_credits": result.request_credits,
-            "rows": len(parsed.rows),
-            "duplicate_rows_merged": parsed.duplicate_rows_merged,
-            "duplicate_groups": parsed.duplicate_groups,
-        }
-    except HSGuruMetaDataError:
-        raise
-    except Exception as exc:
-        firecrawl_error = exc
-
-    if not scrape_do_token():
-        raise RuntimeError(f"Firecrawl failed and Scrape.do is not configured: {firecrawl_error}")
-    errors: list[str] = []
-    for super_proxy, attempts in ((False, 2), (True, 3)):
-        for attempt in range(1, attempts + 1):
-            try:
-                result = await scrape_url(url, render=True, super_proxy=super_proxy)
-                parsed = parse_meta_table(result.html)
-                if not parsed.rows:
-                    raise RuntimeError("rendered page contained no meta rows")
-                return _normalize_current_rows(
-                    parsed.rows,
-                    format_name=format_name,
-                    period=period,
-                    source_url=url,
-                ), {
-                    "format": format_name,
-                    "backend": "scrape_do_super" if super_proxy else "scrape_do",
-                    "request_credits": result.request_cost,
-                    "rows": len(parsed.rows),
-                    "duplicate_rows_merged": parsed.duplicate_rows_merged,
-                    "duplicate_groups": parsed.duplicate_groups,
-                    "attempt": attempt,
-                }
-            except HSGuruMetaDataError:
-                raise
-            except Exception as exc:
-                errors.append(
-                    f"{'super' if super_proxy else 'standard'} attempt {attempt}: {exc}"
-                )
-                if attempt < attempts:
-                    await asyncio.sleep(min(attempt * 2, 4))
-    raise RuntimeError(
-        f"Current {format_name} catalog failed; firecrawl={firecrawl_error}; "
-        + "; ".join(errors)
+    result = await scrape_source_with_options(
+        source,
+        formats=["html"],
+        only_main_content=True,
+        headers=hsguru_firecrawl_headers(),
+        max_age_ms=0,
+        wait_ms=5_000,
+        timeout_ms=120_000,
     )
+    parsed = parse_meta_table(result.html)
+    if not parsed.rows:
+        raise RuntimeError("Provider cascade returned no current-patch meta rows")
+    return _normalize_current_rows(
+        parsed.rows,
+        format_name=format_name,
+        period=period,
+        source_url=url,
+    ), {
+        "format": format_name,
+        "backend": result.backend,
+        "request_credits": result.request_credits,
+        "rows": len(parsed.rows),
+        "duplicate_rows_merged": parsed.duplicate_rows_merged,
+        "duplicate_groups": parsed.duplicate_groups,
+    }
 
 
 def _record_current_history(rows: list[dict[str, Any]], fetched_at: str) -> None:
@@ -857,31 +838,7 @@ async def _default_scrape(spec: SliceSpec) -> FirecrawlScrape:
         site="hsguru",
         category="meta_matrix_slice",
     )
-    primary_error: Exception | None = None
-    if scrape_do_token():
-        try:
-            scraped = await scrape_url(
-                spec.url,
-                render=True,
-                super_proxy=True,
-            )
-            return FirecrawlScrape(
-                html=scraped.html,
-                markdown="",
-                screenshot=scraped.screenshot,
-                metadata={
-                    "backend": "scrape_do_super",
-                    "creditsUsed": 0,
-                    "scrapeDoCreditsUsed": scraped.request_cost,
-                    "scrapeDoRemainingCredits": scraped.credits_remaining,
-                },
-                status_code=scraped.status_code,
-                final_url=scraped.final_url,
-            )
-        except Exception as exc:
-            primary_error = exc
-
-    fallback = await scrape_source_with_options(
+    return await scrape_source_with_options(
         source,
         formats=["html"],
         only_main_content=True,
@@ -890,28 +847,9 @@ async def _default_scrape(spec: SliceSpec) -> FirecrawlScrape:
         wait_ms=5_000,
         timeout_ms=120_000,
     )
-    if primary_error is None:
-        return fallback
-    metadata = dict(fallback.metadata)
-    metadata["providerChain"] = [
-        {
-            "backend": "scrape_do_super",
-            "state": "failed",
-            "error_type": type(primary_error).__name__,
-        },
-        {"backend": fallback.backend, "state": "ok"},
-    ]
-    return FirecrawlScrape(
-        html=fallback.html,
-        markdown=fallback.markdown,
-        screenshot=fallback.screenshot,
-        metadata=metadata,
-        status_code=fallback.status_code,
-        final_url=fallback.final_url,
-    )
 
 
-async def refresh_hsguru_meta_matrix(
+async def _refresh_hsguru_meta_matrix_unlocked(
     *,
     concurrency: int = 2,
     attempts: int = 3,
@@ -924,7 +862,16 @@ async def refresh_hsguru_meta_matrix(
         [dict[str, Any] | None],
         Awaitable[tuple[str, dict[str, Any] | None]],
     ] = _discover_hsguru_patch_period,
+    run_context: JobRunContext | None = None,
+    deadline_seconds: float = DEFAULT_RUN_DEADLINE_SECONDS,
 ) -> dict[str, Any]:
+    run = run_context or JobRunContext.start(
+        timeout_seconds=deadline_seconds,
+        total_slices=0,
+        snapshot_writer=AtomicJobRunSnapshotWriter.for_job(SOURCE_ID),
+        heartbeat_interval_seconds=30,
+    )
+    run.heartbeat(phase="patch_discovery")
     fetched_at = datetime.now(UTC).isoformat()
     cached_dataset = load_dataset(SOURCE_ID)
     discovery_errors: list[dict[str, str]] = []
@@ -943,15 +890,37 @@ async def refresh_hsguru_meta_matrix(
         )
     periods = matrix_periods(current_period)
     specs = iter_slice_specs(periods)
+    run.set_total_slices(len(specs) + len(FORMATS))
+    run.heartbeat(phase="matrix_slices")
     semaphore = asyncio.Semaphore(max(1, min(concurrency, 5)))
     errors: list[dict[str, str]] = list(discovery_errors)
     slice_acquisition: list[dict[str, Any]] = []
 
     async def fetch_one(spec: SliceSpec) -> dict[str, Any] | None:
         last_error: Exception | None = None
+        started = False
         for attempt in range(1, max(1, attempts) + 1):
             try:
                 async with semaphore:
+                    if not started:
+                        if not run.try_start_slice():
+                            errors.append(
+                                {
+                                    "key": spec.key,
+                                    "error": (
+                                        "JobDeadlineExceeded: run deadline reached "
+                                        "before slice start"
+                                    ),
+                                }
+                            )
+                            return None
+                        started = True
+                    elif run.deadline_reached():
+                        run.mark_timed_out()
+                        last_error = TimeoutError(
+                            "run deadline reached before slice retry"
+                        )
+                        break
                     result = await scrape(spec)
                 slice_acquisition.append(
                     {
@@ -966,7 +935,7 @@ async def refresh_hsguru_meta_matrix(
                 parsed = parse_meta_table(result.html)
                 # Sparse premium ranks (Top-100/Top-500) can legitimately return an
                 # empty table for short periods; still publish the slice.
-                return {
+                item = {
                     "key": spec.key,
                     "format": spec.format,
                     "rank": spec.rank,
@@ -989,6 +958,8 @@ async def refresh_hsguru_meta_matrix(
                         "duplicate_groups": parsed.duplicate_groups,
                     },
                 }
+                run.finish_slice(succeeded=True)
+                return item
             except HSGuruMetaDataError as exc:
                 last_error = exc
                 break
@@ -1007,6 +978,8 @@ async def refresh_hsguru_meta_matrix(
                 "error": f"{type(last_error).__name__}: {str(last_error)[:300]}",
             }
         )
+        if started:
+            run.finish_slice(succeeded=False)
         return None
 
     fresh_slices = [
@@ -1035,15 +1008,41 @@ async def refresh_hsguru_meta_matrix(
     )
     current_rows: list[dict[str, Any]] = []
     current_acquisition: list[dict[str, Any]] = []
+
+    async def fetch_current(
+        format_name: str,
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]] | None:
+        if not run.try_start_slice():
+            errors.append(
+                {
+                    "key": f"current|{format_name}|{current_period}",
+                    "error": (
+                        "JobDeadlineExceeded: run deadline reached before "
+                        "current-catalog slice start"
+                    ),
+                }
+            )
+            return None
+        try:
+            result = await scrape_current(format_name, current_period)
+        except BaseException:
+            run.finish_slice(succeeded=False)
+            raise
+        run.finish_slice(succeeded=True)
+        return result
+
+    run.heartbeat(phase="current_catalog")
     try:
         current_results = await asyncio.gather(
             *(
-                scrape_current(format_name, current_period)
+                fetch_current(format_name)
                 for format_name in FORMATS
             ),
             return_exceptions=True,
         )
         for format_name, result in zip(FORMATS, current_results, strict=True):
+            if result is None:
+                continue
             if isinstance(result, Exception):
                 errors.append(
                     {
@@ -1159,11 +1158,20 @@ async def refresh_hsguru_meta_matrix(
     if patch_discovery_acquisition and patch_discovery_acquisition.get("backend"):
         active_backends.add(str(patch_discovery_acquisition["backend"]))
     dataset_backend = "+".join(sorted(active_backends)) or "cache"
+    run.heartbeat(phase="finalizing")
+    if run.deadline_reached():
+        run.mark_timed_out()
     publishable = (
         len(slices) == len(specs)
         and current_complete
+        and not run.timed_out
     )
     complete = publishable and cached_slice_count == 0 and not errors
+    run_state = (
+        SourceState.TIMED_OUT
+        if run.timed_out
+        else SourceState.OK if complete else SourceState.PARTIAL
+    )
     structured = {
         "type": "hsguru_meta_matrix",
         "schema_version": 8,
@@ -1241,6 +1249,12 @@ async def refresh_hsguru_meta_matrix(
         ]
         _record_current_history(fresh_current_rows, fetched_at)
         save_dataset(SOURCE_ID, dataset)
+    terminal_phase = (
+        str(SourceState.TIMED_OUT)
+        if run.timed_out
+        else "complete" if complete else str(SourceState.PARTIAL)
+    )
+    run.finalize(phase=terminal_phase)
     save_status(
         SOURCE_ID,
         {
@@ -1248,19 +1262,29 @@ async def refresh_hsguru_meta_matrix(
             "site": "hsguru",
             "category": "meta_matrix",
             "url": HSGURU_META_URL,
-            "state": SourceState.OK if complete else SourceState.PARTIAL,
+            "state": run_state,
             "fetched_at": fetched_at,
             "http_status": 200 if complete else None,
             "backend": dataset_backend,
             "detail": (
-                f"HSGuru matrix: {len(fresh_slices)} fresh + "
-                f"{cached_slice_count} cached / {len(specs)} slices, "
-                f"{len(slices) * len(MIN_GAMES)}/{len(specs) * len(MIN_GAMES)} logical slices."
+                f"HSGuru matrix timed out: {len(fresh_slices)} fresh + "
+                f"{cached_slice_count} cached / {len(specs)} slices; "
+                "the last-known-good dataset was preserved."
+                if run.timed_out
+                else (
+                    f"HSGuru matrix: {len(fresh_slices)} fresh + "
+                    f"{cached_slice_count} cached / {len(specs)} slices, "
+                    f"{len(slices) * len(MIN_GAMES)}/"
+                    f"{len(specs) * len(MIN_GAMES)} logical slices."
+                )
             ),
             "errors": errors[:20],
             "serving_cached_dataset": bool(cached_dataset) and not complete,
-            "last_refresh_state": SourceState.OK if complete else SourceState.PARTIAL,
+            "last_refresh_state": run_state,
             "last_refresh_at": fetched_at,
+            "run_id": run.run_id,
+            "timed_out": run.timed_out,
+            "job_run": run.snapshot(),
             "firecrawl_requests": firecrawl_requests,
             "scrape_do_requests": scrape_do_requests,
             "firecrawl_credits_used": structured["firecrawl"]["credits_used"],
@@ -1284,6 +1308,9 @@ async def refresh_hsguru_meta_matrix(
         "ok": publishable,
         "published": publishable,
         "complete": complete,
+        "state": run_state,
+        "timed_out": run.timed_out,
+        "job_run": run.snapshot(),
         "serving_cached_dataset": bool(cached_dataset) and not complete,
         "source_id": SOURCE_ID,
         "fetched_at": fetched_at,
@@ -1301,3 +1328,48 @@ async def refresh_hsguru_meta_matrix(
         "content_length": content_length,
         "errors": errors,
     }
+
+
+async def refresh_hsguru_meta_matrix(
+    *,
+    concurrency: int = 2,
+    attempts: int = 3,
+    scrape: Callable[[SliceSpec], Awaitable[FirecrawlScrape]] = _default_scrape,
+    scrape_current: Callable[
+        [str, str],
+        Awaitable[tuple[list[dict[str, Any]], dict[str, Any]]],
+    ] = _scrape_current_page,
+    discover_patch: Callable[
+        [dict[str, Any] | None],
+        Awaitable[tuple[str, dict[str, Any] | None]],
+    ] = _discover_hsguru_patch_period,
+    run_context: JobRunContext | None = None,
+    deadline_seconds: float = DEFAULT_RUN_DEADLINE_SECONDS,
+) -> dict[str, Any]:
+    """Refresh the matrix unless another process already owns its resource."""
+    locks = ResourceLockSet(
+        [SOURCE_ID],
+        metadata={"operation": "refresh_hsguru_meta_matrix"},
+    )
+    try:
+        locks.acquire()
+    except ResourceLocked as exc:
+        return {
+            "ok": True,
+            "published": False,
+            "source_id": SOURCE_ID,
+            **exc.as_outcome(),
+        }
+
+    try:
+        return await _refresh_hsguru_meta_matrix_unlocked(
+            concurrency=concurrency,
+            attempts=attempts,
+            scrape=scrape,
+            scrape_current=scrape_current,
+            discover_patch=discover_patch,
+            run_context=run_context,
+            deadline_seconds=deadline_seconds,
+        )
+    finally:
+        locks.release()

@@ -14,7 +14,6 @@ from app.fetcher import (
     _source_uses_residential_proxy,
     _status_payload,
 )
-from app.fetcher import RefreshLock
 from app.refresh_log import runtime_version_info
 from app.api_only_sources import blocks_browser_fallback
 from app.hsreplay_cards_api import (
@@ -69,11 +68,6 @@ class RefreshStabilityTest(unittest.TestCase):
                 backups = sorted((Path(td) / "backups" / "datasets").glob("example_source.*.json"))
 
                 self.assertLessEqual(len(backups), 5)
-
-    def test_refresh_lock_uses_current_data_dir(self) -> None:
-        with TemporaryDirectory() as td:
-            with patch("app.fetcher.data_dir", return_value=Path(td)):
-                self.assertEqual(RefreshLock().path, Path(td) / ".refresh.lock")
 
     def test_status_payload_includes_runtime_metadata(self) -> None:
         source = Source(

@@ -447,10 +447,13 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if result.get("ok") else 1
     if args.command == "rebuild-hsreplay-index":
         from .firecrawl_map import build_hsreplay_index
-        from .fetcher import RefreshLock
+        from .resource_locks import ResourceLocked, ResourceLockSet
 
-        with RefreshLock():
-            result = build_hsreplay_index()
+        try:
+            with ResourceLockSet(["derived:hsreplay-index"]):
+                result = build_hsreplay_index()
+        except ResourceLocked as exc:
+            result = {"ok": True, **exc.as_outcome()}
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0 if result.get("ok") else 1
     if args.command == "refresh-hsreplay-archetypes":

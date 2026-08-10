@@ -1,17 +1,18 @@
 from __future__ import annotations
 
+import asyncio
 import unittest
 from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 
 from app.hsguru_archetype_analysis import (
+    _fetch_html,
     analysis_urls,
     parse_card_stats_html,
     parse_class_matchups_html,
     refresh_hsguru_archetype_analysis,
 )
-
 
 MATCHUPS_HTML = """
 <table>
@@ -81,6 +82,73 @@ CARD_STATS_LIVE_CELL_HTML = """
 
 
 class HSGuruArchetypeAnalysisTest(unittest.TestCase):
+    def test_fetch_html_runs_one_shared_provider_cascade_without_retries(self) -> None:
+        from app import firecrawl_backend
+
+        provider_calls: list[str] = []
+
+        def fail_provider(name: str):
+            def fail(*_args: object, **_kwargs: object):
+                provider_calls.append(name)
+                raise RuntimeError(f"{name} unavailable")
+
+            return fail
+
+        async def unexpected_extra_scrape_do(*_args: object, **_kwargs: object):
+            provider_calls.append("scrape_do_repeat")
+            raise RuntimeError("unexpected repeated Scrape.do request")
+
+        async def no_sleep(*_args: object, **_kwargs: object) -> None:
+            return None
+
+        with (
+            patch.object(
+                firecrawl_backend, "scrape_do_token", return_value="configured"
+            ),
+            patch.object(firecrawl_backend, "scrapfly_configured", return_value=True),
+            patch.object(
+                firecrawl_backend,
+                "_scrape_via_scrape_do",
+                side_effect=fail_provider("scrape_do"),
+            ),
+            patch.object(
+                firecrawl_backend,
+                "_scrape_via_firecrawl",
+                side_effect=fail_provider("firecrawl"),
+            ),
+            patch.object(
+                firecrawl_backend,
+                "_scrape_via_scrapfly",
+                side_effect=fail_provider("scrapfly"),
+            ),
+            patch(
+                "app.hsguru_archetype_analysis.peek_firecrawl_key",
+                return_value=object(),
+                create=True,
+            ),
+            patch(
+                "app.hsguru_archetype_analysis.scrape_do_token",
+                return_value="configured",
+                create=True,
+            ),
+            patch(
+                "app.hsguru_archetype_analysis.scrape_url",
+                side_effect=unexpected_extra_scrape_do,
+                create=True,
+            ),
+            patch(
+                "app.hsguru_archetype_analysis.asyncio.sleep",
+                side_effect=no_sleep,
+            ),
+            self.assertRaisesRegex(RuntimeError, "All scrape providers failed"),
+        ):
+            asyncio.run(_fetch_html("https://www.hsguru.com/archetype/example"))
+
+        self.assertEqual(
+            provider_calls,
+            ["scrape_do", "firecrawl", "scrapfly"],
+        )
+
     def test_parses_class_matchups_and_excludes_total(self) -> None:
         rows = parse_class_matchups_html(MATCHUPS_HTML)
 
