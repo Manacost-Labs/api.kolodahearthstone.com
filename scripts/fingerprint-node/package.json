@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "fingerprint-generator": "^2.1.66",
-    "header-generator": "^2.1.66"
+    "fingerprint-generator": "^2.1.88",
+    "header-generator": "^2.1.88"
   }
 }
