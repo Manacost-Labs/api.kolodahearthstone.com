@@ -110,11 +110,11 @@ def _scrape_once(
                 key.lower(): value for key, value in response.headers.items()
             }
     except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
-        # exc.url contains the provider key and must never enter logs/errors.
-        raise RuntimeError(f"Scrapfly HTTP {exc.code}: {detail[:300]}") from exc
-    except urllib.error.URLError as exc:
-        raise RuntimeError(f"Scrapfly transport error: {exc.reason}") from exc
+        # Both exc.url and the remote response body may reflect the provider key
+        # or the target URL query. Keep the error deliberately metadata-only.
+        raise RuntimeError(f"Scrapfly HTTP {exc.code}") from None
+    except urllib.error.URLError:
+        raise RuntimeError("Scrapfly transport error") from None
 
     try:
         payload = json.loads(raw.decode("utf-8", errors="replace"))
@@ -128,7 +128,18 @@ def _scrape_once(
         )
     if result.get("success") is False:
         error = result.get("error") or payload.get("error") or "scrape failed"
-        raise RuntimeError(f"Scrapfly scrape failed: {error}")
+        try:
+            status_code = int(result.get("status_code"))
+        except (TypeError, ValueError):
+            status_code = None
+        if status_code is not None and 100 <= status_code <= 599:
+            suffix = f" (HTTP {status_code})"
+        elif is_scrapfly_credit_error(RuntimeError(str(error))):
+            suffix = " (credit limit)"
+        else:
+            suffix = ""
+        # Provider payloads are untrusted and may reflect credentials or URLs.
+        raise RuntimeError(f"Scrapfly scrape failed{suffix}")
 
     content = result.get("content")
     html = str(content) if isinstance(content, str) else ""

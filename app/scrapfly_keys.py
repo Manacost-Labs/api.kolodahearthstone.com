@@ -95,22 +95,22 @@ def parse_scrapfly_api_keys(raw: str | None = None) -> list[ScrapflyKey]:
     seen: set[str] = set()
 
     if text:
-        for part in text.split(","):
+        for position, part in enumerate(text.split(","), start=1):
             entry = part.strip().strip('"').strip("'")
             if not entry:
                 continue
             match = _KEY_ENTRY_RE.match(entry)
             if not match:
                 raise ValueError(
-                    "Invalid HS_SCRAPFLY_API_KEYS entry "
-                    f"(expected label|scp-…|limit): {entry[:48]}"
+                    "Invalid HS_SCRAPFLY_API_KEYS entry at "
+                    f"position {position} (expected label|scp-…|limit)"
                 )
             label = match.group("label").strip().lower()
             key = match.group("key").strip()
             limit_raw = match.group("limit")
             limit = int(limit_raw) if limit_raw else default_limit
             if label in seen:
-                raise ValueError(f"Duplicate Scrapfly key label: {label}")
+                raise ValueError(f"Duplicate Scrapfly key label at position {position}")
             seen.add(label)
             keys.append(ScrapflyKey(label=label, key=key, credit_limit=max(1, limit)))
 

@@ -15,7 +15,7 @@ def rotation_env(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("HS_FIRECRAWL_KEY_ROTATION_CREDITS", "1000")
     monkeypatch.delenv("FIRECRAWL_API_KEY", raising=False)
     monkeypatch.delenv("HS_FIRECRAWL_API_KEY", raising=False)
-    pool = ",".join(
+    pool = ",".join(  # noqa: FLY002 - static fixture entries
         [
             "alpha@example.com|fc-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|1000",
             "beta@example.com|fc-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb|1000",
@@ -34,6 +34,17 @@ def test_parse_firecrawl_api_keys(rotation_env):
         "whitehorses0888@gmail.com",
     ]
     assert keys[-1].credit_limit == 5000
+
+
+def test_malformed_firecrawl_key_error_never_exposes_raw_entry():
+    canary = "fc-CANARYFIRECRAWLSECRET123"
+
+    with pytest.raises(ValueError) as caught:
+        fk.parse_firecrawl_api_keys(f"primary|{canary}:invalid|1000")
+
+    message = str(caught.value)
+    assert canary not in message
+    assert "position 1" in message
 
 
 def test_rotates_after_credit_limit(rotation_env):

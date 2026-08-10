@@ -341,8 +341,10 @@ def _scrape_once(
         raise RuntimeError(f"Firecrawl scrape failed: {body}")
 
     data = body.get("data") or {}
-    html = data.get("html") or ""
-    if not html and any(fmt == "html" for fmt in (formats or ["html", "markdown"])):
+    html = data.get("html") or data.get("rawHtml") or ""
+    if not html and any(
+        fmt in ("html", "rawHtml") for fmt in (formats or ["html", "markdown"])
+    ):
         raise RuntimeError("Firecrawl response did not include html")
     metadata = dict(data.get("metadata") or {})
     metadata.setdefault("backend", "firecrawl")

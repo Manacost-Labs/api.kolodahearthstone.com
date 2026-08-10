@@ -10,8 +10,11 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
-from .config import data_dir, firecrawl_default_key_credit_limit, firecrawl_key_reset_day
-
+from .config import (
+    data_dir,
+    firecrawl_default_key_credit_limit,
+    firecrawl_key_reset_day,
+)
 
 _KEY_ENTRY_RE = re.compile(
     r"^(?P<label>[^|]+)\|(?P<key>fc-[A-Za-z0-9]+)(?:\|(?P<limit>\d+))?$"
@@ -93,22 +96,24 @@ def parse_firecrawl_api_keys(raw: str | None = None) -> list[FirecrawlKey]:
     seen: set[str] = set()
 
     if text:
-        for part in text.split(","):
+        for position, part in enumerate(text.split(","), start=1):
             entry = part.strip()
             if not entry:
                 continue
             match = _KEY_ENTRY_RE.match(entry)
             if not match:
                 raise ValueError(
-                    "Invalid HS_FIRECRAWL_API_KEYS entry "
-                    f"(expected label|fc-…|limit): {entry[:48]}"
+                    "Invalid HS_FIRECRAWL_API_KEYS entry at "
+                    f"position {position} (expected label|fc-…|limit)"
                 )
             label = match.group("label").strip().lower()
             key = match.group("key").strip()
             limit_raw = match.group("limit")
             limit = int(limit_raw) if limit_raw else default_limit
             if label in seen:
-                raise ValueError(f"Duplicate Firecrawl key label: {label}")
+                raise ValueError(
+                    f"Duplicate Firecrawl key label at position {position}"
+                )
             seen.add(label)
             keys.append(FirecrawlKey(label=label, key=key, credit_limit=max(1, limit)))
 
