@@ -247,6 +247,33 @@ def scrape_do_timeout_seconds() -> float:
     return max(15.0, float(os.environ.get("HS_SCRAPE_DO_TIMEOUT_SECONDS", "120")))
 
 
+def scrapfly_api_key() -> str | None:
+    """Return the active Scrapfly key without exposing it in logs."""
+    from .scrapfly_keys import parse_scrapfly_api_keys, peek_scrapfly_key
+
+    if parse_scrapfly_api_keys():
+        lease = peek_scrapfly_key()
+        return lease.key.key if lease else None
+    value = (
+        os.environ.get("SCRAPFLY_API_KEY")
+        or os.environ.get("HS_SCRAPFLY_API_KEY")
+        or ""
+    ).strip()
+    return value or None
+
+
+def scrapfly_default_key_credit_limit() -> int:
+    return max(1, int(os.environ.get("HS_SCRAPFLY_KEY_ROTATION_CREDITS", "1000")))
+
+
+def scrapfly_key_reset_day() -> int:
+    return max(1, min(28, int(os.environ.get("HS_SCRAPFLY_KEY_RESET_DAY", "22"))))
+
+
+def scrapfly_timeout_seconds() -> float:
+    return max(160.0, float(os.environ.get("HS_SCRAPFLY_TIMEOUT_SECONDS", "160")))
+
+
 def hsguru_current_patch_period() -> str | None:
     value = os.environ.get("HS_HSGURU_PATCH_PERIOD", "").strip()
     if not value or value.lower() == "auto":

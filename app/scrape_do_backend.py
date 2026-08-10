@@ -5,13 +5,46 @@ import json
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Mapping
 
 from .config import scrape_do_timeout_seconds, scrape_do_token
 
-
 SCRAPE_DO_URL = "https://api.scrape.do/"
+SCRAPE_DO_MIN_TIMEOUT_MS = 5_000
+SCRAPE_DO_MAX_TIMEOUT_MS = 120_000
+SCRAPE_DO_MIN_RETRY_TIMEOUT_MS = 5_000
+SCRAPE_DO_MAX_RETRY_TIMEOUT_MS = 55_000
+
+_TRANSIENT_HTTP_STATUSES = frozenset({408, 425, 429, 500, 502, 503, 504})
+_ACCOUNT_HTTP_STATUSES = frozenset({401})
+
+
+class ScrapeDoRequestError(RuntimeError):
+    """A Scrape.do failure with an explicit retry classification."""
+
+    retryable = False
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        retry_after_seconds: float | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.retry_after_seconds = retry_after_seconds
+
+
+class ScrapeDoTransientError(ScrapeDoRequestError):
+    """A temporary provider, concurrency, or transport failure."""
+
+    retryable = True
+
+
+class ScrapeDoAccountError(ScrapeDoRequestError):
+    """The Scrape.do subscription or token cannot currently serve requests."""
 
 
 @dataclass(frozen=True)
@@ -39,14 +72,41 @@ def _header_int(headers: Mapping[str, str], name: str) -> int | None:
         return None
 
 
+def _retry_after_seconds(headers: Mapping[str, str]) -> float | None:
+    value = headers.get("Retry-After") or headers.get("retry-after")
+    if value is None:
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return max(0.0, parsed)
+
+
+def _clamp_timeout_ms(timeout_ms: int) -> int:
+    return min(
+        SCRAPE_DO_MAX_TIMEOUT_MS,
+        max(SCRAPE_DO_MIN_TIMEOUT_MS, int(timeout_ms)),
+    )
+
+
+def _clamp_retry_timeout_ms(retry_timeout_ms: int) -> int:
+    return min(
+        SCRAPE_DO_MAX_RETRY_TIMEOUT_MS,
+        max(SCRAPE_DO_MIN_RETRY_TIMEOUT_MS, int(retry_timeout_ms)),
+    )
+
+
 def scrape_url_sync(
     url: str,
     *,
     render: bool = True,
     super_proxy: bool = False,
     headers: Mapping[str, str] | None = None,
+    forward_headers: bool = False,
     wait_ms: int | None = None,
     timeout_ms: int | None = None,
+    retry_timeout_ms: int | None = None,
     screenshot: bool = False,
     full_screenshot: bool = False,
 ) -> ScrapeDoScrape:
@@ -54,31 +114,44 @@ def scrape_url_sync(
     if not token:
         raise RuntimeError("Scrape.do token is not configured")
     params = {
-        'token': token,
-        'url': url,
-        'render': str(bool(render)).lower(),
-        **({'super': 'true'} if super_proxy else {}),
+        "token": token,
+        "url": url,
+        "render": str(bool(render)).lower(),
+        **({"super": "true"} if super_proxy else {}),
     }
     if headers:
-        params["forwardHeaders"] = "true"
+        params["forwardHeaders" if forward_headers else "extraHeaders"] = "true"
     if wait_ms is not None and render:
         params["customWait"] = str(max(0, int(wait_ms)))
     if timeout_ms is not None:
-        params["timeout"] = str(max(1_000, int(timeout_ms)))
+        params["timeout"] = str(_clamp_timeout_ms(timeout_ms))
+    # retryTimeout is supported only by Scrape.do's non-rendered request path.
+    if retry_timeout_ms is not None and not render:
+        params["retryTimeout"] = str(_clamp_retry_timeout_ms(retry_timeout_ms))
     if screenshot:
         params["returnJSON"] = "true"
         params["fullScreenShot" if full_screenshot else "screenShot"] = "true"
     endpoint = f"{SCRAPE_DO_URL}?{urllib.parse.urlencode(params)}"
-    request_headers = dict(headers or {})
+    request_headers = (
+        dict(headers or {})
+        if forward_headers
+        else {f"Sd-{name}": value for name, value in (headers or {}).items()}
+    )
     request_headers.setdefault("User-Agent", "HSDataAPI/0.1 Scrape.do fallback")
     request = urllib.request.Request(
         endpoint,
         headers=request_headers,
     )
+    request_timeout = scrape_do_timeout_seconds()
+    if timeout_ms is not None:
+        request_timeout = min(
+            request_timeout,
+            (_clamp_timeout_ms(timeout_ms) / 1000) + 15,
+        )
     try:
         with urllib.request.urlopen(
             request,
-            timeout=scrape_do_timeout_seconds(),
+            timeout=request_timeout,
         ) as response:
             raw = response.read()
             response_headers = {
@@ -93,9 +166,25 @@ def scrape_url_sync(
     except urllib.error.HTTPError as exc:
         # Do not include exc.url: Scrape.do puts the secret token in it.
         detail = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"Scrape.do HTTP {exc.code}: {detail[:300]}") from exc
+        detail = detail.replace(token, "<redacted>")
+        error_type: type[ScrapeDoRequestError]
+        if exc.code in _TRANSIENT_HTTP_STATUSES:
+            error_type = ScrapeDoTransientError
+        elif exc.code in _ACCOUNT_HTTP_STATUSES:
+            error_type = ScrapeDoAccountError
+        else:
+            error_type = ScrapeDoRequestError
+        raise error_type(
+            f"Scrape.do HTTP {exc.code}: {detail[:300]}",
+            status_code=exc.code,
+            retry_after_seconds=_retry_after_seconds(exc.headers or {}),
+        ) from exc
     except urllib.error.URLError as exc:
-        raise RuntimeError(f"Scrape.do transport error: {exc.reason}") from exc
+        raise ScrapeDoTransientError(
+            f"Scrape.do transport error: {exc.reason}"
+        ) from exc
+    except TimeoutError as exc:
+        raise ScrapeDoTransientError("Scrape.do request timed out") from exc
     body = raw.decode("utf-8", errors="replace")
     image: str | None = None
     html = body
@@ -103,7 +192,9 @@ def scrape_url_sync(
         try:
             payload = json.loads(body)
         except json.JSONDecodeError as exc:
-            raise RuntimeError("Scrape.do screenshot response is not valid JSON") from exc
+            raise RuntimeError(
+                "Scrape.do screenshot response is not valid JSON"
+            ) from exc
         shots = payload.get("screenShots") if isinstance(payload, dict) else None
         if isinstance(shots, list) and shots and isinstance(shots[0], dict):
             value = shots[0].get("image")
@@ -116,7 +207,9 @@ def scrape_url_sync(
         raise RuntimeError("Scrape.do returned an empty body")
     request_cost = _header_int(response_headers, "scrape.do-request-cost")
     if request_cost is None:
-        request_cost = 25 if render and super_proxy else 10 if super_proxy else 5 if render else 1
+        request_cost = (
+            25 if render and super_proxy else 10 if super_proxy else 5 if render else 1
+        )
     return ScrapeDoScrape(
         html=html,
         status_code=status_code,
@@ -137,8 +230,10 @@ async def scrape_url(
     render: bool = True,
     super_proxy: bool = False,
     headers: Mapping[str, str] | None = None,
+    forward_headers: bool = False,
     wait_ms: int | None = None,
     timeout_ms: int | None = None,
+    retry_timeout_ms: int | None = None,
     screenshot: bool = False,
     full_screenshot: bool = False,
 ) -> ScrapeDoScrape:
@@ -148,8 +243,10 @@ async def scrape_url(
         render=render,
         super_proxy=super_proxy,
         headers=headers,
+        forward_headers=forward_headers,
         wait_ms=wait_ms,
         timeout_ms=timeout_ms,
+        retry_timeout_ms=retry_timeout_ms,
         screenshot=screenshot,
         full_screenshot=full_screenshot,
     )
