@@ -83,8 +83,8 @@ python -m app.cli proxy-rotation-check     # 8 выборок, список uniq
 
 ```mermaid
 flowchart TB
-    lock[RefreshLock]
-    lock --> p1[Phase1 light_api parallel max 5]
+    locks[Persistent per-source ResourceLockSet in .locks]
+    locks --> p1[Phase1 light_api parallel max 5]
     p1 --> p2[Phase2 medium_api parallel max 2]
     p2 --> p3[Phase3 browser_patchright serial]
     p3 --> p4[Phase4 browser_protected serial + FlareSolverr]

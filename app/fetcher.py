@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-import fcntl
 import html
 import logging
-import os
 import random
 import time
 from collections import Counter
+from contextlib import ExitStack
 from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import Any
@@ -15,7 +14,6 @@ from typing import Any
 import httpx
 
 from .config import (
-    data_dir,
     fetch_backends,
     fetch_direct_enabled,
     fetch_proxy_url,
@@ -34,6 +32,7 @@ from .config import (
     request_timeout_seconds,
     user_agent,
 )
+from .resource_locks import ResourceLocked, ResourceLockSet
 from .source_state import EFFECTIVE_OK_CACHED, FAILURE_STATES, SourceState
 from .source_tiers import (
     API_FIRST_TIERS,
@@ -435,29 +434,6 @@ async def _maybe_cached_after_failure_alert(source: Source, status: dict[str, An
         },
     )
     await send_telegram_alert(source.id, "cached_after_failure", detail, source.url)
-
-
-class RefreshLock:
-    def __init__(self, path: Any | None = None) -> None:
-        self.path = path if path is not None else data_dir() / ".refresh.lock"
-        self._fh = None
-
-    def __enter__(self) -> RefreshLock:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._fh = self.path.open("w")
-        try:
-            fcntl.flock(self._fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
-            raise RuntimeError("Another refresh is already running") from exc
-        self._fh.write(f"pid={os.getpid()}\n")
-        self._fh.flush()
-        return self
-
-    def __exit__(self, *args: object) -> None:
-        if self._fh is not None:
-            fcntl.flock(self._fh.fileno(), fcntl.LOCK_UN)
-            self._fh.close()
-            self.path.unlink(missing_ok=True)
 
 
 async def _fetch_direct(_client: httpx.AsyncClient, source: Source) -> tuple[str, int, str]:
@@ -2361,12 +2337,46 @@ async def refresh_sources(
     tier: str | None = None,
     respect_section_controls: bool = False,
 ) -> list[dict[str, Any]]:
-    with RefreshLock():
-        return await _refresh_sources_unlocked(
-            source_ids,
+    lock_source_ids = _refresh_lock_source_ids(source_ids, tier=tier)
+    available_source_ids: list[str] = []
+    locked_outcomes: list[dict[str, Any]] = []
+    with ExitStack() as acquired_locks:
+        for source_id in lock_source_ids:
+            try:
+                acquired_locks.enter_context(
+                    ResourceLockSet([source_id], metadata={"operation": "refresh"})
+                )
+            except ResourceLocked as exc:
+                locked_outcomes.append({"source_id": source_id, **exc.as_outcome()})
+            else:
+                available_source_ids.append(source_id)
+
+        if not available_source_ids:
+            return locked_outcomes
+
+        refresh_source_ids = source_ids
+        if locked_outcomes:
+            refresh_source_ids = available_source_ids
+        refreshed = await _refresh_sources_unlocked(
+            refresh_source_ids,
             tier_filter=tier,
             respect_section_controls=respect_section_controls,
         )
+        return [*refreshed, *locked_outcomes]
+
+
+def _refresh_lock_source_ids(
+    source_ids: list[str] | None,
+    *,
+    tier: str | None,
+) -> list[str]:
+    if source_ids:
+        return sorted(set(source_ids))
+    selected = [source for source in SOURCES if source.kind == "scrape"]
+    if tier is not None:
+        tier_filter = SourceTier(tier)
+        selected = [source for source in selected if tier_for(source.id) == tier_filter]
+    return sorted(source.id for source in selected)
 
 
 async def _run_browser_phase(

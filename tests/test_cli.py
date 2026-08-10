@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import io
+import json
 import os
+import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import unittest
 from unittest.mock import patch
 
 from app import cli
+from app.resource_locks import ResourceLocked
 from app.sources import Source
 
 
@@ -197,17 +201,48 @@ class CliTest(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         generic_validate.assert_not_called()
 
-    def test_rebuild_index_uses_refresh_lock(self) -> None:
-        with patch("app.fetcher.RefreshLock") as refresh_lock, patch(
+    def test_rebuild_index_uses_derived_resource_lock(self) -> None:
+        with patch("app.resource_locks.ResourceLockSet") as resource_locks, patch(
             "app.firecrawl_map.build_hsreplay_index",
             return_value={"ok": True},
         ) as build:
             exit_code = cli.main(["rebuild-hsreplay-index"])
 
         self.assertEqual(exit_code, 0)
-        refresh_lock.assert_called_once_with()
-        refresh_lock.return_value.__enter__.assert_called_once_with()
+        resource_locks.assert_called_once_with(["derived:hsreplay-index"])
+        resource_locks.return_value.__enter__.assert_called_once_with()
         build.assert_called_once_with()
+
+    def test_rebuild_index_reports_expected_lock_overlap_as_skipped(self) -> None:
+        output = io.StringIO()
+        owner = {
+            "pid": 321,
+            "resource_id": "derived:hsreplay-index",
+            "run_id": "owner-run",
+        }
+        with patch("app.resource_locks.ResourceLockSet") as resource_locks, patch(
+            "app.firecrawl_map.build_hsreplay_index",
+        ) as build:
+            resource_locks.return_value.__enter__.side_effect = ResourceLocked(
+                "derived:hsreplay-index",
+                owner,
+            )
+            with redirect_stdout(output):
+                exit_code = cli.main(["rebuild-hsreplay-index"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            json.loads(output.getvalue()),
+            {
+                "ok": True,
+                "state": "locked",
+                "skipped": True,
+                "reason": "resource_locked",
+                "locked_resource": "derived:hsreplay-index",
+                "owner": owner,
+            },
+        )
+        build.assert_not_called()
 
 
 if __name__ == "__main__":
