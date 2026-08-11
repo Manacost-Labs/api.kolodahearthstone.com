@@ -27,7 +27,8 @@ DECK_CODE_PATTERN = re.compile(
 )
 
 _LIST_PAGE_LIMIT = 20
-_MAX_CLOUD_DETAIL_FETCHES = 8
+_MAX_CLOUD_DETAIL_FETCHES = 40
+_CLOUD_DETAIL_CONCURRENCY = 4
 _ALLOWED_HOSTS = frozenset({"hearthstone-decks.net", "www.hearthstone-decks.net"})
 _LIST_PAGES = (
     ("Standard", "https://hearthstone-decks.net/standard-decks/"),
@@ -423,7 +424,7 @@ async def fetch_hearthstone_decks(source: Source) -> dict[str, Any]:
     force_cloud_details = proxy_unavailable or any(
         backend != "residential_httpx" for backend in backends
     )
-    cloud_detail_attempts = 0
+    cloud_candidates: list[dict[str, Any]] = []
     for deck in missing_details:
         result: dict[str, Any] | None = None
         if not force_cloud_details:
@@ -443,7 +444,7 @@ async def fetch_hearthstone_decks(source: Source) -> dict[str, Any]:
                 backends.add("residential_httpx")
                 continue
 
-        if cloud_detail_attempts >= _MAX_CLOUD_DETAIL_FETCHES:
+        if len(cloud_candidates) >= _MAX_CLOUD_DETAIL_FETCHES:
             deck.update(
                 {
                     "deck_code": "",
@@ -452,14 +453,30 @@ async def fetch_hearthstone_decks(source: Source) -> dict[str, Any]:
                 }
             )
             continue
-        cloud_detail_attempts += 1
-        result, detail_backend = await _fetch_cloud_deck_code(
-            source,
-            str(deck["url"]),
-        )
+
+        cloud_candidates.append(deck)
+
+    detail_semaphore = asyncio.Semaphore(_CLOUD_DETAIL_CONCURRENCY)
+
+    async def fetch_cloud_candidate(
+        deck: dict[str, Any],
+    ) -> tuple[dict[str, Any], str | None]:
+        async with detail_semaphore:
+            return await _fetch_cloud_deck_code(source, str(deck["url"]))
+
+    cloud_results = await asyncio.gather(
+        *(fetch_cloud_candidate(deck) for deck in cloud_candidates)
+    )
+    for deck, (result, detail_backend) in zip(
+        cloud_candidates,
+        cloud_results,
+        strict=True,
+    ):
         deck.update(result)
         if detail_backend:
             backends.add(detail_backend)
+
+    cloud_detail_attempts = len(cloud_candidates)
 
     structured = {
         "type": "hearthstone_decks",

@@ -207,17 +207,28 @@ def test_standard_and_wild_lists_must_not_reuse_the_same_deck_urls() -> None:
         asyncio.run(fetch_hearthstone_decks(SOURCE))
 
 
-def test_cloud_detail_requests_are_bounded_when_no_cached_codes_exist() -> None:
+def test_cloud_detail_requests_cover_current_lists_with_bounded_concurrency() -> None:
     detail_urls: list[str] = []
+    active_details = 0
+    max_active_details = 0
 
     async def cloud(source: Source, **options):
+        nonlocal active_details, max_active_details
         if source.url.endswith("-decks/"):
             format_name = "Wild" if "/wild-decks/" in source.url else "Standard"
             html = _list_html(format_name)
         else:
             detail_urls.append(source.url)
             index = len(detail_urls)
-            html = f'<button data-clipboard-text="{_deck_code(index)}">Copy</button>'
+            active_details += 1
+            max_active_details = max(max_active_details, active_details)
+            try:
+                await asyncio.sleep(0.001)
+                html = (
+                    f'<button data-clipboard-text="{_deck_code(index)}">Copy</button>'
+                )
+            finally:
+                active_details -= 1
         candidate = _provider_result(source, html)
         assert options["accept_result"](candidate)
         return candidate
@@ -242,12 +253,13 @@ def test_cloud_detail_requests_are_bounded_when_no_cached_codes_exist() -> None:
         structured = asyncio.run(fetch_hearthstone_decks(SOURCE))
 
     assert structured["total_decks"] == 40
-    assert structured["with_deck_code"] == 8
-    assert structured["missing_deck_code_count"] == 32
-    assert len(detail_urls) == 8
-    assert (
-        sum(deck.get("deck_code_status") == "deferred" for deck in structured["decks"])
-        == 32
+    assert structured["with_deck_code"] == 40
+    assert structured["missing_deck_code_count"] == 0
+    assert structured["cloud_detail_attempts"] == 40
+    assert len(detail_urls) == 40
+    assert 1 < max_active_details <= 4
+    assert not any(
+        deck.get("deck_code_status") == "deferred" for deck in structured["decks"]
     )
 
 
