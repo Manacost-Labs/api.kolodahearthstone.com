@@ -993,6 +993,22 @@ class RefreshStabilityTest(unittest.TestCase):
             classify_backend_error("RuntimeError", "quality check failed: card stats too few (0)"),
             "quality_empty",
         )
+        self.assertEqual(
+            classify_backend_error(
+                "ProxyPaymentRequiredError",
+                "proxy CONNECT rejected",
+                proxy_status=402,
+            ),
+            "proxy_402",
+        )
+        self.assertEqual(
+            classify_backend_error(
+                "ProxyPaymentRequiredError",
+                "proxy CONNECT rejected",
+                proxy_status=407,
+            ),
+            "proxy_407",
+        )
 
     def test_backend_circuit_opens_after_repeated_classification(self) -> None:
         source = Source(

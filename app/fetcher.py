@@ -70,7 +70,7 @@ from .scrapers.flaresolverr_session import FlareSolverrSession
 from .scrapers.http_resilience import is_session_blocked, resilient_http_get
 from .scrapers.proxy import burn_proxy_session, proxy_url_for_source
 from .scrapers.quality import is_cloudflare_challenge, quality_metrics
-from .scrapers.rotator import fetch_html
+from .scrapers.rotator import fetch_html, record_residential_proxy_failure
 from .source_state import EFFECTIVE_OK_CACHED, FAILURE_STATES, SourceState
 from .source_tiers import (
     API_FIRST_TIERS,
@@ -115,7 +115,7 @@ class _RefreshProxyCircuit:
             self.error = error
 
     def open_from_status(self, status: dict[str, Any]) -> None:
-        if not _status_reports_proxy_407(status):
+        if not _status_reports_proxy_failure(status):
             return
         raw_status = status.get("proxy_status") or status.get(
             "last_refresh_proxy_status"
@@ -324,9 +324,7 @@ def _attach_failure_class(
     exc: BaseException,
 ) -> dict[str, Any]:
     if isinstance(exc, ProxyPaymentRequiredError):
-        # Preserve the historical label consumed by dashboards while exposing
-        # the exact CONNECT rejection for new telemetry.
-        status["failure_class"] = "proxy_407"
+        status["failure_class"] = f"proxy_{exc.status_code}"
         status["proxy_status"] = exc.status_code
     return status
 
@@ -1820,6 +1818,11 @@ async def _fetch_source_with_active_lifecycle(
             import logging
 
             api_detail = str(exc)[:2000]
+            if isinstance(exc, ProxyPaymentRequiredError):
+                # API collectors and browser fallbacks share one paid proxy.
+                # A typed CONNECT rejection must stop browser backends from
+                # repeating the same failing tunnel within this refresh.
+                record_residential_proxy_failure(exc)
             if (
                 source.site == "hsreplay"
                 and retry_on_auth_failure
@@ -2415,10 +2418,18 @@ def _fetch_error_status(source: Source, exc: BaseException) -> dict[str, Any]:
     return _attach_failure_class(status, exc)
 
 
-def _status_reports_proxy_407(status: dict[str, Any]) -> bool:
-    return (
-        status.get("failure_class") == "proxy_407"
-        or status.get("last_refresh_failure_class") == "proxy_407"
+def _status_reports_proxy_failure(status: dict[str, Any]) -> bool:
+    raw_status = status.get("proxy_status") or status.get(
+        "last_refresh_proxy_status"
+    )
+    try:
+        if int(raw_status) in {402, 407}:
+            return True
+    except (TypeError, ValueError):
+        pass
+    return any(
+        status.get(field) in {"proxy_402", "proxy_407"}
+        for field in ("failure_class", "last_refresh_failure_class")
     )
 
 
@@ -2461,7 +2472,7 @@ async def _run_tier_parallel(
                     detail="source has no configured proxyless route",
                     extra={
                         "phase": phase,
-                        "failure_class": "proxy_407",
+                        "failure_class": f"proxy_{circuit.error.status_code}",
                         "proxy_status": circuit.error.status_code,
                     },
                 )
@@ -2562,7 +2573,7 @@ async def _run_tier_serial_browser(
                         detail="source has no configured proxyless route",
                         extra={
                             "phase": phase,
-                            "failure_class": "proxy_407",
+                            "failure_class": f"proxy_{circuit.error.status_code}",
                             "proxy_status": circuit.error.status_code,
                         },
                     )

@@ -23,7 +23,12 @@ from app.proxy_errors import ProxyPaymentRequiredError
 from app.scrapers.curl_impersonate import _fetch_sync
 from app.scrapers.http_resilience import resilient_http_get
 from app.scrapers.proxy import check_proxy_health
-from app.scrapers.rotator import fetch_html, reset_backend_circuits
+from app.scrapers.rotator import (
+    fetch_html,
+    record_residential_proxy_failure,
+    reset_backend_circuits,
+    residential_proxy_circuit_error,
+)
 from app.sources import SOURCE_BY_ID, Source
 
 
@@ -226,6 +231,92 @@ def test_rotator_keeps_proxyless_recovery_after_connect_402() -> None:
     proxy_backend.assert_awaited_once_with(source)
     proxyless_backend.assert_awaited_once_with(source)
     reset_backend_circuits()
+
+
+def test_api_proxy_402_opens_rotator_circuit_before_browser_fallback() -> None:
+    source = SOURCE_BY_ID["vicious_syndicate_radars"]
+    proxy_error = ProxyPaymentRequiredError(
+        "Residential proxy CONNECT tunnel rejected the request (HTTP 402)",
+        status_code=402,
+    )
+
+    async def browser_fallback(*_args: object, **_kwargs: object) -> object:
+        assert residential_proxy_circuit_error() is proxy_error
+        raise proxy_error
+
+    with (
+        TemporaryDirectory() as td,
+        patch("app.storage.data_dir", return_value=Path(td)),
+        patch(
+            "app.fetcher._fetch_hsreplay_api_source",
+            new=AsyncMock(side_effect=proxy_error),
+        ),
+        patch("app.fetcher.fetch_html", side_effect=browser_fallback) as browser,
+        patch("app.fetcher._try_firecrawl_html", new=AsyncMock(return_value=None)),
+        patch("app.fetcher.send_telegram_alert", new=AsyncMock()),
+        patch("app.fetcher._maybe_stale_data_alert", new=AsyncMock()),
+        patch("app.fetcher.firecrawl_primary_source_ids", return_value=set()),
+        patch("app.fetcher.firecrawl_fallback_source_ids", return_value=set()),
+        patch("app.fetcher.log_action"),
+    ):
+        status = asyncio.run(fetch_source(None, source))
+
+    browser.assert_awaited_once()
+    assert status["failure_class"] == "proxy_402"
+    assert status["proxy_status"] == 402
+
+
+def test_rotator_observes_proxy_circuit_opened_between_backends() -> None:
+    source = Source(
+        id="concurrent-circuit-refresh",
+        url="https://example.test/data",
+        site="example",
+        category="test",
+    )
+    proxy_error = ProxyPaymentRequiredError(
+        "Residential proxy CONNECT tunnel rejected the request (HTTP 402)",
+        status_code=402,
+    )
+
+    async def open_circuit_then_fail(_source: Source) -> object:
+        record_residential_proxy_failure(proxy_error)
+        raise RuntimeError("independent proxyless backend unavailable")
+
+    first_proxyless = AsyncMock(side_effect=open_circuit_then_fail)
+    paid_backend = AsyncMock()
+    recovered = SimpleNamespace(
+        html="<html>" + ("valid data " * 300) + "</html>",
+        final_url=source.url,
+        backend="proxyless_second",
+        http_status=200,
+    )
+    second_proxyless = AsyncMock(return_value=recovered)
+
+    with (
+        patch("app.scrapers.rotator.assert_proxy_configured"),
+        patch("app.scrapers.rotator.fetch_max_retries", return_value=1),
+        patch("app.scrapers.rotator.fetch_backend_max_seconds", return_value=None),
+        patch(
+            "app.scrapers.rotator._ordered_backends",
+            return_value=[
+                ("proxyless_first", first_proxyless, lambda: True),
+                ("patchright", paid_backend, lambda: True),
+                ("proxyless_second", second_proxyless, lambda: True),
+            ],
+        ),
+        patch(
+            "app.scrapers.rotator.browser_backend_uses_residential_proxy",
+            side_effect=lambda _source, backend: backend == "patchright",
+        ),
+        patch("app.scrapers.rotator.looks_like_real_page", return_value=True),
+        patch("app.scrapers.rotator.log_action"),
+    ):
+        result = asyncio.run(fetch_html(source))
+
+    assert result is recovered
+    first_proxyless.assert_awaited_once_with(source)
+    paid_backend.assert_not_awaited()
+    second_proxyless.assert_awaited_once_with(source)
 
 
 def test_deterministic_shell_candidate_is_not_retried_by_same_backend() -> None:
@@ -475,11 +566,11 @@ def test_refresh_circuit_crosses_phases_but_keeps_hsreplay_scrape_do() -> None:
             )
         )
 
-    assert first[0]["failure_class"] == "proxy_407"
+    assert first[0]["failure_class"] == "proxy_402"
     assert first[0]["proxy_status"] == 402
     assert second[0]["state"] == "ok"
     assert second[1]["state"] == "ok"
-    assert third[0]["failure_class"] == "proxy_407"
+    assert third[0]["failure_class"] == "proxy_402"
     assert third[0]["proxy_status"] == 402
     assert [call.args[1].id for call in fetch_mock.call_args_list] == [
         failing.id,

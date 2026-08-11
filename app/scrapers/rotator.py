@@ -63,12 +63,16 @@ def _current_backend_failures() -> Counter[tuple[str, str, str]]:
     return failures
 
 
-def classify_backend_error(exc_type: str, detail: str) -> str:
+def classify_backend_error(
+    exc_type: str,
+    detail: str,
+    *,
+    proxy_status: int | None = None,
+) -> str:
     text = f"{exc_type} {detail}".lower()
     if exc_type == "ProxyPaymentRequiredError":
-        # Keep the historical telemetry label so existing dashboards remain
-        # continuous. The exact 402/407 status is emitted separately.
-        return "proxy_407"
+        exact_status = proxy_status if proxy_status in {402, 407} else 407
+        return f"proxy_{exact_status}"
     if "timeout" in text:
         return "timeout"
     if "err_name_not_resolved" in text or "name or service" in text or "dns" in text:
@@ -257,6 +261,9 @@ async def fetch_html(
             extra={"backends": backend_names},
         )
         for name, fetch_fn, is_available in backends:
+            latest_proxy_error = residential_proxy_circuit_error()
+            if latest_proxy_error is not None:
+                proxy_error = latest_proxy_error
             route_uses_proxy = browser_backend_uses_residential_proxy(source, name)
             if proxy_error is not None and route_uses_proxy:
                 detail = (
@@ -272,7 +279,7 @@ async def fetch_html(
                     detail=detail,
                     level="warn",
                     extra={
-                        "classification": "proxy_407",
+                        "classification": f"proxy_{proxy_error.status_code}",
                         "proxy_status": proxy_error.status_code,
                     },
                 )
@@ -440,6 +447,11 @@ async def fetch_html(
                 classification = classify_backend_error(
                     type(reported_exc).__name__,
                     str(reported_exc),
+                    proxy_status=(
+                        typed_proxy_error.status_code
+                        if typed_proxy_error is not None
+                        else None
+                    ),
                 )
                 failures = _current_backend_failures()
                 failures[_circuit_key(source, name, classification)] += 1
