@@ -5,7 +5,10 @@ from typing import NamedTuple
 
 from .hsreplay_card_periods import HSREPLAY_CARD_PERIOD_SOURCE_IDS
 from .sources import SOURCES, Source
-from .trinket_slices import TRINKET_SLICE_SOURCE_IDS
+from .trinket_slices import (
+    LEGACY_DEFAULT_TRINKET_SOURCE_IDS,
+    TRINKET_SLICE_SOURCE_IDS,
+)
 
 
 class SourceTier(str, Enum):
@@ -56,6 +59,8 @@ MEDIUM_API_IDS: frozenset[str] = frozenset(
         "hsreplay_meta_legend_1d_firecrawl",
         "hsreplay_meta_diamond_4to1_1d_firecrawl",
         "hsreplay_arena_class_pages_firecrawl",
+        *LEGACY_DEFAULT_TRINKET_SOURCE_IDS,
+        *TRINKET_SLICE_SOURCE_IDS,
         "vicious_syndicate_live_beta",
         "vicious_syndicate_radars",
     }
@@ -82,11 +87,8 @@ BROWSER_PROTECTED_IDS: frozenset[str] = frozenset(
         "hsguru_matchups_legend",
         "hsguru_matchups_wild_legend",
         "hsguru_matchups_diamond_4to1",
-        "hsreplay_battlegrounds_trinkets_lesser",
-        "hsreplay_battlegrounds_trinkets_greater",
         "hsreplay_decks_trending",
     }
-    | TRINKET_SLICE_SOURCE_IDS
 )
 
 _ALL_TIER_IDS = (

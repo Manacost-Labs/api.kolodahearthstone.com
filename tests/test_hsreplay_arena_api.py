@@ -4,10 +4,65 @@ import asyncio
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from app.hsreplay_arena_api import _class_name, fetch_class_stats
+from app.hsreplay_arena_api import (
+    ARENA_CARD_STATS_API_URL,
+    _class_name,
+    _fetch_arena_cards_payload,
+    fetch_class_stats,
+)
 
 
 class HsreplayArenaApiTest(unittest.TestCase):
+    def test_arena_cards_keep_primary_endpoint_after_first_channel_failure(
+        self,
+    ) -> None:
+        channel_fetch = AsyncMock(
+            side_effect=[
+                RuntimeError("first channel failed"),
+                '{"data": "valid"}',
+            ]
+        )
+        channels = [
+            ("curl_cffi", ARENA_CARD_STATS_API_URL),
+            ("flaresolverr", ARENA_CARD_STATS_API_URL),
+        ]
+
+        with (
+            patch("app.hsreplay_client.get_cached_hsreplay_json", return_value=None),
+            patch("app.hsreplay_client.set_cached_hsreplay_json"),
+            patch("app.hsreplay_client._channel_urls", return_value=channels),
+            patch(
+                "app.hsreplay_client._channel_uses_residential_proxy",
+                return_value=False,
+            ),
+            patch("app.hsreplay_client._fetch_body_for_channel", new=channel_fetch),
+            patch("app.hsreplay_client.asyncio.sleep", new=AsyncMock()),
+            patch("app.hsreplay_client.log_action"),
+            patch(
+                "app.hsreplay_arena_api._parse_arena_cards_payload",
+                return_value={"ALL": [{} for _ in range(900)]},
+            ),
+        ):
+            payload, api_url = asyncio.run(
+                _fetch_arena_cards_payload("hsreplay_arena_cards_advanced")
+            )
+
+        self.assertEqual(payload, {"data": "valid"})
+        self.assertEqual(api_url, ARENA_CARD_STATS_API_URL)
+        self.assertEqual(
+            [call.args[:2] for call in channel_fetch.await_args_list],
+            [
+                ("curl_cffi", ARENA_CARD_STATS_API_URL),
+                ("flaresolverr", ARENA_CARD_STATS_API_URL),
+            ],
+        )
+        self.assertTrue(
+            all(
+                call.args[1] == ARENA_CARD_STATS_API_URL
+                for call in channel_fetch.await_args_list
+            )
+        )
+
     def test_class_names_use_titlecased_cardclass_enum_labels(self) -> None:
         # _class_name titles the hearthstone CardClass enum name
         # (app/hsreplay_arena_api.py:74-80): DEATHKNIGHT -> "Deathknight",

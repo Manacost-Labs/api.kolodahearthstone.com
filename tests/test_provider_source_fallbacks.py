@@ -252,6 +252,43 @@ class ProviderSourceFallbackTest(unittest.TestCase):
         self.assertTrue(status["serving_cached_dataset"])
         self.assertEqual(status["last_refresh_state"], "fetch_error")
 
+        cached.pop("transport_backend")
+        cached["used_residential_proxy"] = True
+        with (
+            patch(
+                "app.parser_control.load_resolved_public_dataset",
+                return_value=cached,
+            ),
+            patch("app.fetcher.save_status"),
+            patch("app.fetcher.log_action"),
+        ):
+            legacy_status = _preserve_cached_ok_status(HEARTHARENA_SOURCE, failed)
+
+        self.assertIsNotNone(legacy_status)
+        assert legacy_status is not None
+        self.assertNotIn("transport_backend", legacy_status)
+        self.assertTrue(legacy_status["used_residential_proxy"])
+
+        cached["transport_backend"] = "residential_httpx"
+        cached.pop("used_residential_proxy")
+        with (
+            patch(
+                "app.parser_control.load_resolved_public_dataset",
+                return_value=cached,
+            ),
+            patch("app.fetcher.save_status"),
+            patch("app.fetcher.log_action"),
+            patch.dict("os.environ", {}, clear=True),
+        ):
+            historical_proxy_status = _preserve_cached_ok_status(
+                HEARTHARENA_SOURCE,
+                failed,
+            )
+
+        self.assertIsNotNone(historical_proxy_status)
+        assert historical_proxy_status is not None
+        self.assertTrue(historical_proxy_status["used_residential_proxy"])
+
     def test_cloud_transport_passes_real_publish_gate_without_leaking(self) -> None:
         structured = {
             "type": "metastats_decks",

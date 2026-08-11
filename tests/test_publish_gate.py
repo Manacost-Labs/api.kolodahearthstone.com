@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import patch
 
-from app.publish_gate import validate_candidate_for_publish
+from app.publish_gate import (
+    validate_candidate_for_publish,
+    validate_existing_publication_for_serving,
+)
 from app.sources import SOURCE_BY_ID
 
 
@@ -80,7 +82,7 @@ class PublishGateTest(unittest.TestCase):
         self.assertEqual(result.reason, "ok")
         self.assertTrue(result.extra["backend_allowed"])
 
-    def test_fallback_parser_is_published_with_warning(self) -> None:
+    def test_page_fallback_is_rejected_for_api_only_trinkets(self) -> None:
         source = SOURCE_BY_ID["hsreplay_battlegrounds_trinkets_lesser"]
         trinkets = [
             {
@@ -102,16 +104,21 @@ class PublishGateTest(unittest.TestCase):
             },
         }
 
-        with patch("app.scrapers.quality.log_action") as log_action:
-            result = validate_candidate_for_publish(source, parsed, backend="firecrawl")
+        result = validate_candidate_for_publish(source, parsed, backend="firecrawl")
 
-        self.assertTrue(result.ok, result.reason)
-        warning = next(
-            call for call in log_action.call_args_list
-            if call.args and call.args[0] == "source_semantic.validate.warn"
+        self.assertFalse(result.ok)
+        self.assertIn("backend policy rejected candidate", result.reason)
+
+        existing = validate_existing_publication_for_serving(
+            source,
+            parsed,
+            backend="firecrawl",
         )
-        self.assertEqual(warning.kwargs["level"], "warn")
-        self.assertIn("fallback_anchor", warning.kwargs["detail"])
+
+        self.assertTrue(existing.ok, existing.reason)
+        self.assertFalse(existing.extra["backend_allowed"])
+        self.assertTrue(existing.extra["existing_publication"])
+        self.assertTrue(existing.extra["backend_policy_grandfathered"])
 
 
 if __name__ == "__main__":

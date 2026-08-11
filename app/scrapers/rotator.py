@@ -22,7 +22,7 @@ from .proxy import (
     burn_proxy_session,
     source_can_use_flaresolverr_without_proxy,
 )
-from .quality import looks_like_real_page, quality_metrics
+from .quality import is_cloudflare_challenge, looks_like_real_page, quality_metrics
 
 logger = logging.getLogger(__name__)
 
@@ -245,9 +245,11 @@ async def fetch_html(
     )
 
     errors: list[str] = []
+    deterministic_challenge_backends: set[str] = set()
     proxy_error = residential_proxy_circuit_error()
     for attempt in range(1, fetch_max_retries() + 1):
         proxyless_retry_candidate = False
+        retryable_failure_seen = False
         log_action(
             "browser.round.begin",
             source_id=source.id,
@@ -272,6 +274,25 @@ async def fetch_html(
                     extra={
                         "classification": "proxy_407",
                         "proxy_status": proxy_error.status_code,
+                    },
+                )
+                continue
+            if name in deterministic_challenge_backends:
+                detail = (
+                    f"{name}: skipped after deterministic "
+                    "Cloudflare challenge candidate"
+                )
+                errors.append(detail)
+                log_action(
+                    "browser.backend.skip",
+                    source_id=source.id,
+                    backend=name,
+                    attempt=attempt,
+                    detail=detail,
+                    level="warn",
+                    extra={
+                        "classification": "blocked_403",
+                        "deterministic_candidate_rejection": True,
                     },
                 )
                 continue
@@ -323,7 +344,14 @@ async def fetch_html(
                     result = await fetch_fn(source)
                 html_len = len(result.html)
                 if not looks_like_real_page(result.html, source):
-                    raise RuntimeError("page looks like Cloudflare or empty shell")
+                    if is_cloudflare_challenge(result.html):
+                        deterministic_challenge_backends.add(name)
+                        raise RuntimeError(
+                            "page is a deterministic Cloudflare challenge shell"
+                        )
+                    raise RuntimeError(
+                        "quality check failed: page below source shape/size threshold"
+                    )
                 if parse_preview is not None:
                     parsed = parse_preview(result.html)
                     gate = validate_candidate_for_publish(source, parsed, backend=name)
@@ -362,6 +390,7 @@ async def fetch_html(
                 _record_backend_success(source, name)
                 return result
             except TimeoutError:
+                retryable_failure_seen = True
                 if not route_uses_proxy:
                     proxyless_retry_candidate = True
                 max_s = fetch_backend_max_seconds()
@@ -396,11 +425,14 @@ async def fetch_html(
                     else proxy_tunnel_error(exc, proxy_used=route_uses_proxy)
                 )
                 reported_exc = typed_proxy_error or exc
+                deterministic_rejection = name in deterministic_challenge_backends
                 if typed_proxy_error is not None:
                     record_residential_proxy_failure(typed_proxy_error)
                     proxy_error = typed_proxy_error
-                elif not route_uses_proxy:
-                    proxyless_retry_candidate = True
+                elif not deterministic_rejection:
+                    retryable_failure_seen = True
+                    if not route_uses_proxy:
+                        proxyless_retry_candidate = True
                 msg = (
                     f"{name}[{attempt}]: {type(reported_exc).__name__}: "
                     f"{reported_exc}"
@@ -443,6 +475,8 @@ async def fetch_html(
                             _circuit_key(source, name, classification)
                         ],
                         "circuit_scope": _circuit_scope(source, classification),
+                        "retryable": not deterministic_rejection,
+                        "deterministic_candidate_rejection": deterministic_rejection,
                         **(
                             {"proxy_status": typed_proxy_error.status_code}
                             if typed_proxy_error is not None
@@ -450,6 +484,8 @@ async def fetch_html(
                         ),
                     },
                 )
+        if not retryable_failure_seen:
+            break
         if proxy_error is not None and not proxyless_retry_candidate:
             break
         if attempt < fetch_max_retries():

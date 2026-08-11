@@ -6,9 +6,9 @@ from typing import Any
 
 from hearthstone.enums import CardClass
 
-from .cards_index import card_from_id, card_label, cards_by_id
+from .cards_index import card_from_id
 from .deck_decode import decode_deck_code
-from .hsreplay_client import extract_json_payload, fetch_hsreplay_json, fetch_text_via_curl_cffi
+from .hsreplay_client import fetch_hsreplay_json
 from .storage import load_dataset
 
 logger = logging.getLogger(__name__)
@@ -25,11 +25,6 @@ CLASSES_STATS_API_URL = "https://hsreplay.net/api/v1/arena/classes_stats/"
 ARENA_CARDS_PAGE_URL = "https://hsreplay.net/arena/cards/#view=advanced"
 # HSReplay exposes card tiers via card_stats (cards/ often 404 behind CF).
 ARENA_CARD_STATS_API_URL = "https://hsreplay.net/api/v1/arena/card_stats/"
-ARENA_CARDS_API_URLS = (
-    ARENA_CARD_STATS_API_URL,
-    "https://hsreplay.net/api/v1/arena/cards/?game_type=arena&tiering=winrate",
-    "https://hsreplay.net/api/v1/arena/cards/",
-)
 
 REGION_NAMES = {
     1: "US",
@@ -277,24 +272,17 @@ def _parse_arena_cards_payload(payload: dict[str, Any], *, locale: str = "ruRU")
 
 
 async def _fetch_arena_cards_payload(source_id: str) -> tuple[dict[str, Any], str]:
-    last_error: Exception | None = None
-    for url in ARENA_CARDS_API_URLS:
-        try:
-            if url == ARENA_CARD_STATS_API_URL:
-                body = await fetch_text_via_curl_cffi(url, source_id=source_id)
-                payload = extract_json_payload(body)
-                if isinstance(payload, list):
-                    payload = {"data": payload}
-                if isinstance(payload, dict) and _parse_arena_cards_payload(payload):
-                    return payload, url
-            payload = await fetch_hsreplay_json(url, source_id=source_id)
-            if _parse_arena_cards_payload(payload):
-                return payload, url
-        except Exception as exc:
-            last_error = exc
-    if last_error:
-        raise last_error
-    raise RuntimeError("arena card stats payload empty")
+    # Keep every transport attempt on the canonical card_stats endpoint.  The
+    # older /arena/cards API variants now return 404/non-JSON responses, and a
+    # curl/proxy failure must not move the refresh away from the valid endpoint
+    # before the remaining JSON channels have had a chance to run.
+    payload = await fetch_hsreplay_json(
+        ARENA_CARD_STATS_API_URL,
+        source_id=source_id,
+    )
+    if not _parse_arena_cards_payload(payload):
+        raise RuntimeError("arena card stats payload empty")
+    return payload, ARENA_CARD_STATS_API_URL
 
 
 async def fetch_class_stats(

@@ -10,6 +10,10 @@ from datetime import UTC, date, datetime
 from typing import Any
 
 from .hsreplay_card_periods import HSREPLAY_CARD_PERIOD_SOURCE_IDS
+from .trinket_slices import (
+    LEGACY_DEFAULT_TRINKET_SOURCE_IDS,
+    TRINKET_SLICE_SOURCE_IDS,
+)
 
 WINDOW_TIMEZONE = "Europe/Warsaw"
 DEFAULT_WINDOW_START = date(2026, 7, 21)
@@ -73,15 +77,27 @@ HSREPLAY_CURRENT_PATCH_EARLY_SOURCE_IDS = frozenset(
     if source_id.endswith("_patch")
 )
 
+TRINKET_EARLY_SOURCE_IDS = frozenset(LEGACY_DEFAULT_TRINKET_SOURCE_IDS) | frozenset(
+    TRINKET_SLICE_SOURCE_IDS
+)
+
 EARLY_SOURCE_IDS = frozenset(
     ARENA_EARLY_SOURCE_IDS
     | HSGURU_EARLY_SOURCE_IDS
     | HSREPLAY_CURRENT_PATCH_EARLY_SOURCE_IDS
+    | TRINKET_EARLY_SOURCE_IDS
 )
 
 
 def _policy_for_source(source_id: str) -> PostPatchPolicy:
-    minimum_rows = 3 if source_id in HSGURU_EARLY_SOURCE_IDS else 20
+    if source_id in HSGURU_EARLY_SOURCE_IDS:
+        minimum_rows = 3
+    elif source_id in LEGACY_DEFAULT_TRINKET_SOURCE_IDS:
+        minimum_rows = 8
+    elif source_id in TRINKET_SLICE_SOURCE_IDS:
+        minimum_rows = 16
+    else:
+        minimum_rows = 20
     return PostPatchPolicy(source_id=source_id, minimum_rows=minimum_rows)
 
 

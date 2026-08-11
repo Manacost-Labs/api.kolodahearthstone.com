@@ -166,24 +166,26 @@ CONTRACTS: dict[str, SourceContract] = {
     "hsreplay_battlegrounds_trinkets_lesser": SourceContract(
         source_id="hsreplay_battlegrounds_trinkets_lesser",
         structured_type="bg_trinkets",
-        allow_browser_fallback=True,
+        preferred_channels=HSREPLAY_JSON_CHANNELS,
+        allow_browser_fallback=False,
         min_rows=80,
         critical_fields=("name", "trinket_id", "description", "pick_rate", "avg_placement"),
         min_field_fill_rate=0.90,
         regression_drop_ratio=0.35,
-        fallback_policy="html_allowed",
-        recommendation="Protected HSReplay trinkets page; prefer Firecrawl markdown rows with Avg. Placement and keep canonical ids/names enriched from cache.",
+        fallback_policy="api_only",
+        recommendation="Use the HSReplay trinkets JSON API and preserve the previous valid Lesser snapshot on regression.",
     ),
     "hsreplay_battlegrounds_trinkets_greater": SourceContract(
         source_id="hsreplay_battlegrounds_trinkets_greater",
         structured_type="bg_trinkets",
-        allow_browser_fallback=True,
+        preferred_channels=HSREPLAY_JSON_CHANNELS,
+        allow_browser_fallback=False,
         min_rows=80,
         critical_fields=("name", "trinket_id", "description", "pick_rate", "avg_placement"),
         min_field_fill_rate=0.90,
         regression_drop_ratio=0.35,
-        fallback_policy="html_allowed",
-        recommendation="Protected HSReplay trinkets page; prefer Firecrawl markdown rows with Avg. Placement and keep canonical ids/names enriched from cache.",
+        fallback_policy="api_only",
+        recommendation="Use the HSReplay trinkets JSON API and preserve the previous valid Greater snapshot on regression.",
     ),
     "hsreplay_meta_archetypes_legend_eu_1d": SourceContract(
         source_id="hsreplay_meta_archetypes_legend_eu_1d",
@@ -369,12 +371,13 @@ for _trinket_slice_source_id in TRINKET_SLICE_SOURCE_IDS:
     CONTRACTS[_trinket_slice_source_id] = SourceContract(
         source_id=_trinket_slice_source_id,
         structured_type="bg_trinkets",
-        allow_browser_fallback=True,
+        preferred_channels=HSREPLAY_JSON_CHANNELS,
+        allow_browser_fallback=False,
         min_rows=160,
         critical_fields=("name", "trinket_id", "description", "pick_rate", "avg_placement"),
         min_field_fill_rate=0.90,
         regression_drop_ratio=0.35,
-        fallback_policy="html_allowed",
+        fallback_policy="api_only",
         recommendation=(
             "HSReplay combined trinket JSON slice; retain both Lesser and Greater "
             "rows with canonical card identities."

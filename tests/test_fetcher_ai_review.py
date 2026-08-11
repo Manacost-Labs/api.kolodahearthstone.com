@@ -177,6 +177,11 @@ class FetcherAIReviewIntegrationTest(unittest.TestCase):
             reason="deterministic validation passed",
             extra={"rows_total": 42},
         )
+        existing_publication_gate = SimpleNamespace(
+            ok=True,
+            reason="existing publication validation passed",
+            extra={"backend_policy_grandfathered": False},
+        )
         last_good_dataset = {
             "fetched_at": "2026-08-10T12:00:00+00:00",
             "http_status": 200,
@@ -203,6 +208,10 @@ class FetcherAIReviewIntegrationTest(unittest.TestCase):
                 "app.fetcher.validate_candidate_for_publish",
                 return_value=deterministic_gate,
             ) as validate_candidate,
+            patch(
+                "app.fetcher.validate_existing_publication_for_serving",
+                return_value=existing_publication_gate,
+            ) as validate_existing_publication,
             patch(
                 "app.fetcher.quality_metrics",
                 return_value={"quality_score": 0.99, "rows_total": 42},
@@ -238,7 +247,8 @@ class FetcherAIReviewIntegrationTest(unittest.TestCase):
 
         reviewer.assert_awaited_once()
         save_candidate.assert_not_called()
-        self.assertEqual(validate_candidate.call_count, 2)
+        validate_candidate.assert_called_once()
+        validate_existing_publication.assert_called_once()
         save_status.assert_called_once()
         alert.assert_not_awaited()
 

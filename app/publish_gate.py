@@ -67,3 +67,34 @@ def validate_candidate_for_publish(
         reason=reason,
         extra={"backend": backend, "backend_allowed": True},
     )
+
+
+def validate_existing_publication_for_serving(
+    source: Source,
+    parsed: dict[str, Any],
+    *,
+    backend: str | None,
+) -> PublishGateResult:
+    """Revalidate content of an existing publication without re-ingesting it.
+
+    Backend policy is an ingestion boundary. A previously published snapshot
+    can remain the last-known-good fallback after that policy becomes stricter,
+    provided its content still passes the current contract and semantic checks.
+    """
+
+    from .scrapers.quality import validate_parsed_data
+
+    ok, reason = validate_parsed_data(source, parsed)
+    backend_allowed = not _is_unstructured_page_backend(backend) or (
+        allows_browser_fallback(source.id, default=True)
+    )
+    return PublishGateResult(
+        ok=ok,
+        reason=reason,
+        extra={
+            "backend": backend,
+            "backend_allowed": backend_allowed,
+            "existing_publication": True,
+            "backend_policy_grandfathered": not backend_allowed,
+        },
+    )

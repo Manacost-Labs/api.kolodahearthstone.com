@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
 import unittest
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 from app.scrapers.quality import validate_parsed_data
@@ -391,6 +391,38 @@ class SourceValidatorsTest(unittest.TestCase):
         self.assertIn(
             "bg_trinkets.incomplete_descriptions",
             {issue.code for issue in report.issues},
+        )
+
+    def test_combined_bg_trinkets_require_both_tiers(self) -> None:
+        source_id = (
+            "hsreplay_battlegrounds_trinkets_top_20_percent_"
+            "current_battlegrounds_patch"
+        )
+        trinkets = [
+            {
+                "name": f"Trinket {idx}",
+                "pick_rate": "5%",
+                "description": "Start of Combat: Give your minions +2/+2 permanently.",
+                "trinket_tier": "Lesser" if idx < 4 else "Greater",
+            }
+            for idx in range(8)
+        ]
+
+        complete = validate_structured(
+            source_id,
+            {"type": "bg_trinkets", "trinkets": trinkets},
+        )
+        self.assertTrue(complete.ok, complete.reason)
+
+        trinkets[-1]["trinket_tier"] = "Lesser"
+        incomplete = validate_structured(
+            source_id,
+            {"type": "bg_trinkets", "trinkets": trinkets},
+        )
+        self.assertFalse(incomplete.ok)
+        self.assertIn(
+            "bg_trinkets.incomplete_tier_mix",
+            {issue.code for issue in incomplete.issues},
         )
 
     def test_bg_minions_require_forty_stat_rows(self) -> None:

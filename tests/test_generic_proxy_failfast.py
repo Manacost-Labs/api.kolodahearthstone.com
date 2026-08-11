@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import ModuleType, SimpleNamespace
 from typing import Self
 from unittest.mock import AsyncMock, patch
@@ -15,6 +17,7 @@ from app.fetcher import (
     _RefreshProxyCircuit,
     _run_tier_parallel,
     _run_tier_serial_browser,
+    fetch_source,
 )
 from app.proxy_errors import ProxyPaymentRequiredError
 from app.scrapers.curl_impersonate import _fetch_sync
@@ -223,6 +226,183 @@ def test_rotator_keeps_proxyless_recovery_after_connect_402() -> None:
     proxy_backend.assert_awaited_once_with(source)
     proxyless_backend.assert_awaited_once_with(source)
     reset_backend_circuits()
+
+
+def test_deterministic_shell_candidate_is_not_retried_by_same_backend() -> None:
+    source = Source(
+        id="deterministic-shell",
+        url="https://example.test/data",
+        site="example",
+        category="test",
+    )
+    patchright = AsyncMock(
+        return_value=SimpleNamespace(
+            html="<html><body>Just a moment...</body></html>",
+            final_url=source.url,
+            backend="patchright",
+            http_status=200,
+        )
+    )
+    flaresolverr = AsyncMock(
+        return_value=SimpleNamespace(
+            html="<html><body>cf-chl empty shell</body></html>",
+            final_url=source.url,
+            backend="flaresolverr",
+            http_status=200,
+        )
+    )
+
+    with (
+        patch("app.scrapers.rotator.assert_proxy_configured"),
+        patch("app.scrapers.rotator.fetch_max_retries", return_value=3),
+        patch("app.scrapers.rotator.fetch_backend_max_seconds", return_value=None),
+        patch(
+            "app.scrapers.rotator._ordered_backends",
+            return_value=[
+                ("patchright", patchright, lambda: True),
+                ("flaresolverr", flaresolverr, lambda: True),
+            ],
+        ),
+        patch(
+            "app.scrapers.rotator.browser_backend_uses_residential_proxy",
+            return_value=False,
+        ),
+        patch("app.scrapers.rotator.log_action"),
+        patch("app.scrapers.rotator.asyncio.sleep", new=AsyncMock()) as sleep,
+        pytest.raises(RuntimeError, match="deterministic Cloudflare challenge shell"),
+    ):
+        asyncio.run(fetch_html(source))
+
+    patchright.assert_awaited_once_with(source)
+    flaresolverr.assert_awaited_once_with(source)
+    sleep.assert_not_awaited()
+
+
+def test_deterministic_shell_skip_does_not_disable_transient_retry() -> None:
+    source = Source(
+        id="transient-timeout",
+        url="https://example.test/data",
+        site="example",
+        category="test",
+    )
+    recovered = SimpleNamespace(
+        html="<html>" + ("valid data " * 300) + "</html>",
+        final_url=source.url,
+        backend="patchright",
+        http_status=200,
+    )
+    blocked = AsyncMock(
+        return_value=SimpleNamespace(
+            html="<html><body>Just a moment...</body></html>",
+            final_url=source.url,
+            backend="patchright",
+            http_status=200,
+        )
+    )
+    transient = AsyncMock(side_effect=[TimeoutError(), recovered])
+
+    with (
+        patch("app.scrapers.rotator.assert_proxy_configured"),
+        patch("app.scrapers.rotator.fetch_max_retries", return_value=2),
+        patch("app.scrapers.rotator.fetch_backend_max_seconds", return_value=None),
+        patch(
+            "app.scrapers.rotator._ordered_backends",
+            return_value=[
+                ("patchright", blocked, lambda: True),
+                ("flaresolverr", transient, lambda: True),
+            ],
+        ),
+        patch(
+            "app.scrapers.rotator.browser_backend_uses_residential_proxy",
+            return_value=False,
+        ),
+        patch("app.scrapers.rotator.log_action"),
+        patch("app.scrapers.rotator.asyncio.sleep", new=AsyncMock()),
+    ):
+        result = asyncio.run(fetch_html(source))
+
+    assert result is recovered
+    blocked.assert_awaited_once_with(source)
+    assert transient.await_count == 2
+
+
+def test_sparse_post_patch_candidate_can_retry_and_recover() -> None:
+    source = Source(
+        id="sparse-post-patch",
+        url="https://example.test/data",
+        site="example",
+        category="test",
+    )
+    sparse = SimpleNamespace(
+        html="<html><body>Small but non-challenge post-patch page</body></html>",
+        final_url=source.url,
+        backend="patchright",
+        http_status=200,
+    )
+    recovered = SimpleNamespace(
+        html="<html>" + ("valid data " * 300) + "</html>",
+        final_url=source.url,
+        backend="patchright",
+        http_status=200,
+    )
+    patchright = AsyncMock(side_effect=[sparse, recovered])
+
+    with (
+        patch("app.scrapers.rotator.assert_proxy_configured"),
+        patch("app.scrapers.rotator.fetch_max_retries", return_value=2),
+        patch("app.scrapers.rotator.fetch_backend_max_seconds", return_value=None),
+        patch(
+            "app.scrapers.rotator._ordered_backends",
+            return_value=[("patchright", patchright, lambda: True)],
+        ),
+        patch(
+            "app.scrapers.rotator.browser_backend_uses_residential_proxy",
+            return_value=False,
+        ),
+        patch("app.scrapers.rotator.log_action"),
+        patch("app.scrapers.rotator.asyncio.sleep", new=AsyncMock()),
+    ):
+        result = asyncio.run(fetch_html(source))
+
+    assert result is recovered
+    assert patchright.await_count == 2
+
+
+def test_deterministic_shell_exhaustion_preserves_cloud_fallback() -> None:
+    source = SOURCE_BY_ID["hsreplay_battlegrounds_trinkets_lesser"]
+    recovered = {
+        "source_id": source.id,
+        "state": "ok",
+        "backend": "scrape_do",
+    }
+    cloud = AsyncMock(return_value=recovered)
+
+    with (
+        TemporaryDirectory() as temp_dir,
+        patch("app.storage.data_dir", return_value=Path(temp_dir)),
+        patch(
+            "app.fetcher._fetch_hsreplay_api_source",
+            new=AsyncMock(return_value=None),
+        ),
+        patch(
+            "app.fetcher.fetch_html",
+            new=AsyncMock(
+                side_effect=RuntimeError(
+                    "page is a deterministic Cloudflare challenge shell"
+                )
+            ),
+        ),
+        patch("app.fetcher._try_firecrawl_html", new=cloud),
+        patch("app.fetcher.log_action"),
+    ):
+        result = asyncio.run(fetch_source(None, source))
+
+    assert result is recovered
+    cloud.assert_awaited_once()
+    await_call = cloud.await_args
+    assert await_call is not None
+    assert await_call.args == (source,)
+    assert await_call.kwargs["reason"] == "browser_exception:RuntimeError"
 
 
 def test_refresh_circuit_crosses_phases_but_keeps_hsreplay_scrape_do() -> None:

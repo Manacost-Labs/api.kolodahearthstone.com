@@ -1,16 +1,16 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
-import json
 import logging
 import random
 import re
+from datetime import datetime
 from typing import Any
 
 import httpx
 from bs4 import BeautifulSoup
 
+from .proxy_errors import ProxyPaymentRequiredError, proxy_tunnel_error
 from .scrapers.http_resilience import (
     DEFAULT_BACKOFF_SECONDS,
     backoff_delay_seconds,
@@ -23,6 +23,22 @@ from .sources import Source
 from .vicious_syndicate_auth import vicious_syndicate_cookies_for_fetch
 
 logger = logging.getLogger(__name__)
+
+
+class _ViciousProxyCircuit:
+    """Fail fast within one radar refresh after a verified proxy CONNECT rejection."""
+
+    def __init__(self) -> None:
+        self.error: ProxyPaymentRequiredError | None = None
+
+    def open(self, error: ProxyPaymentRequiredError) -> None:
+        if self.error is None:
+            self.error = error
+
+    def raise_if_open(self) -> None:
+        if self.error is not None:
+            raise self.error
+
 
 CLASSES = [
     "DeathKnight",
@@ -204,6 +220,7 @@ async def fetch_with_retry(
     source_id: str = "vicious_syndicate_radars",
     optional: bool = False,
     optional_context: str = "optional",
+    proxy_circuit: _ViciousProxyCircuit | None = None,
 ) -> httpx.Response | None:
     """
     FIX: jitter + exponential backoff (5/15/45s) + session burn.
@@ -223,11 +240,16 @@ async def fetch_with_retry(
     effective_max_retries = min(max_retries, 2) if optional else max_retries
     async with semaphore:
         for attempt in range(1, effective_max_retries + 1):
+            if proxy_circuit is not None:
+                proxy_circuit.raise_if_open()
             await asyncio.sleep(random.uniform(0.2, 0.5))
+            if proxy_circuit is not None:
+                proxy_circuit.raise_if_open()
+            client_kwargs = httpx_client_kwargs(source_id, page_url=url)
+            proxy_used = bool(client_kwargs.get("proxy"))
             try:
                 # Recreate the client per attempt so a burned sticky proxy session
                 # is reflected on the very next retry.
-                client_kwargs = httpx_client_kwargs(source_id, page_url=url)
                 cookies = vicious_syndicate_cookies_for_fetch()
                 if cookies:
                     client_kwargs["cookies"] = cookies
@@ -258,7 +280,18 @@ async def fetch_with_retry(
                         backoff_delay_seconds(attempt, schedule=DEFAULT_BACKOFF_SECONDS)
                     )
                     continue
+            except ProxyPaymentRequiredError as exc:
+                if proxy_circuit is not None:
+                    proxy_circuit.open(exc)
+                raise
             except Exception as exc:
+                typed_proxy_error = proxy_tunnel_error(exc, proxy_used=proxy_used)
+                if typed_proxy_error is not None:
+                    if proxy_circuit is not None:
+                        proxy_circuit.open(typed_proxy_error)
+                    if typed_proxy_error is exc:
+                        raise
+                    raise typed_proxy_error from exc
                 if optional:
                     logger.warning(
                         "Optional Vicious fetch failed context=%s error=%s url=%s",
@@ -293,24 +326,38 @@ async def fetch_with_retry(
         return None
 
 
-async def fetch_radar_html(client: httpx.AsyncClient, url: str, semaphore: asyncio.Semaphore) -> str | None:
+async def fetch_radar_html(
+    client: httpx.AsyncClient,
+    url: str,
+    semaphore: asyncio.Semaphore,
+    *,
+    proxy_circuit: _ViciousProxyCircuit | None = None,
+) -> str | None:
     resp = await fetch_with_retry(
         client,
         url,
         semaphore,
         optional=True,
         optional_context="radar_html",
+        proxy_circuit=proxy_circuit,
     )
     return resp.text if resp else None
 
 
-async def fetch_deck_code(client: httpx.AsyncClient, deck_url: str, semaphore: asyncio.Semaphore) -> str | None:
+async def fetch_deck_code(
+    client: httpx.AsyncClient,
+    deck_url: str,
+    semaphore: asyncio.Semaphore,
+    *,
+    proxy_circuit: _ViciousProxyCircuit | None = None,
+) -> str | None:
     resp = await fetch_with_retry(
         client,
         deck_url,
         semaphore,
         optional=True,
         optional_context="deck_code",
+        proxy_circuit=proxy_circuit,
     )
     if not resp:
         return None
@@ -344,6 +391,8 @@ async def discover_class_radars(
     client: httpx.AsyncClient,
     class_name: str,
     semaphore: asyncio.Semaphore,
+    *,
+    proxy_circuit: _ViciousProxyCircuit | None = None,
 ) -> list[dict[str, Any]]:
     slug = CLASS_SLUGS.get(class_name)
     if not slug:
@@ -359,6 +408,7 @@ async def discover_class_radars(
             semaphore,
             optional=True,
             optional_context=f"class_index:{class_name}",
+            proxy_circuit=proxy_circuit,
         )
         if not resp:
             logger.warning("Optional Vicious class index missing for %s", class_name)
@@ -402,6 +452,8 @@ async def discover_class_radars(
                     "deck_code": None,
                 })
 
+    except ProxyPaymentRequiredError:
+        raise
     except Exception as e:
         logger.warning("Optional Vicious discovery failed for %s: %s", class_name, e)
 
@@ -412,6 +464,8 @@ async def resolve_archetype_details(
     client: httpx.AsyncClient,
     item: dict[str, Any],
     semaphore: asyncio.Semaphore,
+    *,
+    proxy_circuit: _ViciousProxyCircuit | None = None,
 ) -> dict[str, Any] | None:
     try:
         resp = await fetch_with_retry(
@@ -420,6 +474,7 @@ async def resolve_archetype_details(
             semaphore,
             optional=True,
             optional_context="archetype_details",
+            proxy_circuit=proxy_circuit,
         )
         if resp:
             soup = BeautifulSoup(resp.text, "lxml")
@@ -437,6 +492,8 @@ async def resolve_archetype_details(
             
             item["inner_deck_pages"] = list(set(deck_pages))
             return item
+    except ProxyPaymentRequiredError:
+        raise
     except Exception as e:
         logger.warning(
             "Optional Vicious detail resolution failed for %s: %s",
@@ -449,18 +506,33 @@ async def resolve_archetype_details(
 async def fetch_vicious_syndicate_radars(source: Source) -> dict[str, Any]:
     # Use strict Semaphore of 3 to avoid triggering Cloudflare / server rate-limiting/disconnects
     semaphore = asyncio.Semaphore(3)
+    proxy_circuit = _ViciousProxyCircuit()
 
     async with httpx.AsyncClient(**httpx_client_kwargs(source.id)) as client:
-        report_index_task = asyncio.create_task(
-            fetch_with_retry(client, REPORT_INDEX_URL, semaphore, source_id=source.id)
+        # This index is mandatory. Resolve it before fanning out optional class
+        # requests so a dead paid proxy costs one CONNECT attempt, not 5 + 11×2.
+        report_index_response = await fetch_with_retry(
+            client,
+            REPORT_INDEX_URL,
+            semaphore,
+            source_id=source.id,
+            proxy_circuit=proxy_circuit,
         )
-        # Step 1: Discover class indexes & potential archetype pages
-        discovery_tasks = [discover_class_radars(client, cls_name, semaphore) for cls_name in CLASSES]
-        discovery_results = await asyncio.gather(*discovery_tasks)
-        report_index_response = await report_index_task
         if report_index_response is None:
             raise RuntimeError("Could not fetch Vicious Syndicate report index")
         latest_report = parse_latest_report_metadata(report_index_response.text)
+
+        # Step 1: Discover class indexes & potential archetype pages
+        discovery_tasks = [
+            discover_class_radars(
+                client,
+                cls_name,
+                semaphore,
+                proxy_circuit=proxy_circuit,
+            )
+            for cls_name in CLASSES
+        ]
+        discovery_results = await asyncio.gather(*discovery_tasks)
 
         all_items = []
         for res_list in discovery_results:
@@ -468,7 +540,15 @@ async def fetch_vicious_syndicate_radars(source: Source) -> dict[str, Any]:
         discovery_count = len(all_items)
 
         # Step 2: Resolve archetype details (including inner deck links & radar URLs)
-        resolve_tasks = [resolve_archetype_details(client, item, semaphore) for item in all_items]
+        resolve_tasks = [
+            resolve_archetype_details(
+                client,
+                item,
+                semaphore,
+                proxy_circuit=proxy_circuit,
+            )
+            for item in all_items
+        ]
         resolved_results = await asyncio.gather(*resolve_tasks)
         
         # Keep items that have resolved radar URLs
@@ -479,7 +559,12 @@ async def fetch_vicious_syndicate_radars(source: Source) -> dict[str, Any]:
         async def fetch_code_for_item(item: dict[str, Any]) -> dict[str, Any]:
             if item["inner_deck_pages"]:
                 # Fetch first deck page code for this archetype
-                code = await fetch_deck_code(client, item["inner_deck_pages"][0], semaphore)
+                code = await fetch_deck_code(
+                    client,
+                    item["inner_deck_pages"][0],
+                    semaphore,
+                    proxy_circuit=proxy_circuit,
+                )
                 if code:
                     item["deck_code"] = code
             return item
@@ -489,7 +574,12 @@ async def fetch_vicious_syndicate_radars(source: Source) -> dict[str, Any]:
 
         # Step 4: Fetch index.html files for all resolved radars and parse them
         async def fetch_and_parse(item: dict[str, Any]) -> dict[str, Any] | None:
-            html = await fetch_radar_html(client, item["radar_url"], semaphore)
+            html = await fetch_radar_html(
+                client,
+                item["radar_url"],
+                semaphore,
+                proxy_circuit=proxy_circuit,
+            )
             if not html:
                 return None
 

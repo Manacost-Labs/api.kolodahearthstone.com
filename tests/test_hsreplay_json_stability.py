@@ -341,6 +341,48 @@ def test_hsreplay_json_records_successful_scrape_do_transport() -> None:
     assert consume_hsreplay_json_transport_backend("transport-test") == "scrape_do"
 
 
+def test_hsreplay_json_single_flights_concurrent_shared_cache_key() -> None:
+    cache: dict[str, dict[str, object]] = {}
+    fetch = AsyncMock(return_value='{"data": [{"id": 1}]}')
+
+    async def run() -> tuple[dict[str, object], dict[str, object]]:
+        first, second = await asyncio.gather(
+            fetch_hsreplay_json(
+                "https://hsreplay.net/api/test",
+                source_id="trinkets-lesser",
+                cache_key="shared-trinkets-slice",
+            ),
+            fetch_hsreplay_json(
+                "https://hsreplay.net/api/test",
+                source_id="trinkets-greater",
+                cache_key="shared-trinkets-slice",
+            ),
+        )
+        return first, second
+
+    with (
+        patch(
+            "app.hsreplay_client._channel_urls",
+            return_value=[("scrape_do", "https://hsreplay.net/api/test")],
+        ),
+        patch("app.hsreplay_client._fetch_body_for_channel", new=fetch),
+        patch(
+            "app.hsreplay_client.get_cached_hsreplay_json",
+            side_effect=lambda key: cache.get(key),
+        ),
+        patch(
+            "app.hsreplay_client.set_cached_hsreplay_json",
+            side_effect=lambda key, value: cache.__setitem__(key, value),
+        ),
+    ):
+        first, second = asyncio.run(run())
+
+    assert first == second == {"data": [{"id": 1}]}
+    fetch.assert_awaited_once()
+    assert consume_hsreplay_json_transport_backend("trinkets-lesser") == "scrape_do"
+    assert consume_hsreplay_json_transport_backend("trinkets-greater") == "scrape_do"
+
+
 def test_scrape_do_does_not_retry_account_failure() -> None:
     scrape = AsyncMock(
         side_effect=ScrapeDoRequestError("account rejected", status_code=401)
@@ -349,6 +391,7 @@ def test_scrape_do_does_not_retry_account_failure() -> None:
         patch("app.hsreplay_client.scrape_url", scrape),
         patch("app.hsreplay_client.api_json_attempts_per_channel", return_value=3),
         patch("app.hsreplay_client.hsreplay_cookies_for_fetch", return_value=[]),
+        patch("app.hsreplay_client.log_action") as log_action,
         pytest.raises(ScrapeDoRequestError),
     ):
         asyncio.run(
@@ -359,6 +402,9 @@ def test_scrape_do_does_not_retry_account_failure() -> None:
         )
 
     scrape.assert_awaited_once()
+    actions = [call.args[0] for call in log_action.call_args_list]
+    assert "provider.scrape_do.hsreplay_json.fail" in actions
+    assert "provider.scrape_do.hsreplay_json.retry" not in actions
 
 
 def test_concurrent_refresh_contexts_do_not_reset_each_other() -> None:

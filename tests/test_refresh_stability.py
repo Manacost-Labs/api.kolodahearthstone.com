@@ -212,7 +212,7 @@ class RefreshStabilityTest(unittest.TestCase):
         with (
             TemporaryDirectory() as td,
             patch("app.storage.data_dir", return_value=Path(td)),
-            patch("app.fetcher.validate_candidate_for_publish") as validate,
+            patch("app.fetcher.validate_existing_publication_for_serving") as validate,
             patch("app.fetcher.fetch_source", side_effect=fetch) as fetch_mock,
             patch("app.fetcher._parallel_stagger_delay", new=AsyncMock()),
             patch("app.fetcher.log_action"),
@@ -223,7 +223,7 @@ class RefreshStabilityTest(unittest.TestCase):
                 return_value={cloud_source.id},
             ),
         ):
-            validate.return_value = SimpleNamespace(ok=True, reason="ok")
+            validate.return_value = SimpleNamespace(ok=True, reason="ok", extra={})
             save_dataset(
                 cached_source.id,
                 {

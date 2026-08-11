@@ -47,7 +47,10 @@ from .post_patch_policy import (
     early_policy_changed_since_capture,
 )
 from .proxy_errors import ProxyPaymentRequiredError
-from .publish_gate import validate_candidate_for_publish
+from .publish_gate import (
+    validate_candidate_for_publish,
+    validate_existing_publication_for_serving,
+)
 from .refresh_log import (
     activate_source_trace,
     complete_source_trace,
@@ -421,7 +424,7 @@ def _preserve_cached_ok_status(source: Source, failed_status: dict[str, Any]) ->
     if not isinstance(parsed, dict) or not parsed:
         return None
     try:
-        gate = validate_candidate_for_publish(
+        gate = validate_existing_publication_for_serving(
             source,
             parsed,
             backend=dataset.get("backend"),
@@ -440,9 +443,16 @@ def _preserve_cached_ok_status(source: Source, failed_status: dict[str, Any]) ->
 
     cached_at = str(dataset.get("fetched_at") or failed_status.get("fetched_at") or now_iso())
     transport_backend = _sanitize_transport_backend(dataset.get("transport_backend"))
-    if transport_backend is None:
-        cached_backend = dataset.get("backend")
-        transport_backend = str(cached_backend) if cached_backend else None
+    cached_proxy_usage = dataset.get("used_residential_proxy")
+    used_residential_proxy = (
+        cached_proxy_usage
+        if isinstance(cached_proxy_usage, bool)
+        else (
+            "residential_httpx" in transport_backend
+            if transport_backend is not None
+            else None
+        )
+    )
     status = _status_payload(
         source,
         SourceState.OK,
@@ -452,14 +462,14 @@ def _preserve_cached_ok_status(source: Source, failed_status: dict[str, Any]) ->
         content_length=dataset.get("content_length"),
         backend=dataset.get("backend"),
         transport_backend=transport_backend,
-        used_residential_proxy=_source_uses_residential_proxy(
-            source,
-            transport_backend,
-        ),
+        used_residential_proxy=used_residential_proxy,
         detail="Serving cached dataset; latest live refresh failed.",
     )
     _attach_provisional_status(status, _provisional_metadata_from_parsed(parsed))
     status["serving_cached_dataset"] = True
+    status["cached_backend_policy_grandfathered"] = bool(
+        gate.extra.get("backend_policy_grandfathered")
+    )
     status["effective_state"] = EFFECTIVE_OK_CACHED
     status["last_refresh_state"] = failed_status.get("state")
     status["last_refresh_at"] = failed_status.get("fetched_at")
@@ -493,6 +503,9 @@ def _preserve_cached_ok_status(source: Source, failed_status: dict[str, Any]) ->
         extra={
             "last_refresh_state": status.get("last_refresh_state"),
             "transport_backend": transport_backend,
+            "backend_policy_grandfathered": status.get(
+                "cached_backend_policy_grandfathered"
+            ),
         },
     )
     return status
@@ -1335,6 +1348,20 @@ async def _fetch_hsreplay_api_source(source: Source) -> dict[str, Any] | None:
 
         structured = await fetch_battlegrounds_compositions(source.id)
         backend = structured.get("source", {}).get("backend", "hsreplay_bg_api")
+        return _dataset_from_structured(source, structured, backend=backend)
+    from .trinket_slices import (
+        LEGACY_DEFAULT_TRINKET_SOURCE_IDS,
+        TRINKET_SLICE_SOURCE_IDS,
+    )
+
+    if source.id in set(LEGACY_DEFAULT_TRINKET_SOURCE_IDS) | TRINKET_SLICE_SOURCE_IDS:
+        from .hsreplay_bg_trinkets import fetch_battlegrounds_trinkets
+
+        structured = await fetch_battlegrounds_trinkets(source)
+        backend = structured.get("source", {}).get(
+            "backend",
+            "hsreplay_trinkets_api",
+        )
         return _dataset_from_structured(source, structured, backend=backend)
     if source.id == "hsreplay_arena_legendaries":
         from .hsreplay_legendaries_api import fetch_legendary_groups

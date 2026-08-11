@@ -67,6 +67,7 @@ class _HsReplayTransportState:
     scrape_do_requests_reserved: int = 0
     scrape_do_credits_reserved: int = 0
     json_cache_transports: dict[str, str] = field(default_factory=dict)
+    json_key_locks: dict[str, asyncio.Lock] = field(default_factory=dict)
     source_json_transports: dict[str, set[str]] = field(default_factory=dict)
     scrape_do_semaphore: asyncio.Semaphore = field(
         default_factory=lambda: asyncio.Semaphore(
@@ -144,6 +145,18 @@ def _record_json_transport(
         state.source_json_transports.setdefault(source_id, set()).add(
             transport_backend
         )
+
+
+def _json_key_gate(cache_key: str) -> asyncio.Lock:
+    """Return the refresh-scoped single-flight gate for one JSON snapshot."""
+
+    state = _current_transport_state()
+    with state.lock:
+        gate = state.json_key_locks.get(cache_key)
+        if gate is None:
+            gate = asyncio.Lock()
+            state.json_key_locks[cache_key] = gate
+        return gate
 
 
 def consume_hsreplay_json_transport_backend(source_id: str) -> str | None:
@@ -534,7 +547,7 @@ async def _fetch_text_via_scrape_do(url: str, *, source_id: str) -> str:
             _assert_exact_hsreplay_https_url(result.final_url)
             _account_scrape_do_actual_cost(result.request_cost)
             log_action(
-                "provider.scrape_do.hsreplay_json.ok",
+                "provider.scrape_do.hsreplay_json.transport_ok",
                 source_id=source_id,
                 backend="scrape_do",
                 http_status=result.status_code,
@@ -547,8 +560,13 @@ async def _fetch_text_via_scrape_do(url: str, *, source_id: str) -> str:
             retryable = bool(
                 exc.retryable or exc.status_code in retryable_statuses
             )
+            will_retry = retryable and attempt < attempts
             log_action(
-                "provider.scrape_do.hsreplay_json.retry",
+                (
+                    "provider.scrape_do.hsreplay_json.retry"
+                    if will_retry
+                    else "provider.scrape_do.hsreplay_json.fail"
+                ),
                 source_id=source_id,
                 backend="scrape_do",
                 level="warn",
@@ -557,9 +575,10 @@ async def _fetch_text_via_scrape_do(url: str, *, source_id: str) -> str:
                 extra={
                     "provider_status": exc.status_code,
                     "retryable": retryable,
+                    "will_retry": will_retry,
                 },
             )
-            if not retryable or attempt >= attempts:
+            if not will_retry:
                 raise
             delay = (
                 exc.retry_after_seconds
@@ -656,14 +675,12 @@ def _payload_to_dict(payload: dict[str, Any] | list[Any]) -> dict[str, Any]:
     return payload
 
 
-async def fetch_hsreplay_json(
+async def _fetch_hsreplay_json_serialized(
     api_url: str,
     *,
     source_id: str,
-    cache_key: str | None = None,
+    key: str,
 ) -> dict[str, Any]:
-    """Fetch HSReplay JSON API via configured channels with retries and per-run cache."""
-    key = cache_key or api_url
     cached = get_cached_hsreplay_json(key)
     if cached is not None:
         state = _current_transport_state()
@@ -782,6 +799,23 @@ async def fetch_hsreplay_json(
     if first_proxy_error is not None and not independent_channel_attempted:
         raise first_proxy_error
     raise RuntimeError(detail)
+
+
+async def fetch_hsreplay_json(
+    api_url: str,
+    *,
+    source_id: str,
+    cache_key: str | None = None,
+) -> dict[str, Any]:
+    """Fetch and single-flight one HSReplay JSON snapshot per refresh cache key."""
+
+    key = cache_key or api_url
+    async with _json_key_gate(key):
+        return await _fetch_hsreplay_json_serialized(
+            api_url,
+            source_id=source_id,
+            key=key,
+        )
 
 
 def _is_bg_comps_listing_url(page_url: str) -> bool:

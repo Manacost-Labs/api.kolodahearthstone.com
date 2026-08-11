@@ -19,6 +19,7 @@ from .post_patch_policy import (
     policy_for,
 )
 from .quality_thresholds import threshold_for
+from .trinket_slices import TRINKET_SLICE_SOURCE_IDS
 
 ARENA_PERCENT_FIELDS = (
     "deck_winrate",
@@ -532,9 +533,18 @@ def _validate_bg_card_stats(_source_id: str, structured: dict[str, Any]) -> Vali
     return report
 
 
-def _validate_bg_trinkets(_source_id: str, structured: dict[str, Any]) -> ValidationReport:
+def _validate_bg_trinkets(source_id: str, structured: dict[str, Any]) -> ValidationReport:
     report = ValidationReport()
     trinkets = [row for row in (structured.get("trinkets") or []) if isinstance(row, dict)]
+    tier_counts = {"lesser": 0, "greater": 0}
+    for row in trinkets:
+        tier = str(
+            row.get("trinket_tier") or row.get("type") or row.get("group") or ""
+        ).strip().lower()
+        for expected_tier in tier_counts:
+            if expected_tier in tier:
+                tier_counts[expected_tier] += 1
+                break
     valid = [
         row
         for row in trinkets
@@ -561,6 +571,8 @@ def _validate_bg_trinkets(_source_id: str, structured: dict[str, Any]) -> Valida
             "minimum_complete_descriptions": minimum_complete_descriptions,
             "parser_level": structured.get("parser_level"),
             "dropped_rows": int(structured.get("dropped_rows") or 0),
+            "lesser_trinkets": tier_counts["lesser"],
+            "greater_trinkets": tier_counts["greater"],
         }
     )
     parser_level = str(structured.get("parser_level") or "primary")
@@ -576,6 +588,16 @@ def _validate_bg_trinkets(_source_id: str, structured: dict[str, Any]) -> Valida
             "bg_trinkets.too_few_rows",
             f"bg trinkets too few ({len(trinkets)} < 8)",
             field="trinkets",
+        )
+    if source_id in TRINKET_SLICE_SOURCE_IDS and min(tier_counts.values()) < 4:
+        report.add_issue(
+            "bg_trinkets.incomplete_tier_mix",
+            (
+                "combined bg trinkets slice is incomplete "
+                f"(lesser={tier_counts['lesser']}, greater={tier_counts['greater']}; "
+                "minimum 4 each)"
+            ),
+            field="trinket_tier",
         )
     if len(valid) < minimum_valid:
         report.add_issue(

@@ -90,6 +90,20 @@ class PostPatchPolicyTest(unittest.TestCase):
         self.assertNotIn("hsreplay_cards_legend_1d", EARLY_SOURCE_IDS)
         self.assertNotIn("hsreplay_cards_wild_platinum_14d", EARLY_SOURCE_IDS)
 
+    def test_trinket_early_mode_uses_sparse_but_complete_row_floors(self) -> None:
+        legacy_id = "hsreplay_battlegrounds_trinkets_lesser"
+        combined_id = (
+            "hsreplay_battlegrounds_trinkets_top_20_percent_"
+            "current_battlegrounds_patch"
+        )
+
+        self.assertIn(legacy_id, EARLY_SOURCE_IDS)
+        self.assertIn(combined_id, EARLY_SOURCE_IDS)
+        self.assertEqual(policy_for(legacy_id, at=WINDOW_TIME).minimum_rows, 8)
+        self.assertEqual(policy_for(combined_id, at=WINDOW_TIME).minimum_rows, 16)
+        self.assertIsNone(policy_for(legacy_id, at=AFTER_WINDOW))
+        self.assertIsNone(policy_for(combined_id, at=AFTER_WINDOW))
+
     def test_hsguru_legend_early_mode_accepts_three_complete_rows_but_not_two(self) -> None:
         source_id = "hsguru_meta_standard_legend"
         with patch("app.post_patch_policy.current_time", return_value=WINDOW_TIME):
