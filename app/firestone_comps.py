@@ -13,7 +13,6 @@ import httpx
 from .cards_index import card_from_id
 from .post_patch_policy import effective_firestone_minimum_sample
 from .refresh_log import log_action
-from .scrapers.proxy import httpx_client_kwargs
 from .sources import Source
 
 logger = logging.getLogger(__name__)
@@ -65,7 +64,7 @@ async def _get_static_json(
                     duration_ms=(time.monotonic() - started) * 1000,
                 )
                 return response
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - retry any transport failure
             last_exc = exc
             logger.warning("Firestone static fetch %s attempt %d failed: %s", url, attempt, exc)
             log_action(
@@ -270,12 +269,15 @@ async def fetch_firestone_comps(source: Source) -> dict[str, Any]:
     }
 
 
-FIRESTONE_CARDS_URL = "https://static.zerotoheroes.com/api/bgs/card-stats/past-three/overview-from-hourly.gz.json?v=2"
+FIRESTONE_CARDS_URL = (
+    "https://static.zerotoheroes.com/api/bgs/card-stats/"
+    "mmr-100/past-three/overview-from-hourly.gz.json?v=2"
+)
 
 async def fetch_firestone_cards(source: Source) -> dict[str, Any]:
     """
     Fetch and assemble Firestone Battlegrounds card stats grouped by Tavern Tier.
-    Parses card-stats/past-three/overview-from-hourly.gz.json?v=2.
+    Parses the explicit all-MMR (mmr-100), past-three snapshot used by Firestone.
     If source.id ends with '_spells' or has 'type=spell', filters specifically for BATTLEGROUND_SPELL type.
     Otherwise, filters for minion card types (ignores BATTLEGROUND_SPELL).
     """
@@ -365,6 +367,9 @@ async def fetch_firestone_cards(source: Source) -> dict[str, Any]:
         "tiers": tiers,
         "last_update_date": data.get("lastUpdateDate"),
         "total_data_points": data.get("dataPoints"),
+        "mmr_bracket": "mmr-100",
+        "time_period": "past-three",
+        "_fetch_backend": "proxyless_direct",
     }
 
 
@@ -406,7 +411,7 @@ async def fetch_firestone_arena(source: Source) -> dict[str, Any]:
         if content_draft.startswith(b"\x1f\x8b"):
             content_draft = gzip.decompress(content_draft)
         draft_data = json.loads(content_draft.decode("utf-8"))
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - draft statistics are optional
         logger.warning("Failed to parse draft stats: %s", e)
                 
     draft_stats_list = draft_data.get("stats") or []
@@ -424,9 +429,8 @@ async def fetch_firestone_arena(source: Source) -> dict[str, Any]:
         rarity = card_meta.get("rarity")
         
         # Apply legendary-only filter
-        if is_legendary_only:
-            if rarity != "LEGENDARY":
-                continue
+        if is_legendary_only and rarity != "LEGENDARY":
+            continue
                 
         stats = stat.get("stats") or {}
         
