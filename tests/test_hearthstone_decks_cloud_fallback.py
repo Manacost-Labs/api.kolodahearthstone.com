@@ -3,14 +3,24 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
 
 from app.firecrawl_backend import FirecrawlScrape
-from app.hearthstone_decks import fetch_hearthstone_decks
+from app.hearthstone_decks import (
+    _fetch_cloud_deck_code,
+    _fetch_wordpress_format,
+    _parse_wordpress_posts,
+    fetch_hearthstone_decks,
+)
 from app.proxy_errors import ProxyPaymentRequiredError
 from app.sources import SOURCE_BY_ID, Source
 
 SOURCE = SOURCE_BY_ID["hearthstone_decks"]
+VALID_DECK_CODE = (
+    "AAEBAf0GBs30Av76A4f7A564BtvXB63ZBwycENfOA4j0A8b5A8f5A63pBdCeBu6h"
+    "Bom1BoSZB+C+B43cBwAA"
+)
 
 
 def _deck_code(index: int) -> str:
@@ -43,7 +53,7 @@ def _cached_dataset(*, per_format: int = 30) -> dict:
                     "title": f"{format_name} Deck {index} #1 Legend – Player {index}",
                     "url": f"https://hearthstone-decks.net/{slug}-deck-{index}/",
                     "format": format_name,
-                    "deck_code": _deck_code(index),
+                    "deck_code": VALID_DECK_CODE,
                     "deck_code_status": "ok",
                 }
             )
@@ -56,6 +66,342 @@ def _cached_dataset(*, per_format: int = 30) -> dict:
             }
         },
     }
+
+
+def _wordpress_posts(
+    format_name: str,
+    *,
+    category_id: int,
+    count: int = 20,
+) -> list[dict]:
+    slug = format_name.lower()
+    return [
+        {
+            "id": category_id * 1_000 + index,
+            "date": "2026-08-11T12:34:56",
+            "modified": "2026-08-11T13:45:01",
+            "link": f"https://hearthstone-decks.net/{slug}-api-deck-{index}/",
+            "title": {
+                "rendered": (
+                    f"{format_name} &amp; Deck {index} #1 Legend &#8211; Player {index}"
+                )
+            },
+            "content": {
+                "rendered": (
+                    f'<button data-clipboard-text="{VALID_DECK_CODE}">'
+                    "Copy deck</button>"
+                )
+            },
+            "categories": [category_id, 100 + index],
+        }
+        for index in range(count)
+    ]
+
+
+def _wordpress_unavailable() -> AsyncMock:
+    return AsyncMock(side_effect=RuntimeError("wordpress REST unavailable"))
+
+
+def test_wordpress_parser_extracts_codes_and_decodes_titles_without_details() -> None:
+    rows = _parse_wordpress_posts(
+        _wordpress_posts("Standard", category_id=3),
+        format_name="Standard",
+        category_id=3,
+    )
+
+    assert len(rows) == 20
+    assert rows[0]["title"] == "Standard & Deck 0 #1 Legend – Player 0"
+    assert rows[0]["archetype"] == "Standard & Deck 0"
+    assert rows[0]["deck_code"] == VALID_DECK_CODE
+    assert rows[0]["deck_code_status"] == "ok"
+    assert rows[0]["deck_code_source"] == "wordpress_content"
+    assert rows[0]["detail_attempts"] == 0
+    assert rows[0]["published_at"] == "2026-08-11T12:34:56"
+    assert rows[0]["modified_at"] == "2026-08-11T13:45:01"
+
+
+@pytest.mark.parametrize(
+    ("mutate", "message"),
+    [
+        (lambda posts: posts.pop(), "coverage incomplete"),
+        (
+            lambda posts: posts[1].__setitem__("id", posts[0]["id"]),
+            "duplicate post id",
+        ),
+        (
+            lambda posts: posts[1].__setitem__("link", posts[0]["link"]),
+            "duplicate post URL",
+        ),
+        (
+            lambda posts: posts[0].__setitem__("categories", [999]),
+            "missing category",
+        ),
+    ],
+)
+def test_wordpress_parser_rejects_incomplete_or_ambiguous_payloads(
+    mutate,
+    message: str,
+) -> None:
+    posts = _wordpress_posts("Standard", category_id=3)
+    mutate(posts)
+
+    with pytest.raises(RuntimeError, match=message):
+        _parse_wordpress_posts(
+            posts,
+            format_name="Standard",
+            category_id=3,
+        )
+
+
+def test_wordpress_parser_accepts_one_missing_code_but_rejects_two() -> None:
+    posts = _wordpress_posts("Standard", category_id=3)
+    posts[0]["content"] = {"rendered": "No deck code"}
+
+    rows = _parse_wordpress_posts(
+        posts,
+        format_name="Standard",
+        category_id=3,
+    )
+
+    assert rows[0]["deck_code"] == ""
+    assert rows[0]["deck_code_status"] == "missing"
+    assert rows[0]["deck_code_error"] == "missing from wordpress content"
+
+    posts[1]["content"] = {"rendered": "No deck code either"}
+    with pytest.raises(RuntimeError, match="deck-code coverage incomplete"):
+        _parse_wordpress_posts(
+            posts,
+            format_name="Standard",
+            category_id=3,
+        )
+
+
+def test_wordpress_parser_does_not_count_regex_shaped_garbage_as_a_deck() -> None:
+    posts = _wordpress_posts("Standard", category_id=3)
+    posts[0]["content"] = {
+        "rendered": f'<button data-clipboard-text="{_deck_code(0)}">Copy</button>'
+    }
+
+    rows = _parse_wordpress_posts(
+        posts,
+        format_name="Standard",
+        category_id=3,
+    )
+
+    assert rows[0]["deck_code"] == ""
+    assert rows[0]["deck_code_status"] == "missing"
+
+
+def test_wordpress_transport_sends_bounded_filtered_request() -> None:
+    async def run() -> list[dict]:
+        def respond(request: httpx.Request) -> httpx.Response:
+            assert request.url.host == "hearthstone-decks.net"
+            assert request.url.params["categories"] == "3"
+            assert request.url.params["per_page"] == "20"
+            assert request.url.params["page"] == "1"
+            assert request.url.params["orderby"] == "date"
+            assert request.url.params["order"] == "desc"
+            assert "content" in request.url.params["_fields"]
+            assert "modified" in request.url.params["_fields"]
+            return httpx.Response(
+                200,
+                json=_wordpress_posts("Standard", category_id=3),
+                request=request,
+            )
+
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(respond),
+            follow_redirects=True,
+        ) as client:
+            return await _fetch_wordpress_format(
+                client,
+                format_name="Standard",
+                category_id=3,
+            )
+
+    rows = asyncio.run(run())
+
+    assert len(rows) == 20
+    assert all(row["deck_code"] == VALID_DECK_CODE for row in rows)
+
+
+def test_wordpress_transport_rejects_non_json_and_foreign_redirects() -> None:
+    async def non_json() -> None:
+        def respond(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                text="<html>not JSON</html>",
+                headers={"content-type": "text/html"},
+                request=request,
+            )
+
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(respond),
+        ) as client:
+            with pytest.raises(RuntimeError, match="response is not JSON"):
+                await _fetch_wordpress_format(
+                    client,
+                    format_name="Standard",
+                    category_id=3,
+                )
+
+    async def foreign_redirect() -> None:
+        def respond(request: httpx.Request) -> httpx.Response:
+            if request.url.host == "hearthstone-decks.net":
+                return httpx.Response(
+                    302,
+                    headers={"location": "https://example.invalid/posts"},
+                    request=request,
+                )
+            return httpx.Response(200, json=[], request=request)
+
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(respond),
+            follow_redirects=True,
+        ) as client:
+            with pytest.raises(RuntimeError, match="response URL rejected"):
+                await _fetch_wordpress_format(
+                    client,
+                    format_name="Standard",
+                    category_id=3,
+                )
+
+    asyncio.run(non_json())
+    asyncio.run(foreign_redirect())
+
+
+def test_wordpress_rest_is_primary_and_needs_only_two_list_requests() -> None:
+    async def wordpress_lists() -> dict[str, list[dict]]:
+        return {
+            "Standard": _parse_wordpress_posts(
+                _wordpress_posts("Standard", category_id=3),
+                format_name="Standard",
+                category_id=3,
+            ),
+            "Wild": _parse_wordpress_posts(
+                _wordpress_posts("Wild", category_id=13),
+                format_name="Wild",
+                category_id=13,
+            ),
+        }
+
+    with (
+        patch(
+            "app.hearthstone_decks._fetch_wordpress_lists",
+            side_effect=wordpress_lists,
+        ) as rest,
+        patch(
+            "app.hearthstone_decks.scrape_source_with_options",
+            new=AsyncMock(side_effect=AssertionError("HTML fallback must stay idle")),
+        ) as provider,
+        patch(
+            "app.hearthstone_decks._fetch_residential_html",
+            new=AsyncMock(side_effect=AssertionError("residential must stay idle")),
+        ) as residential,
+        patch("app.hearthstone_decks.load_dataset", return_value=None),
+    ):
+        structured = asyncio.run(fetch_hearthstone_decks(SOURCE))
+
+    assert structured["total_decks"] == 40
+    assert structured["with_deck_code"] == 40
+    assert structured["deck_code_fill_rate"] == 1.0
+    assert structured["_fetch_backend"] == "wordpress_rest_direct"
+    assert structured["fetch_strategy"] == "wordpress_rest"
+    assert structured["wordpress_rest_requests"] == 2
+    assert structured["wordpress_rest_accepted_formats"] == 2
+    assert structured["html_list_pages"] == 0
+    assert structured["detail_page_attempts"] == 0
+    assert all(deck["detail_attempts"] == 0 for deck in structured["decks"])
+    from app.fetcher import _dataset_from_structured
+
+    parsed = _dataset_from_structured(
+        SOURCE,
+        structured,
+        backend="hearthstone_decks_api",
+    )
+    assert parsed["_transport_backend"] == "wordpress_rest_direct"
+    rest.assert_awaited_once()
+    provider.assert_not_awaited()
+    residential.assert_not_awaited()
+
+
+def test_wordpress_rest_reuses_lkg_for_one_missing_content_code() -> None:
+    standard_posts = _wordpress_posts("Standard", category_id=3)
+    standard_posts[0]["content"] = {"rendered": "Deck code temporarily missing"}
+    lists = {
+        "Standard": _parse_wordpress_posts(
+            standard_posts,
+            format_name="Standard",
+            category_id=3,
+        ),
+        "Wild": _parse_wordpress_posts(
+            _wordpress_posts("Wild", category_id=13),
+            format_name="Wild",
+            category_id=13,
+        ),
+    }
+    cached = {
+        "data": {
+            "structured": {
+                "type": "hearthstone_decks",
+                "decks": [
+                    {
+                        "url": lists["Standard"][0]["url"],
+                        "deck_code": VALID_DECK_CODE,
+                        "deck_code_status": "ok",
+                        "detail_attempts": 1,
+                    }
+                ],
+            }
+        }
+    }
+
+    with (
+        patch(
+            "app.hearthstone_decks._fetch_wordpress_lists",
+            new=AsyncMock(return_value=lists),
+        ),
+        patch(
+            "app.hearthstone_decks.scrape_source_with_options",
+            new=AsyncMock(side_effect=AssertionError("detail fetch must stay idle")),
+        ) as provider,
+        patch(
+            "app.hearthstone_decks._fetch_residential_html",
+            new=AsyncMock(side_effect=AssertionError("residential must stay idle")),
+        ) as residential,
+        patch("app.hearthstone_decks.load_dataset", return_value=cached),
+    ):
+        structured = asyncio.run(fetch_hearthstone_decks(SOURCE))
+
+    restored = structured["decks"][0]
+    assert structured["with_deck_code"] == 40
+    assert structured["cached_deck_codes_reused"] == 1
+    assert structured["detail_page_attempts"] == 0
+    assert restored["deck_code"] == VALID_DECK_CODE
+    assert restored["deck_code_source"] == "last_known_good"
+    assert restored["previous_detail_attempts"] == 1
+    assert "deck_code_error" not in restored
+    provider.assert_not_awaited()
+    residential.assert_not_awaited()
+
+
+def test_detail_fallback_rejects_regex_shaped_garbage_deck_code() -> None:
+    fake_html = f'<button data-clipboard-text="{_deck_code(0)}">Copy fake deck</button>'
+    with patch(
+        "app.hearthstone_decks._fetch_cloud_html",
+        new=AsyncMock(return_value=(fake_html, "scrape_do")),
+    ):
+        result, backend = asyncio.run(
+            _fetch_cloud_deck_code(
+                SOURCE,
+                "https://hearthstone-decks.net/example-deck/",
+            )
+        )
+
+    assert result["deck_code"] == ""
+    assert result["deck_code_status"] == "missing"
+    assert result["deck_code_error"] == "invalid deck code"
+    assert backend is None
 
 
 def _provider_result(
@@ -95,6 +441,10 @@ def test_validated_cloud_lists_avoid_residential_and_reuse_cached_codes() -> Non
 
     with (
         patch(
+            "app.hearthstone_decks._fetch_wordpress_lists",
+            new=_wordpress_unavailable(),
+        ),
+        patch(
             "app.hearthstone_decks._fetch_residential_html",
             new=AsyncMock(
                 side_effect=ProxyPaymentRequiredError(
@@ -133,6 +483,10 @@ def test_cloud_failure_uses_residential_lists_as_last_fallback() -> None:
 
     with (
         patch(
+            "app.hearthstone_decks._fetch_wordpress_lists",
+            new=_wordpress_unavailable(),
+        ),
+        patch(
             "app.hearthstone_decks._fetch_residential_html",
             side_effect=residential,
         ) as residential_fetch,
@@ -161,6 +515,10 @@ def test_cloud_list_candidate_with_fewer_than_twenty_rows_fails_closed() -> None
         return _provider_result(source, _list_html(format_name, count=count))
 
     with (
+        patch(
+            "app.hearthstone_decks._fetch_wordpress_lists",
+            new=_wordpress_unavailable(),
+        ),
         patch(
             "app.hearthstone_decks._fetch_residential_html",
             new=AsyncMock(
@@ -191,6 +549,10 @@ def test_cloud_list_candidate_redirected_to_wrong_path_fails_closed() -> None:
 
     with (
         patch(
+            "app.hearthstone_decks._fetch_wordpress_lists",
+            new=_wordpress_unavailable(),
+        ),
+        patch(
             "app.hearthstone_decks._fetch_residential_html",
             new=AsyncMock(
                 side_effect=ProxyPaymentRequiredError(
@@ -215,6 +577,10 @@ def test_standard_and_wild_lists_must_not_reuse_the_same_deck_urls() -> None:
         return _provider_result(source, _list_html("Standard"))
 
     with (
+        patch(
+            "app.hearthstone_decks._fetch_wordpress_lists",
+            new=_wordpress_unavailable(),
+        ),
         patch(
             "app.hearthstone_decks._fetch_residential_html",
             new=AsyncMock(
@@ -247,14 +613,11 @@ def test_cloud_detail_requests_cover_current_lists_with_bounded_concurrency() ->
             html = _list_html(format_name)
         else:
             detail_urls.append(source.url)
-            index = len(detail_urls)
             active_details += 1
             max_active_details = max(max_active_details, active_details)
             try:
                 await asyncio.sleep(0.001)
-                html = (
-                    f'<button data-clipboard-text="{_deck_code(index)}">Copy</button>'
-                )
+                html = f'<button data-clipboard-text="{VALID_DECK_CODE}">Copy</button>'
             finally:
                 active_details -= 1
         candidate = _provider_result(source, html)
@@ -262,6 +625,10 @@ def test_cloud_detail_requests_cover_current_lists_with_bounded_concurrency() ->
         return candidate
 
     with (
+        patch(
+            "app.hearthstone_decks._fetch_wordpress_lists",
+            new=_wordpress_unavailable(),
+        ),
         patch(
             "app.hearthstone_decks._fetch_residential_html",
             new=AsyncMock(

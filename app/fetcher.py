@@ -341,6 +341,7 @@ _TRANSPORT_BACKENDS = frozenset(
         "scrape_do",
         "scrape_do_super",
         "scrapfly",
+        "wordpress_rest_direct",
     }
 )
 
@@ -1393,6 +1394,11 @@ async def _fetch_hsreplay_api_source(source: Source) -> dict[str, Any] | None:
         from .firestone_comps import fetch_firestone_comps
 
         structured = await fetch_firestone_comps(source)
+        return _dataset_from_structured(source, structured, backend="firestone_api")
+    if source.id == "firestone_standard":
+        from .firestone_standard import fetch_firestone_standard
+
+        structured = await fetch_firestone_standard(source)
         return _dataset_from_structured(source, structured, backend="firestone_api")
     if source.id == "firestone_battlegrounds_cards":
         from .firestone_comps import fetch_firestone_cards
