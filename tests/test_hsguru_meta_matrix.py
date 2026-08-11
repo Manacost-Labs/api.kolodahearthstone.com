@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, patch
+from pathlib import Path
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from starlette.testclient import TestClient
@@ -871,6 +872,139 @@ def test_last_current_slice_finishing_after_deadline_is_not_published() -> None:
     save_dataset.assert_not_called()
     record_history.assert_not_called()
     assert save_status.call_args.args[1]["published"] is False
+
+
+def test_hard_deadline_cancels_blocked_provider_and_preserves_lkg(tmp_path) -> None:
+    from app.hsguru_meta_matrix import (
+        SOURCE_ID,
+        SliceSpec,
+        refresh_hsguru_meta_matrix,
+    )
+    from app.job_run import AtomicJobRunSnapshotWriter
+    from app.resource_locks import ResourceLockSet
+
+    spec = SliceSpec(
+        "standard",
+        "all",
+        "past_week",
+        "any_player",
+        "standard|all|past_week|any_player",
+        "https://www.hsguru.com/meta?format=2&rank=all&period=past_week&min_games=100",
+    )
+    cached = {
+        "source_id": SOURCE_ID,
+        "fetched_at": "2026-08-09T20:00:00+00:00",
+        "data": {"structured": {"slices": [{"key": spec.key}]}},
+    }
+    provider_started = asyncio.Event()
+    provider_cancelled = False
+    heartbeat_snapshots: list[dict] = []
+
+    class RecordingWriter:
+        def write(self, snapshot):
+            heartbeat_snapshots.append(snapshot)
+
+    async def discover_patch(_cached):
+        return "patch_36.2.0", None
+
+    async def blocked_scrape(_spec):
+        nonlocal provider_cancelled
+        provider_started.set()
+        try:
+            await asyncio.Future()
+        except asyncio.CancelledError:
+            provider_cancelled = True
+            raise
+
+    async def scenario():
+        return await asyncio.wait_for(
+            refresh_hsguru_meta_matrix(
+                concurrency=1,
+                attempts=1,
+                scrape=blocked_scrape,
+                discover_patch=discover_patch,
+                deadline_seconds=0.03,
+            ),
+            timeout=0.5,
+        )
+
+    with (
+        patch("app.resource_locks.data_dir", return_value=tmp_path),
+        patch("app.hsguru_meta_matrix.iter_slice_specs", return_value=(spec,)),
+        patch("app.hsguru_meta_matrix.load_dataset", return_value=cached),
+        patch.object(
+            AtomicJobRunSnapshotWriter,
+            "for_job",
+            return_value=RecordingWriter(),
+        ),
+        patch("app.hsguru_meta_matrix._record_current_history") as record_history,
+        patch("app.hsguru_meta_matrix.save_dataset") as save_dataset,
+        patch("app.hsguru_meta_matrix.save_status") as save_status,
+    ):
+        result = asyncio.run(scenario())
+
+    assert provider_started.is_set()
+    assert provider_cancelled is True
+    assert result["ok"] is False
+    assert result["published"] is False
+    assert result["state"] == "timed_out"
+    assert result["timed_out"] is True
+    assert result["serving_cached_dataset"] is True
+    assert result["job_run"]["progress"]["phase"] == "timed_out"
+    save_dataset.assert_not_called()
+    record_history.assert_not_called()
+    status = save_status.call_args.args[1]
+    assert status["published"] is False
+    assert status["serving_cached_dataset"] is True
+    assert status["job_run"] == result["job_run"]
+    assert heartbeat_snapshots[-1] == result["job_run"]
+
+    # The application-level timeout must release the cross-process lock too.
+    with ResourceLockSet([SOURCE_ID], lock_dir=tmp_path / ".locks"):
+        pass
+
+
+def test_heartbeat_failure_cannot_replace_result_or_leak_lock() -> None:
+    from app.hsguru_meta_matrix import refresh_hsguru_meta_matrix
+
+    lock = Mock()
+
+    async def successful_refresh(**_kwargs):
+        await asyncio.sleep(0.01)
+        return {"ok": True, "state": "ok"}
+
+    async def failed_heartbeat(_run):
+        await asyncio.sleep(0)
+        raise RuntimeError("snapshot storage unavailable")
+
+    with (
+        patch("app.hsguru_meta_matrix.ResourceLockSet", return_value=lock),
+        patch(
+            "app.hsguru_meta_matrix._refresh_hsguru_meta_matrix_unlocked",
+            side_effect=successful_refresh,
+        ),
+        patch(
+            "app.hsguru_meta_matrix.run_periodic_heartbeat",
+            side_effect=failed_heartbeat,
+        ),
+    ):
+        result = asyncio.run(refresh_hsguru_meta_matrix(deadline_seconds=1))
+
+    assert result == {"ok": True, "state": "ok"}
+    lock.acquire.assert_called_once_with()
+    lock.release.assert_called_once_with()
+
+
+def test_hsguru_matrix_systemd_unit_has_outer_hard_timeout() -> None:
+    unit_path = (
+        Path(__file__).parents[1]
+        / "systemd"
+        / "hs-data-api-docker-refresh-hsguru-meta-matrix.service"
+    )
+    unit = unit_path.read_text(encoding="utf-8")
+
+    assert "TimeoutStartSec=65min" in unit
+    assert "TimeoutStopSec=30s" in unit
 
 
 def test_missing_slice_can_be_carried_forward_from_last_stable_dataset() -> None:

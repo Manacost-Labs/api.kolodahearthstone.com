@@ -6,8 +6,8 @@ from typing import Any
 
 from .cards_index import card_from_id, resolve_card_name
 from .hsreplay_client import fetch_hsreplay_json
+from .parser_control import load_resolved_public_dataset
 from .sources import Source
-from .storage import load_dataset
 from .structured import parse_legendary_groups
 
 logger = logging.getLogger(__name__)
@@ -177,7 +177,7 @@ async def _load_arena_card_stats_index(source_id: str) -> tuple[dict[str, dict[s
     except Exception as exc:
         logger.warning("Live arena card stats unavailable for legendaries enrich: %s", exc)
 
-    dataset = load_dataset("hsreplay_arena_cards_advanced") or {}
+    dataset = load_resolved_public_dataset("hsreplay_arena_cards_advanced") or {}
     data = dataset.get("data") or {}
     structured = data.get("structured") or data.get("hsreplay_extracted") or {}
     cards = [row for row in (structured.get("cards") or []) if isinstance(row, dict)]
@@ -457,14 +457,12 @@ async def fetch_legendary_groups(
 
     try:
         last_error: Exception | None = None
-        payload: dict[str, Any] | None = None
         for url in (LEGENDARIES_API_URL, LEGENDARIES_API_URL_FREE):
             try:
                 candidate = await fetch_hsreplay_json(url, source_id=source_id)
                 data = _payload_data(candidate if isinstance(candidate, dict) else {})
                 built = _groups_from_class_buckets(data, locale=locale)
                 if len(built) >= 10:
-                    payload = candidate if isinstance(candidate, dict) else {"data": data}
                     groups = built
                     api_url = url
                     break

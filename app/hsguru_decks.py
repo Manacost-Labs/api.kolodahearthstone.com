@@ -12,9 +12,9 @@ from bs4 import BeautifulSoup
 
 from .deck_decode import first_deck_code_from_text
 from .firecrawl_backend import scrape_source_with_options
+from .parser_control import load_resolved_public_dataset
 from .sources import Source
 from .storage import dataset_path, read_json, write_json
-
 
 HSGURU_DECKS_URL = "https://www.hsguru.com/decks"
 _CACHE_TTL_SECONDS = 6 * 60 * 60
@@ -195,7 +195,12 @@ def _meta_archetypes(format_name: str) -> list[str]:
     archetypes: dict[str, str] = {}
     for rank in ("legend", "diamond_4to1", "top_5k", "top_legend"):
         try:
-            payload = read_json(dataset_path(f"hsguru_meta_{format_name}_{rank}")) or {}
+            payload = (
+                load_resolved_public_dataset(
+                    f"hsguru_meta_{format_name}_{rank}"
+                )
+                or {}
+            )
         except (OSError, ValueError, TypeError):
             continue
         data = payload.get("data") if isinstance(payload, dict) else {}

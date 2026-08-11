@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from .deck_decode import decode_all_codes_in_text, decode_deck_code, first_deck_code_from_text
+from .deck_decode import (
+    decode_all_codes_in_text,
+    first_deck_code_from_text,
+)
 from .source_state import SourceState
 from .sources import SOURCE_BY_ID, SOURCES, Source
 from .storage import load_dataset, load_status
@@ -79,9 +82,9 @@ def build_demo_view(source_id: str) -> dict[str, Any]:
         status_fallback_reason = "status_missing"
     publication_read = None
     from .dataset_publication_store import (
+        STANDARD_CARDS_SOURCE_ID,
         DatasetPublicationStore,
         PublicationUnavailable,
-        STANDARD_CARDS_SOURCE_ID,
     )
 
     if source_id == STANDARD_CARDS_SOURCE_ID:
@@ -166,10 +169,12 @@ def build_demo_view(source_id: str) -> dict[str, Any]:
 
 
 def build_overview() -> dict[str, Any]:
+    from .parser_control import load_resolved_public_dataset
+
     items: list[dict[str, Any]] = []
     for source in SOURCES:
         status = load_status(source.id) or {}
-        dataset = load_dataset(source.id)
+        dataset = load_resolved_public_dataset(source.id)
         items.append(
             {
                 "source_id": source.id,

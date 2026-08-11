@@ -6,11 +6,14 @@ import random
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
 from bs4 import BeautifulSoup, NavigableString
 
+from .brightdata_backend import brightdata_configured_for_source
+from .brightdata_backend import scrape_url_sync as brightdata_scrape_url_sync
 from .config import (
     firecrawl_hsguru_matchups_timeout_ms,
     firecrawl_max_age_ms,
@@ -32,6 +35,7 @@ from .scrape_do_backend import (
     scrape_url_sync,
 )
 from .scrapers.http_resilience import is_session_blocked
+from .scrapers.quality import looks_like_real_page
 from .scrapfly_backend import scrape_url_sync as scrapfly_scrape_url_sync
 from .scrapfly_backend import scrapfly_configured
 from .sources import Source
@@ -84,10 +88,29 @@ class FirecrawlScrape:
             return 0
 
     @property
+    def brightdata_credits_used(self) -> int:
+        if self.backend != "brightdata_web_unlocker":
+            return 0
+        try:
+            return int(self.metadata.get("brightDataBillableRequests") or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    @property
+    def brightdata_requests_used(self) -> int:
+        if self.backend != "brightdata_web_unlocker":
+            return 0
+        try:
+            return int(self.metadata.get("brightDataRequests") or 1)
+        except (TypeError, ValueError):
+            return 1
+
+    @property
     def request_credits(self) -> int:
         return (
             self.scrape_do_credits_used
             or self.scrapfly_credits_used
+            or self.brightdata_credits_used
             or self.firecrawl_credits_used
         )
 
@@ -185,7 +208,7 @@ def _scrape_via_scrapfly(
             "scrapflyKeyLabel": scraped.key_label,
             "scrapflyKeyFingerprint": scraped.key_fingerprint,
             "scrapflyKeyRotation": scraped.key_rotation,
-            "providerPolicy": "scrape_do_firecrawl_scrapfly",
+            "providerPolicy": "scrape_do_firecrawl_scrapfly_brightdata",
             "firecrawlFallbackReason": reason[:500],
         },
         status_code=scraped.status_code,
@@ -288,7 +311,7 @@ def _scrape_via_scrape_do(
             "scrapeDoCreditsUsed": scraped.request_cost,
             "scrapeDoRemainingCredits": scraped.credits_remaining,
             "scrapeDoAttempts": attempts,
-            "providerPolicy": "scrape_do_firecrawl_scrapfly",
+            "providerPolicy": "scrape_do_firecrawl_scrapfly_brightdata",
             "providerChainReason": reason[:500],
             "firecrawlFallbackReason": reason[:500],
         },
@@ -404,7 +427,7 @@ def _scrape_via_firecrawl(
         metadata["firecrawl_key_label"] = lease.key.label
         metadata["firecrawl_key_fingerprint"] = lease.key.fingerprint
         metadata["firecrawl_key_rotation"] = rotation
-        metadata["providerPolicy"] = "scrape_do_firecrawl_scrapfly"
+        metadata["providerPolicy"] = "scrape_do_firecrawl_scrapfly_brightdata"
         return FirecrawlScrape(
             html=scraped.html,
             markdown=scraped.markdown,
@@ -428,8 +451,10 @@ def _scrape_sync(
     wait_ms: int | None = None,
     timeout_ms: int | None = None,
     skip_providers: frozenset[str] | set[str] | None = None,
+    brightdata_accept_html: Callable[[str], bool] | None = None,
+    brightdata_render: bool = True,
 ) -> FirecrawlScrape:
-    """Fetch through the shared Scrape.do → Firecrawl → Scrapfly policy."""
+    """Fetch through Scrape.do → Firecrawl → Scrapfly → Bright Data."""
     errors: list[str] = []
     skip = frozenset(skip_providers or ())
 
@@ -460,7 +485,15 @@ def _scrape_sync(
         except Exception as exc:  # noqa: BLE001 - provider boundary
             errors.append(f"firecrawl: {type(exc).__name__}: {str(exc)[:300]}")
 
-    if "scrapfly" not in skip and scrapfly_configured():
+    scrapfly_available = False
+    if "scrapfly" not in skip:
+        try:
+            scrapfly_available = scrapfly_configured()
+        except Exception as exc:  # noqa: BLE001 - isolate provider configuration
+            errors.append(
+                f"scrapfly: {type(exc).__name__}: configuration unavailable"
+            )
+    if scrapfly_available:
         try:
             return _scrape_via_scrapfly(
                 source,
@@ -472,6 +505,65 @@ def _scrape_sync(
             )
         except Exception as exc:  # noqa: BLE001 - provider boundary
             errors.append(f"scrapfly: {type(exc).__name__}: {str(exc)[:300]}")
+
+    brightdata_formats_allowed = all(
+        isinstance(item, str)
+        and item.lower() in {"html", "rawhtml", "markdown"}
+        for item in (formats or ["html", "markdown"])
+    )
+    brightdata_available = False
+    if (
+        "brightdata" not in skip
+        and headers is None
+        and brightdata_formats_allowed
+    ):
+        try:
+            brightdata_available = brightdata_configured_for_source(source.id)
+        except Exception as exc:  # noqa: BLE001 - isolate provider configuration
+            errors.append(
+                f"brightdata: {type(exc).__name__}: configuration unavailable"
+            )
+    if brightdata_available:
+        try:
+            scraped = brightdata_scrape_url_sync(
+                source.url,
+                source_id=source.id,
+                timeout_ms=timeout_ms,
+                accept_html=(
+                    brightdata_accept_html
+                    or (lambda html: looks_like_real_page(html, source))
+                ),
+                render=brightdata_render,
+            )
+            requested = formats or ["html", "markdown"]
+            return FirecrawlScrape(
+                html=scraped.html,
+                markdown=(
+                    _html_to_markdown(scraped.html)
+                    if any(
+                        isinstance(item, str) and item.lower() == "markdown"
+                        for item in requested
+                    )
+                    else ""
+                ),
+                screenshot=None,
+                metadata={
+                    "backend": "brightdata_web_unlocker",
+                    "creditsUsed": 0,
+                    "brightDataRequests": 1,
+                    "brightDataBillableRequests": scraped.billable_requests,
+                    "brightDataRequestId": scraped.request_id,
+                    "brightDataRendered": scraped.rendered,
+                    "brightDataBudgetRemaining": scraped.budget_remaining,
+                    "providerPolicy": (
+                        "scrape_do_firecrawl_scrapfly_brightdata"
+                    ),
+                },
+                status_code=scraped.status_code,
+                final_url=scraped.final_url,
+            )
+        except Exception as exc:  # noqa: BLE001 - provider boundary
+            errors.append(f"brightdata: {type(exc).__name__}: {str(exc)[:300]}")
 
     detail = "; ".join(errors) if errors else "no scrape providers configured"
     raise RuntimeError(f"All scrape providers failed: {detail}")
@@ -497,6 +589,8 @@ async def scrape_source_with_options(
     wait_ms: int | None = None,
     timeout_ms: int | None = None,
     skip_providers: frozenset[str] | set[str] | None = None,
+    brightdata_accept_html: Callable[[str], bool] | None = None,
+    brightdata_render: bool = True,
 ) -> FirecrawlScrape:
     return await asyncio.to_thread(
         _scrape_sync,
@@ -508,4 +602,6 @@ async def scrape_source_with_options(
         wait_ms=wait_ms,
         timeout_ms=timeout_ms,
         skip_providers=skip_providers,
+        brightdata_accept_html=brightdata_accept_html,
+        brightdata_render=brightdata_render,
     )

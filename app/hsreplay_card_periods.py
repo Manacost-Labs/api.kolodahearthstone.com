@@ -112,13 +112,66 @@ def _json_document(value: str) -> dict[str, Any]:
     return parsed
 
 
-async def _scrape_card_period_page(url: str) -> Any:
+def _accept_card_period_json(value: str) -> bool:
+    lowered = value.lower()
+    if any(
+        marker in lowered
+        for marker in ("just a moment", "challenges.cloudflare.com", "cf-chl")
+    ):
+        return False
+    try:
+        payload = _json_document(value)
+    except (json.JSONDecodeError, RuntimeError, TypeError, ValueError):
+        return False
+    series = payload.get("series")
+    if not isinstance(series, dict):
+        return False
+    return _contains_card_period_row(series.get("data"))
+
+
+_CARD_PERIOD_ROW_KEYS = frozenset(
+    {
+        "dbfId",
+        "dbf_id",
+        "cardId",
+        "card_id",
+        "includedPopularity",
+        "included_popularity",
+        "includedWinrate",
+        "included_winrate",
+        "deckWinrate",
+        "deck_winrate",
+    }
+)
+
+
+def _contains_card_period_row(value: Any, *, depth: int = 0) -> bool:
+    """Recognise both list and nested-dict HSReplay series representations."""
+    if depth > 4:
+        return False
+    if isinstance(value, list):
+        return any(
+            isinstance(item, dict)
+            and bool(_CARD_PERIOD_ROW_KEYS.intersection(item))
+            for item in value
+        )
+    if not isinstance(value, dict):
+        return False
+    if _CARD_PERIOD_ROW_KEYS.intersection(value):
+        return True
+    return any(
+        _contains_card_period_row(nested, depth=depth + 1)
+        for nested in value.values()
+    )
+
+
+async def _scrape_card_period_page(url: str, *, source_id: str) -> Any:
     # Imported lazily because app.sources imports this module's generated specs.
     from .firecrawl_backend import scrape_source_with_options
     from .sources import Source
 
     source = Source(
-        id="hsreplay_card_period_proxy",
+        id=source_id,
         url=url,
         site="hsreplay",
         category="ranked_cards",
@@ -131,11 +184,17 @@ async def _scrape_card_period_page(url: str) -> Any:
         max_age_ms=0,
         wait_ms=0,
         timeout_ms=int(_timeout_seconds() * 1000),
+        brightdata_accept_html=_accept_card_period_json,
+        brightdata_render=False,
     )
 
 
-async def fetch_hsreplay_card_period_json(url: str) -> CardPeriodFetch:
-    result = await _scrape_card_period_page(url)
+async def fetch_hsreplay_card_period_json(
+    url: str,
+    *,
+    source_id: str,
+) -> CardPeriodFetch:
+    result = await _scrape_card_period_page(url, source_id=source_id)
     payload = _json_document(result.html or result.markdown)
     backend = result.backend
     return CardPeriodFetch(

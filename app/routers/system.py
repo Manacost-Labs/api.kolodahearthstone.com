@@ -5,10 +5,10 @@ from typing import Any
 from fastapi import APIRouter, Query
 from pydantic import BaseModel, ConfigDict
 
+from ..parser_control import load_resolved_public_dataset
 from ..sources import SOURCES
-from ..storage import load_dataset, load_status
+from ..storage import load_status
 from .models import ApiMeta, Envelope, freshest_timestamp, timestamp_is_stale
-
 
 router = APIRouter(prefix="/v1/system", tags=["v1-system"])
 
@@ -49,7 +49,7 @@ def sources(
     ]
     rows: list[dict[str, Any]] = []
     for source in selected:
-        dataset = load_dataset(source.id)
+        dataset = load_resolved_public_dataset(source.id)
         rows.append(
             {
                 "id": source.id,
@@ -80,7 +80,7 @@ def sources(
 def datasets() -> Envelope[list[DatasetSummary]]:
     rows: list[dict[str, Any]] = []
     for source in SOURCES:
-        dataset = load_dataset(source.id)
+        dataset = load_resolved_public_dataset(source.id)
         status = load_status(source.id) or {}
         rows.append(
             {
@@ -109,7 +109,11 @@ def health() -> Envelope[dict[str, Any]]:
     diagnostics = cached_health_diagnostics()
     fetched_at = freshest_timestamp(
         [
-            {"fetched_at": (load_dataset(source.id) or {}).get("fetched_at")}
+            {
+                "fetched_at": (
+                    load_resolved_public_dataset(source.id) or {}
+                ).get("fetched_at")
+            }
             for source in SOURCES
         ],
         "fetched_at",

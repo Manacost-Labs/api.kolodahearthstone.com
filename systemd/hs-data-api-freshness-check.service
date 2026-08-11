@@ -5,9 +5,10 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+SuccessExitStatus=10
 WorkingDirectory=/opt/hs-data-api
 EnvironmentFile=/etc/hs-data-api.env
-ExecStart=/opt/hs-data-api/venv/bin/python -m app.cli freshness-check --since-hours 48 --alert
+ExecStart=/opt/hs-data-api/venv/bin/python -m app.cli freshness-check --since-hours 48 --alert --exit-mode execution
 # The alert path writes logs and Telegram dedup state; keep ownership compatible with the API service.
 ExecStartPost=-/usr/bin/chown -R hs-data-api:hs-data-api /var/lib/hs-data-api
 ExecStopPost=-/usr/bin/chown -R hs-data-api:hs-data-api /var/lib/hs-data-api

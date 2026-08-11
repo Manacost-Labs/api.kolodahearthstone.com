@@ -7,16 +7,37 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, Request, Response
+from fastapi import (
+    Body,
+    Depends,
+    FastAPI,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from .config import api_key, cors_allowed_origins, python_environment
+from .config import (
+    api_key,
+    cors_allowed_origins,
+    orchestrator_api_key,
+    python_environment,
+)
 from .demo import build_demo_view, build_overview
 from .fetcher import refresh_sources
+from .http_observability import RequestObservabilityMiddleware, generic_server_error
+from .public_cache import PublicCacheMiddleware
+from .routers.arena import router as arena_v1_router
+from .routers.bg import router as bg_v1_router
+from .routers.constructed import router as constructed_v1_router
+from .routers.hsguru_meta import router as hsguru_meta_v1_router
+from .routers.system import router as system_v1_router
 from .source_state import SourceState
-from .sources import SOURCES, SOURCE_BY_ID
+from .sources import SOURCE_BY_ID, SOURCES
 from .storage import load_dataset, load_status, root_dir, save_dataset, save_status
 from .trinket_slices import (
     DEFAULT_TRINKET_MMR,
@@ -24,14 +45,6 @@ from .trinket_slices import (
     TRINKET_SLICE_SOURCE_IDS,
     source_ids_for_trinket_slice,
 )
-from .routers.constructed import router as constructed_v1_router
-from .routers.bg import router as bg_v1_router
-from .routers.arena import router as arena_v1_router
-from .routers.system import router as system_v1_router
-from .routers.hsguru_meta import router as hsguru_meta_v1_router
-from .public_cache import PublicCacheMiddleware
-from .http_observability import RequestObservabilityMiddleware, generic_server_error
-
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 ACTIVE_TRINKET_SOURCE_IDS = {
@@ -89,9 +102,9 @@ def bootstrap_standard_cards_publication() -> None:
     """
 
     from .dataset_publication_store import (
+        STANDARD_CARDS_SOURCE_ID,
         DatasetPublicationStore,
         PublicationUnavailable,
-        STANDARD_CARDS_SOURCE_ID,
         validate_and_publish_standard_cards_candidate,
         validate_standard_cards_snapshot,
     )
@@ -247,7 +260,7 @@ def bootstrap_standard_cards_publication() -> None:
 
 @app.middleware("http")
 async def no_cache_ui(request: Request, call_next):
-    standard_dataset_path = f"/datasets/hsreplay_cards_legend_1d"
+    standard_dataset_path = "/datasets/hsreplay_cards_legend_1d"
     exact_publication_cache = (
         request.method in {"GET", "HEAD"}
         and request.url.path == standard_dataset_path
@@ -319,6 +332,32 @@ def require_admin(x_api_key: Annotated[str | None, Header()] = None) -> None:
     if x_api_key and secrets.compare_digest(x_api_key, expected):
         return
     raise HTTPException(status_code=401, detail="Missing or invalid X-API-Key")
+
+
+def require_orchestrator(
+    x_orchestrator_key: Annotated[
+        str | None,
+        Header(alias="X-Orchestrator-Key"),
+    ] = None,
+) -> None:
+    expected = orchestrator_api_key()
+    admin_token = api_key()
+    unsafe_configuration = (
+        not expected
+        or len(expected) < 32
+        or bool(admin_token and secrets.compare_digest(expected, admin_token))
+    )
+    if unsafe_configuration:
+        raise HTTPException(
+            status_code=503,
+            detail="Orchestrator API key is not safely configured",
+        )
+    if x_orchestrator_key and secrets.compare_digest(x_orchestrator_key, expected):
+        return
+    raise HTTPException(
+        status_code=401,
+        detail="Missing or invalid X-Orchestrator-Key",
+    )
 
 
 @app.get("/")
@@ -429,9 +468,11 @@ def demo_view(source_id: str) -> dict:
 
 
 def source_payload(source_id: str) -> dict:
+    from .parser_control import load_resolved_public_dataset
+
     source = SOURCE_BY_ID[source_id]
     status = load_status(source_id)
-    dataset = load_dataset(source_id)
+    dataset = load_resolved_public_dataset(source_id)
     return {
         "id": source.id,
         "site": source.site,
@@ -661,6 +702,9 @@ def health() -> dict:
 
 
 def build_health_diagnostics() -> dict:
+    from .parser_control import resolve_public_dataset
+    from .post_patch_policy import EARLY_SOURCE_IDS
+
     statuses: list[dict[str, Any] | None] = []
     status_errors: list[Exception | None] = []
     for source in SOURCES:
@@ -733,6 +777,20 @@ def build_health_diagnostics() -> dict:
                         "source_id": source.id,
                         "reason": exc.reason,
                         "detail": exc.detail,
+                    }
+                )
+        elif source.id in EARLY_SOURCE_IDS and isinstance(dataset, dict):
+            served_dataset = resolve_public_dataset(source.id, dataset)
+            if served_dataset is None:
+                publication_failed_sources.append(source.id)
+                publication_failures.append(
+                    {
+                        "source_id": source.id,
+                        "reason": "stable_baseline_unavailable",
+                        "detail": (
+                            "Mutable dataset is provisional but no stable public "
+                            "baseline is available"
+                        ),
                     }
                 )
         if state != SourceState.OK and not standard_publication_usable:
@@ -840,11 +898,13 @@ def get_source(source_id: str) -> dict:
 
 @app.get("/datasets")
 def list_datasets() -> dict:
+    from .parser_control import load_resolved_public_dataset
+
     return {
         "datasets": [
             {
                 "source_id": source.id,
-                "has_dataset": load_dataset(source.id) is not None,
+                "has_dataset": load_resolved_public_dataset(source.id) is not None,
                 "status": load_status(source.id),
             }
             for source in SOURCES
@@ -858,9 +918,9 @@ def get_dataset(source_id: str, response: Response) -> dict:
     if source_id not in SOURCE_BY_ID:
         raise HTTPException(status_code=404, detail="Unknown source")
     from .dataset_publication_store import (
+        STANDARD_CARDS_SOURCE_ID,
         DatasetPublicationStore,
         PublicationUnavailable,
-        STANDARD_CARDS_SOURCE_ID,
     )
 
     if source_id == STANDARD_CARDS_SOURCE_ID:
@@ -923,6 +983,26 @@ def _control_list_of_strings(payload: dict[str, Any], key: str) -> list[str]:
     return [item.strip() for item in value if item.strip()]
 
 
+def _orchestrator_list_of_identifiers(
+    payload: dict[str, Any],
+    key: str,
+    *,
+    maximum: int,
+) -> list[str]:
+    values = _control_list_of_strings(payload, key)
+    allowed = frozenset(
+        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._:-"
+    )
+    if len(values) > maximum:
+        raise HTTPException(status_code=422, detail=f"{key} contains too many entries")
+    if any(
+        len(value) > 120 or any(character not in allowed for character in value)
+        for value in values
+    ):
+        raise HTTPException(status_code=422, detail=f"{key} contains an invalid identifier")
+    return values
+
+
 def _raise_parser_control_http_error(exc: Exception) -> None:
     from .parser_control import (
         InvalidControlRequest,
@@ -951,6 +1031,53 @@ def _raise_parser_control_http_error(exc: Exception) -> None:
             detail={"code": "CONTROL_STORAGE_UNAVAILABLE", "message": str(exc)},
         ) from exc
     raise exc
+
+
+def _orchestrator_run_view(run: dict[str, Any]) -> dict[str, Any]:
+    """Return the minimal non-sensitive run contract exposed to Trigger.dev."""
+    from .source_state import SourceState
+
+    source_ids = [
+        source_id
+        for source_id in run.get("sourceIds") or []
+        if isinstance(source_id, str)
+    ]
+    total = run.get("totalSources")
+    if not isinstance(total, int) or isinstance(total, bool) or total < 0:
+        total = len(source_ids)
+
+    def count(name: str) -> int:
+        value = run.get(name)
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            return 0
+        return min(value, total)
+
+    allowed_states = {str(state) for state in SourceState} | {"error"}
+    results: list[dict[str, Any]] = []
+    for raw in run.get("results") or []:
+        if not isinstance(raw, dict) or not isinstance(raw.get("sourceId"), str):
+            continue
+        state = raw.get("state")
+        results.append(
+            {
+                "sourceId": raw["sourceId"],
+                "state": state if state in allowed_states else "error",
+                "servingCachedDataset": bool(raw.get("servingCachedDataset")),
+            }
+        )
+
+    status = run.get("status")
+    if status not in {"queued", "running", "succeeded", "partial", "failed"}:
+        status = "failed"
+    return {
+        "id": str(run.get("id") or ""),
+        "status": status,
+        "sourceIds": source_ids,
+        "totalSources": total,
+        "completedSources": count("completedSources"),
+        "failedSources": count("failedSources"),
+        "results": results,
+    }
 
 
 @app.get("/admin/parser-control", dependencies=[Depends(require_admin)])
@@ -1057,6 +1184,89 @@ def list_parser_runs(limit: int = Query(20, ge=1, le=50)) -> dict[str, Any]:
         raise
 
 
+@app.post(
+    "/admin/orchestrator/parser-runs",
+    dependencies=[Depends(require_orchestrator)],
+    status_code=202,
+)
+def create_orchestrated_parser_run(
+    payload: dict[str, Any] = Body(...),
+) -> dict[str, Any]:
+    from .parser_control import expand_run_selection, parser_run_worker
+
+    allowed_fields = {
+        "requestId",
+        "sourceIds",
+        "sectionIds",
+        "reason",
+    }
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=422, detail="Request body must be an object")
+    unexpected = sorted(set(payload) - allowed_fields)
+    if unexpected:
+        raise HTTPException(
+            status_code=422,
+            detail={"unexpected_fields": unexpected},
+        )
+    request_id = payload.get("requestId")
+    if not isinstance(request_id, str) or not request_id.strip():
+        raise HTTPException(status_code=422, detail="requestId is required")
+    reason = payload.get("reason")
+    if reason is not None and not isinstance(reason, str):
+        raise HTTPException(status_code=422, detail="reason must be a string")
+    if isinstance(reason, str) and len(reason) > 500:
+        raise HTTPException(status_code=422, detail="reason must not exceed 500 characters")
+    try:
+        selected = expand_run_selection(
+            source_ids=_orchestrator_list_of_identifiers(
+                payload,
+                "sourceIds",
+                maximum=len(SOURCE_BY_ID),
+            ),
+            section_ids=_orchestrator_list_of_identifiers(
+                payload,
+                "sectionIds",
+                maximum=30,
+            ),
+        )
+        run, deduplicated = parser_run_worker().enqueue(
+            source_ids=selected,
+            requested_by="trigger.dev",
+            reason=reason,
+            request_id=request_id,
+        )
+        return {
+            "run": _orchestrator_run_view(run),
+            "deduplicated": deduplicated,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_parser_control_http_error(exc)
+        raise
+
+
+@app.get(
+    "/admin/orchestrator/parser-runs/{run_id}",
+    dependencies=[Depends(require_orchestrator)],
+)
+def get_orchestrated_parser_run(run_id: str) -> dict[str, Any]:
+    from .parser_control import parser_control_store
+
+    if len(run_id) != 32 or any(character not in "0123456789abcdef" for character in run_id):
+        raise HTTPException(status_code=404, detail="Parser run not found")
+    try:
+        run = parser_control_store().get_run(run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail="Parser run not found")
+        return {"run": _orchestrator_run_view(run)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_parser_control_http_error(exc)
+        raise
+
+
 @app.post("/admin/refresh", dependencies=[Depends(require_admin)])
 async def refresh(
     source_id: Annotated[list[str] | None, Query()] = None,
@@ -1087,7 +1297,10 @@ async def refresh_hsreplay_archetypes(
     game_type: str = Query("RANKED_STANDARD", min_length=1, max_length=80),
     region: str = Query("REGION_EU", min_length=1, max_length=80),
 ) -> dict:
-    from .hsreplay_archetypes_db import export_latest_archetypes_json, refresh_hsreplay_archetype_database
+    from .hsreplay_archetypes_db import (
+        export_latest_archetypes_json,
+        refresh_hsreplay_archetype_database,
+    )
 
     result = await refresh_hsreplay_archetype_database(
         rank_range=rank_range,
@@ -1145,7 +1358,10 @@ async def hsreplay_archetypes_dictionary(
 
 @app.post("/admin/refresh/bg-minions-db", dependencies=[Depends(require_admin)])
 async def refresh_bg_minions_db() -> dict:
-    from .hsreplay_bg_minions_db import export_latest_bg_minions_json, refresh_bg_minion_database
+    from .hsreplay_bg_minions_db import (
+        export_latest_bg_minions_json,
+        refresh_bg_minion_database,
+    )
 
     result = await refresh_bg_minion_database()
     result["export_path"] = str(export_latest_bg_minions_json())
@@ -1204,8 +1420,8 @@ def dataset_quarantine(
     limit: int = Query(20, ge=1, le=100),
 ) -> dict[str, Any]:
     from .dataset_publication_store import (
-        DatasetPublicationStore,
         STANDARD_CARDS_SOURCE_ID,
+        DatasetPublicationStore,
     )
 
     if source_id not in SOURCE_BY_ID:
@@ -1232,9 +1448,9 @@ def rollback_dataset_publication(
     payload: Annotated[dict[str, Any], Body()],
 ) -> dict[str, Any]:
     from .dataset_publication_store import (
+        STANDARD_CARDS_SOURCE_ID,
         DatasetPublicationStore,
         PublicationUnavailable,
-        STANDARD_CARDS_SOURCE_ID,
         validate_standard_cards_snapshot,
     )
     from .refresh_log import log_action
@@ -1461,8 +1677,8 @@ def upload_dataset(
         "backend": "admin_upload",
     }
     from .dataset_publication_store import (
-        DatasetPublicationStore,
         STANDARD_CARDS_SOURCE_ID,
+        DatasetPublicationStore,
         validate_and_publish_standard_cards_candidate,
     )
 
@@ -1991,7 +2207,10 @@ def db_archetype_decks(
     limit: int = Query(50, ge=1, le=200),
 ) -> dict:
     from .db import get_db_connection
-    from .hsreplay_archetypes_db import get_archetype_deck_cards, get_latest_archetype_snapshot
+    from .hsreplay_archetypes_db import (
+        get_archetype_deck_cards,
+        get_latest_archetype_snapshot,
+    )
 
     snapshot = get_latest_archetype_snapshot(archetype_id, rank_range=rank_range, game_type=game_type)
     if not snapshot:

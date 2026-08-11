@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 from collections.abc import Awaitable, Callable
 from copy import deepcopy
@@ -16,11 +17,17 @@ from .config import hsguru_current_patch_period
 from .firecrawl_backend import FirecrawlScrape, scrape_source_with_options
 from .hsguru_auth import hsguru_firecrawl_headers
 from .hsguru_decks import cached_hsguru_catalog_decks
-from .job_run import AtomicJobRunSnapshotWriter, JobRunContext
+from .job_run import (
+    AtomicJobRunSnapshotWriter,
+    JobRunContext,
+    run_periodic_heartbeat,
+)
 from .resource_locks import ResourceLocked, ResourceLockSet
 from .source_state import SourceState
 from .sources import Source
 from .storage import load_dataset, save_dataset, save_status
+
+logger = logging.getLogger(__name__)
 
 SOURCE_ID = "hsguru_meta_matrix"
 HSGURU_META_URL = "https://www.hsguru.com/meta"
@@ -1330,6 +1337,105 @@ async def _refresh_hsguru_meta_matrix_unlocked(
     }
 
 
+def _hard_timeout_outcome(run: JobRunContext) -> dict[str, Any]:
+    """Record a terminal timeout without publishing an incomplete dataset."""
+    fetched_at = datetime.now(UTC).isoformat()
+    cached_dataset = load_dataset(SOURCE_ID)
+    cached_structured: dict[str, Any] = {}
+    if isinstance(cached_dataset, dict):
+        data = cached_dataset.get("data")
+        if isinstance(data, dict) and isinstance(data.get("structured"), dict):
+            cached_structured = data["structured"]
+
+    cached_slices_value = cached_structured.get("slices")
+    cached_slices = cached_slices_value if isinstance(cached_slices_value, list) else []
+    current_catalog_value = cached_structured.get("current_catalog")
+    current_catalog = (
+        current_catalog_value if isinstance(current_catalog_value, dict) else {}
+    )
+    current_rows_value = current_catalog.get("archetypes")
+    current_rows = current_rows_value if isinstance(current_rows_value, list) else []
+    cached_current_formats = sorted(
+        {
+            str(row.get("format"))
+            for row in current_rows
+            if isinstance(row, dict) and row.get("format")
+        }
+    )
+    criteria_value = current_catalog.get("criteria")
+    criteria = criteria_value if isinstance(criteria_value, dict) else {}
+    logical_slices_value = cached_structured.get("logical_slice_count")
+    logical_slices = (
+        logical_slices_value
+        if isinstance(logical_slices_value, int) and logical_slices_value >= 0
+        else len(cached_slices) * len(MIN_GAMES)
+    )
+
+    run.mark_timed_out()
+    run.finalize(phase=str(SourceState.TIMED_OUT))
+    snapshot = run.snapshot()
+    error = {
+        "key": "job",
+        "error": "JobDeadlineExceeded: hard run deadline reached",
+    }
+    serving_cached = bool(cached_dataset)
+    status = {
+        "source_id": SOURCE_ID,
+        "site": "hsguru",
+        "category": "meta_matrix",
+        "url": HSGURU_META_URL,
+        "state": SourceState.TIMED_OUT,
+        "fetched_at": fetched_at,
+        "http_status": None,
+        "backend": "cache" if serving_cached else None,
+        "detail": (
+            "HSGuru matrix reached its hard run deadline; no incomplete "
+            "dataset was published and the last-known-good dataset was "
+            "preserved."
+        ),
+        "errors": [error],
+        "serving_cached_dataset": serving_cached,
+        "last_refresh_state": SourceState.TIMED_OUT,
+        "last_refresh_at": fetched_at,
+        "run_id": run.run_id,
+        "timed_out": True,
+        "timeout_kind": "hard",
+        "job_run": snapshot,
+        "metrics_complete": False,
+        "rows_total": logical_slices,
+        "base_slices": len(cached_slices),
+        "fresh_base_slices": 0,
+        "cached_base_slices": len(cached_slices),
+        "cached_slices": len(cached_slices),
+        "cached_current_formats": cached_current_formats,
+        "published": False,
+        "current_catalog_archetypes": len(current_rows),
+        "current_catalog_period": criteria.get("period"),
+    }
+    save_status(SOURCE_ID, status)
+    return {
+        "ok": False,
+        "published": False,
+        "complete": False,
+        "state": SourceState.TIMED_OUT,
+        "timed_out": True,
+        "timeout_kind": "hard",
+        "job_run": snapshot,
+        "serving_cached_dataset": serving_cached,
+        "source_id": SOURCE_ID,
+        "fetched_at": fetched_at,
+        "base_slices": len(cached_slices),
+        "fresh_base_slices": 0,
+        "cached_base_slices": len(cached_slices),
+        "cached_current_formats": cached_current_formats,
+        "logical_slices": logical_slices,
+        "current_catalog_archetypes": len(current_rows),
+        "current_catalog_period": criteria.get("period"),
+        "metrics_complete": False,
+        "errors": [error],
+    }
+
+
 async def refresh_hsguru_meta_matrix(
     *,
     concurrency: int = 2,
@@ -1361,15 +1467,45 @@ async def refresh_hsguru_meta_matrix(
             **exc.as_outcome(),
         }
 
+    heartbeat_task: asyncio.Task[None] | None = None
     try:
-        return await _refresh_hsguru_meta_matrix_unlocked(
-            concurrency=concurrency,
-            attempts=attempts,
-            scrape=scrape,
-            scrape_current=scrape_current,
-            discover_patch=discover_patch,
-            run_context=run_context,
-            deadline_seconds=deadline_seconds,
+        run = run_context or JobRunContext.start(
+            timeout_seconds=deadline_seconds,
+            total_slices=0,
+            snapshot_writer=AtomicJobRunSnapshotWriter.for_job(SOURCE_ID),
+            heartbeat_interval_seconds=30,
         )
+        heartbeat_task = asyncio.create_task(run_periodic_heartbeat(run))
+        timeout_scope = asyncio.timeout(run.remaining_seconds())
+        try:
+            async with timeout_scope:
+                return await _refresh_hsguru_meta_matrix_unlocked(
+                    concurrency=concurrency,
+                    attempts=attempts,
+                    scrape=scrape,
+                    scrape_current=scrape_current,
+                    discover_patch=discover_patch,
+                    run_context=run,
+                    deadline_seconds=deadline_seconds,
+                )
+        except TimeoutError:
+            if not timeout_scope.expired():
+                raise
+            return _hard_timeout_outcome(run)
     finally:
-        locks.release()
+        try:
+            if heartbeat_task is not None:
+                _ = heartbeat_task.cancel()
+                heartbeat_results = await asyncio.shield(
+                    asyncio.gather(heartbeat_task, return_exceptions=True)
+                )
+                heartbeat_error = heartbeat_results[0]
+                if isinstance(heartbeat_error, Exception) and not isinstance(
+                    heartbeat_error, asyncio.CancelledError
+                ):
+                    logger.warning(
+                        "HSGuru matrix heartbeat stopped after %s",
+                        type(heartbeat_error).__name__,
+                    )
+        finally:
+            locks.release()

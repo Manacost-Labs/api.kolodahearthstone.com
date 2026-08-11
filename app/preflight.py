@@ -14,12 +14,75 @@ from .config import (
     refresh_preflight_probe_hsreplay,
     refresh_preflight_strict,
 )
+from .fetch_routes import (
+    source_can_run_without_residential_proxy,
+    source_has_cloud_html_route,
+    source_local_route_requires_flaresolverr,
+)
 from .refresh_log import log_action
 from .scrapers.proxy import check_proxy_health
+from .source_tiers import SourceTier, tier_for
+from .sources import Source
 
 logger = logging.getLogger(__name__)
 
 HSREPLAY_PROBE_URL = "https://hsreplay.net/api/v1/arena/card_stats/"
+
+
+def selection_needs_proxy_preflight(
+    selected: list[Source],
+    *,
+    configured_backends: list[str],
+) -> bool:
+    """Return whether every safe route for this selection needs the proxy."""
+    if not fetch_require_proxy() or fetch_direct_enabled():
+        return False
+
+    proxy_only_sources = [
+        source
+        for source in selected
+        if tier_for(source.id)
+        in {SourceTier.BROWSER_PATCHRIGHT, SourceTier.BROWSER_PROTECTED}
+        and not source_can_run_without_residential_proxy(
+            source,
+            default_backends=configured_backends,
+        )
+    ]
+    if not proxy_only_sources:
+        return False
+
+    independent_sources = [
+        source for source in selected if source not in proxy_only_sources
+    ]
+    return not independent_sources
+
+
+def selection_needs_flaresolverr_preflight(
+    selected: list[Source],
+    *,
+    configured_backends: list[str],
+) -> bool:
+    """Gate only selections whose useful routes all need local FlareSolverr."""
+    if fetch_direct_enabled():
+        return False
+    flaresolverr_only_sources = [
+        source
+        for source in selected
+        if tier_for(source.id)
+        in {SourceTier.BROWSER_PATCHRIGHT, SourceTier.BROWSER_PROTECTED}
+        and not source_has_cloud_html_route(source)
+        and source_local_route_requires_flaresolverr(
+            source,
+            default_backends=configured_backends,
+        )
+    ]
+    if not flaresolverr_only_sources:
+        return False
+
+    independent_sources = [
+        source for source in selected if source not in flaresolverr_only_sources
+    ]
+    return not independent_sources
 
 
 @dataclass
@@ -242,13 +305,13 @@ async def run_refresh_preflight(
 async def ensure_refresh_preflight(
     *,
     full_refresh: bool,
+    needs_proxy: bool,
     needs_flaresolverr: bool,
 ) -> dict[str, str]:
     """
     Run preflight before refresh. Returns proxy_info dict (may be empty).
     Raises if strict mode and preflight failed.
     """
-    needs_proxy = fetch_require_proxy() and not fetch_direct_enabled()
     if not needs_proxy and not needs_flaresolverr:
         return {}
 
@@ -262,7 +325,7 @@ async def ensure_refresh_preflight(
             return {}
 
     pf = await run_refresh_preflight(needs_proxy=needs_proxy, needs_flaresolverr=needs_flaresolverr)
-    if not pf.ok and refresh_preflight_strict() and full_refresh:
+    if not pf.ok and refresh_preflight_strict():
         raise RuntimeError(
             "Refresh preflight failed (HS_REFRESH_PREFLIGHT_STRICT=true): "
             + "; ".join(pf.errors)

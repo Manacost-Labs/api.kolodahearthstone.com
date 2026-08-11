@@ -10,15 +10,19 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
+from app.exit_codes import ExitCode  # noqa: E402
 from app.hsguru_deck_catalog_refresh import refresh_all_deck_catalogs  # noqa: E402
 
 
-async def main() -> None:
+async def main() -> int:
     result = await refresh_all_deck_catalogs()
     print(json.dumps(result))
-    if result["state"] != "ok":
-        raise SystemExit(1)
+    if result["state"] == "ok":
+        return int(ExitCode.OK)
+    if result.get("datasets"):
+        return int(ExitCode.DEGRADED)
+    return int(ExitCode.ERROR)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    raise SystemExit(asyncio.run(main()))

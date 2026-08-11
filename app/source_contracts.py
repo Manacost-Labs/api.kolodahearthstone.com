@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Any
 
 from .hsreplay_card_periods import (
     STANDARD_HSREPLAY_CARD_PERIOD_SOURCE_IDS,
@@ -25,6 +26,7 @@ class SourceContract:
     fallback_policy: str = "html_allowed"
     recommendation: str | None = None
     min_html_bytes: int = 2_000
+    early_min_html_bytes: int | None = None
 
 
 HSREPLAY_JSON_CHANNELS = ("curl_cffi", "flaresolverr")
@@ -413,6 +415,7 @@ for _sid in ("hsguru_meta_standard_legend", "hsguru_meta_wild_legend"):
         fallback_policy="html_allowed",
         recommendation="Accept a verified early-patch archetype reset only when every visible row retains its identity and performance metrics.",
         min_html_bytes=25_000,
+        early_min_html_bytes=2_000,
     )
 
 for _sid in (
@@ -432,6 +435,27 @@ for _sid in (
             fallback_policy="api_only",
         ),
     )
+
+CONTRACTS["hsguru_streamer_decks_legend_1000"] = SourceContract(
+    source_id="hsguru_streamer_decks_legend_1000",
+    structured_type="streamer_decks",
+    allow_browser_fallback=True,
+    min_rows=3,
+    critical_fields=("Deck", "Streamer", "deck_code"),
+    min_field_fill_rate=1.0,
+    # The endpoint is explicitly a rolling last-60-minutes activity window.
+    # Row-count contraction is therefore expected and is not evidence of a
+    # truncated response. The absolute row and field-completeness guards above
+    # remain mandatory before publication.
+    regression_drop_ratio=1.0,
+    volatility="rolling_hour",
+    fallback_policy="html_allowed",
+    recommendation=(
+        "Accept the current rolling-hour window only when at least three rows "
+        "retain deck, streamer, and decodable deck-code fields."
+    ),
+    min_html_bytes=8_000,
+)
 
 for _sid in (
     "hsguru_streamer_decks_legend_1000",
@@ -464,6 +488,7 @@ for _sid in (
             fallback_policy="html_allowed",
             recommendation="Investigate HSGuru embedded/internal API and migrate away from hydrated browser pages.",
             min_html_bytes=8_000 if "streamer_decks" in _sid else 25_000,
+            early_min_html_bytes=None if "streamer_decks" in _sid else 2_000,
         ),
 )
 

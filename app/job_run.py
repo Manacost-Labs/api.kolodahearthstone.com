@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -146,6 +147,10 @@ class JobRunContext:
     def deadline_reached(self) -> bool:
         return _clock_value(self._clock) >= self.deadline_at
 
+    def remaining_seconds(self) -> float:
+        remaining = self.deadline_at - _clock_value(self._clock)
+        return max(0.0, remaining.total_seconds())
+
     def try_start_slice(self) -> bool:
         self.heartbeat_at = _clock_value(self._clock)
         if self.heartbeat_at >= self.deadline_at:
@@ -217,3 +222,17 @@ class JobRunContext:
                 "skipped_slices": self.skipped_slices,
             },
         }
+
+
+async def run_periodic_heartbeat(
+    context: JobRunContext,
+    *,
+    interval_seconds: float = 30,
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+) -> None:
+    """Persist liveness even while the active provider coroutine is blocked."""
+    if not 30 <= interval_seconds <= 60:
+        raise ValueError("Heartbeat interval must be between 30 and 60 seconds")
+    while True:
+        await sleep(interval_seconds)
+        context.heartbeat()

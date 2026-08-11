@@ -4,12 +4,9 @@ import asyncio
 from datetime import UTC, datetime
 from typing import Any, Awaitable, Callable
 
-import httpx
-
 from .preflight import check_flaresolverr
 from .refresh_log import log_action
 from .scrapers.proxy import check_proxy_health
-
 
 CanaryCheck = Callable[[], Awaitable[dict[str, Any]]]
 
@@ -23,9 +20,9 @@ def _safe_detail(exc: Exception) -> str:
 
 
 def _structured_from_dataset(source_id: str) -> dict[str, Any]:
-    from .storage import load_dataset
+    from .parser_control import load_resolved_public_dataset
 
-    payload = load_dataset(source_id) or {}
+    payload = load_resolved_public_dataset(source_id) or {}
     data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
     if isinstance(data, dict) and isinstance(data.get("structured"), dict):
         return data["structured"]
@@ -100,6 +97,7 @@ async def _check_hsreplay_bg_premium() -> dict[str, Any]:
 
 async def _check_hsreplay_arena() -> dict[str, Any]:
     from .hsreplay_arena_api import fetch_arena_card_tiers
+    from .source_validators import validate_structured
 
     def _arena_result(structured: dict[str, Any], *, cached: bool, detail: str | None = None) -> dict[str, Any]:
         cards = structured.get("cards") or []
@@ -108,13 +106,18 @@ async def _check_hsreplay_arena() -> dict[str, Any]:
             for card in cards
             if isinstance(card, dict)
         )
+        validation = validate_structured(
+            "hsreplay_arena_cards_advanced",
+            structured,
+        )
         return {
             "name": "hsreplay_arena_cards",
-            "ok": len(cards) >= 100 and has_arenasmith_fields,
+            "ok": validation.ok and has_arenasmith_fields,
             "rows": len(cards),
             "has_arenasmith_fields": has_arenasmith_fields,
+            "quality_score": validation.score,
             "cached": cached,
-            "detail": detail,
+            "detail": detail or (None if validation.ok else validation.reason),
         }
 
     cached_result = _arena_result(_structured_from_dataset("hsreplay_arena_cards_advanced"), cached=True)
@@ -166,11 +169,20 @@ async def _check_hsguru_meta() -> dict[str, Any]:
 
 async def _check_firestone_static() -> dict[str, Any]:
     from .firestone_comps import fetch_firestone_arena
+    from .source_validators import validate_structured
     from .sources import SOURCE_BY_ID
 
-    structured = await fetch_firestone_arena(SOURCE_BY_ID["firestone_arena_cards_normal"])
+    source = SOURCE_BY_ID["firestone_arena_cards_normal"]
+    structured = await fetch_firestone_arena(source)
     cards = structured.get("cards") or []
-    return {"name": "firestone_arena_static", "ok": len(cards) >= 100, "rows": len(cards)}
+    validation = validate_structured(source.id, structured)
+    return {
+        "name": "firestone_arena_static",
+        "ok": validation.ok,
+        "rows": len(cards),
+        "quality_score": validation.score,
+        "detail": None if validation.ok else validation.reason,
+    }
 
 
 CHECKS: tuple[CanaryCheck, ...] = (

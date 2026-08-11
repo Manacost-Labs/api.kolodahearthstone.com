@@ -7,7 +7,7 @@ import shutil
 import stat
 import subprocess
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
@@ -17,7 +17,6 @@ from .hsreplay_card_periods import HSREPLAY_CARD_PERIOD_SOURCE_IDS
 from .parser_control_registry import SOURCE_TO_SECTION
 from .source_tiers import LIGHT_API_IDS, MEDIUM_API_IDS
 from .sources import SOURCE_BY_ID
-
 
 SCHEDULE_INVENTORY_SCHEMA_VERSION = 2
 SCHEDULE_INVENTORY_VERSION = "2026-07-22.1"
@@ -38,6 +37,8 @@ _SYSTEMD_SHOW_PROPERTIES = (
     "SubState",
     "UnitFileState",
     "Result",
+    "ExecMainCode",
+    "ExecMainStatus",
 )
 
 
@@ -302,6 +303,10 @@ def _parse_systemctl_show(
             "subState": _safe_systemd_state(properties.get("SubState")),
             "unitFileState": _safe_systemd_state(properties.get("UnitFileState")),
             "result": _safe_systemd_state(properties.get("Result")),
+            "execMainCode": _safe_systemd_state(properties.get("ExecMainCode")),
+            "execMainStatus": _safe_non_negative_int(
+                properties.get("ExecMainStatus")
+            ),
         }
     return parsed
 
@@ -322,6 +327,16 @@ def _timestamp_from_systemd_microseconds(value: Any) -> str | None:
         ).isoformat()
     except (OverflowError, OSError, ValueError):
         return None
+
+
+def _safe_non_negative_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed >= 0 else None
 
 
 def _parse_systemctl_timer_times(
@@ -377,6 +392,16 @@ def _failure_from_systemd_state(properties: dict[str, str | None]) -> str | None
     if active_state == "failed":
         return "failed"
     return None
+
+
+def _is_handled_data_degradation(properties: dict[str, Any]) -> bool:
+    """Return true only for a normal systemd exit accepted via SuccessExitStatus."""
+    exec_code = str(properties.get("execMainCode") or "").strip().lower()
+    return (
+        properties.get("result") == "success"
+        and exec_code in {"1", "exited"}
+        and properties.get("execMainStatus") == 10
+    )
 
 
 def _probe_systemd_timer_states_direct(
@@ -474,6 +499,9 @@ def _probe_systemd_timer_states_direct(
                 "serviceUnit": service_by_timer[unit],
                 "serviceActiveState": None,
                 "serviceResult": None,
+                "serviceExecMainCode": None,
+                "serviceExecMainStatus": None,
+                "dataDegraded": None,
             }
             continue
         timing = timer_times.get(unit, {}) if timer_times is not None else {}
@@ -491,6 +519,9 @@ def _probe_systemd_timer_states_direct(
             "serviceUnit": service_by_timer[unit],
             "serviceActiveState": service_properties.get("activeState"),
             "serviceResult": service_properties.get("result"),
+            "serviceExecMainCode": service_properties.get("execMainCode"),
+            "serviceExecMainStatus": service_properties.get("execMainStatus"),
+            "dataDegraded": _is_handled_data_degradation(service_properties),
             **properties,
         }
 
@@ -547,6 +578,12 @@ def _sanitize_runtime_unit(value: Any) -> dict[str, Any] | None:
         "result": _safe_systemd_state(value.get("result")),
         "serviceActiveState": _safe_systemd_state(value.get("serviceActiveState")),
         "serviceResult": _safe_systemd_state(value.get("serviceResult")),
+        "serviceExecMainCode": _safe_systemd_state(
+            value.get("serviceExecMainCode")
+        ),
+        "serviceExecMainStatus": _safe_non_negative_int(
+            value.get("serviceExecMainStatus")
+        ),
     }
     return {
         "available": value.get("available") is True,
@@ -556,6 +593,7 @@ def _sanitize_runtime_unit(value: Any) -> dict[str, Any] | None:
         "nextRunAt": optional_timestamp("nextRunAt"),
         "failure": _safe_systemd_state(value.get("failure")),
         "serviceUnit": _safe_systemd_state(value.get("serviceUnit")),
+        "dataDegraded": optional_bool("dataDegraded"),
         **properties,
     }
 
@@ -818,6 +856,19 @@ def build_schedule_inventory(
                 ),
                 "serviceResult": (
                     runtime.get("serviceResult") if runtime_available else None
+                ),
+                "serviceExecMainCode": (
+                    runtime.get("serviceExecMainCode")
+                    if runtime_available
+                    else None
+                ),
+                "serviceExecMainStatus": (
+                    runtime.get("serviceExecMainStatus")
+                    if runtime_available
+                    else None
+                ),
+                "dataDegraded": (
+                    runtime.get("dataDegraded") if runtime_available else None
                 ),
             }
         )

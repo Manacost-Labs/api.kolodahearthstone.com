@@ -7,6 +7,7 @@ StartLimitBurst=3
 
 [Service]
 Type=oneshot
+SuccessExitStatus=10
 WorkingDirectory=/srv/hs-data-api
 ExecStart=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm -e HS_ARENA_POST_PATCH_ENABLED=true -e HS_ARENA_POST_PATCH_FROM=2026-07-21 -e HS_ARENA_POST_PATCH_UNTIL=2026-07-28 api python -m app.cli refresh --source hsreplay_arena_cards_advanced --source heartharena_tierlist --source firestone_arena_cards_normal --require-all-ok --scheduled
 ExecStopPost=-/usr/bin/curl --fail --silent --show-error --max-time 20 --request POST http://127.0.0.1:3101/_internal/tierlist/cache-bust?source=hsreplay

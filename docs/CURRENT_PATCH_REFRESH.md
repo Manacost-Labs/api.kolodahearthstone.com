@@ -5,7 +5,8 @@ Wild across every configured rank. HSReplay resets this sample at patch launch,
 so a new patch can legitimately contain far fewer rows than the mature previous
 patch.
 
-Current-patch contracts therefore combine two safeguards:
+Outside an explicitly enabled early window, current-patch contracts combine two
+safeguards:
 
 - an absolute minimum of 450 Standard rows or 700 Wild rows, plus the normal
   identity and metric-fill validation;
@@ -15,6 +16,30 @@ Current-patch contracts therefore combine two safeguards:
 Rolling one-, three-, seven- and fourteen-day datasets keep their stricter
 regression limits. This lets the first valid snapshot of a new patch replace
 the old patch without allowing empty or malformed payloads onto the site.
+
+## Bounded early-patch publication
+
+Immediately after a game patch, even the normal current-patch floors can be
+legitimately unavailable. The parser-control `early` mode therefore applies a
+smaller contract to an explicit allowlist only:
+
+- the three Arena early-patch feeds;
+- the registered HSGuru meta and matchup feeds;
+- HSReplay card-period source IDs ending in `_patch`.
+
+It never relaxes HSReplay rolling `1d`, `3d`, `7d`, or `14d` datasets. During
+the bounded window, HSGuru requires at least three complete rows and HSReplay
+current-patch cards require at least 20 unique cards with valid metrics. A
+smaller HSGuru document may pass the raw-size gate, but Cloudflare challenges,
+wrong-site pages, incomplete rows, duplicate card identities, impossible
+percentages, and malformed JSON remain rejected.
+
+Every accepted early dataset is marked `provisional`. The stable publication
+baseline/LKG is retained instead of being replaced by the small sample. The
+effective policy is captured at the beginning of a refresh; a policy change
+while the request is running cannot publish against a different gate. When
+`earlyUntil` expires, the normal row and regression thresholds are restored
+automatically.
 
 The HSGuru current patch is discovered from the combined Blizzard and wiki.gg
 catalog. Build versions such as `36.2.0.248348` are normalized to `36.2.0` for
@@ -91,9 +116,11 @@ the five-row minimum continues to reject incomplete responses.
 
 HSGuru Standard/Wild Legend can also contract immediately after a patch because
 only archetypes above `min_games=100` are returned. On patch 36.2 the complete
-tables changed from 65 to 23 Standard rows and from 105 to 29 Wild rows. These
-two feeds allow a 75% contraction only when at least ten unique visible rows
-remain and at least 95% contain `Archetype`, `Winrate↓`, and `Popularity`.
+tables changed from 65 to 23 Standard rows and from 105 to 29 Wild rows. In
+stable mode these two feeds allow a 75% contraction only when at least ten
+unique visible rows remain and at least 95% contain `Archetype`, `Winrate↓`,
+and `Popularity`. The smaller three-row rule is available only through the
+bounded provisional mode described above.
 
 If Firecrawl returns fewer than three live guides, the fetcher must continue to
 the authenticated HTML fallback instead of accepting the empty result. Verify

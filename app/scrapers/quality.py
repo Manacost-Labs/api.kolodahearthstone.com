@@ -5,7 +5,11 @@ from typing import Any
 
 from ..quality_thresholds import threshold_for
 from ..refresh_log import log_action
-from ..source_contracts import contract_quality_ok, contract_quality_report, get_contract
+from ..source_contracts import (
+    contract_quality_ok,
+    contract_quality_report,
+    get_contract,
+)
 from ..source_validators import validate_structured
 from ..sources import Source
 
@@ -35,6 +39,11 @@ def looks_like_real_page(html: str, source: Source) -> bool:
         return False
     contract = get_contract(source.id)
     min_html_bytes = contract.min_html_bytes if contract else 2_000
+    if contract and contract.early_min_html_bytes is not None:
+        from ..post_patch_policy import policy_for
+
+        if policy_for(source.id) is not None:
+            min_html_bytes = contract.early_min_html_bytes
     if len(html.encode("utf-8")) < min_html_bytes:
         return False
     if source.site == "hsreplay":

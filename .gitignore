@@ -4,6 +4,7 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 node_modules/
+.test-dist/
 .env
 .env.*
 !.env.example

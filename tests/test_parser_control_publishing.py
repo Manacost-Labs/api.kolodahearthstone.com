@@ -1,26 +1,91 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
 import os
+import unittest
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import unittest
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
+from app.fetcher import _save_dataset_with_checks
 from app.main import app, public_dataset_payload
-from app.parser_control import ParserControlStore, resolve_public_dataset
+from app.parser_control import (
+    ParserControlStore,
+    load_resolved_public_dataset,
+    resolve_public_dataset,
+)
 from app.post_patch_policy import (
     POST_PATCH_BASELINE_LABEL,
     capture_publication_policy,
 )
-from app.fetcher import _save_dataset_with_checks
 from app.sources import SOURCE_BY_ID
 from app.storage import dataset_path, save_baseline_once, write_json
 
 
 class ParserControlPublishingTest(unittest.TestCase):
+    def test_internal_consumers_resolve_stable_hsguru_baseline(self) -> None:
+        from app.fun_decks import build_archetype_popularity
+        from app.hsguru_decks import _meta_archetypes
+
+        source_id = "hsguru_meta_standard_legend"
+        stable = {
+            "fetched_at": "2026-08-01T00:00:00+00:00",
+            "data": {
+                "tables": [{"rows": [["Stable Archetype", "52%", "2%"]]}],
+                "structured": {
+                    "type": "meta",
+                    "strategies": [
+                        {
+                            "Archetype": "Stable Archetype",
+                            "Winrate↓": "52%",
+                            "Popularity": "2%",
+                        }
+                    ],
+                },
+            },
+        }
+        provisional = {
+            "fetched_at": "2026-08-02T00:00:00+00:00",
+            "data": {
+                "tables": [{"rows": [["Early Archetype", "51%", "1%"]]}],
+                "structured": {
+                    "type": "meta",
+                    "strategies": [
+                        {
+                            "Archetype": "Early Archetype",
+                            "Winrate↓": "51%",
+                            "Popularity": "1%",
+                        }
+                    ],
+                    "provisional": True,
+                    "data_phase": "post_patch_early",
+                },
+            },
+        }
+
+        with TemporaryDirectory() as directory, patch.dict(
+            os.environ, {"HS_API_DATA_DIR": directory}, clear=False
+        ):
+            save_baseline_once(source_id, POST_PATCH_BASELINE_LABEL, stable)
+            write_json(dataset_path(source_id), provisional)
+            ParserControlStore(Path(directory)).update_policy(
+                expected_revision=1,
+                mode="stable",
+                early_until=None,
+                reason="Раннее окно завершено",
+                updated_by="test",
+            )
+
+            resolved = load_resolved_public_dataset(source_id)
+            archetypes = _meta_archetypes("standard")
+            popularity = build_archetype_popularity((source_id,))
+
+        self.assertEqual(resolved, stable)
+        self.assertEqual(archetypes, ["Stable Archetype"])
+        self.assertEqual(popularity, {"stable archetype": 2.0})
+
     def test_public_payload_carries_authoritative_stable_publication_metadata(self) -> None:
         source_id = "hsguru_meta_standard_legend"
         stable = {
@@ -191,6 +256,94 @@ class ParserControlPublishingTest(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["view"]["cards"][0]["card_id"], "STABLE")
         self.assertEqual(payload["fetched_at"], stable["fetched_at"])
+
+    def test_metadata_views_describe_the_resolved_stable_publication(self) -> None:
+        from app.demo import build_overview
+        from app.main import source_payload
+        from app.routers.system import datasets as system_datasets
+        from app.routers.system import sources as system_sources
+
+        source_id = "hsreplay_arena_cards_advanced"
+        source = SOURCE_BY_ID[source_id]
+        stable = {
+            "fetched_at": "2026-07-20T00:00:00+00:00",
+            "backend": "stable-lkg",
+            "data": {
+                "structured": {
+                    "type": "arena_card_tiers",
+                    "cards": [{"card_id": "STABLE", "name": "Stable card"}],
+                }
+            },
+        }
+        provisional = {
+            "fetched_at": "2026-07-21T00:00:00+00:00",
+            "backend": "brightdata_web_unlocker",
+            "data": {
+                "structured": {
+                    "type": "arena_card_tiers",
+                    "cards": [{"card_id": "EARLY", "name": "Early card"}],
+                    "provisional": True,
+                }
+            },
+        }
+
+        with TemporaryDirectory() as directory, patch.dict(
+            os.environ, {"HS_API_DATA_DIR": directory}, clear=False
+        ):
+            save_baseline_once(source_id, POST_PATCH_BASELINE_LABEL, stable)
+            write_json(dataset_path(source_id), provisional)
+            ParserControlStore(Path(directory)).update_policy(
+                expected_revision=1,
+                mode="stable",
+                early_until=None,
+                reason="Stable metadata",
+                updated_by="test",
+            )
+            with patch("app.demo.SOURCES", (source,)):
+                overview = build_overview()
+            with patch("app.routers.system.SOURCES", (source,)):
+                source_index = system_sources(site=None, category=None)
+                dataset_index = system_datasets()
+            legacy_source = source_payload(source_id)
+
+        self.assertEqual(overview["sources"][0]["fetched_at"], stable["fetched_at"])
+        self.assertEqual(
+            source_index.data[0].dataset_fetched_at, stable["fetched_at"]
+        )
+        self.assertEqual(dataset_index.data[0].fetched_at, stable["fetched_at"])
+        self.assertEqual(legacy_source["dataset_fetched_at"], stable["fetched_at"])
+
+    def test_dataset_inventory_hides_expired_provisional_without_baseline(self) -> None:
+        from app.main import list_datasets
+
+        source_id = "heartharena_tierlist"
+        source = SOURCE_BY_ID[source_id]
+        provisional = {
+            "fetched_at": "2026-07-21T00:00:00+00:00",
+            "data": {
+                "structured": {
+                    "type": "arena_card_tiers",
+                    "cards": [{"card_id": "EARLY", "name": "Early card"}],
+                    "provisional": True,
+                }
+            },
+        }
+
+        with TemporaryDirectory() as directory, patch.dict(
+            os.environ, {"HS_API_DATA_DIR": directory}, clear=False
+        ):
+            write_json(dataset_path(source_id), provisional)
+            ParserControlStore(Path(directory)).update_policy(
+                expected_revision=1,
+                mode="stable",
+                early_until=None,
+                reason="No stable baseline",
+                updated_by="test",
+            )
+            with patch("app.main.SOURCES", (source,)):
+                inventory = list_datasets()
+
+        self.assertFalse(inventory["datasets"][0]["has_dataset"])
 
 
 if __name__ == "__main__":

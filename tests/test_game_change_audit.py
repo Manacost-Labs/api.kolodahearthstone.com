@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
 import unittest
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 from app.game_change_audit import (
@@ -80,6 +80,36 @@ class GameChangeAuditTest(unittest.TestCase):
         self.assertNotIn("firestone_battlegrounds_comps", issue_ids)
         self.assertIn("hsreplay_battlegrounds_comps", CRITICAL_SOURCES)
         self.assertIn("firestone_battlegrounds_comps", CRITICAL_SOURCES)
+
+    def test_audit_uses_resolved_public_dataset_age(self) -> None:
+        now = datetime(2026, 8, 6, tzinfo=UTC)
+        source_id = "hsguru_meta_standard_legend"
+        fresh_candidate = {
+            "fetched_at": (now - timedelta(hours=1)).isoformat(),
+            "data": {"structured": {"provisional": True}},
+        }
+        stable_publication = {
+            "fetched_at": (now - timedelta(hours=100)).isoformat(),
+            "data": {"structured": {"strategies": [{"name": "stable"}]}},
+        }
+
+        with patch(
+            "app.game_change_audit.resolve_public_dataset",
+            side_effect=lambda candidate_source_id, candidate: (
+                stable_publication
+                if candidate_source_id == source_id
+                else candidate
+            ),
+        ):
+            _, issues = audit_critical_sources(
+                now=now,
+                status_loader=lambda _source_id: {"state": "ok"},
+                dataset_loader=lambda _source_id: fresh_candidate,
+            )
+
+        issue = next(row for row in issues if row["source_id"] == source_id)
+        self.assertEqual(issue["dataset_age_hours"], 100.0)
+        self.assertIn("stale>72h", issue["reasons"])
 
 
 if __name__ == "__main__":

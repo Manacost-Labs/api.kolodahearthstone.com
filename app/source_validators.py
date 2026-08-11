@@ -1,20 +1,24 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import UTC, datetime
 import math
 import re
-from typing import Any, Callable
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from typing import Any
 
-from .hsreplay_card_periods import STANDARD_HSREPLAY_CARD_PERIOD_SOURCE_IDS
+from .hsreplay_card_periods import (
+    HSREPLAY_CARD_PERIOD_SOURCE_IDS,
+    STANDARD_HSREPLAY_CARD_PERIOD_SOURCE_IDS,
+)
 from .parsing_normalize import parse_decimal, parse_percent
 from .post_patch_policy import (
+    HSREPLAY_CURRENT_PATCH_EARLY_SOURCE_IDS,
     effective_arena_card_minimum,
     effective_heartharena_thresholds,
     policy_for,
 )
 from .quality_thresholds import threshold_for
-
 
 ARENA_PERCENT_FIELDS = (
     "deck_winrate",
@@ -941,11 +945,26 @@ def _validate_card_stats(source_id: str, structured: dict[str, Any]) -> Validati
     report = ValidationReport()
     cards = [row for row in (structured.get("cards") or []) if isinstance(row, dict)]
     with_metrics = sum(
-        1 for row in cards if row.get("deck_winrate") or row.get("deck_popularity")
+        1
+        for row in cards
+        if any(
+            row.get(field_name) not in (None, "")
+            for field_name in STANDARD_CARD_PERCENT_FIELDS
+        )
     )
     blocked = bool(structured.get("blocked"))
+    early_current_patch = (
+        source_id in HSREPLAY_CURRENT_PATCH_EARLY_SOURCE_IDS
+        and policy_for(source_id) is not None
+    )
+    minimum_cards = 20 if early_current_patch else 30
     report.metrics.update(
-        {"cards": len(cards), "cards_with_metrics": with_metrics, "blocked": blocked}
+        {
+            "cards": len(cards),
+            "cards_with_metrics": with_metrics,
+            "blocked": blocked,
+            "minimum_cards": minimum_cards,
+        }
     )
     if blocked and len(cards) < 10:
         report.add_issue(
@@ -953,10 +972,10 @@ def _validate_card_stats(source_id: str, structured: dict[str, Any]) -> Validati
             "card stats blocked or empty",
             field="blocked",
         )
-    if len(cards) < 30:
+    if len(cards) < minimum_cards:
         report.add_issue(
             "card_stats.too_few_cards",
-            f"card stats too few ({len(cards)} < 30)",
+            f"card stats too few ({len(cards)} < {minimum_cards})",
             field="cards",
         )
     if with_metrics < 20:
@@ -965,7 +984,32 @@ def _validate_card_stats(source_id: str, structured: dict[str, Any]) -> Validati
             f"card stats missing metrics ({with_metrics}/{len(cards)}; minimum 20)",
             field="deck_winrate,deck_popularity",
         )
-    if source_id in STANDARD_HSREPLAY_CARD_PERIOD_SOURCE_IDS:
+    if early_current_patch:
+        valid_card_keys: set[tuple[str, str]] = set()
+        for row in cards:
+            card_id = str(row.get("id") or "").strip()
+            dbf_id = str(row.get("dbfId") or "").strip()
+            identity = ("id", card_id) if card_id else (("dbfId", dbf_id) if dbf_id else None)
+            valid_metric = any(
+                (value := _parse_arena_percent(row.get(field_name))) is not None
+                and 0.0 <= value <= 100.0
+                for field_name in STANDARD_CARD_PERCENT_FIELDS
+                if row.get(field_name) not in (None, "")
+            )
+            if identity is not None and valid_metric:
+                valid_card_keys.add(identity)
+        report.metrics["unique_valid_cards"] = len(valid_card_keys)
+        if len(valid_card_keys) < 20:
+            report.add_issue(
+                "card_stats.too_few_unique_valid_patch_cards",
+                (
+                    "current-patch card stats have too few unique valid cards "
+                    f"({len(valid_card_keys)} < 20)"
+                ),
+                field="id,dbfId,deck_winrate,deck_popularity",
+            )
+    if source_id in HSREPLAY_CARD_PERIOD_SOURCE_IDS:
+        is_standard_period = source_id in STANDARD_HSREPLAY_CARD_PERIOD_SOURCE_IDS
         # HSReplay Standard statistics currently contain roughly one thousand
         # rows.  A much larger payload is not an early-meta expansion: it is a
         # format/filter failure (usually Wild/all-cards data under the Standard
@@ -973,15 +1017,20 @@ def _validate_card_stats(source_id: str, structured: dict[str, Any]) -> Validati
         # enforce it during every semantic validation so an orphan immutable
         # snapshot cannot become the bootstrap regression baseline merely
         # because its checksum and timestamp are valid.
-        maximum_cards = int(threshold_for(source_id, "cards_max", 1_800))
-        if structured.get("provisional") is True or (
-            structured.get("data_phase") == "post_patch_early"
-        ):
+        maximum_cards = (
+            int(threshold_for(source_id, "cards_max", 1_800))
+            if is_standard_period
+            else None
+        )
+        if (
+            structured.get("provisional") is True
+            or structured.get("data_phase") == "post_patch_early"
+        ) and not early_current_patch:
             report.add_issue(
                 "card_stats.provisional_not_supported",
                 (
                     "provisional/post-patch-early publication is not supported "
-                    "for Standard card statistics"
+                    "for this HSReplay card-period source"
                 ),
                 field="provisional,data_phase",
             )
@@ -1021,7 +1070,6 @@ def _validate_card_stats(source_id: str, structured: dict[str, Any]) -> Validati
 
         report.metrics.update(
             {
-                "maximum_cards": maximum_cards,
                 "duplicate_card_ids": duplicate_ids,
                 "duplicate_dbf_ids": duplicate_dbf_ids,
                 "missing_card_identity": missing_identity,
@@ -1030,7 +1078,9 @@ def _validate_card_stats(source_id: str, structured: dict[str, Any]) -> Validati
                 "deck_popularity_at_least_80": popularity_cascade,
             }
         )
-        if len(cards) > maximum_cards:
+        if maximum_cards is not None:
+            report.metrics["maximum_cards"] = maximum_cards
+        if maximum_cards is not None and len(cards) > maximum_cards:
             report.add_issue(
                 "card_stats.too_many_standard_cards",
                 (
@@ -1042,26 +1092,26 @@ def _validate_card_stats(source_id: str, structured: dict[str, Any]) -> Validati
         if duplicate_ids:
             report.add_issue(
                 "card_stats.duplicate_card_id",
-                f"standard card stats contain duplicate card ids ({duplicate_ids})",
+                f"HSReplay card stats contain duplicate card ids ({duplicate_ids})",
                 field="id",
             )
         if duplicate_dbf_ids:
             report.add_issue(
                 "card_stats.duplicate_dbf_id",
-                f"standard card stats contain duplicate dbfIds ({duplicate_dbf_ids})",
+                f"HSReplay card stats contain duplicate dbfIds ({duplicate_dbf_ids})",
                 field="dbfId",
             )
         if missing_identity:
             report.add_issue(
                 "card_stats.missing_card_identity",
-                f"standard card stats contain rows without id/dbfId ({missing_identity})",
+                f"HSReplay card stats contain rows without id/dbfId ({missing_identity})",
                 field="id,dbfId",
             )
         if invalid_percentages:
             report.add_issue(
                 "card_stats.percent_out_of_range",
                 (
-                    "standard card stats contain invalid percentage values outside "
+                    "HSReplay card stats contain invalid percentage values outside "
                     f"0..100 ({len(invalid_percentages)})"
                 ),
                 field=",".join(STANDARD_CARD_PERCENT_FIELDS),
@@ -1070,7 +1120,7 @@ def _validate_card_stats(source_id: str, structured: dict[str, Any]) -> Validati
             report.add_issue(
                 "card_stats.systemic_popularity_cascade",
                 (
-                    "systemic standard-card popularity cascade detected: "
+                    "systemic HSReplay-card popularity cascade detected: "
                     f"{popularity_cascade} cards have deck_popularity >= 80%"
                 ),
                 field="deck_popularity",
@@ -1078,7 +1128,7 @@ def _validate_card_stats(source_id: str, structured: dict[str, Any]) -> Validati
     report.score = round(
         (
             float(not blocked or len(cards) >= 10)
-            + min(len(cards) / 30.0, 1.0)
+            + min(len(cards) / float(minimum_cards), 1.0)
             + min(with_metrics / 20.0, 1.0)
         )
         / 3,
@@ -1148,7 +1198,12 @@ def _validate_hsguru_meta(source_id: str, structured: dict[str, Any]) -> Validat
     strategies = [
         row for row in (structured.get("strategies") or []) if isinstance(row, dict)
     ]
-    minimum_rows = int(threshold_for(source_id, "meta_table_rows_min", 5))
+    policy = policy_for(source_id)
+    minimum_rows = (
+        policy.minimum_rows
+        if policy is not None
+        else int(threshold_for(source_id, "meta_table_rows_min", 5))
+    )
     report.metrics.update({"strategies": len(strategies), "minimum_rows": minimum_rows})
     if len(strategies) < minimum_rows:
         report.add_issue(
@@ -1156,6 +1211,31 @@ def _validate_hsguru_meta(source_id: str, structured: dict[str, Any]) -> Validat
             f"HSGuru meta too few rows ({len(strategies)} < {minimum_rows})",
             field="strategies",
         )
+    if policy is not None:
+        valid_archetypes: set[str] = set()
+        for row in strategies:
+            archetype = str(row.get("Archetype") or "").strip()
+            winrate = _parse_arena_percent(row.get("Winrate↓"))
+            popularity = _parse_arena_percent(row.get("Popularity"))
+            if (
+                _valid_name(archetype)
+                and winrate is not None
+                and 0.0 <= winrate <= 100.0
+                and popularity is not None
+                and 0.0 <= popularity <= 100.0
+            ):
+                valid_archetypes.add(archetype.casefold())
+        complete_rows = len(valid_archetypes)
+        report.metrics["complete_early_rows"] = complete_rows
+        if complete_rows < 3:
+            report.add_issue(
+                "hsguru_meta.too_few_complete_early_rows",
+                (
+                    "HSGuru early meta has too few unique rows with valid "
+                    f"metrics ({complete_rows} < 3)"
+                ),
+                field="Archetype,Winrate↓,Popularity",
+            )
     report.score = round(min(len(strategies) / max(minimum_rows, 1), 1.0), 4)
     return report
 
@@ -1202,7 +1282,7 @@ def _validate_hsguru_fun_decks(
 
 
 def _validate_hsguru_matchups(
-    _source_id: str,
+    source_id: str,
     structured: dict[str, Any],
 ) -> ValidationReport:
     report = ValidationReport()
@@ -1223,6 +1303,31 @@ def _validate_hsguru_matchups(
             "HSGuru matchups content not detected",
             field="winrate",
         )
+    if policy_for(source_id) is not None:
+        valid_matchups: set[tuple[str, str]] = set()
+        for row in matchups:
+            archetype = str(row.get("archetype") or "").strip()
+            opponent = str(row.get("vs") or "").strip()
+            winrate = _parse_arena_percent(row.get("winrate"))
+            if (
+                _valid_name(archetype)
+                and _valid_name(opponent)
+                and winrate is not None
+                and 0.0 <= winrate <= 100.0
+            ):
+                valid_matchups.add((archetype.casefold(), opponent.casefold()))
+        complete_rows = len(valid_matchups)
+        report.metrics["complete_early_rows"] = complete_rows
+        if complete_rows < 3:
+            report.add_issue(
+                "hsguru_matchups.too_few_complete_early_rows",
+                (
+                    "HSGuru early matchups have too few unique rows with "
+                    "valid metrics "
+                    f"({complete_rows} < 3)"
+                ),
+                field="archetype,vs,winrate",
+            )
     report.score = round(
         (min(len(matchups) / 3.0, 1.0) + min(with_winrate, 1)) / 2,
         4,

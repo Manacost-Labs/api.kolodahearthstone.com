@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+import math
+import os
+from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
-import math
-import os
-from typing import Any, Iterator
-from zoneinfo import ZoneInfo
+from typing import Any
 
+from .hsreplay_card_periods import HSREPLAY_CARD_PERIOD_SOURCE_IDS
 
 WINDOW_TIMEZONE = "Europe/Warsaw"
 DEFAULT_WINDOW_START = date(2026, 7, 21)
@@ -49,6 +50,39 @@ ARENA_EARLY_SOURCE_IDS = frozenset(
         "firestone_arena_cards_normal",
     }
 )
+
+HSGURU_EARLY_SOURCE_IDS = frozenset(
+    {
+        "hsguru_meta_standard_legend",
+        "hsguru_meta_standard_diamond_4to1",
+        "hsguru_meta_wild_legend",
+        "hsguru_meta_wild_diamond_4to1",
+        "hsguru_meta_standard_top_5k",
+        "hsguru_meta_standard_top_legend",
+        "hsguru_meta_wild_top_legend",
+        "hsguru_meta_wild_top_5k",
+        "hsguru_matchups_legend",
+        "hsguru_matchups_wild_legend",
+        "hsguru_matchups_diamond_4to1",
+    }
+)
+
+HSREPLAY_CURRENT_PATCH_EARLY_SOURCE_IDS = frozenset(
+    source_id
+    for source_id in HSREPLAY_CARD_PERIOD_SOURCE_IDS
+    if source_id.endswith("_patch")
+)
+
+EARLY_SOURCE_IDS = frozenset(
+    ARENA_EARLY_SOURCE_IDS
+    | HSGURU_EARLY_SOURCE_IDS
+    | HSREPLAY_CURRENT_PATCH_EARLY_SOURCE_IDS
+)
+
+
+def _policy_for_source(source_id: str) -> PostPatchPolicy:
+    minimum_rows = 3 if source_id in HSGURU_EARLY_SOURCE_IDS else 20
+    return PostPatchPolicy(source_id=source_id, minimum_rows=minimum_rows)
 
 
 def current_time() -> datetime:
@@ -129,12 +163,12 @@ def early_policy_changed_since_capture(
 
 
 def policy_for(source_id: str, *, at: datetime | None = None) -> PostPatchPolicy | None:
-    if source_id not in ARENA_EARLY_SOURCE_IDS:
+    if source_id not in EARLY_SOURCE_IDS:
         return None
     captured = captured_publication_policy(source_id)
     if captured is not None:
         return (
-            PostPatchPolicy(source_id=source_id)
+            _policy_for_source(source_id)
             if captured.effective_mode == "early"
             else None
         )
@@ -148,7 +182,7 @@ def policy_for(source_id: str, *, at: datetime | None = None) -> PostPatchPolicy
 
     if effective_publication_mode(source_id, at=moment) != "early":
         return None
-    return PostPatchPolicy(source_id=source_id)
+    return _policy_for_source(source_id)
 
 
 def effective_contract_min_rows(

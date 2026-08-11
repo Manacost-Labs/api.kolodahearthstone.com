@@ -1,20 +1,20 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
 import hashlib
 import json
-from pathlib import Path
 import re
-from typing import Any, Callable
 import urllib.parse
 import urllib.request
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any, Callable
 
 from .cards_index import cards_by_id
 from .config import data_dir
+from .parser_control import resolve_public_dataset
 from .patches_db import list_patches
 from .source_state import SourceState
 from .storage import load_dataset, load_status, read_json, write_json
-
 
 WIKI_API_URL = "https://hearthstone.wiki.gg/api.php"
 USER_AGENT = "HSDataAPI/0.1 (+https://api.hs-manacost.ru)"
@@ -176,7 +176,8 @@ def audit_critical_sources(
     issues: list[dict[str, Any]] = []
     for source_id, max_age_hours in CRITICAL_SOURCES.items():
         status = status_loader(source_id) or {}
-        dataset = dataset_loader(source_id) or {}
+        candidate = dataset_loader(source_id) or {}
+        dataset = resolve_public_dataset(source_id, candidate) or {}
         age = _dataset_age_hours(dataset, now)
         state = str(status.get("state") or SourceState.NEVER_FETCHED)
         cached_failure = bool(status.get("serving_cached_dataset")) and status.get(

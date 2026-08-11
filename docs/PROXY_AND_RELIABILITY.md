@@ -11,8 +11,10 @@ flowchart TB
     end
 
     subgraph fetcher [app/fetcher.py]
+        Preflight{Route-aware preflight}
         Route{Тип источника}
         APIpath[API-first: Firestone / HSReplay JSON / MetaStats]
+        Cloud[Cloud: Scrape.do → Firecrawl → Scrapfly → Bright Data opt-in]
         Browser[Browser path: rotator + patchright / FlareSolverr]
         Quality[publish_gate + contracts + semantic validators]
         Store[app/storage.py]
@@ -24,12 +26,16 @@ flowchart TB
 
     CLI --> fetcher
     Timer --> fetcher
-    fetcher --> Route
+    fetcher --> Preflight
+    Preflight --> Route
+    Preflight -. только если без proxy нет полезного маршрута .-> IPRoyal
     Route -->|zerotoheroes, analytics| APIpath
+    Route -->|protected cloud-capable| Cloud
     Route -->|hsguru, hsreplay HTML| Browser
-    APIpath --> proxy
-    Browser --> proxy
+    APIpath -. route-specific .-> IPRoyal
+    Browser -. configured local route .-> IPRoyal
     APIpath --> Quality
+    Cloud --> Quality
     Browser --> Quality
     Quality --> Store
 ```
@@ -39,6 +45,8 @@ flowchart TB
 | Слой | Механизм | Файл |
 |------|----------|------|
 | Обязательный прокси | `HS_FETCH_REQUIRE_PROXY=true` — origin не видит IP сервера | `proxy.py`, `config.py` |
+| Route-aware preflight | Proxy/FlareSolverr блокируют только selection без независимого полезного маршрута | `fetch_routes.py`, `preflight.py` |
+| Cloud fallback | Scrape.do → Firecrawl → Scrapfly → Bright Data (последний выключен по умолчанию) | `firecrawl_backend.py`, `brightdata_backend.py` |
 | Ротация бэкендов | HSGuru: FS → scrapling → patchright → curl; cap `HS_FETCH_BACKEND_MAX_SECONDS` | `rotator.py` |
 | Stale Telegram | После `refresh --all`: `stale_ok` если status ok, но данные старше `HS_STALE_HOURS` | `stale_monitor.py` |
 | Jitter между **браузерными** источниками | 8с × random(0.75–1.25) (`HS_REFRESH_DELAY_BROWSER_ONLY=true`) | `fetcher.py` |
@@ -103,14 +111,14 @@ flowchart TB
 
 В логах: `refresh phase=light_api duration=... ok=... fail=...`.
 
-## Надёжность по типам источников (46: 44 scrape + 2 pipeline)
+## Надёжность по типам источников
 
 | Группа | Источники | Backend | Стабильность |
 |--------|-----------|---------|--------------|
 | API JSON | Firestone BG/Arena, HSReplay arena, MetaStats, Hearthstone-decks, vS radars | `*_api` | Высокая |
 | Browser + API | HSReplay Gold cards (`card_list`) | patchright + перехват API | Высокая |
 | Browser | HSGuru meta/matchups | FlareSolverr (+ scrapling fallback) | Средняя (CF) |
-| API | HSReplay BG comps | Jina markdown **или** FS HTML (`battlegrounds_comps_parse.py`) | Средняя |
+| API/HTML | HSReplay BG comps | FlareSolverr или curl_cffi HTML/markdown (`battlegrounds_comps_parse.py`) | Средняя |
 | Browser | HSReplay trinkets/trending | FlareSolverr / patchright | Средняя |
 | HTML parse | HearthArena tierlist | httpx + proxy | Высокая |
 
@@ -171,8 +179,10 @@ HS_STALE_HOURS=12
 ## Слабые места (мониторить)
 
 1. **HSGuru** — FlareSolverr primary; Scrapling медленный (до 240 с cap).
-2. **HSReplay comps** — Jina 451; основной путь FS HTML + enrichment detail pages.
-3. **Один FlareSolverr контейнер** — SPOF для protected tier (2 GB mem_limit).
+2. **HSReplay comps** — HTML + enrichment detail pages чувствительны к изменению
+   upstream-разметки и требуют semantic validation.
+3. **Один FlareSolverr контейнер** — SPOF для локальных FlareSolverr-only
+   selections; cloud-capable источники могут использовать provider fallback.
 4. **HSReplay Premium cookie** — один `hsreplay-auth.json` на browser HSReplay.
 5. **Orphan statuses** — файлы в `statuses/` без `source_id` в `SOURCES` (удалять скриптом выше).
 
@@ -217,11 +227,17 @@ HS_REFRESH_PARALLEL_LIGHT=1 /srv/hs-data-api/venv/bin/python -m app.cli refresh 
 
 ### FlareSolverr down
 
-Падают 11× `hsguru_*` и часть HSReplay HTML. `docker compose -f /srv/hs-data-api/docker-compose.yml restart flaresolverr`.
+Строго FlareSolverr-only selection завершится ошибкой. API-first и
+cloud-capable источники не должны блокироваться глобальным preflight и могут
+продолжить по независимому маршруту. Для восстановления локального browser path:
+`docker compose -f /srv/hs-data-api/docker-compose.yml restart flaresolverr`.
 
 ### Proxy 407
 
-Остановите `HS_IPROYAL_ROTATE_PER_FETCH` / `HS_IPROYAL_SESSION_PER_SOURCE`, проверьте креды. Refresh прерывает фазу `light_api` при 407.
+Остановите `HS_IPROYAL_ROTATE_PER_FETCH` / `HS_IPROYAL_SESSION_PER_SOURCE` и
+проверьте credentials/баланс. `407` фиксируется как ошибка конкретного source и
+не прерывает независимые источники всей `light_api` фазы; cloud/browser fallback
+для этого source используется только если он разрешён его route policy.
 
 ## Команды диагностики
 

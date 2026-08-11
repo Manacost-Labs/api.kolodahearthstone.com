@@ -5,6 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+SuccessExitStatus=10
 WorkingDirectory=/opt/hs-data-api
 EnvironmentFile=/etc/hs-data-api.env
 ExecCondition=/opt/hs-data-api/venv/bin/python -m app.cli scheduled-check --source hsguru_streamer_decks_legend_1000

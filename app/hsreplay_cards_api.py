@@ -353,7 +353,10 @@ async def fetch_hsreplay_ranked_cards(source: Source, *, locale: str = "ruRU") -
     except Exception as direct_error:
         from .hsreplay_card_periods import fetch_hsreplay_card_period_json
 
-        fallback = await fetch_hsreplay_card_period_json(api_url)
+        fallback = await fetch_hsreplay_card_period_json(
+            api_url,
+            source_id=source.id,
+        )
         api_payload = fallback.payload
         backend = f"hsreplay_cards_api+{fallback.backend}"
         proxy_attempts = [
@@ -377,7 +380,17 @@ async def fetch_hsreplay_ranked_cards(source: Source, *, locale: str = "ruRU") -
         "http_status": 200,
         "proxy_attempts": proxy_attempts,
     }
-    if len(cards) < 30 or metrics < 20:
+    from .post_patch_policy import (
+        HSREPLAY_CURRENT_PATCH_EARLY_SOURCE_IDS,
+        policy_for,
+    )
+
+    early_current_patch = (
+        source.id in HSREPLAY_CURRENT_PATCH_EARLY_SOURCE_IDS
+        and policy_for(source.id) is not None
+    )
+    minimum_cards = 20 if early_current_patch else 30
+    if len(cards) < minimum_cards or metrics < 20:
         from .refresh_log import log_action
 
         log_action(
@@ -385,13 +398,15 @@ async def fetch_hsreplay_ranked_cards(source: Source, *, locale: str = "ruRU") -
             source_id=source.id,
             level="warn",
             detail=(
-                f"HSReplay cards API sparse: cards={len(cards)} metrics={metrics} "
+                f"HSReplay cards API sparse: cards={len(cards)}/{minimum_cards} "
+                f"metrics={metrics}/20 "
                 f"api_payloads={diagnostics['api_payloads']}"
             ),
             extra={"diagnostics": diagnostics},
         )
         raise RuntimeError(
-            f"HSReplay cards API sparse: cards={len(cards)} metrics={metrics}"
+            f"HSReplay cards API sparse: cards={len(cards)}/{minimum_cards} "
+            f"metrics={metrics}/20"
         )
 
     return {

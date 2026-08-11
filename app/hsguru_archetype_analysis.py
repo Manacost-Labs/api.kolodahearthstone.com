@@ -625,6 +625,7 @@ async def refresh_hsguru_archetype_analysis(
     save_status(SOURCE_ID, status)
     return {
         "ok": not errors,
+        "state": payload["state"],
         "source_id": SOURCE_ID,
         "targets": len(targets),
         "archetypes": len(rows),

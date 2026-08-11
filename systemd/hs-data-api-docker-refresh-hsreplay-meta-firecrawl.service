@@ -5,5 +5,6 @@ After=hs-data-api-docker.service network-online.target
 
 [Service]
 Type=oneshot
+SuccessExitStatus=10
 WorkingDirectory=/srv/hs-data-api
 ExecStart=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm api python -m app.cli refresh --source hsreplay_meta_top_1000_legend_1d_firecrawl --source hsreplay_meta_legend_1d_firecrawl --source hsreplay_meta_diamond_4to1_1d_firecrawl --scheduled

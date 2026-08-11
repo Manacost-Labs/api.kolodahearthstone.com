@@ -1,25 +1,25 @@
 from __future__ import annotations
 
-import unittest
+import asyncio
 import subprocess
+import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from app.api_only_sources import blocks_browser_fallback
+from app.fetch_routes import source_can_run_without_residential_proxy
 from app.fetcher import (
     _attach_proxy_egress,
     _preserve_cached_ok_status,
+    _refresh_sources_unlocked,
     _refresh_traffic_summary,
+    _run_tier_parallel,
     _save_dataset_with_checks,
     _source_uses_residential_proxy,
     _status_payload,
-)
-from app.refresh_log import runtime_version_info
-from app.api_only_sources import blocks_browser_fallback
-from app.hsreplay_cards_api import (
-    _analytics_card_list_url,
-    _api_payload_diagnostics,
-    parse_cards_from_api_payloads,
+    fetch_source,
 )
 from app.hsreplay_arena_api import normalize_arena_card_row
 from app.hsreplay_bg_heroes import (
@@ -27,14 +27,30 @@ from app.hsreplay_bg_heroes import (
     parse_hsreplay_bg_hero_stats_text,
     parse_hsreplay_bg_heroes_html,
 )
-from app.hsreplay_bg_stats import _composition_names_from_text, _composition_row, _minion_stats
+from app.hsreplay_bg_stats import (
+    _composition_names_from_text,
+    _composition_row,
+    _minion_stats,
+)
+from app.hsreplay_cards_api import (
+    _analytics_card_list_url,
+    _api_payload_diagnostics,
+    parse_cards_from_api_payloads,
+)
 from app.hsreplay_meta_api import _meta_archetypes_url, normalize_meta_archetypes
-from app.source_tiers import SourceTier, tier_for
-from app.scrapers.rotator import _backend_failures, _open_circuit, classify_backend_error
-from app.scrapers.rotator import _ordered_backends
-from app.scrapers.rotator import reset_backend_circuits
+from app.proxy_errors import ProxyPaymentRequiredError
+from app.refresh_log import runtime_version_info
 from app.scrapers.proxy import source_can_use_flaresolverr_without_proxy
 from app.scrapers.quality import validate_parsed_data
+from app.scrapers.rotator import (
+    _backend_failures,
+    _open_circuit,
+    _ordered_backends,
+    classify_backend_error,
+    fetch_html,
+    reset_backend_circuits,
+)
+from app.source_tiers import SourceTier, tier_for
 from app.sources import SOURCES, Source
 from app.storage import load_dataset, load_status, save_dataset, save_status
 from app.vicious_live import build_ladder_view, build_power_tier_list, build_table_view
@@ -42,6 +58,300 @@ from app.vicious_syndicate import find_radar_url, looks_like_vicious_deck_librar
 
 
 class RefreshStabilityTest(unittest.TestCase):
+    def test_rotator_preserves_typed_proxy_407_for_tier_circuit(self) -> None:
+        source = Source(
+            id="proxy_407_integration",
+            site="hsreplay",
+            category="ranked",
+            url="https://hsreplay.net/cards/",
+        )
+        backend = AsyncMock(
+            side_effect=ProxyPaymentRequiredError("upstream proxy returned 407")
+        )
+
+        with (
+            patch("app.scrapers.rotator.assert_proxy_configured"),
+            patch(
+                "app.scrapers.rotator._ordered_backends",
+                return_value=[("patchright", backend, lambda: True)],
+            ),
+            patch("app.scrapers.rotator.log_action"),
+            self.assertRaises(ProxyPaymentRequiredError),
+        ):
+            asyncio.run(fetch_html(source))
+
+        backend.assert_awaited_once_with(source)
+
+    def test_rotator_tries_proxyless_flaresolverr_after_proxy_407(self) -> None:
+        source = Source(
+            id="hsreplay_proxyless_recovery",
+            site="hsreplay",
+            category="ranked",
+            url="https://hsreplay.net/cards/",
+        )
+        paid_proxy = AsyncMock(
+            side_effect=ProxyPaymentRequiredError("upstream proxy returned 407")
+        )
+        recovered = SimpleNamespace(
+            html="<html>hsreplay.net" + (" usable data" * 300) + "</html>",
+            final_url=source.url,
+            backend="flaresolverr",
+            http_status=200,
+        )
+        proxyless = AsyncMock(return_value=recovered)
+
+        with (
+            patch("app.scrapers.rotator.assert_proxy_configured"),
+            patch(
+                "app.scrapers.rotator._ordered_backends",
+                return_value=[
+                    ("patchright", paid_proxy, lambda: True),
+                    ("flaresolverr", proxyless, lambda: True),
+                ],
+            ),
+            patch("app.scrapers.rotator.log_action"),
+        ):
+            result = asyncio.run(fetch_html(source))
+
+        self.assertIs(result, recovered)
+        paid_proxy.assert_awaited_once_with(source)
+        proxyless.assert_awaited_once_with(source)
+
+    def test_proxyless_capability_uses_configured_source_routes(self) -> None:
+        proxy_source = next(item for item in SOURCES if item.id == "metastats_decks")
+        api_source = next(
+            item for item in SOURCES if item.id == "firestone_battlegrounds_comps"
+        )
+        cloud_source = next(
+            item for item in SOURCES if item.id == "heartharena_tierlist"
+        )
+
+        with (
+            patch("app.fetch_routes.fetch_direct_enabled", return_value=False),
+            patch("app.fetch_routes.firecrawl_primary_source_ids", return_value=set()),
+            patch(
+                "app.fetch_routes.firecrawl_fallback_source_ids",
+                return_value={cloud_source.id},
+            ),
+        ):
+            self.assertFalse(
+                source_can_run_without_residential_proxy(
+                    proxy_source,
+                    default_backends=["patchright"],
+                )
+            )
+            self.assertTrue(
+                source_can_run_without_residential_proxy(
+                    api_source,
+                    default_backends=["patchright"],
+                )
+            )
+            self.assertTrue(
+                source_can_run_without_residential_proxy(
+                    cloud_source,
+                    default_backends=["patchright"],
+                )
+            )
+
+    def test_proxy_407_skips_dependent_sources_and_preserves_lkg(self) -> None:
+        failing_source = next(item for item in SOURCES if item.id == "metastats_decks")
+        cached_source = next(
+            item for item in SOURCES if item.id == "metastats_matchups"
+        )
+        cold_source = next(item for item in SOURCES if item.id == "hearthstone_decks")
+        cloud_source = next(
+            item for item in SOURCES if item.id == "heartharena_tierlist"
+        )
+        api_source = next(
+            item for item in SOURCES if item.id == "firestone_battlegrounds_comps"
+        )
+
+        async def fetch(_client, source):
+            if source.id == failing_source.id:
+                raise ProxyPaymentRequiredError("proxy returned 407")
+            return {"source_id": source.id, "state": "ok", "backend": "cloud_or_api"}
+
+        with (
+            TemporaryDirectory() as td,
+            patch("app.storage.data_dir", return_value=Path(td)),
+            patch("app.fetcher.validate_candidate_for_publish") as validate,
+            patch("app.fetcher.fetch_source", side_effect=fetch) as fetch_mock,
+            patch("app.fetcher._parallel_stagger_delay", new=AsyncMock()),
+            patch("app.fetcher.log_action"),
+            patch("app.fetch_routes.fetch_direct_enabled", return_value=False),
+            patch("app.fetch_routes.firecrawl_primary_source_ids", return_value=set()),
+            patch(
+                "app.fetch_routes.firecrawl_fallback_source_ids",
+                return_value={cloud_source.id},
+            ),
+        ):
+            validate.return_value = SimpleNamespace(ok=True, reason="ok")
+            save_dataset(
+                cached_source.id,
+                {
+                    "fetched_at": "2026-08-10T00:00:00+00:00",
+                    "backend": "metastats_api",
+                    "data": {"structured": {"type": "matchups", "rows": [{"id": 1}]}},
+                },
+            )
+            results = asyncio.run(
+                _run_tier_parallel(
+                    [
+                        failing_source,
+                        cached_source,
+                        cold_source,
+                        cloud_source,
+                        api_source,
+                    ],
+                    phase="light_api",
+                    concurrency=1,
+                    client=None,
+                    proxy_info={},
+                )
+            )
+
+        called_ids = [call.args[1].id for call in fetch_mock.call_args_list]
+        self.assertEqual(
+            called_ids,
+            [failing_source.id, cloud_source.id, api_source.id],
+        )
+        self.assertEqual(results[0]["state"], "fetch_error")
+        self.assertEqual(results[0]["failure_class"], "proxy_407")
+        self.assertEqual(results[1]["state"], "ok")
+        self.assertTrue(results[1]["serving_cached_dataset"])
+        self.assertEqual(results[1]["last_refresh_failure_class"], "proxy_407")
+        self.assertEqual(results[2]["state"], "fetch_error")
+        self.assertEqual(results[2]["failure_class"], "proxy_407")
+        self.assertEqual(results[3]["state"], "ok")
+        self.assertEqual(results[4]["state"], "ok")
+
+    def test_returned_proxy_407_status_opens_tier_circuit(self) -> None:
+        failing_source = next(item for item in SOURCES if item.id == "metastats_decks")
+        skipped_source = next(
+            item for item in SOURCES if item.id == "metastats_matchups"
+        )
+        independent_source = next(
+            item for item in SOURCES if item.id == "firestone_battlegrounds_comps"
+        )
+
+        async def fetch(_client, source):
+            if source.id == failing_source.id:
+                return {
+                    "source_id": source.id,
+                    "state": "fetch_error",
+                    "error": "ProxyPaymentRequiredError",
+                    "failure_class": "proxy_407",
+                }
+            return {"source_id": source.id, "state": "ok", "backend": "firestone_api"}
+
+        with (
+            TemporaryDirectory() as td,
+            patch("app.storage.data_dir", return_value=Path(td)),
+            patch("app.fetcher.fetch_source", side_effect=fetch) as fetch_mock,
+            patch("app.fetcher._parallel_stagger_delay", new=AsyncMock()),
+            patch("app.fetcher.log_action"),
+            patch("app.fetch_routes.fetch_direct_enabled", return_value=False),
+            patch("app.fetch_routes.firecrawl_primary_source_ids", return_value=set()),
+            patch("app.fetch_routes.firecrawl_fallback_source_ids", return_value=set()),
+        ):
+            results = asyncio.run(
+                _run_tier_parallel(
+                    [failing_source, skipped_source, independent_source],
+                    phase="light_api",
+                    concurrency=1,
+                    client=None,
+                    proxy_info={},
+                )
+            )
+
+        called_ids = [call.args[1].id for call in fetch_mock.call_args_list]
+        self.assertEqual(called_ids, [failing_source.id, independent_source.id])
+        self.assertEqual(results[1]["failure_class"], "proxy_407")
+        self.assertEqual(results[2]["state"], "ok")
+
+    def test_fetch_source_retains_proxy_407_failure_class_in_status(self) -> None:
+        source = next(item for item in SOURCES if item.id == "metastats_decks")
+
+        with (
+            TemporaryDirectory() as td,
+            patch("app.storage.data_dir", return_value=Path(td)),
+            patch(
+                "app.fetcher._fetch_hsreplay_api_source",
+                new=AsyncMock(return_value=None),
+            ),
+            patch(
+                "app.fetcher.fetch_html",
+                new=AsyncMock(
+                    side_effect=ProxyPaymentRequiredError("proxy returned 407")
+                ),
+            ),
+            patch("app.fetcher.firecrawl_primary_source_ids", return_value=set()),
+            patch("app.fetcher.firecrawl_fallback_source_ids", return_value=set()),
+            patch("app.fetcher.send_telegram_alert", new=AsyncMock()),
+            patch("app.fetcher._maybe_stale_data_alert", new=AsyncMock()),
+            patch("app.fetcher.log_action"),
+        ):
+            result = asyncio.run(fetch_source(None, source))
+
+        self.assertEqual(result["state"], "fetch_error")
+        self.assertEqual(result["failure_class"], "proxy_407")
+
+    def test_preflight_failure_writes_terminal_refresh_event(self) -> None:
+        with (
+            patch("app.refresh_context.begin_refresh_run") as begin_run,
+            patch("app.refresh_context.end_refresh_run") as end_run,
+            patch(
+                "app.preflight.ensure_refresh_preflight",
+                new=AsyncMock(side_effect=RuntimeError("FlareSolverr unavailable")),
+            ),
+            patch("app.fetcher.log_action") as log_action,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "FlareSolverr unavailable"):
+                asyncio.run(
+                    _refresh_sources_unlocked(
+                        ["hsguru_meta_standard_legend"],
+                    )
+                )
+
+        begin_run.assert_called_once_with()
+        end_run.assert_called_once_with()
+        terminal_events = [
+            call
+            for call in log_action.call_args_list
+            if call.args and call.args[0] == "refresh.end"
+        ]
+        self.assertEqual(len(terminal_events), 1)
+        self.assertEqual(terminal_events[0].kwargs["state"], "fetch_error")
+
+    def test_api_source_is_not_blocked_by_missing_global_proxy(self) -> None:
+        source = next(item for item in SOURCES if item.id == "firestone_battlegrounds_comps")
+        parsed = {
+            "source_id": source.id,
+            "site": source.site,
+            "category": source.category,
+            "url": source.url,
+            "structured": {"type": "bg_comps", "compositions": [{"name": "Mechs"}]},
+            "counts": {"api_bytes": 128},
+            "_backend": "firestone_api",
+        }
+
+        with (
+            TemporaryDirectory() as td,
+            patch("app.storage.data_dir", return_value=Path(td)),
+            patch("app.fetcher.fetch_proxy_url", return_value=""),
+            patch("app.fetcher._fetch_hsreplay_api_source", new=AsyncMock(return_value=parsed)),
+            patch(
+                "app.fetcher.validate_candidate_for_publish",
+                return_value=SimpleNamespace(ok=True, reason="ok", extra={}),
+            ),
+            patch("app.fetcher.quality_metrics", return_value={"quality_score": 1.0}),
+            patch("app.fetcher._save_dataset_with_checks", return_value=(False, None, {})),
+        ):
+            result = asyncio.run(fetch_source(None, source))
+
+        self.assertEqual(result["state"], "ok")
+        self.assertEqual(result["backend"], "firestone_api")
+
     def test_test_process_refuses_default_production_writes(self) -> None:
         with patch("app.storage.data_dir", return_value=Path("/var/lib/hs-data-api")):
             with self.assertRaisesRegex(RuntimeError, "Refusing to write production parser data"):
@@ -760,6 +1070,47 @@ class RefreshStabilityTest(unittest.TestCase):
                 self.assertEqual(out["last_refresh_state"], "blocked_by_protection")
                 self.assertIn("Cloudflare challenge", out["last_refresh_error"])
                 self.assertEqual(load_status(source.id), out)
+
+    def test_preserve_cached_status_uses_resolved_stable_publication(self) -> None:
+        source = Source(
+            id="hsguru_meta_standard_legend",
+            site="hsguru",
+            category="meta",
+            url="https://www.hsguru.com/meta",
+        )
+        stable = {
+            "fetched_at": "2026-06-04T10:00:00+00:00",
+            "backend": "stable-lkg",
+            "data": {
+                "title": "HSGuru Meta",
+                "tables": [
+                    {
+                        "objects": [
+                            {"deck": name}
+                            for name in ("A", "B", "C", "D", "E")
+                        ]
+                    }
+                ]
+            },
+        }
+        failed = {
+            "state": "fetch_error",
+            "fetched_at": "2026-06-05T10:00:00+00:00",
+            "detail": "temporary upstream failure",
+        }
+
+        with TemporaryDirectory() as td, patch(
+            "app.storage.data_dir", return_value=Path(td)
+        ), patch(
+            "app.parser_control.load_resolved_public_dataset", return_value=stable
+        ) as resolved:
+            out = _preserve_cached_ok_status(source, failed)
+
+        self.assertIsNotNone(out)
+        assert out is not None
+        self.assertEqual(out["backend"], "stable-lkg")
+        self.assertTrue(out["serving_cached_dataset"])
+        resolved.assert_called_once_with(source.id)
 
     def test_hsreplay_with_auth_keeps_fallback_backends_after_patchright(self) -> None:
         source = Source(

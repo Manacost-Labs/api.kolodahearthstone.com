@@ -90,6 +90,59 @@ class HealthEndpointTest(unittest.TestCase):
             },
         )
 
+    def test_ops_health_validates_resolved_stable_dataset_after_early_window(self) -> None:
+        source = type("SourceStub", (), {"id": "hsguru_meta_standard_legend"})()
+        status = {"source_id": source.id, "state": "ok", "fetched_at": "2026-08-02T00:00:00Z"}
+        stable = {
+            "data": {
+                "structured": {
+                    "type": "meta",
+                    "strategies": [
+                        {
+                            "Archetype": f"Stable {index}",
+                            "Winrate↓": "52%",
+                            "Popularity": "2%",
+                        }
+                        for index in range(10)
+                    ],
+                }
+            }
+        }
+        provisional = {
+            "data": {
+                "structured": {
+                    "type": "meta",
+                    "strategies": [
+                        {
+                            "Archetype": f"Early {index}",
+                            "Winrate↓": "51%",
+                            "Popularity": "1%",
+                        }
+                        for index in range(3)
+                    ],
+                    "provisional": True,
+                }
+            }
+        }
+
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.object(main, "SOURCES", [source]),
+            patch.object(main, "load_status", return_value=status),
+            patch.object(main, "load_dataset", return_value=provisional),
+            patch.object(main, "root_dir", return_value=Path(tmp)),
+            patch(
+                "app.parser_control.resolve_public_dataset",
+                return_value=stable,
+            ) as resolver,
+            patch("app.stale_monitor.find_stale_sources", return_value=[]),
+        ):
+            payload = main.build_health_diagnostics()
+
+        resolver.assert_called_once_with(source.id, provisional)
+        self.assertTrue(payload["serving_ok"], payload)
+        self.assertEqual(payload["semantic_failed_sources"], [])
+
     def test_cached_dataset_quality_includes_contract_failures(self) -> None:
         dataset = {
             "data": {

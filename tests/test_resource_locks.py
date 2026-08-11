@@ -188,7 +188,7 @@ def test_one_locked_source_does_not_block_another_requested_source(tmp_path) -> 
     )
 
 
-def test_legacy_orchestration_scripts_use_persistent_resource_locks() -> None:
+def test_legacy_orchestration_scripts_delegate_to_shared_locked_refresh() -> None:
     root = Path(__file__).resolve().parents[1]
     streamer = (root / "scripts" / "firecrawl-streamer-decks.py").read_text(
         encoding="utf-8"
@@ -197,7 +197,9 @@ def test_legacy_orchestration_scripts_use_persistent_resource_locks() -> None:
         encoding="utf-8"
     )
 
-    assert "ResourceLockSet(" in streamer
-    assert "[SOURCE_ID]" in streamer
+    assert "from app.cli import main" in streamer
+    assert '"refresh"' in streamer
+    assert '"--source"' in streamer
+    assert "SOURCE_ID" in streamer
     assert "RefreshLock" not in streamer
     assert ".refresh.lock" not in recovery

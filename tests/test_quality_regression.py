@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from app.dataset_regression import check_dataset_regression, estimate_metric_count
 from app.scrapers.quality import quality_metrics
+from app.source_contracts import contract_quality_report
 from app.sources import SOURCE_BY_ID
 
 
@@ -55,6 +56,82 @@ class DatasetRegressionTest(unittest.TestCase):
         new = {"structured": {"type": "arena_card_tiers", "cards": [{"x": 1}] * 80}}
         reg, _, _ = check_dataset_regression(source, previous_data=prev, new_data=new)
         self.assertFalse(reg)
+
+    @patch("app.dataset_regression.dataset_regression_drop_ratio", return_value=0.30)
+    def test_streamer_rolling_hour_accepts_complete_three_row_window(
+        self,
+        _ratio: object,
+    ) -> None:
+        source = SOURCE_BY_ID["hsguru_streamer_decks_legend_1000"]
+        previous = {
+            "structured": {
+                "type": "streamer_decks",
+                "rows": [
+                    {
+                        "Deck": f"Previous deck {index}",
+                        "Streamer": f"Streamer {index}",
+                        "deck_code": f"previous-{index}",
+                    }
+                    for index in range(10)
+                ],
+            }
+        }
+        current = {
+            "structured": {
+                "type": "streamer_decks",
+                "rows": [
+                    {
+                        "Deck": f"Current deck {index}",
+                        "Streamer": f"Streamer {index}",
+                        "deck_code": f"current-{index}",
+                    }
+                    for index in range(3)
+                ],
+            }
+        }
+
+        contract = contract_quality_report(source.id, current["structured"])
+        regression, _message, extra = check_dataset_regression(
+            source,
+            previous_data=previous,
+            new_data=current,
+        )
+
+        self.assertTrue(contract["ok"], contract["warnings"])
+        self.assertFalse(regression)
+        self.assertEqual(extra["rows_before"], 10)
+        self.assertEqual(extra["rows_after"], 3)
+
+    def test_streamer_rolling_hour_rejects_incomplete_rows_at_absolute_floor(
+        self,
+    ) -> None:
+        structured = {
+            "type": "streamer_decks",
+            "rows": [
+                {
+                    "Deck": "Complete deck",
+                    "Streamer": "Complete streamer",
+                    "deck_code": "complete-code",
+                },
+                {
+                    "Deck": "Missing code",
+                    "Streamer": "Second streamer",
+                },
+                {
+                    "Deck": "Missing streamer",
+                    "deck_code": "third-code",
+                },
+            ],
+        }
+
+        report = contract_quality_report(
+            "hsguru_streamer_decks_legend_1000",
+            structured,
+        )
+
+        self.assertFalse(report["ok"])
+        self.assertIn("deck_code fill rate", " ".join(report["warnings"]))
+        self.assertIn("Streamer fill rate", " ".join(report["warnings"]))
 
     @patch("app.dataset_regression.dataset_regression_drop_ratio", return_value=0.30)
     def test_regression_detected_when_card_metrics_disappear(self, _ratio: object) -> None:

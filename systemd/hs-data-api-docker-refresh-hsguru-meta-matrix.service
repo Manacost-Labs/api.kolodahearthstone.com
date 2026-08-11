@@ -5,5 +5,8 @@ After=hs-data-api-docker.service network-online.target
 
 [Service]
 Type=oneshot
+SuccessExitStatus=10
 WorkingDirectory=/srv/hs-data-api
 ExecStart=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm api python -m app.cli refresh-hsguru-meta-matrix --scheduled --concurrency 2
+TimeoutStartSec=65min
+TimeoutStopSec=30s

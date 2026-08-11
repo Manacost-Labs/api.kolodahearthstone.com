@@ -1,0 +1,36 @@
+{
+  "name": "@hearthstone-parses/triggerdev-control-plane",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "pretest": "node -e \"require('node:fs').rmSync('.test-dist',{recursive:true,force:true})\"",
+    "test": "tsc --project tsconfig.test.json && node --test .test-dist/tests/*.test.js",
+    "dev": "trigger dev",
+    "deploy": "trigger deploy"
+  },
+  "dependencies": {
+    "@trigger.dev/sdk": "4.5.10"
+  },
+  "devDependencies": {
+    "@types/node": "22.17.1",
+    "trigger.dev": "4.5.10",
+    "typescript": "5.9.2"
+  },
+  "overrides": {
+    "@opentelemetry/core": "2.8.0",
+    "cookie": "0.7.2",
+    "engine.io": "6.6.9",
+    "engine.io-client": "6.6.6",
+    "esbuild": "0.25.0",
+    "nanoid": "3.3.17",
+    "socket.io": "4.8.3",
+    "socket.io-client": "4.8.3",
+    "tar": "7.5.22",
+    "ws": "8.21.3"
+  }
+}

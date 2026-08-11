@@ -3,17 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .hsreplay_card_periods import HSREPLAY_CARD_PERIOD_SOURCE_IDS
+from .post_patch_policy import EARLY_SOURCE_IDS
 from .sources import SOURCE_BY_ID
 from .trinket_slices import TRINKET_SLICE_SOURCE_IDS
 
-
-EARLY_SOURCE_IDS = frozenset(
-    {
-        "hsreplay_arena_cards_advanced",
-        "heartharena_tierlist",
-        "firestone_arena_cards_normal",
-    }
-)
 
 @dataclass(frozen=True)
 class ParserSection:

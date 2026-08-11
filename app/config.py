@@ -5,7 +5,6 @@ from pathlib import Path
 
 from .trinket_slices import TRINKET_SLICE_SOURCE_IDS
 
-
 DEFAULT_DATA_DIR = "/var/lib/hs-data-api"
 DEFAULT_BACKENDS = "flaresolverr,scrapling,patchright,curl_cffi,cloudscraper"
 DEFAULT_HSGURU_BACKENDS = "flaresolverr,scrapling,curl_cffi,cloudscraper,patchright"
@@ -63,6 +62,11 @@ def bind_port() -> int:
 
 def api_key() -> str | None:
     value = os.environ.get("HS_API_KEY", "").strip()
+    return value or None
+
+
+def orchestrator_api_key() -> str | None:
+    value = os.environ.get("HS_ORCHESTRATOR_API_KEY", "").strip()
     return value or None
 
 
@@ -274,6 +278,68 @@ def scrapfly_timeout_seconds() -> float:
     return max(160.0, float(os.environ.get("HS_SCRAPFLY_TIMEOUT_SECONDS", "160")))
 
 
+def brightdata_unlocker_enabled() -> bool:
+    return os.environ.get(
+        "HS_BRIGHTDATA_UNLOCKER_ENABLED", "false"
+    ).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def brightdata_api_key() -> str | None:
+    """Return the Bright Data bearer token without logging or fingerprinting it."""
+    value = os.environ.get("HS_BRIGHTDATA_API_KEY", "").strip()
+    return value or None
+
+
+def brightdata_unlocker_zone() -> str | None:
+    value = os.environ.get("HS_BRIGHTDATA_UNLOCKER_ZONE", "").strip()
+    return value or None
+
+
+def brightdata_source_ids() -> set[str]:
+    raw = os.environ.get("HS_BRIGHTDATA_SOURCE_IDS", "")
+    return {part.strip() for part in raw.split(",") if part.strip()}
+
+
+def brightdata_monthly_billable_limit() -> int:
+    # A zero default makes the paid fallback fail closed until an operator has
+    # explicitly chosen a monthly ceiling.
+    try:
+        return max(
+            0,
+            int(os.environ.get("HS_BRIGHTDATA_MONTHLY_BILLABLE_LIMIT", "0")),
+        )
+    except ValueError:
+        return 0
+
+
+def brightdata_timeout_seconds() -> float:
+    try:
+        configured = float(os.environ.get("HS_BRIGHTDATA_TIMEOUT_SECONDS", "180"))
+    except ValueError:
+        configured = 180.0
+    return min(300.0, max(30.0, configured))
+
+
+def brightdata_circuit_failure_threshold() -> int:
+    try:
+        configured = int(
+            os.environ.get("HS_BRIGHTDATA_CIRCUIT_FAILURE_THRESHOLD", "3")
+        )
+    except ValueError:
+        configured = 3
+    return max(1, configured)
+
+
+def brightdata_circuit_cooldown_seconds() -> int:
+    try:
+        configured = int(
+            os.environ.get("HS_BRIGHTDATA_CIRCUIT_COOLDOWN_SECONDS", "1800")
+        )
+    except ValueError:
+        configured = 1800
+    return max(60, configured)
+
+
 def hsguru_current_patch_period() -> str | None:
     value = os.environ.get("HS_HSGURU_PATCH_PERIOD", "").strip()
     if not value or value.lower() == "auto":
@@ -406,7 +472,7 @@ def dataset_regression_drop_ratio() -> float:
 
 def firecrawl_api_key() -> str | None:
     """Return the currently active Firecrawl key (rotating pool or legacy single key)."""
-    from .firecrawl_keys import peek_firecrawl_key, parse_firecrawl_api_keys
+    from .firecrawl_keys import parse_firecrawl_api_keys, peek_firecrawl_key
 
     if parse_firecrawl_api_keys():
         lease = peek_firecrawl_key()

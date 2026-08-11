@@ -3,6 +3,21 @@
 The parser control plane is exposed only through admin-key protected endpoints.
 All responses are private and must not be cached.
 
+## Publication policy
+
+`PATCH /admin/parser-control/policy` switches between `stable` and a bounded
+`early` publication mode. An early mutation must include a future
+`earlyUntil`; expiry returns the effective mode to `stable` automatically.
+The early policy is intentionally global but its reduced thresholds apply only
+to the explicit patch-sensitive source allowlist: Arena early feeds, registered
+HSGuru meta/matchups, and HSReplay card-period IDs ending in `_patch`. Rolling
+HSReplay `1d`/`3d`/`7d`/`14d` datasets and unrelated sources remain stable.
+
+An accepted early sample is published as `provisional` while retaining the
+stable baseline/LKG. Each refresh captures one immutable policy token, so a
+concurrent policy update makes the candidate stale rather than mixing early
+and stable gates within one run.
+
 ## Snapshot and schedule contract
 
 `GET /admin/parser-control` returns the current publication policy, section

@@ -13,16 +13,18 @@ from typing import Any
 
 import httpx
 
+from .api_only_sources import blocks_browser_fallback
 from .config import (
     fetch_backends,
     fetch_direct_enabled,
     fetch_proxy_url,
-    fetch_require_proxy,
     firecrawl_fallback_max_attempts_per_refresh,
     firecrawl_fallback_max_attempts_per_source,
     firecrawl_fallback_source_ids,
     firecrawl_primary_source_ids,
     flaresolverr_session_per_source,
+    http_retry_attempts,
+    proxy_check_url,
     refresh_delay_browser_only,
     refresh_parallel_light,
     refresh_parallel_medium,
@@ -32,7 +34,39 @@ from .config import (
     request_timeout_seconds,
     user_agent,
 )
+from .dataset_regression import check_dataset_regression, estimate_metric_count
+from .fetch_routes import source_can_run_without_residential_proxy
+from .parser import parse_html
+from .post_patch_policy import (
+    EARLY_SOURCE_IDS,
+    POST_PATCH_BASELINE_LABEL,
+    STABLE_PUBLICATION_BASELINE_LABEL,
+    build_provisional_metadata,
+    capture_publication_policy,
+    early_policy_changed_since_capture,
+)
+from .proxy_errors import ProxyPaymentRequiredError
+from .publish_gate import validate_candidate_for_publish
+from .refresh_log import (
+    activate_source_trace,
+    complete_source_trace,
+    deactivate_source_trace,
+    log_action,
+    new_run_id,
+    runtime_version_info,
+    set_refresh_context,
+)
 from .resource_locks import ResourceLocked, ResourceLockSet
+from .scrapers.browser_pool import PatchrightPool
+from .scrapers.flaresolverr import (
+    set_active_flaresolverr_session,
+    set_flaresolverr_source,
+)
+from .scrapers.flaresolverr_session import FlareSolverrSession
+from .scrapers.http_resilience import is_session_blocked, resilient_http_get
+from .scrapers.proxy import burn_proxy_session, proxy_url_for_source
+from .scrapers.quality import is_cloudflare_challenge, quality_metrics
+from .scrapers.rotator import fetch_html
 from .source_state import EFFECTIVE_OK_CACHED, FAILURE_STATES, SourceState
 from .source_tiers import (
     API_FIRST_TIERS,
@@ -41,38 +75,7 @@ from .source_tiers import (
     tier_for,
     validate_tier_registry,
 )
-from .parser import parse_html
-from .publish_gate import validate_candidate_for_publish
-from .scrapers.browser_pool import PatchrightPool
-from .scrapers.flaresolverr import set_active_flaresolverr_session, set_flaresolverr_source
-from .scrapers.flaresolverr_session import FlareSolverrSession
-from .config import http_retry_attempts, proxy_check_url
-from .scrapers.http_resilience import is_session_blocked, resilient_http_get
-from .scrapers.proxy import burn_proxy_session, check_proxy_health, proxy_url_for_source
-from .scrapers.quality import is_cloudflare_challenge, quality_metrics
-from .scrapers.rotator import fetch_html
-from .sources import SOURCES, SOURCE_BY_ID, Source
-from .api_only_sources import blocks_browser_fallback
-from .refresh_log import (
-    activate_source_trace,
-    complete_source_trace,
-    deactivate_source_trace,
-    log_action,
-    log_event,
-    new_run_id,
-    runtime_version_info,
-    set_refresh_context,
-)
-from .dataset_regression import check_dataset_regression, estimate_metric_count
-from .post_patch_policy import (
-    ARENA_EARLY_SOURCE_IDS,
-    POST_PATCH_BASELINE_LABEL,
-    STABLE_PUBLICATION_BASELINE_LABEL,
-    build_provisional_metadata,
-    capture_publication_policy,
-    early_policy_changed_since_capture,
-)
-from .proxy_errors import ProxyPaymentRequiredError
+from .sources import SOURCE_BY_ID, SOURCES, Source
 from .storage import (
     load_dataset,
     load_status,
@@ -193,6 +196,15 @@ def _status_payload(
     return payload
 
 
+def _attach_failure_class(
+    status: dict[str, Any],
+    exc: BaseException,
+) -> dict[str, Any]:
+    if isinstance(exc, ProxyPaymentRequiredError):
+        status["failure_class"] = "proxy_407"
+    return status
+
+
 def _source_uses_residential_proxy(source: Source, backend: str | None) -> bool:
     if not fetch_proxy_url() or not backend:
         return False
@@ -238,7 +250,12 @@ def _preserve_cached_ok_status(source: Source, failed_status: dict[str, Any]) ->
     The refresh job should not turn /health red just because a temporary proxy/CF
     failure prevented a fresh snapshot, as long as we still have a valid cached dataset.
     """
-    dataset = load_dataset(source.id)
+    # The mutable candidate may still contain a small provisional snapshot after
+    # the early window has expired.  Preserve the dataset that is actually
+    # published (normally the stable baseline), not that hidden candidate.
+    from .parser_control import load_resolved_public_dataset
+
+    dataset = load_resolved_public_dataset(source.id)
     if not dataset:
         return None
     parsed = dataset.get("data")
@@ -281,6 +298,8 @@ def _preserve_cached_ok_status(source: Source, failed_status: dict[str, Any]) ->
     status["last_refresh_error"] = (
         failed_status.get("detail") or failed_status.get("error") or "live refresh failed"
     )
+    if failed_status.get("failure_class"):
+        status["last_refresh_failure_class"] = failed_status["failure_class"]
     try:
         cached_dt = datetime.fromisoformat(cached_at.replace("Z", "+00:00"))
         if cached_dt.tzinfo is None:
@@ -311,9 +330,9 @@ def _save_failure_status(
     publication_attempt: Any | None = None,
 ) -> dict[str, Any]:
     from .dataset_publication_store import (
+        STANDARD_CARDS_SOURCE_ID,
         DatasetPublicationStore,
         PublicationUnavailable,
-        STANDARD_CARDS_SOURCE_ID,
     )
 
     if source.id == STANDARD_CARDS_SOURCE_ID:
@@ -583,7 +602,7 @@ def _save_dataset_with_checks(
             structured = new_data.get(key)
             if isinstance(structured, dict):
                 structured.update(provisional_metadata)
-    elif source.id in ARENA_EARLY_SOURCE_IDS:
+    elif source.id in EARLY_SOURCE_IDS:
         # Any fully validated non-provisional dataset becomes the new stable
         # channel for sources that can publish provisional rows. Early
         # snapshots never overwrite this file.
@@ -726,7 +745,6 @@ def _enrich_firecrawl_trinkets_from_cache(source: Source, parsed: dict[str, Any]
         trinket_identity_key,
         trinket_variant_key,
     )
-
     from .trinket_slices import TRINKET_SLICE_SOURCE_IDS
 
     if source.id not in {
@@ -993,6 +1011,18 @@ async def _try_firecrawl_html(
         )
         status["firecrawl_credits_used"] = scraped.firecrawl_credits_used
         status["scrape_do_credits_used"] = scraped.scrape_do_credits_used
+        status["scrapfly_credits_used"] = scraped.scrapfly_credits_used
+        status["brightdata_credits_used"] = scraped.brightdata_credits_used
+        status["brightdata_requests_used"] = scraped.brightdata_requests_used
+        status["brightdata_budget_remaining"] = scraped.metadata.get(
+            "brightDataBudgetRemaining"
+        )
+        status["brightdata_request_id"] = scraped.metadata.get(
+            "brightDataRequestId"
+        )
+        status["brightdata_rendered"] = scraped.metadata.get(
+            "brightDataRendered"
+        )
         status["firecrawl_cache_state"] = scraped.metadata.get("cacheState")
         _attach_provisional_status(status, provisional_metadata)
         if reg:
@@ -1007,6 +1037,12 @@ async def _try_firecrawl_html(
             bytes_out=scraped.content_length,
             extra={
                 "credits_used": scraped.request_credits,
+                "brightdata_budget_remaining": scraped.metadata.get(
+                    "brightDataBudgetRemaining"
+                ),
+                "brightdata_request_id": scraped.metadata.get(
+                    "brightDataRequestId"
+                ),
                 "cache_state": scraped.metadata.get("cacheState"),
                 "reason": reason,
                 "quality_metrics": qmetrics,
@@ -1172,8 +1208,8 @@ async def _fetch_source_with_active_lifecycle(
     trace_id: str,
 ) -> dict[str, Any]:
     from .dataset_publication_store import (
-        DatasetPublicationStore,
         STANDARD_CARDS_SOURCE_ID,
+        DatasetPublicationStore,
     )
 
     def _finish(status: dict[str, Any]) -> dict[str, Any]:
@@ -1192,25 +1228,6 @@ async def _fetch_source_with_active_lifecycle(
                 exc,
             )
         return status
-
-    if fetch_require_proxy() and not fetch_proxy_url():
-        log_action(
-            "proxy.health.fail",
-            level="error",
-            source_id=source.id,
-            state=SourceState.PROXY_REQUIRED,
-            detail="HS_FETCH_PROXY_URL not configured",
-        )
-        status = _status_payload(
-            source,
-            SourceState.PROXY_REQUIRED,
-            fetched_at=fetched_at,
-            detail="Set HS_FETCH_PROXY_URL in /etc/hs-data-api.env",
-        )
-        status = _save_failure_status(source, status)
-        if status.get("state") != SourceState.OK:
-            await send_telegram_alert(source.id, SourceState.PROXY_REQUIRED, status["detail"], source.url)
-        return _finish(status)
 
     if source.id in firecrawl_primary_source_ids():
         firecrawl_status = await _try_firecrawl_html(
@@ -1239,8 +1256,8 @@ async def _fetch_source_with_active_lifecycle(
                 }
                 publication_decision = None
                 from .dataset_publication_store import (
-                    DatasetPublicationStore,
                     STANDARD_CARDS_SOURCE_ID,
+                    DatasetPublicationStore,
                     validate_and_publish_standard_cards_candidate,
                 )
 
@@ -1378,7 +1395,11 @@ async def _fetch_source_with_active_lifecycle(
                     and retry_on_auth_failure
                     and _looks_like_hsreplay_auth_error(reason)
                 ):
-                    from .hsreplay_auth import force_relogin_hsreplay, hsreplay_email, hsreplay_password
+                    from .hsreplay_auth import (
+                        force_relogin_hsreplay,
+                        hsreplay_email,
+                        hsreplay_password,
+                    )
 
                     if hsreplay_email() and hsreplay_password() and await force_relogin_hsreplay():
                         return await fetch_source(client, source, retry_on_auth_failure=False)
@@ -1479,8 +1500,6 @@ async def _fetch_source_with_active_lifecycle(
                 tier=source_tier,
                 level="warn",
             )
-        except ProxyPaymentRequiredError:
-            raise
         except Exception as exc:
             import logging
 
@@ -1490,7 +1509,11 @@ async def _fetch_source_with_active_lifecycle(
                 and retry_on_auth_failure
                 and _looks_like_hsreplay_auth_error(api_detail)
             ):
-                from .hsreplay_auth import force_relogin_hsreplay, hsreplay_email, hsreplay_password
+                from .hsreplay_auth import (
+                    force_relogin_hsreplay,
+                    hsreplay_email,
+                    hsreplay_password,
+                )
 
                 if hsreplay_email() and hsreplay_password() and await force_relogin_hsreplay():
                     return await fetch_source(client, source, retry_on_auth_failure=False)
@@ -1516,6 +1539,7 @@ async def _fetch_source_with_active_lifecycle(
                     error=type(exc).__name__,
                     detail=f"API fetch failed (browser fallback disabled): {api_detail}",
                 )
+                _attach_failure_class(status, exc)
                 status = _save_failure_status(source, status)
                 log_action(
                     "api.fallback.blocked",
@@ -1574,8 +1598,6 @@ async def _fetch_source_with_active_lifecycle(
             final_url = result.final_url
             backend = result.backend
             page_snapshot = result.snapshot
-    except ProxyPaymentRequiredError:
-        raise
     except Exception as exc:
         log_action(
             "browser.fetch.end",
@@ -1599,6 +1621,7 @@ async def _fetch_source_with_active_lifecycle(
             error=type(exc).__name__,
             detail=str(exc)[:2000],
         )
+        _attach_failure_class(status, exc)
         status = _save_failure_status(source, status)
         if status.get("state") != SourceState.OK:
             await send_telegram_alert(source.id, SourceState.FETCH_ERROR, status["detail"], source.url)
@@ -1698,7 +1721,11 @@ async def _fetch_source_with_active_lifecycle(
             k in reason.lower() for k in ("session not authenticated", "premium data", "login required")
         )
         if is_auth_error and retry_on_auth_failure:
-            from .hsreplay_auth import force_relogin_hsreplay, hsreplay_email, hsreplay_password
+            from .hsreplay_auth import (
+                force_relogin_hsreplay,
+                hsreplay_email,
+                hsreplay_password,
+            )
             if hsreplay_email() and hsreplay_password():
                 import logging
                 logging.getLogger(__name__).warning(
@@ -1791,8 +1818,8 @@ async def _fetch_source_with_captured_policy(
     """Own every per-fetch ContextVar/trace token for the whole lifecycle."""
 
     from .dataset_publication_store import (
-        DatasetPublicationStore,
         STANDARD_CARDS_SOURCE_ID,
+        DatasetPublicationStore,
     )
     from .scrapers.preferred_backend import preferred_browser_backend
 
@@ -1982,12 +2009,20 @@ async def _run_tier_after_cooldown(coro):
 
 
 def _fetch_error_status(source: Source, exc: BaseException) -> dict[str, Any]:
-    return _status_payload(
+    status = _status_payload(
         source,
         SourceState.FETCH_ERROR,
         fetched_at=now_iso(),
         error=type(exc).__name__,
         detail=str(exc)[:2000],
+    )
+    return _attach_failure_class(status, exc)
+
+
+def _status_reports_proxy_407(status: dict[str, Any]) -> bool:
+    return (
+        status.get("failure_class") == "proxy_407"
+        or status.get("last_refresh_failure_class") == "proxy_407"
     )
 
 
@@ -2005,35 +2040,49 @@ async def _run_tier_parallel(
     logger = logging.getLogger(__name__)
     started = time.monotonic()
     semaphore = asyncio.Semaphore(concurrency)
-
-    proxy_407_abort = False
+    proxy_unavailable = asyncio.Event()
 
     async def fetch_one(source: Source) -> dict[str, Any]:
-        nonlocal proxy_407_abort
-        if proxy_407_abort:
-            status = _fetch_error_status(
-                source,
-                ProxyPaymentRequiredError("light_api phase aborted after proxy 407"),
-            )
-            return _attach_proxy_egress(status, proxy_info)
         async with semaphore:
             await _parallel_stagger_delay()
             set_refresh_context(phase=phase)
+            if (
+                proxy_unavailable.is_set()
+                and not source_can_run_without_residential_proxy(source)
+            ):
+                status = _fetch_error_status(
+                    source,
+                    ProxyPaymentRequiredError(
+                        f"{phase} source skipped after residential proxy 407"
+                    ),
+                )
+                status = _save_failure_status(source, status)
+                log_action(
+                    "proxy.source.skip",
+                    level="warn",
+                    source_id=source.id,
+                    detail="source has no configured proxyless route",
+                    extra={"phase": phase, "failure_class": "proxy_407"},
+                )
+                return _attach_proxy_egress(status, proxy_info)
             try:
                 status = await fetch_source(client, source)
             except ProxyPaymentRequiredError as exc:
-                proxy_407_abort = True
-                logger.error("Proxy 407 — aborting %s phase: %s", phase, exc)
+                proxy_unavailable.set()
+                logger.error("Proxy 407 for %s; independent sources continue: %s", source.id, exc)
                 log_action(
                     "proxy.health.fail",
                     level="error",
                     detail=str(exc)[:500],
-                    extra={"phase_abort": phase},
+                    source_id=source.id,
+                    extra={"phase": phase, "phase_abort": False},
                 )
-                status = _fetch_error_status(source, exc)
+                status = _save_failure_status(source, _fetch_error_status(source, exc))
             except Exception as exc:
                 logger.exception("Parallel fetch failed for %s", source.id)
                 status = _fetch_error_status(source, exc)
+            if _status_reports_proxy_407(status):
+                proxy_unavailable.set()
             return _attach_proxy_egress(status, proxy_info)
 
     raw = await asyncio.gather(*(fetch_one(source) for source in sources), return_exceptions=True)
@@ -2173,16 +2222,42 @@ async def _refresh_sources_unlocked(
     full_refresh = source_ids is None and tier_filter is None
     parts_preview = partition_sources(selected)
     backends_lower_preview = [b.lower() for b in fetch_backends()]
-    needs_flaresolverr = bool(parts_preview.browser_protected) and not fetch_direct_enabled() and (
-        "flaresolverr" in backends_lower_preview
+    from .preflight import (
+        ensure_refresh_preflight,
+        selection_needs_flaresolverr_preflight,
+        selection_needs_proxy_preflight,
     )
 
-    from .preflight import ensure_refresh_preflight
-
-    proxy_info = await ensure_refresh_preflight(
-        full_refresh=full_refresh,
-        needs_flaresolverr=needs_flaresolverr,
-    )
+    try:
+        proxy_info = await ensure_refresh_preflight(
+            full_refresh=full_refresh,
+            needs_proxy=selection_needs_proxy_preflight(
+                selected,
+                configured_backends=backends_lower_preview,
+            ),
+            needs_flaresolverr=selection_needs_flaresolverr_preflight(
+                selected,
+                configured_backends=backends_lower_preview,
+            ),
+        )
+    except Exception as exc:
+        try:
+            log_action(
+                "refresh.end",
+                state=SourceState.FETCH_ERROR,
+                level="error",
+                error_type=type(exc).__name__,
+                detail=str(exc)[:500],
+                extra={
+                    "ok": 0,
+                    "fail": len(selected),
+                    "run_id": run_id,
+                    "phase": "preflight",
+                },
+            )
+        finally:
+            end_refresh_run()
+        raise
 
     if tier_filter is None and parts_preview.light_api:
         from .cards_index import prefetch_hearthstonejson_async

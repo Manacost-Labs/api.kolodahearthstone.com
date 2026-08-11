@@ -8,13 +8,18 @@ from collections import Counter
 from collections.abc import Awaitable, Callable
 
 from ..config import fetch_backend_max_seconds, fetch_max_retries
+from ..proxy_errors import ProxyPaymentRequiredError
 from ..publish_gate import validate_candidate_for_publish
-from .http_resilience import DEFAULT_BACKOFF_SECONDS, backoff_delay_seconds
 from ..refresh_log import log_action
 from ..source_state import SourceState
 from ..sources import Source
 from .base import FetchResult
-from .proxy import assert_proxy_configured, burn_proxy_session, source_can_use_flaresolverr_without_proxy
+from .http_resilience import DEFAULT_BACKOFF_SECONDS, backoff_delay_seconds
+from .proxy import (
+    assert_proxy_configured,
+    burn_proxy_session,
+    source_can_use_flaresolverr_without_proxy,
+)
 from .quality import looks_like_real_page, quality_metrics
 
 logger = logging.getLogger(__name__)
@@ -78,11 +83,10 @@ def reset_backend_circuits() -> None:
 
 
 def _site_backend_order(source: Source) -> list[str]:
-    from ..config import fetch_backends, hsguru_fetch_backends
+    from ..fetch_routes import configured_browser_backend_names
 
-    configured = [b.lower() for b in fetch_backends()]
+    configured = list(configured_browser_backend_names(source))
     if source.site == "hsguru":
-        configured = [b.lower() for b in hsguru_fetch_backends()]
         # Patchright has been noisy for HSGuru DNS in production. Keep it
         # configurable, but late in the default order.
         preferred = configured
@@ -121,10 +125,10 @@ def _site_backend_order(source: Source) -> list[str]:
 def _ordered_backends(source: Source | None = None) -> list[tuple[str, BackendFn, Callable[[], bool]]]:
     from ..config import fetch_backends
     from .camoufox_browser import camoufox_available, fetch_via_camoufox
+    from .cloakbrowser_pool import cloakbrowser_available, fetch_via_cloakbrowser
     from .cloudscraper_client import fetch_via_cloudscraper
     from .curl_impersonate import curl_cffi_available, fetch_via_curl_cffi
     from .flaresolverr import fetch_via_flaresolverr
-    from .cloakbrowser_pool import cloakbrowser_available, fetch_via_cloakbrowser
     from .patchright_browser import fetch_via_patchright, patchright_available
     from .scrapling_browser import fetch_via_scrapling, scrapling_available
 
@@ -165,7 +169,11 @@ async def fetch_html(
     preferred_backend: str | None = None,
     parse_preview: Callable[[str], dict] | None = None,
 ) -> FetchResult:
-    if not source_can_use_flaresolverr_without_proxy(source):
+    configured_backends = _site_backend_order(source)
+    if not (
+        "flaresolverr" in configured_backends
+        and source_can_use_flaresolverr_without_proxy(source)
+    ):
         assert_proxy_configured()
     backends = _ordered_backends(source)
     if not backends:
@@ -184,6 +192,7 @@ async def fetch_html(
     )
 
     errors: list[str] = []
+    proxy_407_error: ProxyPaymentRequiredError | None = None
     for attempt in range(1, fetch_max_retries() + 1):
         log_action(
             "browser.round.begin",
@@ -192,6 +201,22 @@ async def fetch_html(
             extra={"backends": backend_names},
         )
         for name, fetch_fn, is_available in backends:
+            if proxy_407_error is not None and not (
+                name == "flaresolverr"
+                and source_can_use_flaresolverr_without_proxy(source)
+            ):
+                detail = f"{name}: skipped after residential proxy 407"
+                errors.append(detail)
+                log_action(
+                    "browser.backend.skip",
+                    source_id=source.id,
+                    backend=name,
+                    attempt=attempt,
+                    detail=detail,
+                    level="warn",
+                    extra={"classification": "proxy_407"},
+                )
+                continue
             open_state = _open_circuit(source, name)
             if open_state is not None:
                 classification, count = open_state
@@ -337,6 +362,18 @@ async def fetch_html(
                         "circuit_scope": _circuit_scope(source, classification),
                     },
                 )
+                if classification == "proxy_407":
+                    # Do not repeat paid-proxy routes. A configured proxyless
+                    # FlareSolverr route may still recover this source.
+                    proxy_407_error = ProxyPaymentRequiredError(
+                        "Residential proxy payment required (407)"
+                    )
+        if proxy_407_error is not None and not any(
+            name == "flaresolverr"
+            and source_can_use_flaresolverr_without_proxy(source)
+            for name, _fetch_fn, _available in backends
+        ):
+            break
         if attempt < fetch_max_retries():
             # FIX: exponential backoff with jitter (5s → 15s → 45s), not fixed 3*attempt
             delay = backoff_delay_seconds(attempt, schedule=DEFAULT_BACKOFF_SECONDS)
@@ -356,4 +393,6 @@ async def fetch_html(
         detail=detail,
         level="error",
     )
+    if proxy_407_error is not None:
+        raise proxy_407_error
     raise RuntimeError(detail)

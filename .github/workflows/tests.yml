@@ -43,3 +43,22 @@ jobs:
         with:
           persist-credentials: false
       - run: docker build --no-cache --tag hs-data-api:ci .
+
+  triggerdev-control-plane:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: orchestration/triggerdev
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: orchestration/triggerdev/package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: npm run check
+      - run: npm test
+      - run: npm audit --audit-level=high

@@ -33,10 +33,10 @@ from .config import (
     fun_deck_retention_hours,
 )
 from .deck_decode import decode_deck_code
+from .parser_control import load_resolved_public_dataset
 from .source_state import SourceState
 from .sources import SOURCE_BY_ID, Source
 from .storage import load_dataset, save_dataset, save_status
-
 
 SOURCE_ID = "hsguru_fun_decks"
 DETECTOR_VERSION = "concept-v6"
@@ -432,7 +432,7 @@ def build_archetype_popularity(
 ) -> dict[str, float]:
     popularity: dict[str, float] = {}
     for source_id in source_ids:
-        dataset = load_dataset(source_id) or {}
+        dataset = load_resolved_public_dataset(source_id) or {}
         data = dataset.get("data") or {}
         if not isinstance(data, dict):
             continue

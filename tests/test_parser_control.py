@@ -1,28 +1,33 @@
 from __future__ import annotations
 
+import os
+import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import os
-import unittest
 from unittest.mock import AsyncMock, patch
 
 from app.parser_control import (
     ParserControlStore,
     ParserRunWorker,
     RevisionConflict,
+    _run_pipeline_source,
+    effective_publication_mode,
     enabled_section_ids,
     execute_parser_run,
-    effective_publication_mode,
     filter_scheduled_source_ids,
-    _run_pipeline_source,
 )
 from app.parser_control_registry import (
     EARLY_SOURCE_IDS,
     SECTION_BY_ID,
     SOURCE_TO_SECTION,
 )
-from app.post_patch_policy import STABLE_PUBLICATION_BASELINE_LABEL
+from app.post_patch_policy import (
+    EARLY_SOURCE_IDS as POLICY_EARLY_SOURCE_IDS,
+)
+from app.post_patch_policy import (
+    STABLE_PUBLICATION_BASELINE_LABEL,
+)
 from app.sources import SOURCE_BY_ID
 
 
@@ -32,14 +37,11 @@ class ParserControlRegistryTest(unittest.TestCase):
         self.assertTrue(all(section_id in SECTION_BY_ID for section_id in SOURCE_TO_SECTION.values()))
 
     def test_early_mode_is_only_advertised_for_implemented_sources(self) -> None:
-        self.assertEqual(
-            EARLY_SOURCE_IDS,
-            {
-                "hsreplay_arena_cards_advanced",
-                "heartharena_tierlist",
-                "firestone_arena_cards_normal",
-            },
-        )
+        self.assertEqual(EARLY_SOURCE_IDS, POLICY_EARLY_SOURCE_IDS)
+        self.assertIn("hsguru_meta_standard_legend", EARLY_SOURCE_IDS)
+        self.assertIn("hsguru_matchups_legend", EARLY_SOURCE_IDS)
+        self.assertIn("hsreplay_cards_legend_patch", EARLY_SOURCE_IDS)
+        self.assertNotIn("hsreplay_cards_legend_1d", EARLY_SOURCE_IDS)
 
 
 class ParserControlStoreTest(unittest.TestCase):
@@ -211,6 +213,212 @@ class ParserControlStoreTest(unittest.TestCase):
             self.assertEqual(first["failedSources"], 0)
             self.assertEqual(store.list_runs()["activeRun"]["status"], "queued")
 
+    def test_orchestrator_request_id_is_idempotent_after_terminal_run(self) -> None:
+        with TemporaryDirectory() as directory:
+            store = ParserControlStore(Path(directory))
+            first, first_deduplicated = store.enqueue_run(
+                source_ids=["heartharena_tierlist"],
+                requested_by="trigger.dev",
+                reason="scheduled canary",
+                request_id="trigger:run_123:attempt:1",
+            )
+            store.finish_run(first["id"], status="failed", results=[])
+
+            repeated, repeated_deduplicated = store.enqueue_run(
+                source_ids=["heartharena_tierlist"],
+                requested_by="trigger.dev",
+                reason="retry after lost response",
+                request_id="trigger:run_123:attempt:1",
+            )
+
+            self.assertFalse(first_deduplicated)
+            self.assertTrue(repeated_deduplicated)
+            self.assertEqual(repeated["id"], first["id"])
+            self.assertEqual(repeated["status"], "failed")
+            self.assertEqual(repeated["requestId"], "trigger:run_123:attempt:1")
+
+    def test_orchestrator_request_id_survives_full_active_run_deduplication(self) -> None:
+        with TemporaryDirectory() as directory:
+            store = ParserControlStore(Path(directory))
+            covering, _ = store.enqueue_run(
+                source_ids=["heartharena_tierlist"],
+                requested_by="systemd",
+                reason="existing schedule",
+            )
+            deduplicated, was_deduplicated = store.enqueue_run(
+                source_ids=["heartharena_tierlist"],
+                requested_by="trigger.dev",
+                reason="trigger canary",
+                request_id="trigger:run_dedup:attempt:1",
+            )
+            store.finish_run(
+                covering["id"],
+                status="succeeded",
+                results=[{"sourceId": "heartharena_tierlist", "state": "ok"}],
+            )
+
+            repeated, repeated_deduplicated = ParserControlStore(
+                Path(directory)
+            ).enqueue_run(
+                source_ids=["heartharena_tierlist"],
+                requested_by="trigger.dev",
+                reason="retry after lost response",
+                request_id="trigger:run_dedup:attempt:1",
+            )
+
+            self.assertTrue(was_deduplicated)
+            self.assertEqual(deduplicated["id"], covering["id"])
+            self.assertTrue(repeated_deduplicated)
+            self.assertEqual(repeated["id"], covering["id"])
+            self.assertEqual(repeated["status"], "succeeded")
+
+    def test_orchestrator_partial_overlap_aggregates_dependency_failure(self) -> None:
+        with TemporaryDirectory() as directory:
+            store = ParserControlStore(Path(directory))
+            dependency, _ = store.enqueue_run(
+                source_ids=["heartharena_tierlist"],
+                requested_by="systemd",
+                reason="already active",
+            )
+            aggregate, deduplicated = store.enqueue_run(
+                source_ids=[
+                    "heartharena_tierlist",
+                    "hsreplay_arena_cards_advanced",
+                ],
+                requested_by="trigger.dev",
+                reason="overlapping canary",
+                request_id="trigger:run_overlap:attempt:1",
+            )
+            store.finish_run(
+                dependency["id"],
+                status="failed",
+                results=[
+                    {
+                        "sourceId": "heartharena_tierlist",
+                        "state": "fetch_error",
+                        "servingCachedDataset": False,
+                    }
+                ],
+            )
+
+            async def executor(source_ids: list[str]) -> list[dict[str, object]]:
+                self.assertEqual(source_ids, ["hsreplay_arena_cards_advanced"])
+                return [
+                    {
+                        "source_id": "hsreplay_arena_cards_advanced",
+                        "state": "ok",
+                    }
+                ]
+
+            worker = ParserRunWorker(store, executor=executor)
+            self.assertTrue(worker.process_next())
+            finished = store.get_run(aggregate["id"])
+
+            self.assertTrue(deduplicated)
+            self.assertIsNotNone(finished)
+            assert finished is not None
+            self.assertEqual(finished["status"], "partial")
+            self.assertEqual(finished["totalSources"], 2)
+            self.assertEqual(
+                {result["sourceId"]: result["state"] for result in finished["results"]},
+                {
+                    "heartharena_tierlist": "fetch_error",
+                    "hsreplay_arena_cards_advanced": "ok",
+                },
+            )
+
+    def test_orchestrator_collective_coverage_aggregates_all_active_runs(self) -> None:
+        with TemporaryDirectory() as directory:
+            store = ParserControlStore(Path(directory))
+            first, _ = store.enqueue_run(
+                source_ids=["heartharena_tierlist"],
+                requested_by="systemd",
+                reason="first active",
+            )
+            second, _ = store.enqueue_run(
+                source_ids=["hsreplay_arena_cards_advanced"],
+                requested_by="systemd",
+                reason="second active",
+            )
+            aggregate, deduplicated = store.enqueue_run(
+                source_ids=[
+                    "heartharena_tierlist",
+                    "hsreplay_arena_cards_advanced",
+                ],
+                requested_by="trigger.dev",
+                reason="collective coverage",
+                request_id="trigger:run_collective:attempt:1",
+            )
+            store.finish_run(
+                first["id"],
+                status="succeeded",
+                results=[{"sourceId": "heartharena_tierlist", "state": "ok"}],
+            )
+            store.finish_run(
+                second["id"],
+                status="failed",
+                results=[
+                    {
+                        "sourceId": "hsreplay_arena_cards_advanced",
+                        "state": "fetch_error",
+                    }
+                ],
+            )
+
+            executor = AsyncMock(return_value=[])
+            worker = ParserRunWorker(store, executor=executor)
+            self.assertTrue(worker.process_next())
+            finished = store.get_run(aggregate["id"])
+
+            self.assertTrue(deduplicated)
+            executor.assert_not_called()
+            self.assertIsNotNone(finished)
+            assert finished is not None
+            self.assertEqual(finished["status"], "partial")
+            self.assertEqual(finished["failedSources"], 1)
+
+    def test_orchestrator_subset_ignores_unrequested_covering_failure(self) -> None:
+        with TemporaryDirectory() as directory:
+            store = ParserControlStore(Path(directory))
+            covering, _ = store.enqueue_run(
+                source_ids=[
+                    "heartharena_tierlist",
+                    "hsreplay_arena_cards_advanced",
+                ],
+                requested_by="systemd",
+                reason="covering superset",
+            )
+            aggregate, deduplicated = store.enqueue_run(
+                source_ids=["heartharena_tierlist"],
+                requested_by="trigger.dev",
+                reason="requested subset",
+                request_id="trigger:run_subset:attempt:1",
+            )
+            store.finish_run(
+                covering["id"],
+                status="partial",
+                results=[
+                    {"sourceId": "heartharena_tierlist", "state": "ok"},
+                    {
+                        "sourceId": "hsreplay_arena_cards_advanced",
+                        "state": "fetch_error",
+                    },
+                ],
+            )
+
+            executor = AsyncMock(return_value=[])
+            worker = ParserRunWorker(store, executor=executor)
+            self.assertTrue(worker.process_next())
+            finished = store.get_run(aggregate["id"])
+
+            self.assertTrue(deduplicated)
+            executor.assert_not_called()
+            self.assertIsNotNone(finished)
+            assert finished is not None
+            self.assertEqual(finished["status"], "succeeded")
+            self.assertEqual(finished["sourceIds"], ["heartharena_tierlist"])
+            self.assertEqual(finished["failedSources"], 0)
+
     def test_run_queue_deduplicates_sources_already_covered_by_other_active_runs(self) -> None:
         with TemporaryDirectory() as directory:
             store = ParserControlStore(Path(directory))
@@ -316,6 +524,58 @@ class ParserControlStoreTest(unittest.TestCase):
 
             self.assertEqual(finished["totalSources"], 2)
             self.assertEqual(finished["completedSources"], 2)
+            self.assertEqual(finished["failedSources"], 1)
+
+    def test_worker_marks_all_cached_results_as_usable_partial(self) -> None:
+        with TemporaryDirectory() as directory:
+            store = ParserControlStore(Path(directory))
+            store.enqueue_run(
+                source_ids=["heartharena_tierlist"],
+                requested_by="trigger.dev",
+                reason="cached fallback",
+            )
+
+            async def executor(_source_ids: list[str]) -> list[dict[str, object]]:
+                return [
+                    {
+                        "source_id": "heartharena_tierlist",
+                        "state": "fetch_error",
+                        "serving_cached_dataset": True,
+                        "detail": "origin unavailable",
+                    }
+                ]
+
+            worker = ParserRunWorker(store, executor=executor)
+            self.assertTrue(worker.process_next())
+
+            finished = store.list_runs()["runs"][0]
+            self.assertEqual(finished["status"], "partial")
+            self.assertEqual(finished["failedSources"], 1)
+
+    def test_worker_marks_publishable_partial_result_as_degraded(self) -> None:
+        with TemporaryDirectory() as directory:
+            store = ParserControlStore(Path(directory))
+            store.enqueue_run(
+                source_ids=["heartharena_tierlist"],
+                requested_by="trigger.dev",
+                reason="publishable partial",
+            )
+
+            async def executor(_source_ids: list[str]) -> list[dict[str, object]]:
+                return [
+                    {
+                        "source_id": "heartharena_tierlist",
+                        "state": "partial",
+                        "serving_cached_dataset": False,
+                        "rows_total": 14,
+                    }
+                ]
+
+            worker = ParserRunWorker(store, executor=executor)
+            self.assertTrue(worker.process_next())
+
+            finished = store.list_runs()["runs"][0]
+            self.assertEqual(finished["status"], "partial")
             self.assertEqual(finished["failedSources"], 1)
 
     def test_corrupted_control_file_fails_open_for_scheduled_sections_and_logs(self) -> None:

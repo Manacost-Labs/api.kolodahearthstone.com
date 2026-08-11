@@ -14,6 +14,7 @@ from app.parser_control_schedule import (
     _HOST_TIMER_STATE_SCHEMA_VERSION,
     _SCHEDULES,
     _failure_from_systemd_state,
+    _is_handled_data_degradation,
     _probe_systemd_timer_states,
     _probe_systemd_timer_states_direct,
     build_schedule_inventory,
@@ -22,7 +23,6 @@ from app.systemd_timer_export import (
     build_host_timer_snapshot,
     write_host_timer_snapshot,
 )
-
 
 NOW = datetime(2026, 7, 21, 12, 0, tzinfo=UTC)
 UNIT = "hs-data-api-docker-refresh.timer"
@@ -47,6 +47,9 @@ def _runtime_unit(
         "serviceUnit": "hs-data-api-docker-refresh.service",
         "serviceActiveState": "inactive",
         "serviceResult": "success",
+        "serviceExecMainCode": "exited",
+        "serviceExecMainStatus": 0,
+        "dataDegraded": False,
     }
 
 
@@ -74,6 +77,8 @@ def test_direct_probe_is_allowlisted_bounded_and_does_not_use_a_shell() -> None:
             "SubState=waiting\n"
             "UnitFileState=enabled\n\n"
             "Result=success\n"
+            "ExecMainCode=1\n"
+            "ExecMainStatus=10\n"
             "Id=hs-data-api-docker-refresh.service\n"
             "LoadState=loaded\n"
             "ActiveState=inactive\n"
@@ -116,6 +121,8 @@ def test_direct_probe_is_allowlisted_bounded_and_does_not_use_a_shell() -> None:
     assert result["units"][UNIT]["active"] is True
     assert result["units"][UNIT]["failure"] is None
     assert result["units"][UNIT]["serviceResult"] == "success"
+    assert result["units"][UNIT]["serviceExecMainStatus"] == 10
+    assert result["units"][UNIT]["dataDegraded"] is True
     assert len(run.call_args_list) == 2
     for call in run.call_args_list:
         command = call.args[0]
@@ -150,6 +157,15 @@ def test_service_failure_result_is_exposed_as_the_timer_failure() -> None:
     ) == "exit-code"
 
 
+def test_signal_status_ten_is_not_reported_as_handled_data_degradation() -> None:
+    assert _is_handled_data_degradation(
+        {"result": "signal", "execMainCode": "2", "execMainStatus": 10}
+    ) is False
+    assert _is_handled_data_degradation(
+        {"result": "success", "execMainCode": "1", "execMainStatus": 10}
+    ) is True
+
+
 def test_inventory_prefers_runtime_state_and_retains_nominal_next_run() -> None:
     runtime = {
         "provider": "host-systemd",
@@ -177,6 +193,34 @@ def test_inventory_prefers_runtime_state_and_retains_nominal_next_run() -> None:
     assert schedule["active"] is True
     assert schedule["lastRunAt"] == "2026-07-21T11:00:00+00:00"
     assert schedule["failure"] is None
+    assert schedule["dataDegraded"] is False
+
+
+def test_inventory_exposes_handled_data_degradation() -> None:
+    degraded_unit = {
+        **_runtime_unit(),
+        "serviceExecMainStatus": 10,
+        "dataDegraded": True,
+    }
+    runtime = {
+        "provider": "host-systemd",
+        "checkedAt": NOW.isoformat(),
+        "available": True,
+        "status": "ok",
+        "reason": None,
+        "timingAvailable": True,
+        "units": {UNIT: degraded_unit},
+    }
+    with patch(
+        "app.parser_control_schedule._probe_systemd_timer_states",
+        return_value=runtime,
+    ):
+        inventory = build_schedule_inventory(at=NOW)
+
+    schedule = next(row for row in inventory["schedules"] if row["systemdUnit"] == UNIT)
+    assert schedule["serviceResult"] == "success"
+    assert schedule["serviceExecMainStatus"] == 10
+    assert schedule["dataDegraded"] is True
 
 
 def test_fresh_host_snapshot_is_used_without_container_systemctl() -> None:

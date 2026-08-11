@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from .config import stale_dataset_hours
+from .parser_control import resolve_public_dataset
 from .source_state import SourceState
 from .sources import SOURCES
 from .storage import load_dataset, load_status
@@ -46,10 +47,16 @@ def find_stale_sources(*, include_ok: bool = True) -> list[dict[str, Any]]:
 
         fetched_at = st.get("fetched_at")
         try:
-            ds = load_dataset(source.id)
+            candidate = load_dataset(source.id)
         except (OSError, UnicodeError, ValueError):
-            ds = None
+            candidate = None
             corrupt_parts.append("dataset")
+        ds = (
+            resolve_public_dataset(source.id, candidate)
+            if isinstance(candidate, dict)
+            else None
+        )
+        public_dataset_unavailable = candidate is not None and ds is None
         ds_fetched = ds.get("fetched_at") if ds else None
         age_status = _age_hours(fetched_at)
         age_dataset = _age_hours(ds_fetched)
@@ -67,6 +74,19 @@ def find_stale_sources(*, include_ok: bool = True) -> list[dict[str, Any]]:
                     "fetched_at": fetched_at,
                     "checked_at": now_label,
                     "reason": f"{'_and_'.join(corrupt_parts)}_corrupt",
+                }
+            )
+            continue
+
+        if public_dataset_unavailable:
+            stale.append(
+                {
+                    "source_id": source.id,
+                    "state": state,
+                    "dataset_age_hours": None,
+                    "fetched_at": None,
+                    "checked_at": now_label,
+                    "reason": "public_dataset_unavailable",
                 }
             )
             continue

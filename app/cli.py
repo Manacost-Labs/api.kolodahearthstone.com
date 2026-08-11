@@ -7,11 +7,80 @@ import os
 import sys
 from pathlib import Path
 
+from .exit_codes import ExitCode
 from .fetcher import refresh_sources
 from .source_state import SourceState
 from .sources import SOURCE_BY_ID
 
 DEFAULT_ENV_FILE = Path("/etc/hs-data-api.env")
+
+
+def _is_fresh_refresh_result(result: dict[str, object]) -> bool:
+    return (
+        result.get("state") == SourceState.OK
+        and not result.get("serving_cached_dataset")
+    )
+
+
+def _is_handled_refresh_degradation(result: dict[str, object]) -> bool:
+    if result.get("serving_cached_dataset"):
+        return True
+    return (
+        result.get("state") == "locked"
+        and result.get("skipped") is True
+        and result.get("reason") == "resource_locked"
+    )
+
+
+def _scheduled_refresh_exit_code(
+    results: list[dict[str, object]],
+    *,
+    expected_ids: set[str] | None = None,
+) -> int:
+    """Keep schedulers green only when every source remains serviceable."""
+    if expected_ids:
+        returned_ids = {
+            str(result.get("source_id") or "")
+            for result in results
+        }
+        if not expected_ids.issubset(returned_ids):
+            return int(ExitCode.ERROR)
+
+    degraded = False
+    for result in results:
+        if _is_fresh_refresh_result(result):
+            continue
+        if _is_handled_refresh_degradation(result):
+            degraded = True
+            continue
+        return int(ExitCode.ERROR)
+    return int(ExitCode.DEGRADED if degraded else ExitCode.OK)
+
+
+async def _refresh_scheduled_api_tiers() -> tuple[list[dict[str, object]], int]:
+    tier_runs: list[dict[str, object]] = []
+    exit_codes: list[int] = []
+    for tier in ("light_api", "medium_api"):
+        results = await refresh_sources(
+            None,
+            tier=tier,
+            respect_section_controls=True,
+        )
+        exit_code = _scheduled_refresh_exit_code(results)
+        tier_runs.append(
+            {
+                "tier": tier,
+                "exit_code": exit_code,
+                "results": results,
+            }
+        )
+        exit_codes.append(exit_code)
+
+    if int(ExitCode.ERROR) in exit_codes:
+        return tier_runs, int(ExitCode.ERROR)
+    if int(ExitCode.DEGRADED) in exit_codes:
+        return tier_runs, int(ExitCode.DEGRADED)
+    return tier_runs, int(ExitCode.OK)
 
 
 def load_env_file(path: Path = DEFAULT_ENV_FILE) -> None:
@@ -30,6 +99,7 @@ def load_env_file(path: Path = DEFAULT_ENV_FILE) -> None:
         if key.startswith(
             (
                 "HS_API_",
+                "HS_BRIGHTDATA_",
                 "HS_FETCH_",
                 "HS_HSGURU_",
                 "HS_FLARESOLVERR_",
@@ -76,6 +146,26 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="Honor per-section enable/disable controls for a scheduled run.",
     )
+    sub.add_parser(
+        "refresh-api-tiers",
+        help=(
+            "Refresh scheduled light_api and medium_api tiers and aggregate "
+            "their exit status."
+        ),
+    )
+    brightdata_init = sub.add_parser(
+        "brightdata-init-usage",
+        help=(
+            "Initialize the local Bright Data usage ledger once from the "
+            "provider dashboard baseline."
+        ),
+    )
+    brightdata_init.add_argument(
+        "--billed-requests",
+        type=int,
+        required=True,
+        help="Requests already billed in the current UTC month.",
+    )
     scheduled_check = sub.add_parser(
         "scheduled-check",
         help="Exit 0 when a source's scheduled section is enabled, otherwise exit 1.",
@@ -96,6 +186,15 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     freshness.add_argument("--since-hours", type=float, default=24.0)
     freshness.add_argument("--alert", action="store_true", help="Send configured stale Telegram alerts.")
+    freshness.add_argument(
+        "--exit-mode",
+        choices=["health", "execution"],
+        default="health",
+        help=(
+            "health returns an error for stale data; execution reports handled "
+            "degradation separately for schedulers."
+        ),
+    )
     game_audit = sub.add_parser(
         "game-change-audit",
         help="Compare patch, HearthstoneJSON, wiki changes and critical site feeds.",
@@ -186,6 +285,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     hsguru_analysis.add_argument("--concurrency", type=int, default=3)
     hsguru_analysis.add_argument(
+        "--scheduled",
+        action="store_true",
+        help="Report a usable partial refresh as handled degradation.",
+    )
+    hsguru_analysis.add_argument(
         "--limit",
         type=int,
         default=None,
@@ -195,7 +299,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "capture-bg-compositions-screenshot",
         help="Capture a Firecrawl screenshot of HSReplay Battlegrounds compositions.",
     )
-    login = sub.add_parser("hsreplay-login", help="Log into HSReplay Premium and save browser session.")
+    sub.add_parser("hsreplay-login", help="Log into HSReplay Premium and save browser session.")
     imp = sub.add_parser(
         "hsreplay-import-storage",
         help="Import Playwright storage_state JSON (export from logged-in browser).",
@@ -245,6 +349,39 @@ def main(argv: list[str] | None = None) -> int:
         info = asyncio.run(check_proxy_health())
         print(json.dumps(info, ensure_ascii=False, indent=2))
         return 0
+    if args.command == "brightdata-init-usage":
+        from .brightdata_state import (
+            BrightDataStateError,
+            initialize_usage_state,
+        )
+        from .config import brightdata_monthly_billable_limit
+
+        try:
+            snapshot = initialize_usage_state(
+                monthly_limit=brightdata_monthly_billable_limit(),
+                billed_requests=args.billed_requests,
+            )
+        except BrightDataStateError as exc:
+            print(
+                json.dumps(
+                    {"ok": False, "error": str(exc)},
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return int(ExitCode.ERROR)
+        print(
+            json.dumps(
+                {
+                    "ok": True,
+                    "billed_requests": snapshot.billed_requests,
+                    "remaining_requests": snapshot.remaining_requests,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return int(ExitCode.OK)
     if args.command == "proxy-rotation-check":
         from .scrapers.proxy import check_proxy_rotation
 
@@ -305,7 +442,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.alert:
             payload["alerts"] = asyncio.run(_send_freshness_alerts(cached_after_failure_sources))
         print(json.dumps(payload, ensure_ascii=False, indent=2))
-        return 0 if payload["ok"] else 1
+        if payload["ok"]:
+            return int(ExitCode.OK)
+        if args.exit_mode == "execution":
+            return int(ExitCode.DEGRADED)
+        return int(ExitCode.ERROR)
     if args.command == "game-change-audit":
         from .game_change_audit import run_game_change_audit
 
@@ -332,16 +473,17 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "quality-check":
         from collections import Counter
 
+        from .parser_control import load_resolved_public_dataset
         from .scrapers.quality import quality_metrics, validate_parsed_data
         from .source_contracts import contract_quality_report, get_contract
-        from .storage import load_dataset, load_status
+        from .storage import load_status
 
         sources = []
         bad = []
         warn = []
         for source in SOURCE_BY_ID.values():
             status = load_status(source.id) or {}
-            dataset = load_dataset(source.id) or {}
+            dataset = load_resolved_public_dataset(source.id) or {}
             data = dataset.get("data") or {}
             structured = data.get("structured") or data.get("hsreplay_extracted") or {}
             error_type = None
@@ -527,7 +669,11 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
         print(json.dumps(result, ensure_ascii=False, indent=2))
-        return 0 if result.get("ok") else 1
+        if args.scheduled and result.get("serving_cached_dataset"):
+            return int(ExitCode.DEGRADED)
+        if result.get("ok") and result.get("published"):
+            return int(ExitCode.OK)
+        return int(ExitCode.ERROR)
     if args.command == "refresh-hsguru-meta-matrix":
         if args.scheduled:
             from .parser_control import is_source_scheduled_enabled
@@ -546,7 +692,17 @@ def main(argv: list[str] | None = None) -> int:
             refresh_hsguru_meta_matrix(concurrency=max(1, min(args.concurrency, 5)))
         )
         print(json.dumps(result, ensure_ascii=False, indent=2))
-        return 0 if result.get("ok") else 1
+        if args.scheduled:
+            if result.get("serving_cached_dataset") or result.get("state") == "locked":
+                return int(ExitCode.DEGRADED)
+            if result.get("ok") and (
+                result.get("state") != SourceState.OK
+                or result.get("complete") is False
+            ):
+                return int(ExitCode.DEGRADED)
+        if result.get("ok"):
+            return int(ExitCode.OK)
+        return int(ExitCode.ERROR)
     if args.command == "refresh-fun-decks":
         if args.scheduled:
             from .parser_control import is_source_scheduled_enabled
@@ -575,7 +731,11 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
         print(json.dumps(result, ensure_ascii=False, indent=2))
-        return 0 if result.get("ok") else 1
+        if result.get("ok"):
+            return int(ExitCode.OK)
+        if args.scheduled and int(result.get("archetypes") or 0) > 0:
+            return int(ExitCode.DEGRADED)
+        return int(ExitCode.ERROR)
     if args.command == "capture-bg-compositions-screenshot":
         from .hsreplay_bg_screenshots import capture_compositions_screenshot
 
@@ -617,8 +777,9 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"ok": True, "storage": str(dest)}, indent=2))
         return 0
     if args.command == "telegram-setup":
-        from .config import telegram_bot_token
         import httpx
+
+        from .config import telegram_bot_token
 
         token = telegram_bot_token()
         if not token:
@@ -647,7 +808,7 @@ def main(argv: list[str] | None = None) -> int:
                                 chat_id = str(chat["id"])
                                 first_name = chat.get("first_name", "")
                                 username = chat.get("username", "")
-                                print(f"\nDetected Telegram Chat!")
+                                print("\nDetected Telegram Chat!")
                                 print(f"  Chat ID: {chat_id}")
                                 print(f"  Name: {first_name} (@{username})")
                                 
@@ -691,7 +852,7 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"Attempt {attempt}/10: No new messages found yet. Checking again in 3s...")
                     await asyncio.sleep(3)
                 print("\nTimeout: No messages found in Telegram. Did you send a message to the bot?", file=sys.stderr)
-                return 1
+                return int(ExitCode.ERROR)
 
         return asyncio.run(_setup())
     if args.command == "enrich-links":
@@ -754,6 +915,10 @@ def main(argv: list[str] | None = None) -> int:
             }
             print(sid, json.dumps(summary, ensure_ascii=False))
         return 0
+    if args.command == "refresh-api-tiers":
+        tier_runs, exit_code = asyncio.run(_refresh_scheduled_api_tiers())
+        print(json.dumps({"tiers": tier_runs}, ensure_ascii=False, indent=2))
+        return exit_code
     if args.command == "refresh":
         if not args.all and not args.source and not args.tier:
             print("Use --all, --tier TIER, or --source SOURCE_ID", file=sys.stderr)
@@ -790,6 +955,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             results = asyncio.run(refresh_sources(source_ids, tier=args.tier))
         print(json.dumps(results, ensure_ascii=False, indent=2))
+        expected_ids: set[str] = set()
         if args.require_all_ok:
             expected_ids = set(args.source)
             if args.all:
@@ -802,6 +968,11 @@ def main(argv: list[str] | None = None) -> int:
                 from .parser_control import filter_scheduled_source_ids
 
                 expected_ids = set(filter_scheduled_source_ids(list(expected_ids)))
+            if args.scheduled:
+                return _scheduled_refresh_exit_code(
+                    results,
+                    expected_ids=expected_ids,
+                )
             fresh_ids = {
                 str(result.get("source_id") or "")
                 for result in results
@@ -809,13 +980,15 @@ def main(argv: list[str] | None = None) -> int:
                 and not result.get("serving_cached_dataset")
             }
             if expected_ids and (not results or not expected_ids.issubset(fresh_ids)):
-                return 1
+                return int(ExitCode.ERROR)
             if any(
                 result.get("state") != "ok" or result.get("serving_cached_dataset")
                 for result in results
             ):
-                return 1
-        return 0
+                return int(ExitCode.ERROR)
+        if args.scheduled:
+            return _scheduled_refresh_exit_code(results)
+        return int(ExitCode.OK)
     return 2
 
 

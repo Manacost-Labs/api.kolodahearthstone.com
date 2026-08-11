@@ -1,23 +1,24 @@
 from __future__ import annotations
 
+import unittest
 from datetime import UTC, datetime
 from tempfile import TemporaryDirectory
-import unittest
 from unittest.mock import patch
 
 from app.dataset_regression import check_dataset_regression
 from app.fetcher import _attach_provisional_status, _save_dataset_with_checks
 from app.post_patch_policy import (
+    EARLY_SOURCE_IDS,
     build_provisional_metadata,
     effective_contract_min_rows,
     effective_firestone_minimum_sample,
     policy_for,
 )
+from app.scrapers.quality import looks_like_real_page
 from app.source_contracts import contract_quality_report
 from app.source_validators import validate_structured
 from app.sources import SOURCE_BY_ID
 from app.storage import load_baseline, save_baseline_once
-
 
 WINDOW_TIME = datetime(2026, 7, 23, 12, 0, tzinfo=UTC)
 BEFORE_WINDOW = datetime(2026, 7, 20, 12, 0, tzinfo=UTC)
@@ -40,6 +41,29 @@ def _arena_cards(count: int) -> list[dict]:
     ]
 
 
+def _hsguru_meta_rows(count: int) -> list[dict]:
+    return [
+        {
+            "Archetype": f"Deck {index}",
+            "Winrate↓": "52.1%",
+            "Popularity": "1.2%",
+        }
+        for index in range(count)
+    ]
+
+
+def _patch_cards(count: int) -> list[dict]:
+    return [
+        {
+            "id": f"CARD_{index}",
+            "dbfId": index + 1,
+            "deck_winrate": "52.1%",
+            "deck_popularity": "1.2%",
+        }
+        for index in range(count)
+    ]
+
+
 class PostPatchPolicyTest(unittest.TestCase):
     def setUp(self) -> None:
         self._enabled = patch.dict(
@@ -57,6 +81,157 @@ class PostPatchPolicyTest(unittest.TestCase):
         self.assertIsNone(policy_for("hsreplay_cards_legend_1d", at=WINDOW_TIME))
         self.assertIsNone(policy_for("hsreplay_arena_cards_advanced", at=BEFORE_WINDOW))
         self.assertIsNone(policy_for("hsreplay_arena_cards_advanced", at=AFTER_WINDOW))
+
+    def test_policy_explicitly_covers_hsguru_and_only_current_patch_card_periods(self) -> None:
+        self.assertIn("hsguru_meta_standard_legend", EARLY_SOURCE_IDS)
+        self.assertIn("hsguru_matchups_legend", EARLY_SOURCE_IDS)
+        self.assertIn("hsreplay_cards_legend_patch", EARLY_SOURCE_IDS)
+        self.assertIn("hsreplay_cards_wild_platinum_patch", EARLY_SOURCE_IDS)
+        self.assertNotIn("hsreplay_cards_legend_1d", EARLY_SOURCE_IDS)
+        self.assertNotIn("hsreplay_cards_wild_platinum_14d", EARLY_SOURCE_IDS)
+
+    def test_hsguru_legend_early_mode_accepts_three_complete_rows_but_not_two(self) -> None:
+        source_id = "hsguru_meta_standard_legend"
+        with patch("app.post_patch_policy.current_time", return_value=WINDOW_TIME):
+            accepted = contract_quality_report(
+                source_id,
+                {"type": "meta", "strategies": _hsguru_meta_rows(3)},
+            )
+            rejected = contract_quality_report(
+                source_id,
+                {"type": "meta", "strategies": _hsguru_meta_rows(2)},
+            )
+            semantic = validate_structured(
+                source_id,
+                {"type": "meta", "strategies": _hsguru_meta_rows(3)},
+            )
+
+        self.assertTrue(accepted["ok"], accepted["warnings"])
+        self.assertEqual(accepted["minimum_rows"], 3)
+        self.assertFalse(rejected["ok"])
+        self.assertTrue(semantic.ok, semantic.reason)
+
+    def test_hsguru_matchups_early_mode_requires_three_complete_rows(self) -> None:
+        source_id = "hsguru_matchups_legend"
+        complete = [
+            {"archetype": f"Deck {index}", "vs": "Other", "winrate": "51%"}
+            for index in range(3)
+        ]
+        incomplete = [*complete[:2], {"archetype": "Deck 2", "vs": "Other"}]
+
+        with patch("app.post_patch_policy.current_time", return_value=WINDOW_TIME):
+            accepted = validate_structured(
+                source_id, {"type": "matchups", "matchups": complete}
+            )
+            rejected = validate_structured(
+                source_id, {"type": "matchups", "matchups": incomplete}
+            )
+
+        self.assertTrue(accepted.ok, accepted.reason)
+        self.assertFalse(rejected.ok)
+
+    def test_hsguru_early_mode_rejects_duplicate_or_invalid_metric_rows(self) -> None:
+        duplicate_meta = [
+            {
+                "Archetype": "Same Deck",
+                "Winrate↓": "garbage",
+                "Popularity": "1.2%",
+            }
+            for _index in range(3)
+        ]
+        duplicate_matchups = [
+            {
+                "archetype": "Same Deck",
+                "vs": "Same Opponent",
+                "winrate": "garbage",
+            }
+            for _index in range(3)
+        ]
+
+        with patch("app.post_patch_policy.current_time", return_value=WINDOW_TIME):
+            meta_report = validate_structured(
+                "hsguru_meta_standard_legend",
+                {"type": "meta", "strategies": duplicate_meta},
+            )
+            matchup_report = validate_structured(
+                "hsguru_matchups_legend",
+                {"type": "matchups", "matchups": duplicate_matchups},
+            )
+
+        self.assertFalse(meta_report.ok)
+        self.assertFalse(matchup_report.ok)
+
+    def test_current_patch_cards_accept_twenty_unique_valid_rows_but_not_nineteen(self) -> None:
+        source_id = "hsreplay_cards_legend_patch"
+        with patch("app.post_patch_policy.current_time", return_value=WINDOW_TIME):
+            accepted_contract = contract_quality_report(
+                source_id,
+                {"type": "card_stats", "cards": _patch_cards(20)},
+            )
+            accepted_semantic = validate_structured(
+                source_id,
+                {"type": "card_stats", "cards": _patch_cards(20)},
+            )
+            rejected_contract = contract_quality_report(
+                source_id,
+                {"type": "card_stats", "cards": _patch_cards(19)},
+            )
+            rejected_semantic = validate_structured(
+                source_id,
+                {"type": "card_stats", "cards": _patch_cards(19)},
+            )
+
+        self.assertTrue(accepted_contract["ok"], accepted_contract["warnings"])
+        self.assertEqual(accepted_contract["minimum_rows"], 20)
+        self.assertTrue(accepted_semantic.ok, accepted_semantic.reason)
+        self.assertFalse(rejected_contract["ok"])
+        self.assertFalse(rejected_semantic.ok)
+
+    def test_wild_current_patch_rejects_any_invalid_percentage(self) -> None:
+        source_id = "hsreplay_cards_wild_legend_patch"
+        cards = _patch_cards(20)
+        for row in cards:
+            row["deck_popularity"] = "garbage"
+
+        with patch("app.post_patch_policy.current_time", return_value=WINDOW_TIME):
+            report = validate_structured(
+                source_id,
+                {"type": "card_stats", "cards": cards},
+            )
+
+        self.assertFalse(report.ok)
+        self.assertIn(
+            "card_stats.percent_out_of_range",
+            {issue.code for issue in report.issues},
+        )
+
+    def test_mature_card_period_thresholds_are_unchanged_in_early_mode(self) -> None:
+        with patch("app.post_patch_policy.current_time", return_value=WINDOW_TIME):
+            standard = contract_quality_report(
+                "hsreplay_cards_legend_1d",
+                {"type": "card_stats", "cards": _patch_cards(20)},
+            )
+            wild = contract_quality_report(
+                "hsreplay_cards_wild_legend_1d",
+                {"type": "card_stats", "cards": _patch_cards(20)},
+            )
+
+        self.assertFalse(standard["ok"])
+        self.assertEqual(standard["minimum_rows"], 450)
+        self.assertFalse(wild["ok"])
+        self.assertEqual(wild["minimum_rows"], 700)
+
+    def test_hsguru_early_html_floor_expires_and_challenge_is_always_rejected(self) -> None:
+        source = SOURCE_BY_ID["hsguru_meta_standard_legend"]
+        early_page = "hsguru.com meta archetype".ljust(2_000, "x")
+        challenge = "just a moment hsguru.com meta archetype".ljust(25_000, "x")
+
+        with patch("app.post_patch_policy.current_time", return_value=WINDOW_TIME):
+            self.assertTrue(looks_like_real_page(early_page, source))
+            self.assertFalse(looks_like_real_page(challenge, source))
+        with patch("app.post_patch_policy.current_time", return_value=AFTER_WINDOW):
+            self.assertFalse(looks_like_real_page(early_page, source))
+            self.assertFalse(looks_like_real_page(challenge, source))
 
     def test_policy_can_be_disabled_from_environment(self) -> None:
         with patch.dict("os.environ", {"HS_ARENA_POST_PATCH_ENABLED": "false"}):
@@ -310,6 +485,65 @@ class PostPatchPolicyTest(unittest.TestCase):
         self.assertTrue(details["post_patch_regression_bypass"])
         self.assertEqual(details["rows_before"], 1000)
         self.assertEqual(details["rows_after"], 20)
+
+    def test_current_patch_cards_are_provisional_early_and_revert_to_lkg_gates(self) -> None:
+        source = SOURCE_BY_ID["hsreplay_cards_legend_patch"]
+        previous_data = {
+            "structured": {"type": "card_stats", "cards": _patch_cards(450)}
+        }
+        candidate_data = {
+            "structured": {"type": "card_stats", "cards": _patch_cards(20)}
+        }
+        previous_dataset = {
+            "fetched_at": "2026-07-20T12:00:00+00:00",
+            "data": previous_data,
+        }
+        candidate_dataset = {"data": candidate_data}
+
+        with (
+            patch("app.post_patch_policy.current_time", return_value=WINDOW_TIME),
+            patch("app.fetcher.load_dataset", return_value=previous_dataset),
+            patch("app.fetcher.save_dataset") as save_dataset,
+            patch("app.fetcher.save_baseline") as save_stable,
+            patch("app.fetcher.save_baseline_once", return_value=True),
+            patch("app.fetcher.log_action"),
+        ):
+            regression, _, metadata = _save_dataset_with_checks(
+                source,
+                candidate_dataset,
+                fetched_at=WINDOW_TIME.isoformat(),
+            )
+
+        self.assertFalse(regression)
+        self.assertTrue(metadata["provisional"])
+        self.assertEqual(metadata["accepted_rows"], 20)
+        self.assertTrue(
+            save_dataset.call_args.args[1]["data"]["structured"]["provisional"]
+        )
+        save_stable.assert_called_once()
+
+        with patch("app.post_patch_policy.current_time", return_value=AFTER_WINDOW):
+            stable_contract = contract_quality_report(
+                source.id,
+                candidate_data["structured"],
+            )
+            expired_regression, _, details = check_dataset_regression(
+                source,
+                previous_data=previous_data,
+                new_data=candidate_data,
+            )
+            expired_metadata = build_provisional_metadata(
+                source.id,
+                accepted_rows=20,
+                baseline_rows=450,
+                at=AFTER_WINDOW,
+            )
+
+        self.assertFalse(stable_contract["ok"])
+        self.assertEqual(stable_contract["minimum_rows"], 450)
+        self.assertTrue(expired_regression)
+        self.assertNotIn("post_patch_regression_bypass", details)
+        self.assertEqual(expired_metadata, {})
 
     def test_firestone_minimum_sample_drops_to_ten_only_during_window(self) -> None:
         self.assertEqual(

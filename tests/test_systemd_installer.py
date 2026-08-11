@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import subprocess
-
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -63,3 +62,71 @@ def test_docker_systemd_installer_covers_every_timer(tmp_path: Path) -> None:
     assert vicious_service.is_file()
     assert "vicious_syndicate_live_beta" in vicious_service.read_text(encoding="utf-8")
     assert "vicious_syndicate_radars" in vicious_service.read_text(encoding="utf-8")
+
+    freshness_service = staged_systemd / "hs-data-api-docker-freshness-check.service"
+    freshness_text = freshness_service.read_text(encoding="utf-8")
+    assert "freshness-check --since-hours 48 --alert --exit-mode execution" in freshness_text
+    assert "SuccessExitStatus=10" in freshness_text
+
+    scheduled_refresh_services = [
+        path
+        for path in staged_systemd.glob("hs-data-api-docker-*.service")
+        if "python -m app.cli refresh " in path.read_text(encoding="utf-8")
+        and "--scheduled" in path.read_text(encoding="utf-8")
+    ]
+    assert scheduled_refresh_services
+    for service in scheduled_refresh_services:
+        assert "SuccessExitStatus=10" in service.read_text(encoding="utf-8")
+
+    streamer_service = staged_systemd / "hs-data-api-docker-firecrawl-streamer.service"
+    assert "SuccessExitStatus=10" in streamer_service.read_text(encoding="utf-8")
+
+    for service_name in (
+        "hs-data-api-docker-refresh-hsguru-meta-matrix.service",
+        "hs-data-api-docker-refresh-hsguru-archetype-analysis.service",
+        "hs-data-api-docker-refresh-hsguru-deck-catalog.service",
+    ):
+        service_text = (staged_systemd / service_name).read_text(encoding="utf-8")
+        assert "SuccessExitStatus=10" in service_text
+
+    archetype_service = staged_systemd / "hs-data-api-docker-refresh-hsguru-archetype-analysis.service"
+    assert "refresh-hsguru-archetype-analysis --scheduled" in archetype_service.read_text(
+        encoding="utf-8"
+    )
+
+
+def test_legacy_refresh_units_rely_on_route_aware_internal_preflight() -> None:
+    for service_name in (
+        "hs-data-api-refresh.service",
+        "hs-data-api-refresh-protected.service",
+        "hs-data-api-refresh-api.service",
+    ):
+        service_text = (ROOT / "systemd" / service_name).read_text(encoding="utf-8")
+        assert "app.cli preflight --strict" not in service_text
+        assert "ensure-flaresolverr.sh" not in service_text
+
+
+def test_api_refresh_units_use_one_aggregating_command() -> None:
+    for service_name in (
+        "hs-data-api-refresh-api.service",
+        "hs-data-api-docker-refresh-api.service",
+    ):
+        service_text = (ROOT / "systemd" / service_name).read_text(encoding="utf-8")
+        exec_start_lines = [
+            line for line in service_text.splitlines() if line.startswith("ExecStart=")
+        ]
+
+        assert len(exec_start_lines) == 1
+        assert "python -m app.cli refresh-api-tiers" in exec_start_lines[0]
+        assert "--tier light_api" not in service_text
+        assert "--tier medium_api" not in service_text
+        assert "SuccessExitStatus=10" in service_text
+
+
+def test_docker_bg_hero_details_accepts_degraded_exit_code() -> None:
+    service_text = (
+        ROOT / "systemd" / "hs-data-api-docker-refresh-bg-hero-details.service"
+    ).read_text(encoding="utf-8")
+
+    assert "refresh-bg-hero-details --scheduled" in service_text
+    assert "SuccessExitStatus=10" in service_text

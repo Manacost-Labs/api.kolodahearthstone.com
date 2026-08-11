@@ -121,7 +121,7 @@ def test_firecrawl_runs_after_scrape_do_failure() -> None:
     scrapfly.assert_not_called()
 
 
-def test_scrapfly_is_last_after_scrape_do_and_firecrawl() -> None:
+def test_scrapfly_runs_after_scrape_do_and_firecrawl() -> None:
     from app.scrapfly_backend import ScrapflyScrape
 
     scrapfly_result = ScrapflyScrape(
@@ -156,6 +156,147 @@ def test_scrapfly_is_last_after_scrape_do_and_firecrawl() -> None:
     assert result.backend == "scrapfly"
     assert result.scrapfly_credits_used == 5
     assert "[Alt](/deck/2)" in result.markdown
+
+
+def test_brightdata_is_fourth_after_scrape_do_firecrawl_and_scrapfly() -> None:
+    from app.brightdata_backend import BrightDataScrape
+
+    calls: list[str] = []
+    brightdata_options: dict[str, object] = {}
+
+    def scrape_do_failure(*args, **kwargs):
+        calls.append("scrape_do")
+        raise RuntimeError("scrape.do down")
+
+    def firecrawl_failure():
+        calls.append("firecrawl")
+        raise RuntimeError("All Firecrawl API keys are exhausted")
+
+    def scrapfly_failure(*args, **kwargs):
+        calls.append("scrapfly")
+        raise RuntimeError("Scrapfly down")
+
+    def brightdata_success(*args, **kwargs):
+        calls.append("brightdata")
+        brightdata_options.update(kwargs)
+        return BrightDataScrape(
+            html="<html><body><a href='/deck/3'>Unlocked</a></body></html>",
+            status_code=200,
+            final_url=SOURCE.url,
+            billable_requests=1,
+            request_id="hl_test_123",
+            rendered=True,
+            budget_remaining=9,
+        )
+
+    with (
+        patch("app.firecrawl_backend.scrape_do_token", return_value="configured"),
+        patch("app.firecrawl_backend.scrape_url_sync", side_effect=scrape_do_failure),
+        patch(
+            "app.firecrawl_backend.acquire_firecrawl_key",
+            side_effect=firecrawl_failure,
+        ),
+        patch("app.firecrawl_backend.scrapfly_configured", return_value=True),
+        patch(
+            "app.firecrawl_backend.scrapfly_scrape_url_sync",
+            side_effect=scrapfly_failure,
+        ),
+        patch(
+            "app.firecrawl_backend.brightdata_configured_for_source",
+            return_value=True,
+        ),
+        patch(
+            "app.firecrawl_backend.brightdata_scrape_url_sync",
+            side_effect=brightdata_success,
+        ),
+    ):
+        result = _scrape_sync(SOURCE, formats=["html", "markdown"])
+
+    assert list(dict.fromkeys(calls)) == [
+        "scrape_do",
+        "firecrawl",
+        "scrapfly",
+        "brightdata",
+    ]
+    assert result.backend == "brightdata_web_unlocker"
+    assert result.brightdata_credits_used == 1
+    assert result.request_credits == 1
+    assert "[Unlocked](/deck/3)" in result.markdown
+    assert result.metadata["brightDataRequestId"] == "hl_test_123"
+    assert result.metadata["brightDataBudgetRemaining"] == 9
+    assert brightdata_options["render"] is True
+    accept_html = brightdata_options["accept_html"]
+    assert callable(accept_html)
+    assert accept_html(
+        "<html><title>Just a moment</title>challenges.cloudflare.com</html>"
+    ) is False
+    assert accept_html("<html>" + "real page " * 300 + "</html>") is True
+
+
+def test_invalid_scrapfly_configuration_does_not_block_brightdata() -> None:
+    from app.brightdata_backend import BrightDataScrape
+
+    brightdata_result = BrightDataScrape(
+        html="<html><body>unlocked</body></html>",
+        status_code=200,
+        final_url=SOURCE.url,
+        billable_requests=1,
+        request_id=None,
+        rendered=True,
+        budget_remaining=9,
+    )
+    with (
+        patch("app.firecrawl_backend.scrape_do_token", return_value=None),
+        patch(
+            "app.firecrawl_backend.acquire_firecrawl_key",
+            side_effect=RuntimeError("Firecrawl unavailable"),
+        ),
+        patch(
+            "app.firecrawl_backend.scrapfly_configured",
+            side_effect=ValueError("invalid Scrapfly pool"),
+        ),
+        patch(
+            "app.firecrawl_backend.brightdata_configured_for_source",
+            return_value=True,
+        ),
+        patch(
+            "app.firecrawl_backend.brightdata_scrape_url_sync",
+            return_value=brightdata_result,
+        ) as brightdata,
+    ):
+        result = _scrape_sync(SOURCE, formats=["html"])
+
+    assert result.backend == "brightdata_web_unlocker"
+    brightdata.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"headers": {"Cookie": "session=secret"}},
+        {"formats": [{"type": "screenshot", "fullPage": True}]},
+        {"formats": ["map"]},
+        {"formats": ["json"]},
+    ],
+)
+def test_brightdata_never_receives_headers_screenshots_or_map(options) -> None:
+    with (
+        patch("app.firecrawl_backend.scrape_do_token", return_value=None),
+        patch(
+            "app.firecrawl_backend.acquire_firecrawl_key",
+            side_effect=RuntimeError("Firecrawl unavailable"),
+        ),
+        patch("app.firecrawl_backend.scrapfly_configured", return_value=False),
+        patch(
+            "app.firecrawl_backend.brightdata_configured_for_source",
+            return_value=True,
+        ),
+        patch("app.firecrawl_backend.brightdata_scrape_url_sync") as brightdata,
+        pytest.raises(RuntimeError, match="All scrape providers failed"),
+    ):
+        _scrape_sync(SOURCE, **options)
+
+    brightdata.assert_not_called()
 
 
 def test_scrape_do_challenge_escalates_standard_to_super() -> None:

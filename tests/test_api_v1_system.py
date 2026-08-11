@@ -7,7 +7,6 @@ from starlette.testclient import TestClient
 
 from app.main import app
 
-
 client = TestClient(app)
 
 
@@ -19,7 +18,9 @@ def test_v1_sources_returns_registry_envelope() -> None:
             return {"fetched_at": fetched_at}
         return None
 
-    with patch("app.routers.system.load_dataset", side_effect=dataset):
+    with patch(
+        "app.routers.system.load_resolved_public_dataset", side_effect=dataset
+    ):
         response = client.get("/v1/system/sources?site=hsreplay&category=arena")
 
     assert response.status_code == 200

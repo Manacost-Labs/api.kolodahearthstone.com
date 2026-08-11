@@ -44,10 +44,12 @@ GET /datasets/{source_id}
 
 ```mermaid
 flowchart LR
-    Start["systemd timer / CLI / admin API"] --> Lock["ResourceLockSet для поддерживаемых writers"]
+    Trigger["Trigger.dev: подготовлен, расписание не включено"] --> Orchestrator["Scoped API + idempotent local queue"]
+    Orchestrator --> Start["systemd timer / CLI / admin API / local queue"]
+    Start --> Lock["ResourceLockSet для поддерживаемых writers"]
     Lock --> Route{"Маршрут источника"}
     Route --> API["API-first: JSON / curl_cffi / специализированный клиент"]
-    Route --> Cloud["Shared cloud scrape: Scrape.do → Firecrawl → Scrapfly"]
+    Route --> Cloud["Shared cloud scrape: Scrape.do → Firecrawl → Scrapfly → Bright Data (opt-in)"]
     Route --> Browser["Local browser path: FlareSolverr / Scrapling / Patchright"]
     API --> Normalize["Нормализация и схема"]
     Cloud --> Normalize
@@ -65,7 +67,9 @@ flowchart LR
 | --- | --- |
 | `app/sources.py` | Реестр источников, тип и допустимая свежесть. |
 | `app/fetcher.py` | Оркестрация refresh, маршрутизация, сохранение последнего хорошего результата. |
+| `app/fetch_routes.py`, `app/preflight.py` | Определение доступных маршрутов и preflight только для реально обязательных зависимостей. |
 | `app/firecrawl_backend.py` | Общая политика protected-page провайдеров. |
+| `app/brightdata_backend.py`, `app/brightdata_state.py` | Выключенный по умолчанию Web Unlocker fallback, локальный guard расходов и circuit breaker. |
 | `app/publish_gate.py` | Единая точка проверки кандидата перед публикацией. |
 | `app/source_contracts.py` | Минимальные объёмы, обязательные поля и backend policy. |
 | `app/dataset_regression.py` | Защита от резкого уменьшения или деградации набора. |
@@ -84,26 +88,43 @@ browser rotator или через общий cloud-scrape каскад. Для �
 1. **Scrape.do** — основной платный провайдер. Временные `429/5xx` получают
    ограниченный retry; Cloudflare challenge может переключить запрос на Super.
 2. **Firecrawl** — первый резерв с ротацией настроенных ключей.
-3. **Scrapfly** — последний резерв с отдельной ротацией ключей.
+3. **Scrapfly** — дополнительный резерв с отдельной ротацией ключей.
+4. **Bright Data Web Unlocker** — платный аварийный слой только для явно
+   разрешённых public HTTPS-источников. Он выключен по умолчанию и не делает
+   запросов, пока одновременно не заданы флаг включения, API key, Web Unlocker
+   zone, точный allowlist source ID и месячный лимит больше нуля.
 
 Переход к следующему провайдеру происходит после исчерпания ограниченных попыток
 текущего: внутри Scrape.do возможны retry/Super escalation, а Firecrawl и
-Scrapfly могут ротировать ключи. Ключи, cookies и URL с токенами очищаются из
-ошибок и не должны попадать в логи. Детали и переменные конфигурации:
+Scrapfly могут ротировать ключи. Bright Data не принимает в этом каскаде
+cookies/custom headers, screenshot- и map-запросы. Ключи, cookies и URL с
+токенами очищаются из ошибок и не должны попадать в логи. Детали, ограничения
+и переменные конфигурации:
 [docs/SCRAPE_PROVIDERS.md](docs/SCRAPE_PROVIDERS.md).
 
 ## Гарантии устойчивости
 
 - Generic refresh и HSGuru matrix используют lock по конкретным ресурсам,
   поэтому занятый источник не должен блокировать независимые источники.
+- Preflight учитывает выбранный маршрут: proxy или FlareSolverr становятся
+  блокирующей проверкой только тогда, когда без них нет полезного маршрута для
+  всей выбранной job. API-first, cloud-capable и независимые источники в
+  смешанной выборке не останавливаются из-за чужой зависимости.
 - Кандидат проходит структурную схему, source contract, semantic validation и
   regression gate до записи.
+- После игрового патча ограниченный `early`-режим принимает меньший, но
+  проверенный набор только для Arena, HSGuru meta/matchups и HSReplay
+  `*_patch`. Такие данные помечаются `provisional`, не заменяют стабильный
+  baseline/LKG, а после `earlyUntil` автоматически снова проходят обычные
+  пороги. Срезы HSReplay `1d`/`3d`/`7d`/`14d` не ослабляются.
 - При временном отказе upstream валидный предыдущий snapshot остаётся доступен
   как `effective_state=ok_cached`; причина последнего сбоя остаётся видимой.
 - Последовательная JSON-запись использует временный файл и atomic replace;
   предыдущие datasets и statuses сохраняются в ограниченной ротации backups.
-- HSGuru meta matrix имеет кооперативный дедлайн 60 минут, throttled snapshots
-  прогресса и единый lock для matrix refresh и присоединения deck catalog.
+- HSGuru meta matrix имеет отдельный 30-секундный heartbeat, hard deadline
+  60 минут и единый lock для matrix refresh и присоединения deck catalog. При
+  дедлайне неполный candidate и его history не публикуются, а last-known-good
+  остаётся доступен; systemd даёт процессу 65 минут и 30 секунд на остановку.
 - Ошибка best-effort telemetry не прерывает сам парсер.
 - Состояния источника типизированы: `ok`, `partial`, `fetch_error`,
   `http_error`, `blocked_by_protection`, `proxy_required`, `quality_error`,
@@ -113,17 +134,33 @@ Scrapfly могут ротировать ключи. Ключи, cookies и URL 
 но не превращает неудачный refresh в успех. Именно поэтому liveness, freshness
 и quality проверяются раздельно.
 
+Для scheduled CLI действует единая классификация результата:
+
+| Код | Смысл | Пример |
+| --- | --- | --- |
+| `0` | Успешное выполнение. | Все выбранные источники свежие либо section намеренно отключён и job стала no-op. |
+| `10` | Управляемая деградация, данные остаются пригодными. | Обслуживается LKG или ресурс уже занят другой job. |
+| `1` | Жёсткая ошибка, пригодного результата нет. | Cold-start failure, timeout без LKG или отсутствует ожидаемый source result. |
+
+Scheduled systemd units, для которых определена деградация, объявляют только
+`10` через `SuccessExitStatus=10`, поэтому он не превращает управляемую
+деградацию в failed unit. Состояние всё равно
+видно отдельно как `dataDegraded`/`ExecMainStatus=10` в parser-control runtime.
+Для `freshness-check` режим `health` возвращает `1` на stale data, а
+`--exit-mode execution` — `10`, если проверка выполнена, но состояние
+деградировано.
+
 ### Известные ограничения
 
-- Дедлайн HSGuru проверяется между сетевыми операциями и пока не прерывает
-  реально зависшую coroutine; heartbeat не работает отдельным фоновым циклом.
+- Hard deadline HSGuru отменяет координирующую coroutine и запрещает публикацию
+  неполного результата, но синхронный provider request, уже запущенный через
+  worker thread, может жить до собственного timeout или остановки процесса.
+- Heartbeat подтверждает, что job-процесс жив и snapshot обновляется, но сам по
+  себе не доказывает прогресс конкретного upstream-запроса.
 - Не все dedicated pipeline writers ещё используют `ResourceLockSet`.
 - Общий `storage.write_json()` использует одинаковое имя `.tmp` и не рассчитан
   на две одновременные записи одного source без внешнего lock.
 - Docker healthcheck проверяет liveness процесса, а не свежесть parser data.
-- Strict preflight пока проверяет настроенный residential proxy как глобальную
-  зависимость; его отказ может остановить API-first или cloud-provider job,
-  которому этот proxy непосредственно не нужен.
 - System-wide list endpoints пока вычисляют ETag через полный проход по JSON
   snapshots, поэтому их нельзя считать дешёвыми high-QPS endpoints.
 
@@ -146,6 +183,7 @@ Canonical Docker хранит runtime на host в `/srv/hs-data-api/data` и м
 | `data/publications/` | `/var/lib/hs-data-api/publications/` | Versioned candidate/published/quarantine records. |
 | `data/control/` | `/var/lib/hs-data-api/control/` | Parser-control state и lock. |
 | `data/firecrawl/`, `data/scrapfly/` | Одноимённые каталоги | Состояние ротации provider keys без самих ключей. |
+| `data/brightdata/` | `/var/lib/hs-data-api/brightdata/` | Локальный счётчик billable reservations/requests и состояние circuit breaker; без API key. |
 | `data/logs/refresh-events.jsonl` | `/var/lib/hs-data-api/logs/refresh-events.jsonl` | Структурированные события. |
 | `data/hs_parses.db` | `/var/lib/hs-data-api/hs_parses.db` | SQLite/WAL индексы. |
 
@@ -224,6 +262,30 @@ docker exec hs-data-api python -m app.cli quality-check
 docker exec hs-data-api python -m app.cli refresh-hsguru-meta-matrix --concurrency 2
 ```
 
+Scheduled команды могут завершиться кодом `10`; это не свежий успех, а
+обслуживаемая деградация. Для ручного health gate не маскируйте этот код и
+проверяйте `freshness-check` в режиме `health`.
+
+## Внешняя оркестрация Trigger.dev
+
+В репозитории подготовлен внешний control plane в
+[`orchestration/triggerdev/`](orchestration/triggerdev/README.md). Trigger.dev
+не получает provider keys, cookies или доступ к data directory: он передаёт
+только `sourceIds`/`sectionIds` в два узких endpoint, а фактический refresh
+выполняет durable parser-control queue на сервере.
+
+Интеграция ещё не означает, что production-расписание включено. Canary для
+Vicious Syndicate намеренно не имеет declarative cron. При вводе в эксплуатацию
+сначала отключите соответствующий systemd timer, оставьте service как rollback,
+затем включайте только одну canary schedule. Одновременный запуск Trigger.dev и
+systemd для одной выборки запрещён.
+
+Для границы доверия используется отдельный `HS_ORCHESTRATOR_API_KEY` длиной не
+менее 32 символов; он не должен совпадать с `HS_API_KEY`. В Trigger.dev тот же
+секрет хранится как `PARSER_ORCHESTRATOR_TOKEN`. Повтор transient HTTP/network
+запроса безопасен: Trigger отправляет стабильный `requestId`, а локальная
+очередь идемпотентно возвращает ранее созданный run.
+
 На production команды запускаются внутри штатного venv/container и через
 systemd units из `systemd/`. Полная установка и расписание описаны в
 [DEPLOY.md](DEPLOY.md).
@@ -284,12 +346,20 @@ Admin/ops, требует `X-API-Key`:
 - `GET /ops/run/{run_id}`
 - `GET /health/premium`
 
+Scoped orchestration, требует отдельный `X-Orchestrator-Key`:
+
+- `POST /admin/orchestrator/parser-runs` — идемпотентно поставить выбранные
+  источники/секции в локальную очередь.
+- `GET /admin/orchestrator/parser-runs/{run_id}` — получить только минимальный
+  статус конкретного run.
+
 ## Документация
 
 - [docs/DATA_CATALOG.md](docs/DATA_CATALOG.md) — выбор endpoint и поля данных.
 - [docs/SOURCES.md](docs/SOURCES.md) — генерируемый реестр всех источников.
 - [docs/API.md](docs/API.md) — полная REST API документация.
-- [docs/SCRAPE_PROVIDERS.md](docs/SCRAPE_PROVIDERS.md) — Scrape.do, Firecrawl и Scrapfly.
+- [docs/SCRAPE_PROVIDERS.md](docs/SCRAPE_PROVIDERS.md) — Scrape.do, Firecrawl, Scrapfly и opt-in Bright Data.
+- [orchestration/triggerdev/README.md](orchestration/triggerdev/README.md) — безопасный rollout внешнего control plane.
 - [docs/HSREPLAY_ARCHETYPE_DATABASE.md](docs/HSREPLAY_ARCHETYPE_DATABASE.md) — SQL snapshots архетипов.
 - [docs/SECURITY_AND_PARSING.md](docs/SECURITY_AND_PARSING.md) — proxy, cookies, auth и threat model.
 - [DEPLOY.md](DEPLOY.md) — установка, systemd timers, обновление и recovery.
@@ -300,6 +370,11 @@ Admin/ops, требует `X-API-Key`:
 - Не передавайте секреты через query string или публичные endpoints.
 - Используйте `HS_FETCH_REQUIRE_PROXY=true` для защищённых production-источников.
 - Public API read-only; refresh и ops закрыты `X-API-Key`.
+- Для Trigger.dev используйте отдельный случайный токен длиной не менее 32
+  символов; не переиспользуйте admin API key.
+- Bright Data оставляйте выключенным до настройки точного source allowlist,
+  выделенной Web Unlocker zone, ненулевого месячного лимита и однократной
+  инициализации usage ledger по текущему значению из provider dashboard.
 - Перед публикацией изменений запускайте tests, Docker build и secret scan.
 
 ## License

@@ -38,17 +38,36 @@ class PublishGateTest(unittest.TestCase):
             },
         }
 
-    def test_firecrawl_cannot_publish_api_only_bg_heroes(self) -> None:
+    def test_cloud_page_backends_cannot_publish_api_only_bg_heroes(self) -> None:
+        for backend in (
+            "firecrawl",
+            "scrape_do",
+            "scrape_do_super",
+            "scrapfly",
+            "brightdata_web_unlocker",
+        ):
+            with self.subTest(backend=backend):
+                result = validate_candidate_for_publish(
+                    self.source,
+                    self.parsed,
+                    backend=backend,
+                )
+
+                self.assertFalse(result.ok)
+                self.assertIn("backend policy rejected", result.reason)
+                self.assertEqual(result.extra["backend"], backend)
+                self.assertFalse(result.extra["backend_allowed"])
+
+    def test_structured_brightdata_wrapper_is_not_misclassified_as_page_html(self) -> None:
+        source = SOURCE_BY_ID["hsreplay_cards_legend_patch"]
         result = validate_candidate_for_publish(
-            self.source,
-            self.parsed,
-            backend="firecrawl",
+            source,
+            {"structured": {"type": "card_stats", "cards": []}},
+            backend="hsreplay_cards_api+brightdata_web_unlocker",
         )
 
-        self.assertFalse(result.ok)
-        self.assertIn("backend policy rejected", result.reason)
-        self.assertEqual(result.extra["backend"], "firecrawl")
-        self.assertFalse(result.extra["backend_allowed"])
+        self.assertNotIn("backend policy rejected", result.reason)
+        self.assertTrue(result.extra["backend_allowed"])
 
     def test_hsreplay_backend_can_publish_valid_bg_heroes(self) -> None:
         result = validate_candidate_for_publish(

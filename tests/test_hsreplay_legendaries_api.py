@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import unittest
 from unittest.mock import AsyncMock, patch
 
 from app.hsreplay_legendaries_api import (
     _groups_from_class_buckets,
+    _load_arena_card_stats_index,
     enrich_legendary_groups,
     normalize_legendary_package,
 )
@@ -12,6 +14,37 @@ from app.source_validators import validate_structured
 
 
 class LegendaryGroupsByClassTests(unittest.TestCase):
+    def test_cached_enrichment_reads_resolved_public_arena_dataset(self) -> None:
+        cached = {
+            "data": {
+                "structured": {
+                    "cards": [
+                        {
+                            "card_id": "STABLE_CARD",
+                            "pick_rate": 2.5,
+                        }
+                    ]
+                }
+            }
+        }
+        with (
+            patch(
+                "app.hsreplay_arena_api.fetch_arena_card_tiers",
+                new=AsyncMock(side_effect=RuntimeError("offline")),
+            ),
+            patch(
+                "app.hsreplay_legendaries_api.load_resolved_public_dataset",
+                return_value=cached,
+            ) as resolved_loader,
+        ):
+            stats, backend = asyncio.run(
+                _load_arena_card_stats_index("hsreplay_arena_legendaries")
+            )
+
+        resolved_loader.assert_called_once_with("hsreplay_arena_cards_advanced")
+        self.assertEqual(backend, "cached_hsreplay_arena_cards_advanced")
+        self.assertEqual(stats["STABLE_CARD"]["pick_rate"], 2.5)
+
     def test_groups_keep_per_class_metrics(self) -> None:
         groups = _groups_from_class_buckets(
             {

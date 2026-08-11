@@ -7,7 +7,6 @@ from app import hsguru_decks
 from app.firecrawl_backend import FirecrawlScrape
 from app.hsguru_decks import parse_hsguru_decks_html
 
-
 EVENLOCK_CODE = "AAEBAf0GBs30Av76A4f7A564BtvXB63ZBwycENfOA4j0A8b5A8f5A63pBdCeBu6hBom1BoSZB+C+B43cBwAA"
 SECOND_EVENLOCK_CODE = "AAEBAf0GBM30Aof7A6nhBq3ZBw3XzgOI9APG+QPH+QP++gOt6QXQngbuoQaJtQacwQaEmQfb1weN3AcAAA=="
 
@@ -136,9 +135,10 @@ def test_all_rank_catalog_targets_meta_archetypes_missing_from_all_rank_cache() 
     meta_payload = {
         "data": {"tables": [{"rows": [["Popular Mage"], ["XL HL Exodia Mage"]]}]},
     }
-    with (
-        patch.object(hsguru_decks, "dataset_path", side_effect=lambda source_id: source_id),
-        patch.object(hsguru_decks, "read_json", return_value=meta_payload),
+    with patch.object(
+        hsguru_decks,
+        "load_resolved_public_dataset",
+        return_value=meta_payload,
     ):
         archetypes = hsguru_decks._all_rank_catalog_archetypes(
             "wild",

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from typing import Any
+
+import pytest
 
 
 class MutableClock:
@@ -103,6 +106,55 @@ def test_job_run_context_persists_throttled_progress_and_terminal_snapshot() -> 
     assert len(writer.snapshots) == 3
     assert writer.snapshots[-1]["progress"]["phase"] == "complete"
     assert writer.snapshots[-1]["progress"]["completed_slices"] == 2
+
+
+def test_periodic_heartbeat_persists_while_job_body_is_blocked() -> None:
+    from app.job_run import JobRunContext, run_periodic_heartbeat
+
+    async def scenario() -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        started_at = datetime(2026, 8, 10, 20, 0, tzinfo=UTC)
+        clock = MutableClock(started_at)
+        heartbeat_persisted = asyncio.Event()
+
+        class RecordingWriter:
+            def __init__(self) -> None:
+                self.snapshots: list[dict[str, Any]] = []
+
+            def write(self, snapshot: dict[str, Any]) -> None:
+                self.snapshots.append(deepcopy(snapshot))
+                if len(self.snapshots) > 1:
+                    heartbeat_persisted.set()
+
+        writer = RecordingWriter()
+        run = JobRunContext.start(
+            run_id="blocked-provider-run",
+            timeout_seconds=120,
+            total_slices=1,
+            clock=clock,
+            snapshot_writer=writer,
+            heartbeat_interval_seconds=30,
+        )
+        ticks: asyncio.Queue[None] = asyncio.Queue()
+
+        async def controlled_sleep(seconds: float) -> None:
+            assert seconds == 30
+            await ticks.get()
+            clock.advance(seconds)
+
+        task = asyncio.create_task(run_periodic_heartbeat(run, sleep=controlled_sleep))
+        ticks.put_nowait(None)
+        await asyncio.wait_for(heartbeat_persisted.wait(), timeout=0.5)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        return writer.snapshots, run.snapshot()
+
+    snapshots, current = asyncio.run(scenario())
+
+    assert len(snapshots) == 2
+    assert snapshots[-1]["heartbeat_at"] == "2026-08-10T20:00:30+00:00"
+    assert snapshots[-1]["progress"]["phase"] == "starting"
+    assert current["heartbeat_at"] == snapshots[-1]["heartbeat_at"]
 
 
 def test_finishing_a_slice_at_or_after_deadline_marks_the_run_timed_out() -> None:

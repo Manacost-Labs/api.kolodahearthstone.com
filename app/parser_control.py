@@ -1,16 +1,17 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import contextmanager
-from datetime import UTC, date, datetime, time as datetime_time
 import fcntl
 import hashlib
 import json
 import logging
 import os
-from pathlib import Path
 import threading
 import time
+from contextlib import contextmanager
+from datetime import UTC, date, datetime
+from datetime import time as datetime_time
+from pathlib import Path
 from typing import Any, Callable, Iterator
 from uuid import uuid4
 from zoneinfo import ZoneInfo
@@ -18,22 +19,25 @@ from zoneinfo import ZoneInfo
 from .config import data_dir
 from .parser_control_registry import (
     EARLY_SOURCE_IDS,
-    SECTIONS,
     SECTION_BY_ID,
+    SECTIONS,
     SOURCE_TO_SECTION,
     source_label,
 )
 from .sources import SOURCE_BY_ID
-
 
 CONTROL_FILENAME = "parser-control.json"
 CONTROL_LOCK_FILENAME = "parser-control.lock"
 MAX_RECENT_RUNS = 50
 MAX_PENDING_RUNS = 20
 MAX_RUN_SOURCES = len(SOURCE_BY_ID)
+MAX_ORCHESTRATOR_REQUESTS = 1000
 ACTIVE_RUN_STATUSES = {"queued", "running"}
 RUN_STATUSES = ACTIVE_RUN_STATUSES | {"succeeded", "partial", "failed"}
 _logger = logging.getLogger(__name__)
+_REQUEST_ID_CHARACTERS = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._:-"
+)
 
 
 AUDIT_WRITE_WARNING = {
@@ -313,7 +317,7 @@ def _with_warning(
 
 def _default_state() -> dict[str, Any]:
     return {
-        "schemaVersion": 2,
+        "schemaVersion": 3,
         "revision": 1,
         "policyConfigured": False,
         "policy": {
@@ -327,6 +331,7 @@ def _default_state() -> dict[str, Any]:
         "updatedAt": None,
         "updatedBy": None,
         "runs": [],
+        "orchestratorRequests": [],
     }
 
 
@@ -340,7 +345,7 @@ def _normalise_state(raw: dict[str, Any]) -> dict[str, Any]:
     state["revision"] = revision
     # Normalising an older file upgrades the in-memory representation; the
     # next mutation persists the current schema version.
-    state["schemaVersion"] = 2
+    state["schemaVersion"] = 3
 
     policy = raw.get("policy") or {}
     if not isinstance(policy, dict):
@@ -388,7 +393,77 @@ def _normalise_state(raw: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(runs, list):
         raise ParserControlStorageError("Parser control runs are invalid")
     state["runs"] = [run for run in runs if isinstance(run, dict)][-MAX_RECENT_RUNS:]
+
+    requests = raw.get("orchestratorRequests") or []
+    if not isinstance(requests, list):
+        raise ParserControlStorageError("Parser orchestrator request ledger is invalid")
+    normalised_requests: list[dict[str, Any]] = []
+    for entry in requests:
+        if not isinstance(entry, dict):
+            continue
+        request_id = entry.get("requestId")
+        run_id = entry.get("runId")
+        source_ids = entry.get("requestedSourceIds")
+        if (
+            not isinstance(request_id, str)
+            or not request_id
+            or len(request_id) > 160
+            or any(character not in _REQUEST_ID_CHARACTERS for character in request_id)
+            or not isinstance(run_id, str)
+            or not run_id
+            or not isinstance(source_ids, list)
+            or any(not isinstance(source_id, str) for source_id in source_ids)
+        ):
+            continue
+        normalised_requests.append(
+            {
+                "requestId": request_id,
+                "runId": run_id,
+                "requestedSourceIds": sorted(set(source_ids)),
+                "createdAt": entry.get("createdAt"),
+            }
+        )
+    known_request_ids = {entry["requestId"] for entry in normalised_requests}
+    for run in state["runs"]:
+        request_id = run.get("requestId")
+        if not isinstance(request_id, str) or not request_id or request_id in known_request_ids:
+            continue
+        normalised_requests.append(
+            {
+                "requestId": request_id,
+                "runId": str(run.get("id") or ""),
+                "requestedSourceIds": sorted(
+                    set(run.get("requestedSourceIds") or run.get("sourceIds") or [])
+                ),
+                "createdAt": run.get("createdAt"),
+            }
+        )
+        known_request_ids.add(request_id)
+    state["orchestratorRequests"] = normalised_requests[-MAX_ORCHESTRATOR_REQUESTS:]
     return state
+
+
+def _record_orchestrator_request(
+    state: dict[str, Any],
+    *,
+    request_id: str,
+    run_id: str,
+    requested_source_ids: list[str],
+) -> None:
+    requests = [
+        entry
+        for entry in state.get("orchestratorRequests") or []
+        if isinstance(entry, dict) and entry.get("requestId") != request_id
+    ]
+    requests.append(
+        {
+            "requestId": request_id,
+            "runId": run_id,
+            "requestedSourceIds": list(requested_source_ids),
+            "createdAt": _iso(),
+        }
+    )
+    state["orchestratorRequests"] = requests[-MAX_ORCHESTRATOR_REQUESTS:]
 
 
 def _environment_policy(at: datetime) -> dict[str, Any] | None:
@@ -867,6 +942,7 @@ class ParserControlStore:
         source_ids: list[str],
         requested_by: str,
         reason: str | None,
+        request_id: str | None = None,
     ) -> tuple[dict[str, Any], bool]:
         normalised = sorted(set(source_ids))
         if not normalised:
@@ -878,59 +954,156 @@ class ParserControlStore:
             raise InvalidControlRequest("Unknown sources: " + ", ".join(unknown))
         actor = str(requested_by or "admin-api").strip()[:120] or "admin-api"
         clean_reason = str(reason or "").strip()[:500] or None
+        clean_request_id = str(request_id or "").strip() or None
+        if clean_request_id and (
+            len(clean_request_id) > 160
+            or any(character not in _REQUEST_ID_CHARACTERS for character in clean_request_id)
+        ):
+            raise InvalidControlRequest("Invalid orchestrator request ID")
         with self._locked(exclusive=True) as (state, _persisted):
+            if clean_request_id:
+                request_entry = next(
+                    (
+                        entry
+                        for entry in state["orchestratorRequests"]
+                        if entry.get("requestId") == clean_request_id
+                    ),
+                    None,
+                )
+                if request_entry is not None:
+                    existing_selection = request_entry["requestedSourceIds"]
+                    if existing_selection != normalised:
+                        raise InvalidControlRequest(
+                            "Orchestrator request ID was already used for another selection"
+                        )
+                    existing = next(
+                        (
+                            run
+                            for run in state["runs"]
+                            if run.get("id") == request_entry.get("runId")
+                        ),
+                        None,
+                    )
+                    if existing is None:
+                        raise InvalidControlRequest(
+                            "Orchestrator request ID refers to an expired parser run"
+                        )
+                    return _run_public_view(existing), True
             active = [
                 run for run in state["runs"]
                 if run.get("status") in ACTIVE_RUN_STATUSES
             ]
             active_sources: set[str] = set()
+            active_source_runs: dict[str, str] = {}
             for run in active:
                 completed = {
                     str(result.get("sourceId") or result.get("source_id") or "")
                     for result in (run.get("results") or [])
                     if isinstance(result, dict)
                 }
+                for source_id in run.get("sourceIds") or []:
+                    active_source_runs.setdefault(source_id, str(run.get("id") or ""))
                 active_sources.update(
                     source_id
                     for source_id in (run.get("sourceIds") or [])
                     if source_id not in completed
                 )
-            deduplicated_source_ids = sorted(set(normalised) & active_sources)
-            uncovered_source_ids = sorted(set(normalised) - active_sources)
-            if not uncovered_source_ids:
-                covering = next(
-                    (
-                        run
-                        for run in active
-                        if set(normalised).issubset(set(run.get("sourceIds") or []))
-                    ),
-                    active[0],
+            if clean_request_id:
+                deduplicated_source_ids = sorted(
+                    set(normalised) & set(active_source_runs)
                 )
-                view = _run_public_view(covering)
-                view["requestedSourceIds"] = normalised
-                view["deduplicatedSourceIds"] = deduplicated_source_ids
-                return view, True
+                uncovered_source_ids = sorted(
+                    set(normalised) - set(active_source_runs)
+                )
+            else:
+                deduplicated_source_ids = sorted(set(normalised) & active_sources)
+                uncovered_source_ids = sorted(set(normalised) - active_sources)
+            if not uncovered_source_ids:
+                dependency_run_ids = {
+                    active_source_runs[source_id] for source_id in normalised
+                    if active_source_runs.get(source_id)
+                }
+                exact_covering = None
+                if clean_request_id and len(dependency_run_ids) == 1:
+                    dependency_run_id = next(iter(dependency_run_ids))
+                    exact_covering = next(
+                        (
+                            run
+                            for run in active
+                            if run.get("id") == dependency_run_id
+                            and set(run.get("sourceIds") or []) == set(normalised)
+                        ),
+                        None,
+                    )
+                if clean_request_id and exact_covering is not None:
+                    view = _run_public_view(exact_covering)
+                    view["requestedSourceIds"] = normalised
+                    view["deduplicatedSourceIds"] = deduplicated_source_ids
+                    _record_orchestrator_request(
+                        state,
+                        request_id=clean_request_id,
+                        run_id=str(exact_covering["id"]),
+                        requested_source_ids=normalised,
+                    )
+                    self._write_locked(state)
+                    return view, True
+                if not clean_request_id:
+                    covering = next(
+                        (
+                            run
+                            for run in active
+                            if set(normalised).issubset(
+                                set(run.get("sourceIds") or [])
+                            )
+                        ),
+                        active[0],
+                    )
+                    view = _run_public_view(covering)
+                    view["requestedSourceIds"] = normalised
+                    view["deduplicatedSourceIds"] = deduplicated_source_ids
+                    return view, True
             if len(active) >= MAX_PENDING_RUNS:
                 raise InvalidControlRequest("Parser run queue is full")
+            run_source_ids = normalised if clean_request_id else uncovered_source_ids
             run = {
                 "id": uuid4().hex,
                 "status": "queued",
-                "sourceIds": uncovered_source_ids,
+                "sourceIds": run_source_ids,
+                "executionSourceIds": (
+                    uncovered_source_ids if clean_request_id else run_source_ids
+                ),
+                "dependencySourceRuns": (
+                    {
+                        source_id: active_source_runs[source_id]
+                        for source_id in deduplicated_source_ids
+                        if active_source_runs.get(source_id)
+                    }
+                    if clean_request_id
+                    else {}
+                ),
                 "requestedSourceIds": normalised,
                 "deduplicatedSourceIds": deduplicated_source_ids,
                 "requestedBy": actor,
+                "requestId": clean_request_id,
                 "reason": clean_reason,
                 "createdAt": _iso(),
                 "startedAt": None,
                 "finishedAt": None,
                 "results": [],
                 "error": None,
-                "totalSources": len(uncovered_source_ids),
+                "totalSources": len(run_source_ids),
                 "completedSources": 0,
                 "failedSources": 0,
             }
             state["runs"].append(run)
             state["runs"] = state["runs"][-MAX_RECENT_RUNS:]
+            if clean_request_id:
+                _record_orchestrator_request(
+                    state,
+                    request_id=clean_request_id,
+                    run_id=str(run["id"]),
+                    requested_source_ids=normalised,
+                )
             self._write_locked(state)
             return _run_public_view(run), bool(deduplicated_source_ids)
 
@@ -972,12 +1145,83 @@ class ParserControlStore:
             )
             if not queued:
                 return None
-            run = queued[0]
+            runs_by_id = {
+                str(candidate.get("id") or ""): candidate
+                for candidate in state["runs"]
+            }
+
+            def dependencies_finished(candidate: dict[str, Any]) -> bool:
+                dependencies = candidate.get("dependencySourceRuns") or {}
+                if not isinstance(dependencies, dict):
+                    return True
+                return all(
+                    runs_by_id.get(str(dependency_run_id), {}).get("status")
+                    not in ACTIVE_RUN_STATUSES
+                    for dependency_run_id in dependencies.values()
+                )
+
+            run = next(
+                (
+                    candidate
+                    for candidate in queued
+                    if dependencies_finished(candidate)
+                ),
+                None,
+            )
+            if run is None:
+                return None
             run["status"] = "running"
             run["startedAt"] = _iso()
             run["error"] = None
             self._write_locked(state)
             return dict(run)
+
+    def dependency_results(self, run_id: str) -> list[dict[str, Any]]:
+        state, _persisted = self.read_state()
+        run = next((row for row in state["runs"] if row.get("id") == run_id), None)
+        if run is None:
+            return []
+        runs_by_id = {
+            str(candidate.get("id") or ""): candidate
+            for candidate in state["runs"]
+        }
+        summaries: list[dict[str, Any]] = []
+        dependencies = run.get("dependencySourceRuns") or {}
+        if not isinstance(dependencies, dict):
+            return summaries
+        for source_id in run.get("sourceIds") or []:
+            dependency_run_id = dependencies.get(source_id)
+            if not isinstance(dependency_run_id, str):
+                continue
+            dependency = runs_by_id.get(dependency_run_id)
+            raw_result = next(
+                (
+                    result
+                    for result in (dependency or {}).get("results") or []
+                    if isinstance(result, dict)
+                    and str(result.get("sourceId") or result.get("source_id") or "")
+                    == source_id
+                ),
+                None,
+            )
+            if raw_result is None:
+                detail = "Dependency parser run did not produce a source result"
+                summaries.append(
+                    {
+                        "sourceId": source_id,
+                        "label": source_label(source_id),
+                        "state": "error",
+                        "fetchedAt": None,
+                        "detail": detail,
+                        "errors": [detail],
+                        "servingCachedDataset": False,
+                    }
+                )
+                continue
+            summary = _run_result_summary(raw_result)
+            summary["sourceId"] = source_id
+            summaries.append(summary)
+        return summaries
 
     def record_run_result(
         self,
@@ -1256,6 +1500,28 @@ def resolve_public_dataset(
     return baseline
 
 
+def load_resolved_public_dataset(
+    source_id: str,
+    *,
+    at: datetime | None = None,
+    store: ParserControlStore | None = None,
+    effective_mode: str | None = None,
+) -> dict[str, Any] | None:
+    """Load the public publication channel instead of the mutable candidate."""
+    from .storage import load_dataset
+
+    dataset = load_dataset(source_id)
+    if not isinstance(dataset, dict):
+        return None
+    return resolve_public_dataset(
+        source_id,
+        dataset,
+        at=at,
+        store=store,
+        effective_mode=effective_mode,
+    )
+
+
 def expand_run_selection(
     *, source_ids: list[str] | None, section_ids: list[str] | None
 ) -> list[str]:
@@ -1458,11 +1724,13 @@ class ParserRunWorker:
         source_ids: list[str],
         requested_by: str,
         reason: str | None,
+        request_id: str | None = None,
     ) -> tuple[dict[str, Any], bool]:
         run, deduplicated = self.store.enqueue_run(
             source_ids=source_ids,
             requested_by=requested_by,
             reason=reason,
+            request_id=request_id,
         )
         self.start()
         self._wake.set()
@@ -1474,12 +1742,18 @@ class ParserRunWorker:
         if run is None:
             return False
         run_id = str(run["id"])
+        for dependency_result in self.store.dependency_results(run_id):
+            self.store.record_run_result(run_id, dependency_result)
+        persisted_at_start = self.store.get_run(run_id) or _run_public_view(run)
         completed = {
             str(result.get("sourceId") or result.get("source_id") or "")
-            for result in (run.get("results") or [])
+            for result in (persisted_at_start.get("results") or [])
             if isinstance(result, dict)
         }
-        for source_id in run.get("sourceIds") or []:
+        execution_source_ids = run.get("executionSourceIds")
+        if not isinstance(execution_source_ids, list):
+            execution_source_ids = run.get("sourceIds") or []
+        for source_id in execution_source_ids:
             if source_id in completed:
                 continue
             source_started_ms = _monotonic_ms()
@@ -1516,14 +1790,23 @@ class ParserRunWorker:
 
         persisted = self.store.get_run(run_id) or _run_public_view(run)
         summaries = list(persisted.get("results") or [])
-        ok_count = sum(
+        fresh_count = sum(
             result.get("state") == "ok" and not result.get("servingCachedDataset")
             for result in summaries
         )
+        usable_count = sum(
+            result.get("state") in {"ok", "partial"}
+            or bool(result.get("servingCachedDataset"))
+            for result in summaries
+        )
         expected_count = len(run.get("sourceIds") or [])
-        if summaries and len(summaries) == expected_count and ok_count == expected_count:
+        if (
+            summaries
+            and len(summaries) == expected_count
+            and fresh_count == expected_count
+        ):
             terminal = "succeeded"
-        elif ok_count:
+        elif usable_count:
             terminal = "partial"
         else:
             terminal = "failed"
