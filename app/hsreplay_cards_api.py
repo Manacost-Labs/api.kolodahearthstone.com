@@ -31,6 +31,14 @@ def _fmt_pct(value: Any) -> str | None:
     return text if "%" in text else f"{text}%"
 
 
+def _first_present(row: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        value = row.get(key)
+        if value is not None and value != "":
+            return value
+    return None
+
+
 def _card_entry_from_dbf_id(dbf_id: int, *, locale: str = "ruRU") -> dict[str, Any]:
     meta = card_label(cards_by_dbfid().get(dbf_id))
     if locale == "ruRU" and meta.get("id"):
@@ -57,34 +65,45 @@ def _normalize_card_row(row: dict[str, Any], *, sort_mode: str, locale: str = "r
     if not entry or not entry.get("id"):
         return None
 
-    pop = (
-        row.get("includedPopularity")
-        or row.get("included_popularity")
-        or row.get("deck_popularity")
-        or row.get("popularity")
+    pop = _first_present(
+        row,
+        "includedPopularity",
+        "included_popularity",
+        "deck_popularity",
+        "popularity",
     )
-    wr = (
-        row.get("includedWinrate")
-        or row.get("included_winrate")
-        or row.get("deckWinrate")
-        or row.get("deck_winrate")
-        or row.get("winrate")
-        or row.get("win_rate")
+    wr = _first_present(
+        row,
+        "includedWinrate",
+        "included_winrate",
+        "deckWinrate",
+        "deck_winrate",
+        "winrate",
+        "win_rate",
     )
-    copies = (
-        row.get("included_count")
-        or row.get("includedCount")
-        or row.get("avgCopies")
-        or row.get("avg_copies")
-        or row.get("averageCopiesInDeck")
+    copies = _first_present(
+        row,
+        "included_count",
+        "includedCount",
+        "avgCopies",
+        "avg_copies",
+        "averageCopiesInDeck",
     )
-    played = row.get("timesPlayed") or row.get("times_played") or row.get("numGames")
-    winrate_when_played = row.get("winrate_when_played") or row.get("winrateWhenPlayed")
-    winrate_when_drawn = row.get("winrate_when_drawn") or row.get("winrateWhenDrawn")
-    keep_percentage = row.get("keep_percentage") or row.get("keepPercentage")
-    opening_hand_winrate = row.get("opening_hand_winrate") or row.get("openingHandWinrate")
-    avg_turns_in_hand = row.get("avg_turns_in_hand") or row.get("avgTurnsInHand")
-    avg_turn_played_on = row.get("avg_turn_played_on") or row.get("avgTurnPlayedOn")
+    played = _first_present(row, "timesPlayed", "times_played", "numGames")
+    winrate_when_played = _first_present(
+        row, "winrate_when_played", "winrateWhenPlayed"
+    )
+    winrate_when_drawn = _first_present(
+        row, "winrate_when_drawn", "winrateWhenDrawn"
+    )
+    keep_percentage = _first_present(row, "keep_percentage", "keepPercentage")
+    opening_hand_winrate = _first_present(
+        row, "opening_hand_winrate", "openingHandWinrate"
+    )
+    avg_turns_in_hand = _first_present(row, "avg_turns_in_hand", "avgTurnsInHand")
+    avg_turn_played_on = _first_present(
+        row, "avg_turn_played_on", "avgTurnPlayedOn"
+    )
 
     if wr is not None:
         entry["deck_winrate"] = _fmt_pct(wr)

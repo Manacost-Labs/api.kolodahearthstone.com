@@ -39,6 +39,33 @@ class ContractFixturesTest(unittest.TestCase):
         self.assertEqual(card["avg_turns_in_hand"], 0.75)
         self.assertEqual(card["avg_turn_played_on"], 4.53)
 
+    def test_hsreplay_card_list_contract_preserves_zero_metrics(self) -> None:
+        payload = {
+            "series": {
+                "data": [
+                    {
+                        "dbfId": 69545,
+                        "includedPopularity": 0.0,
+                        "includedWinrate": 0.0,
+                        "included_count": 0,
+                        "timesPlayed": 0,
+                        "keepPercentage": 0.0,
+                    }
+                ]
+            }
+        }
+
+        cards = parse_cards_from_api_payloads(
+            [("https://hsreplay.net/analytics/query/card_list/", payload)],
+            sort_mode="popularity",
+        )
+
+        self.assertEqual(cards[0]["deck_popularity"], "0.00%")
+        self.assertEqual(cards[0]["deck_winrate"], "0.00%")
+        self.assertEqual(cards[0]["avg_copies"], 0)
+        self.assertEqual(cards[0]["times_played"], 0)
+        self.assertEqual(cards[0]["keep_percentage"], "0.00%")
+
     def test_hsreplay_meta_archetypes_contract_groups_by_class(self) -> None:
         payload = load_fixture("hsreplay_meta_archetypes.json")
 
