@@ -1,0 +1,31 @@
+{
+  "lastUpdated": "2026-08-11T11:59:43.000Z",
+  "rankBracket": "legend",
+  "timePeriod": "last-patch",
+  "format": "standard",
+  "dataPoints": 82393,
+  "archetypeStats": [
+    {
+      "id": 637,
+      "name": "pure-paladin",
+      "format": "standard",
+      "heroCardClass": "paladin",
+      "heroCardIds": ["HERO_04a", "HERO_04b"],
+      "totalGames": 947,
+      "totalWins": 471,
+      "coreCards": ["CATA_472", "CATA_473", "CATA_474"],
+      "winrate": 0.4974
+    },
+    {
+      "id": 40968,
+      "name": "buu-egg-dk",
+      "format": "standard",
+      "heroCardClass": "deathknight",
+      "heroCardIds": ["HERO_11", "HERO_11bd"],
+      "totalGames": 1100,
+      "totalWins": 583,
+      "coreCards": ["DINO_410", "DINO_411", "DINO_417"],
+      "winrate": 0.53
+    }
+  ]
+}

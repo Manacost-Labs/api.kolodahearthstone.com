@@ -73,6 +73,10 @@ def estimate_metric_count(source: Source, data: dict[str, Any]) -> int:
         return len(structured.get("decks") or [])
     if stype == "metastats_decks":
         return len(structured.get("decks") or [])
+    if stype == "firestone_standard":
+        return len(structured.get("decks") or []) + len(
+            structured.get("archetypes") or []
+        )
     if stype == "metastats_matchups":
         return len(structured.get("matchups") or [])
 
@@ -152,6 +156,20 @@ def estimate_filled_metric_count(source: Source, data: dict[str, Any]) -> int:
         )
     if stype == "hearthstone_decks":
         return sum(1 for deck in (structured.get("decks") or []) if deck.get("deck_code"))
+    if stype == "firestone_standard":
+        return sum(
+            1
+            for collection in ("decks", "archetypes")
+            for row in (structured.get(collection) or [])
+            if (
+                row.get("archetype_id") is not None
+                and row.get("archetype_name")
+                and row.get("player_class")
+                and row.get("games") is not None
+                and row.get("wins") is not None
+                and row.get("winrate") is not None
+            )
+        )
     return estimate_metric_count(source, data)
 
 

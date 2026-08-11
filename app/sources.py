@@ -283,6 +283,16 @@ SOURCES: tuple[Source, ...] = (
         description="Firestone Battlegrounds compositions.",
     ),
     Source(
+        "firestone_standard",
+        "https://static.zerotoheroes.com/api/constructed/stats/decks/standard/legend/last-patch/overview-from-hourly.gz.json",
+        "firestone",
+        "ranked",
+        description=(
+            "Firestone Standard meta decks and archetypes, Legend, last patch; "
+            "two direct ZeroToHeroes CDN snapshots."
+        ),
+    ),
+    Source(
         "firestone_battlegrounds_cards",
         "https://www.firestoneapp.com/battlegrounds/cards?time=past-three&tavernTiers=1,7,2,3,4,5,6&turns=10",
         "firestone",

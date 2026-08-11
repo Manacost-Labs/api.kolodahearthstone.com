@@ -6,6 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlparse
 
 from .hsreplay_card_periods import (
     HSREPLAY_CARD_PERIOD_SOURCE_IDS,
@@ -1357,6 +1358,294 @@ def _validate_hsguru_matchups(
     return report
 
 
+def _validate_hearthstone_decks(
+    _source_id: str,
+    structured: dict[str, Any],
+) -> ValidationReport:
+    from .deck_decode import decode_deck_code
+
+    report = ValidationReport()
+    decks = [row for row in (structured.get("decks") or []) if isinstance(row, dict)]
+    format_counts = {
+        format_name: sum(1 for row in decks if row.get("format") == format_name)
+        for format_name in ("Standard", "Wild")
+    }
+    canonical_urls: list[str] = []
+    valid_urls = 0
+    decodable_codes = 0
+    wordpress_ids: list[int] = []
+    valid_wordpress_rows = 0
+    for row in decks:
+        raw_url = str(row.get("url") or "").strip()
+        parsed_url = urlparse(raw_url)
+        if (
+            parsed_url.scheme == "https"
+            and (parsed_url.hostname or "").rstrip(".").lower()
+            in {"hearthstone-decks.net", "www.hearthstone-decks.net"}
+            and parsed_url.path.rstrip("/")
+            and not parsed_url.fragment
+        ):
+            valid_urls += 1
+        canonical_urls.append(raw_url.rstrip("/").casefold())
+
+        deck_code = str(row.get("deck_code") or "").strip()
+        if deck_code and decode_deck_code(deck_code).get("ok"):
+            decodable_codes += 1
+
+        post_id = row.get("wordpress_post_id")
+        categories = row.get("wordpress_categories")
+        if isinstance(post_id, int) and not isinstance(post_id, bool) and post_id > 0:
+            wordpress_ids.append(post_id)
+            expected_category = 3 if row.get("format") == "Standard" else 13
+            if isinstance(categories, list) and expected_category in categories:
+                valid_wordpress_rows += 1
+
+    unique_urls = len({url for url in canonical_urls if url})
+    unique_wordpress_ids = len(set(wordpress_ids))
+    minimum_decodable = max(1, math.ceil(len(decks) * 0.95))
+    report.metrics.update(
+        {
+            "decks": len(decks),
+            "standard_decks": format_counts["Standard"],
+            "wild_decks": format_counts["Wild"],
+            "valid_urls": valid_urls,
+            "unique_urls": unique_urls,
+            "decodable_deck_codes": decodable_codes,
+            "minimum_decodable_deck_codes": minimum_decodable,
+            "wordpress_rows": len(wordpress_ids),
+            "valid_wordpress_rows": valid_wordpress_rows,
+            "unique_wordpress_ids": unique_wordpress_ids,
+        }
+    )
+    if len(decks) != 40:
+        report.add_issue(
+            "hearthstone_decks.wrong_total",
+            f"Hearthstone-Decks row count must be 40 ({len(decks)}/40)",
+            field="decks",
+        )
+    for format_name, count in format_counts.items():
+        if count != 20:
+            report.add_issue(
+                "hearthstone_decks.wrong_format_count",
+                f"Hearthstone-Decks {format_name} row count must be 20 ({count}/20)",
+                field="format",
+            )
+    if valid_urls != len(decks) or unique_urls != len(decks):
+        report.add_issue(
+            "hearthstone_decks.invalid_or_duplicate_urls",
+            (
+                "Hearthstone-Decks URLs are invalid or duplicated "
+                f"({valid_urls} valid, {unique_urls} unique, {len(decks)} total)"
+            ),
+            field="url",
+        )
+    if decodable_codes < minimum_decodable:
+        report.add_issue(
+            "hearthstone_decks.invalid_deck_codes",
+            (
+                "Hearthstone-Decks decodable deck codes too few "
+                f"({decodable_codes} < {minimum_decodable})"
+            ),
+            field="deck_code",
+        )
+
+    strategy = structured.get("fetch_strategy")
+    if strategy == "wordpress_rest":
+        if (
+            len(wordpress_ids) != len(decks)
+            or valid_wordpress_rows != len(decks)
+            or unique_wordpress_ids != len(decks)
+        ):
+            report.add_issue(
+                "hearthstone_decks.invalid_wordpress_identity",
+                "WordPress REST rows have missing, duplicate, or mismatched identities",
+                field="wordpress_post_id,wordpress_categories",
+            )
+        if (
+            structured.get("wordpress_rest_requests") != 2
+            or structured.get("wordpress_rest_accepted_formats") != 2
+            or structured.get("html_list_pages") != 0
+        ):
+            report.add_issue(
+                "hearthstone_decks.invalid_rest_telemetry",
+                "WordPress REST telemetry does not match the two-feed API-only path",
+                field="wordpress_rest_requests,wordpress_rest_accepted_formats,html_list_pages",
+            )
+    elif strategy != "validated_html_fallback":
+        report.add_issue(
+            "hearthstone_decks.unknown_fetch_strategy",
+            f"Hearthstone-Decks fetch strategy is not recognized: {strategy!r}",
+            field="fetch_strategy",
+        )
+
+    report.score = round(
+        (
+            min(len(decks) / 40.0, 1.0)
+            + min(format_counts["Standard"] / 20.0, 1.0)
+            + min(format_counts["Wild"] / 20.0, 1.0)
+            + min(valid_urls / max(len(decks), 1), 1.0)
+            + min(unique_urls / max(len(decks), 1), 1.0)
+            + min(decodable_codes / max(len(decks), 1), 1.0)
+        )
+        / 6.0,
+        4,
+    )
+    return report
+
+
+def _validate_firestone_standard(
+    _source_id: str,
+    structured: dict[str, Any],
+) -> ValidationReport:
+    from .deck_decode import decode_deck_code
+
+    report = ValidationReport()
+    decks = [row for row in (structured.get("decks") or []) if isinstance(row, dict)]
+    archetypes = [
+        row for row in (structured.get("archetypes") or []) if isinstance(row, dict)
+    ]
+
+    def complete_metric_row(row: dict[str, Any]) -> bool:
+        games = parse_decimal(row.get("games"))
+        wins = parse_decimal(row.get("wins"))
+        winrate = parse_decimal(row.get("winrate"))
+        return bool(
+            row.get("archetype_id") is not None
+            and _valid_name(row.get("archetype_name"))
+            and _valid_name(row.get("player_class"))
+            and games is not None
+            and games > 0
+            and wins is not None
+            and 0 <= wins <= games
+            and winrate is not None
+            and 0.0 <= winrate <= 1.0
+        )
+
+    complete_decks = sum(
+        1 for row in decks if row.get("decklist") and complete_metric_row(row)
+    )
+    complete_archetypes = sum(1 for row in archetypes if complete_metric_row(row))
+    unique_decklists = len(
+        {str(row.get("decklist")) for row in decks if row.get("decklist")}
+    )
+    unique_archetype_ids = len(
+        {row.get("archetype_id") for row in archetypes if row.get("archetype_id") is not None}
+    )
+    decodable_decks = 0
+    for row in decks:
+        deck_code = str(row.get("deck_code") or "").strip()
+        if deck_code and decode_deck_code(deck_code).get("ok"):
+            decodable_decks += 1
+
+    metadata = structured.get("metadata")
+    valid_metadata = 0
+    if isinstance(metadata, dict):
+        for collection in ("decks", "archetypes"):
+            item = metadata.get(collection)
+            if not isinstance(item, dict):
+                continue
+            data_points = parse_decimal(item.get("data_points"))
+            if (
+                data_points is not None
+                and data_points > 0
+                and item.get("last_updated")
+                and item.get("format") == "standard"
+                and item.get("rank_bracket") == "legend"
+                and item.get("time_period") == "last-patch"
+            ):
+                valid_metadata += 1
+
+    report.metrics.update(
+        {
+            "decks": len(decks),
+            "archetypes": len(archetypes),
+            "complete_decks": complete_decks,
+            "complete_archetypes": complete_archetypes,
+            "unique_decklists": unique_decklists,
+            "unique_archetype_ids": unique_archetype_ids,
+            "decodable_decks": decodable_decks,
+            "valid_metadata_collections": valid_metadata,
+        }
+    )
+    if len(decks) < 10:
+        report.add_issue(
+            "firestone_standard.too_few_decks",
+            f"Firestone Standard decks too few ({len(decks)} < 10)",
+            field="decks",
+        )
+    if len(archetypes) < 10:
+        report.add_issue(
+            "firestone_standard.too_few_archetypes",
+            f"Firestone Standard archetypes too few ({len(archetypes)} < 10)",
+            field="archetypes",
+        )
+    required_complete_decks = max(1, math.ceil(len(decks) * 0.80))
+    required_complete_archetypes = max(1, math.ceil(len(archetypes) * 0.80))
+    if complete_decks < required_complete_decks:
+        report.add_issue(
+            "firestone_standard.incomplete_decks",
+            (
+                "Firestone Standard complete deck rows too few "
+                f"({complete_decks} < {required_complete_decks})"
+            ),
+            field="decklist,archetype_id,archetype_name,player_class,games,wins,winrate",
+        )
+    if complete_archetypes < required_complete_archetypes:
+        report.add_issue(
+            "firestone_standard.incomplete_archetypes",
+            (
+                "Firestone Standard complete archetype rows too few "
+                f"({complete_archetypes} < {required_complete_archetypes})"
+            ),
+            field="archetype_id,archetype_name,player_class,games,wins,winrate",
+        )
+    if unique_decklists < required_complete_decks:
+        report.add_issue(
+            "firestone_standard.duplicate_decks",
+            f"Firestone Standard unique decklists too few ({unique_decklists}/{len(decks)})",
+            field="decklist",
+        )
+    required_decodable_decks = max(1, math.ceil(len(decks) * 0.90))
+    if decodable_decks < required_decodable_decks:
+        report.add_issue(
+            "firestone_standard.invalid_deck_codes",
+            (
+                "Firestone Standard decodable deck codes too few "
+                f"({decodable_decks} < {required_decodable_decks})"
+            ),
+            field="deck_code",
+        )
+    if unique_archetype_ids < required_complete_archetypes:
+        report.add_issue(
+            "firestone_standard.duplicate_archetypes",
+            (
+                "Firestone Standard unique archetype ids too few "
+                f"({unique_archetype_ids}/{len(archetypes)})"
+            ),
+            field="archetype_id",
+        )
+    if valid_metadata < 2:
+        report.add_issue(
+            "firestone_standard.invalid_metadata",
+            f"Firestone Standard valid metadata collections too few ({valid_metadata} < 2)",
+            field="metadata",
+        )
+
+    report.score = round(
+        (
+            min(len(decks) / 10.0, 1.0)
+            + min(len(archetypes) / 10.0, 1.0)
+            + min(complete_decks / max(len(decks), 1), 1.0)
+            + min(complete_archetypes / max(len(archetypes), 1), 1.0)
+            + min(decodable_decks / max(len(decks), 1), 1.0)
+            + valid_metadata / 2.0
+        )
+        / 6.0,
+        4,
+    )
+    return report
+
+
 _VALIDATORS: dict[str, Callable[[str, dict[str, Any]], ValidationReport]] = {
     "bg_heroes": _validate_bg_heroes,
     "vicious_live": _validate_vicious_live,
@@ -1378,6 +1667,8 @@ _VALIDATORS: dict[str, Callable[[str, dict[str, Any]], ValidationReport]] = {
     "streamer_decks": _validate_hsguru_streamer_decks,
     "fun_decks": _validate_hsguru_fun_decks,
     "matchups": _validate_hsguru_matchups,
+    "hearthstone_decks": _validate_hearthstone_decks,
+    "firestone_standard": _validate_firestone_standard,
 }
 
 

@@ -14,7 +14,9 @@ from app.hearthstone_decks import (
     fetch_hearthstone_decks,
 )
 from app.proxy_errors import ProxyPaymentRequiredError
+from app.source_validators import validate_structured
 from app.sources import SOURCE_BY_ID, Source
+from app.structured_schema import StructuredSchemaError, validate_structured_schema
 
 SOURCE = SOURCE_BY_ID["hearthstone_decks"]
 VALID_DECK_CODE = (
@@ -100,6 +102,39 @@ def _wordpress_posts(
 
 def _wordpress_unavailable() -> AsyncMock:
     return AsyncMock(side_effect=RuntimeError("wordpress REST unavailable"))
+
+
+def _normalized_hearthstone_decks() -> dict:
+    decks = []
+    for format_name, category_id in (("Standard", 3), ("Wild", 13)):
+        for index in range(20):
+            decks.append(
+                {
+                    "title": f"{format_name} Deck {index}",
+                    "url": (
+                        "https://hearthstone-decks.net/"
+                        f"{format_name.lower()}-validation-deck-{index}/"
+                    ),
+                    "format": format_name,
+                    "deck_code": VALID_DECK_CODE,
+                    "wordpress_post_id": category_id * 1_000 + index,
+                    "wordpress_categories": [category_id],
+                }
+            )
+    return {
+        "type": "hearthstone_decks",
+        "decks": decks,
+        "standard_count": 20,
+        "wild_count": 20,
+        "total_decks": 40,
+        "with_deck_code": 40,
+        "missing_deck_code_count": 0,
+        "deck_code_fill_rate": 1.0,
+        "fetch_strategy": "wordpress_rest",
+        "wordpress_rest_requests": 2,
+        "wordpress_rest_accepted_formats": 2,
+        "html_list_pages": 0,
+    }
 
 
 def test_wordpress_parser_extracts_codes_and_decodes_titles_without_details() -> None:
@@ -190,6 +225,34 @@ def test_wordpress_parser_does_not_count_regex_shaped_garbage_as_a_deck() -> Non
 
     assert rows[0]["deck_code"] == ""
     assert rows[0]["deck_code_status"] == "missing"
+
+
+def test_central_validators_enforce_unique_formats_and_decodable_codes() -> None:
+    structured = _normalized_hearthstone_decks()
+
+    assert validate_structured_schema(structured)["validated"]
+    valid_report = validate_structured(SOURCE.id, structured)
+    assert valid_report.ok, valid_report.reason
+    assert valid_report.metrics["decodable_deck_codes"] == 40
+
+    structured["decks"][1]["url"] = structured["decks"][0]["url"]
+    structured["decks"][0]["deck_code"] = "not-a-deck-code"
+    structured["decks"][1]["deck_code"] = "not-a-deck-code"
+    structured["decks"][2]["deck_code"] = "not-a-deck-code"
+    invalid_report = validate_structured(SOURCE.id, structured)
+
+    assert not invalid_report.ok
+    issue_codes = {issue.code for issue in invalid_report.issues}
+    assert "hearthstone_decks.invalid_or_duplicate_urls" in issue_codes
+    assert "hearthstone_decks.invalid_deck_codes" in issue_codes
+
+
+def test_hearthstone_schema_rejects_inconsistent_counters() -> None:
+    structured = _normalized_hearthstone_decks()
+    structured["standard_count"] = 19
+
+    with pytest.raises(StructuredSchemaError, match="standard_count"):
+        validate_structured_schema(structured)
 
 
 def test_wordpress_transport_sends_bounded_filtered_request() -> None:

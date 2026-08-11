@@ -29,6 +29,7 @@ API_FIRST_TIERS: frozenset[SourceTier] = frozenset(
 
 LIGHT_API_IDS: frozenset[str] = frozenset(
     {
+        "firestone_standard",
         "firestone_battlegrounds_comps",
         "firestone_battlegrounds_cards",
         "firestone_battlegrounds_spells",

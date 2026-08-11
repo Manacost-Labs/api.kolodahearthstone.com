@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlparse
 
 
 class StructuredSchemaError(ValueError):
@@ -14,6 +15,18 @@ def _require(condition: bool, message: str) -> None:
 
 def _is_non_empty_string(value: Any) -> bool:
     return isinstance(value, str) and bool(value.strip())
+
+
+def _is_non_negative_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def _is_unit_rate(value: Any) -> bool:
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and 0.0 <= float(value) <= 1.0
+    )
 
 
 def _validate_card_stats(data: dict[str, Any]) -> None:
@@ -122,6 +135,130 @@ def _validate_hsreplay_meta_archetypes(data: dict[str, Any]) -> None:
             _require(archetype.get("games") is not None, f"classes[{class_idx}].archetypes[{arch_idx}] missing games")
 
 
+def _validate_hearthstone_decks(data: dict[str, Any]) -> None:
+    decks = data.get("decks")
+    _require(isinstance(decks, list), "hearthstone_decks.decks must be a list")
+    _require(
+        data.get("total_decks") == len(decks),
+        "hearthstone_decks.total_decks does not match decks",
+    )
+    standard_count = sum(
+        1 for row in decks if isinstance(row, dict) and row.get("format") == "Standard"
+    )
+    wild_count = sum(
+        1 for row in decks if isinstance(row, dict) and row.get("format") == "Wild"
+    )
+    _require(
+        data.get("standard_count") == standard_count,
+        "hearthstone_decks.standard_count does not match decks",
+    )
+    _require(
+        data.get("wild_count") == wild_count,
+        "hearthstone_decks.wild_count does not match decks",
+    )
+    with_code = sum(
+        1 for row in decks if isinstance(row, dict) and row.get("deck_code")
+    )
+    _require(
+        data.get("with_deck_code") == with_code,
+        "hearthstone_decks.with_deck_code does not match decks",
+    )
+    _require(
+        data.get("missing_deck_code_count") == len(decks) - with_code,
+        "hearthstone_decks.missing_deck_code_count does not match decks",
+    )
+    fill_rate = data.get("deck_code_fill_rate")
+    _require(_is_unit_rate(fill_rate), "hearthstone_decks.deck_code_fill_rate must be 0..1")
+    expected_fill_rate = round(with_code / len(decks), 4) if decks else 0.0
+    _require(
+        float(fill_rate) == expected_fill_rate,
+        "hearthstone_decks.deck_code_fill_rate does not match decks",
+    )
+    _require(
+        data.get("fetch_strategy") in {"wordpress_rest", "validated_html_fallback"},
+        "hearthstone_decks.fetch_strategy is invalid",
+    )
+    for idx, row in enumerate(decks):
+        path = f"hearthstone_decks.decks[{idx}]"
+        _require(isinstance(row, dict), f"{path} must be an object")
+        _require(_is_non_empty_string(row.get("title")), f"{path} missing title")
+        _require(row.get("format") in {"Standard", "Wild"}, f"{path}.format is invalid")
+        raw_url = row.get("url")
+        _require(_is_non_empty_string(raw_url), f"{path} missing url")
+        parsed = urlparse(str(raw_url))
+        _require(parsed.scheme == "https", f"{path}.url must use https")
+        _require(
+            (parsed.hostname or "").rstrip(".").lower()
+            in {"hearthstone-decks.net", "www.hearthstone-decks.net"},
+            f"{path}.url host is invalid",
+        )
+        _require(isinstance(row.get("deck_code"), str), f"{path}.deck_code must be a string")
+
+
+def _validate_firestone_standard(data: dict[str, Any]) -> None:
+    _require(data.get("format") == "standard", "firestone_standard.format must be standard")
+    _require(data.get("rank_bracket") == "legend", "firestone_standard.rank_bracket must be legend")
+    _require(data.get("time_period") == "last-patch", "firestone_standard.time_period must be last-patch")
+
+    metadata = data.get("metadata")
+    _require(isinstance(metadata, dict), "firestone_standard.metadata must be an object")
+    for collection in ("decks", "archetypes"):
+        item = metadata.get(collection) if isinstance(metadata, dict) else None
+        _require(isinstance(item, dict), f"firestone_standard.metadata.{collection} must be an object")
+        _require(
+            _is_non_negative_int(item.get("data_points")),
+            f"firestone_standard.metadata.{collection}.data_points must be a non-negative integer",
+        )
+        _require(
+            _is_non_empty_string(item.get("last_updated")),
+            f"firestone_standard.metadata.{collection}.last_updated is required",
+        )
+        _require(item.get("format") == "standard", f"metadata.{collection}.format must be standard")
+        _require(item.get("rank_bracket") == "legend", f"metadata.{collection}.rank_bracket must be legend")
+        _require(item.get("time_period") == "last-patch", f"metadata.{collection}.time_period must be last-patch")
+
+    decks = data.get("decks")
+    archetypes = data.get("archetypes")
+    _require(isinstance(decks, list), "firestone_standard.decks must be a list")
+    _require(isinstance(archetypes, list), "firestone_standard.archetypes must be a list")
+    _require(data.get("total_decks") == len(decks), "firestone_standard.total_decks does not match decks")
+    _require(
+        data.get("total_archetypes") == len(archetypes),
+        "firestone_standard.total_archetypes does not match archetypes",
+    )
+
+    for collection, rows in (("decks", decks), ("archetypes", archetypes)):
+        for idx, row in enumerate(rows):
+            path = f"firestone_standard.{collection}[{idx}]"
+            _require(isinstance(row, dict), f"{path} must be an object")
+            _require(_is_non_negative_int(row.get("archetype_id")), f"{path} missing archetype_id")
+            _require(_is_non_empty_string(row.get("archetype_name")), f"{path} missing archetype_name")
+            _require(_is_non_empty_string(row.get("player_class")), f"{path} missing player_class")
+            _require(_is_non_negative_int(row.get("games")), f"{path}.games must be a non-negative integer")
+            _require(_is_non_negative_int(row.get("wins")), f"{path}.wins must be a non-negative integer")
+            _require(row["wins"] <= row["games"], f"{path}.wins cannot exceed games")
+            _require(_is_unit_rate(row.get("winrate")), f"{path}.winrate must be between 0 and 1")
+            _require(isinstance(row.get("core_cards"), list), f"{path}.core_cards must be a list")
+            _require(
+                all(_is_non_empty_string(card_id) for card_id in row["core_cards"]),
+                f"{path}.core_cards must contain card ids",
+            )
+
+    for idx, deck in enumerate(decks):
+        path = f"firestone_standard.decks[{idx}]"
+        _require(_is_non_empty_string(deck.get("decklist")), f"{path} missing decklist")
+        _require(deck.get("deck_code") == deck.get("decklist"), f"{path}.deck_code must equal decklist")
+        variations = deck.get("card_variations")
+        _require(isinstance(variations, dict), f"{path}.card_variations must be an object")
+        for key in ("added", "removed"):
+            values = variations.get(key) if isinstance(variations, dict) else None
+            _require(isinstance(values, list), f"{path}.card_variations.{key} must be a list")
+            _require(
+                all(_is_non_empty_string(card_id) for card_id in values),
+                f"{path}.card_variations.{key} must contain card ids",
+            )
+
+
 _VALIDATORS = {
     "arena_class_pages": _validate_arena_class_pages,
     "arena_card_tiers": _validate_arena_card_tiers,
@@ -129,6 +266,8 @@ _VALIDATORS = {
     "bg_heroes": _validate_bg_heroes,
     "bg_minions": _validate_bg_minions,
     "card_stats": _validate_card_stats,
+    "firestone_standard": _validate_firestone_standard,
+    "hearthstone_decks": _validate_hearthstone_decks,
     "hsreplay_meta_archetypes": _validate_hsreplay_meta_archetypes,
     "vicious_live": _validate_vicious_live,
 }

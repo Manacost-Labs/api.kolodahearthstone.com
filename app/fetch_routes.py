@@ -18,6 +18,7 @@ from .sources import Source
 
 _PROXYLESS_API_SOURCE_IDS: frozenset[str] = frozenset(
     {
+        "firestone_standard",
         "firestone_battlegrounds_comps",
         "firestone_battlegrounds_cards",
         "firestone_battlegrounds_spells",

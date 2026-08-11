@@ -19,6 +19,7 @@ class SourceContract:
     preferred_channels: tuple[str, ...] = ()
     allow_browser_fallback: bool = True
     min_rows: int | None = None
+    min_collection_rows: tuple[tuple[str, int], ...] = ()
     critical_fields: tuple[str, ...] = ()
     min_field_fill_rate: float = 0.0
     regression_drop_ratio: float | None = None
@@ -308,6 +309,30 @@ CONTRACTS: dict[str, SourceContract] = {
         regression_drop_ratio=0.85,
         fallback_policy="api_only",
     ),
+    "firestone_standard": SourceContract(
+        source_id="firestone_standard",
+        structured_type="firestone_standard",
+        allow_browser_fallback=False,
+        min_rows=20,
+        min_collection_rows=(("decks", 10), ("archetypes", 10)),
+        critical_fields=(
+            "archetype_id",
+            "archetype_name",
+            "player_class",
+            "games",
+            "wins",
+            "winrate",
+            "core_cards",
+        ),
+        min_field_fill_rate=0.80,
+        regression_drop_ratio=0.50,
+        volatility="patch",
+        fallback_policy="api_only",
+        recommendation=(
+            "Use the two direct ZeroToHeroes Standard overview snapshots; "
+            "preserve the previous valid dataset if either collection regresses."
+        ),
+    ),
     "firestone_battlegrounds_cards": SourceContract(
         source_id="firestone_battlegrounds_cards",
         structured_type="bg_card_stats",
@@ -359,11 +384,14 @@ CONTRACTS: dict[str, SourceContract] = {
         structured_type="hearthstone_decks",
         allow_browser_fallback=True,
         min_rows=40,
-        critical_fields=("title", "url"),
-        min_field_fill_rate=0.80,
+        critical_fields=("title", "url", "format", "deck_code"),
+        min_field_fill_rate=0.95,
         regression_drop_ratio=0.35,
-        fallback_policy="allow_partial",
-        recommendation="Track deck_code fill rate separately; missing individual detail pages should not fail the whole source.",
+        fallback_policy="validated_html_fallback",
+        recommendation=(
+            "Prefer the two WordPress REST category feeds; accept HTML only as a "
+            "validated fallback and preserve last-known-good deck codes."
+        ),
     ),
 }
 
@@ -618,6 +646,13 @@ def _rows_for_structured(structured: dict[str, Any]) -> list[dict[str, Any]]:
         ]
     if stype == "metastats_decks":
         return [row for row in (structured.get("decks") or []) if isinstance(row, dict)]
+    if stype == "firestone_standard":
+        return [
+            row
+            for collection in ("decks", "archetypes")
+            for row in (structured.get(collection) or [])
+            if isinstance(row, dict)
+        ]
     if stype == "metastats_matchups":
         return [row for row in (structured.get("matchups") or []) if isinstance(row, dict)]
     if stype == "trending_decks":
@@ -659,6 +694,7 @@ def contract_quality_report(
         "ok": True,
         "warnings": [],
         "minimum_rows": None,
+        "minimum_collections": {},
     }
     if contract is None:
         return report
@@ -673,6 +709,18 @@ def contract_quality_report(
         if len(rows) < minimum_rows:
             report["ok"] = False
             report["warnings"].append(f"too few rows ({len(rows)} < {minimum_rows})")
+    for collection, minimum in contract.min_collection_rows:
+        value = structured.get(collection)
+        count = sum(1 for row in value if isinstance(row, dict)) if isinstance(value, list) else 0
+        report["minimum_collections"][collection] = {
+            "rows": count,
+            "minimum_rows": minimum,
+        }
+        if count < minimum:
+            report["ok"] = False
+            report["warnings"].append(
+                f"{collection} has too few rows ({count} < {minimum})"
+            )
     rates: list[float] = []
     for field in contract.critical_fields:
         total = len(rows)

@@ -41,6 +41,7 @@ class ParserControlRegistryTest(unittest.TestCase):
         self.assertIn("hsguru_meta_standard_legend", EARLY_SOURCE_IDS)
         self.assertIn("hsguru_matchups_legend", EARLY_SOURCE_IDS)
         self.assertIn("hsreplay_cards_legend_patch", EARLY_SOURCE_IDS)
+        self.assertIn("firestone_standard", EARLY_SOURCE_IDS)
         self.assertNotIn("hsreplay_cards_legend_1d", EARLY_SOURCE_IDS)
 
 

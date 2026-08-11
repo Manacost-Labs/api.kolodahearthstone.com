@@ -27,6 +27,7 @@ CRITICAL_SOURCES: dict[str, float] = {
     "hsguru_meta_wild_legend": 72,
     "hsreplay_cards_legend_1d": 30,
     "hsreplay_cards_wild_legend_1d": 30,
+    "firestone_standard": 36,
     "hsreplay_arena_cards_advanced": 36,
     "heartharena_tierlist": 36,
     "hsreplay_battlegrounds_heroes": 36,

@@ -1,0 +1,47 @@
+{
+  "lastUpdated": "2026-08-11T14:58:56.000Z",
+  "rankBracket": "legend",
+  "timePeriod": "last-patch",
+  "format": "standard",
+  "dataPoints": 55393,
+  "deckStats": [
+    {
+      "heroCardIds": ["HERO_11", "HERO_11bd"],
+      "archetypeId": 40968,
+      "decklist": "AAECAfHhBAj1mAfsmwfXnQfgnQftnwfSrged2we/3wcL054Ggf0Gl4IHupUHn54HkqQH4rEH2tcHrtoHtNoHptwHAAA=",
+      "format": "standard",
+      "lastUpdate": "2026-08-07T20:58:22.000Z",
+      "playerClass": "deathknight",
+      "rankBracket": "legend",
+      "timePeriod": "last-patch",
+      "totalGames": 281,
+      "totalWins": 149,
+      "winrate": 0.5302,
+      "archetypeCoreCards": ["DINO_410", "DINO_411", "DINO_417"],
+      "cardVariations": {
+        "added": ["CORE_UNG_205", "EDR_814", "EDR_814"],
+        "removed": ["TIME_003"]
+      },
+      "archetypeName": "buu-egg-dk"
+    },
+    {
+      "heroCardIds": ["HERO_11"],
+      "archetypeId": 40968,
+      "decklist": "AAECAfHhBAj1mAfsmwfXnQfgnQftnwfSrgfa1wed2wcL054Ggf0Gl4IHupUHn54HkqQH4rEHrtoHtNoHptwHv98HAAA=",
+      "format": "standard",
+      "lastUpdate": "2026-08-08T10:00:00.000Z",
+      "playerClass": "deathknight",
+      "rankBracket": "legend",
+      "timePeriod": "last-patch",
+      "totalGames": 140,
+      "totalWins": 70,
+      "winrate": 0.5,
+      "archetypeCoreCards": ["DINO_410", "DINO_411"],
+      "cardVariations": {
+        "added": ["TIME_003"],
+        "removed": []
+      },
+      "archetypeName": "buu-egg-dk"
+    }
+  ]
+}
