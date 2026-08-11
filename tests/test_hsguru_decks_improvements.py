@@ -148,6 +148,95 @@ class HsGuruDecksImprovementsTest(unittest.TestCase):
             {"brightdata", "firecrawl", "scrapfly"},
         )
 
+    def test_all_rank_fanout_prefers_fast_local_solver(self) -> None:
+        from app import hsguru_decks
+
+        source = Source(
+            id="hsguru_deck_catalog_standard_all",
+            url=(
+                "https://www.hsguru.com/decks?format=2&rank=all&"
+                "period=patch_36.2.0&min_games=100&limit=200"
+            ),
+            site="hsguru",
+            category="deck_catalog",
+        )
+        primary = AsyncMock()
+        solver = AsyncMock(
+            return_value=SimpleNamespace(
+                html='<div class="deck_stats_viewport">complete</div>',
+                http_status=200,
+                backend="flaresolverr",
+                final_url=source.url,
+            )
+        )
+        with (
+            patch.object(hsguru_decks, "scrape_source_with_options", primary),
+            patch.object(hsguru_decks, "fetch_via_flaresolverr", solver),
+        ):
+            page = asyncio.run(
+                hsguru_decks._fetch_catalog_page(
+                    source,
+                    max_age_ms=1,
+                    wait_ms=2,
+                    timeout_ms=3,
+                    prefer_local_solver=True,
+                )
+            )
+
+        self.assertEqual(page.backend, "flaresolverr")
+        solver.assert_awaited_once_with(source, wait_ms=0)
+        primary.assert_not_awaited()
+
+    def test_all_rank_fanout_falls_back_to_subscribed_scrape_do(self) -> None:
+        from app import hsguru_decks
+
+        source = Source(
+            id="hsguru_deck_catalog_standard_all",
+            url=(
+                "https://www.hsguru.com/decks?format=2&rank=all&"
+                "period=patch_36.2.0&min_games=100&limit=200"
+            ),
+            site="hsguru",
+            category="deck_catalog",
+        )
+        primary_result = FirecrawlScrape(
+            html='<div class="deck_stats_viewport">complete</div>',
+            markdown="",
+            screenshot=None,
+            metadata={"backend": "scrape_do_super", "scrapeDoCreditsUsed": 25},
+            status_code=200,
+            final_url=source.url,
+        )
+
+        async def primary(*_args, **kwargs):
+            kwargs["attempt_observer"](primary_result, True)
+            return primary_result
+
+        with (
+            patch.object(
+                hsguru_decks,
+                "fetch_via_flaresolverr",
+                AsyncMock(side_effect=RuntimeError("local solver unavailable")),
+            ),
+            patch.object(hsguru_decks, "scrape_source_with_options", primary),
+        ):
+            page = asyncio.run(
+                hsguru_decks._fetch_catalog_page(
+                    source,
+                    max_age_ms=1,
+                    wait_ms=2,
+                    timeout_ms=3,
+                    prefer_local_solver=True,
+                )
+            )
+
+        self.assertEqual(page.backend, "scrape_do_super")
+        self.assertEqual(page.request_credits, 25)
+        self.assertEqual(
+            [attempt["backend"] for attempt in page.acquisition],
+            ["flaresolverr", "scrape_do_super"],
+        )
+
     def test_catalog_counts_rejected_scrape_do_response_before_solver(self) -> None:
         from app import hsguru_decks
 

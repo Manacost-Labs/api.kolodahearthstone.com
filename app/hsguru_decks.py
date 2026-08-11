@@ -411,6 +411,7 @@ async def _fetch_catalog_page(
     max_age_ms: int,
     wait_ms: int,
     timeout_ms: int,
+    prefer_local_solver: bool = False,
 ) -> _CatalogPage:
     """Prefer subscribed Scrape.do, then local solver, then remote fallbacks."""
     errors: list[str] = []
@@ -418,6 +419,30 @@ async def _fetch_catalog_page(
 
     def catalog_result_is_valid(result: Any) -> bool:
         return _catalog_result_is_valid(result, expected_url=source.url)
+
+    async def fetch_from_local_solver() -> _CatalogPage | None:
+        solver_result: Any | None = None
+        try:
+            solver_result = await fetch_via_flaresolverr(
+                source,
+                wait_ms=flaresolverr_hsguru_decks_wait_ms(),
+            )
+            page = _catalog_page(solver_result, expected_url=source.url)
+            attempts.append(_provider_attempt(solver_result, "accepted"))
+            return _page_with_acquisition(page, attempts)
+        except Exception as exc:  # noqa: BLE001 - isolated provider boundary
+            attempts.append(
+                _provider_attempt(solver_result, "rejected")
+                if solver_result is not None
+                else _failed_attempt("flaresolverr", exc)
+            )
+            errors.append(f"flaresolverr:{type(exc).__name__}")
+            return None
+
+    if prefer_local_solver:
+        local_page = await fetch_from_local_solver()
+        if local_page is not None:
+            return local_page
 
     if _scrape_do_circuit_open():
         attempts.append(
@@ -463,22 +488,10 @@ async def _fetch_catalog_page(
             _record_scrape_do_failure()
             errors.append(f"scrape_do:{type(exc).__name__}")
 
-    solver_result: Any | None = None
-    try:
-        solver_result = await fetch_via_flaresolverr(
-            source,
-            wait_ms=flaresolverr_hsguru_decks_wait_ms(),
-        )
-        page = _catalog_page(solver_result, expected_url=source.url)
-        attempts.append(_provider_attempt(solver_result, "accepted"))
-        return _page_with_acquisition(page, attempts)
-    except Exception as exc:  # noqa: BLE001 - isolated provider boundary
-        attempts.append(
-            _provider_attempt(solver_result, "rejected")
-            if solver_result is not None
-            else _failed_attempt("flaresolverr", exc)
-        )
-        errors.append(f"flaresolverr:{type(exc).__name__}")
+    if not prefer_local_solver:
+        local_page = await fetch_from_local_solver()
+        if local_page is not None:
+            return local_page
 
     remote_attempts: list[dict[str, Any]] = []
 
@@ -942,6 +955,11 @@ async def _fetch_catalog_chunk(
         max_age_ms=_CACHE_TTL_SECONDS * 1_000,
         wait_ms=3_000,
         timeout_ms=25_000,
+        # This scheduled fan-out spans hundreds of patch archetypes. The
+        # local browser is materially faster and free; subscribed Scrape.do
+        # remains the immediate fallback when the solver cannot validate a
+        # page. Interactive/exact requests keep the remote-first policy.
+        prefer_local_solver=True,
     )
     rows = parse_hsguru_decks_html(
         page.html,
