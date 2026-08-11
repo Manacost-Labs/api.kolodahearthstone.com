@@ -2755,7 +2755,11 @@ async def _refresh_sources_unlocked(
         _record_reliability_results_best_effort(
             run_id,
             [
-                {"source_id": source.id, "state": terminal_state}
+                {
+                    "source_id": source.id,
+                    "state": terminal_state,
+                    "failure_reason_code": "preflight",
+                }
                 for source in selected
             ],
         )
@@ -2791,7 +2795,11 @@ async def _refresh_sources_unlocked(
             _record_reliability_results_best_effort(
                 run_id,
                 [
-                    {"source_id": source.id, "state": terminal_state}
+                    {
+                        "source_id": source.id,
+                        "state": terminal_state,
+                        "failure_reason_code": "dependency",
+                    }
                     for source in selected
                 ],
             )

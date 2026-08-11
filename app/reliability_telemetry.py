@@ -8,6 +8,7 @@ never enter this database or its public aggregate report.
 from __future__ import annotations
 
 import hashlib
+import math
 import sqlite3
 import threading
 from collections.abc import Iterable, Mapping
@@ -33,7 +34,28 @@ WINDOWS = (
     ("7d", timedelta(days=7)),
     ("30d", timedelta(days=30)),
 )
-METHODOLOGY_VERSION = "logical-source-observed-v1"
+METHODOLOGY_VERSION = "logical-source-observed-v2"
+SLO_TARGET_RATE_PCT = 99.0
+FAILURE_REASONS = (
+    "proxy_payment",
+    "authentication",
+    "rate_limited",
+    "access_blocked",
+    "upstream_4xx",
+    "upstream_5xx",
+    "timeout",
+    "transport",
+    "unavailable",
+    "contract",
+    "parse_error",
+    "regression",
+    "backend_policy",
+    "ai_quarantine",
+    "publication_sync",
+    "preflight",
+    "dependency",
+    "unknown",
+)
 
 _schema_lock = threading.Lock()
 
@@ -76,6 +98,105 @@ def classify_terminal_status(status: Mapping[str, object]) -> str:
     return "failed"
 
 
+def classify_failure_reason(status: Mapping[str, object]) -> str:
+    """Reduce an unsuccessful refresh to a safe, bounded operational reason."""
+
+    outcome = classify_terminal_status(status)
+    if outcome in {"fresh_published", "provisional"}:
+        return "none"
+
+    explicit = str(status.get("failure_reason_code") or "").strip().lower()
+    if explicit in FAILURE_REASONS:
+        return explicit
+
+    ai_review = status.get("ai_review") or status.get("latest_ai_review")
+    if isinstance(ai_review, Mapping) and ai_review.get("quarantine") is True:
+        return "ai_quarantine"
+
+    signal = _failure_signal(status)
+    proxy_status = _bounded_http_status(
+        status.get("last_refresh_proxy_status") or status.get("proxy_status")
+    )
+    http_status = _bounded_http_status(status.get("http_status"))
+
+    if "regression" in signal or "metric count dropped" in signal:
+        return "regression"
+    if "backend policy" in signal or "policy changed" in signal:
+        return "backend_policy"
+    if "cache_sync_error" in signal or "publication sync" in signal:
+        return "publication_sync"
+    if proxy_status in {402, 407} or any(
+        marker in signal
+        for marker in ("proxy_402", "proxy_407", "payment required", "connect tunnel")
+    ):
+        return "proxy_payment"
+    if http_status == 401 or any(
+        marker in signal
+        for marker in (
+            "not authenticated",
+            "unauthorized",
+            "login required",
+            "session expired",
+            "cookie expired",
+        )
+    ):
+        return "authentication"
+    if http_status == 429 or "rate limit" in signal or "too many requests" in signal:
+        return "rate_limited"
+    if http_status == 403 or any(
+        marker in signal
+        for marker in (
+            "access denied",
+            "blocked_403",
+            "captcha",
+            "challenge page",
+            "cloudflare",
+            "forbidden",
+        )
+    ):
+        return "access_blocked"
+    if outcome == OUTCOME_TIMED_OUT or "timed out" in signal or "timeout" in signal:
+        return "timeout"
+    if (http_status is not None and 500 <= http_status <= 599) or any(
+        marker in signal
+        for marker in ("http 500", "http 502", "http 503", "http 504", "bad gateway")
+    ):
+        return "upstream_5xx"
+    if http_status is not None and 400 <= http_status <= 499:
+        return "upstream_4xx"
+    if any(
+        marker in signal
+        for marker in (
+            "source contract failed",
+            "quality check failed",
+            "too few rows",
+            "fill rate",
+            "schema mismatch",
+        )
+    ):
+        return "contract"
+    if "parse_error" in signal or "parse error" in signal or "parser" in signal:
+        return "parse_error"
+    if "preflight" in signal:
+        return "preflight"
+    if "dependency" in signal or "prefetch" in signal:
+        return "dependency"
+    if "unavailable" in signal:
+        return "unavailable"
+    if any(
+        marker in signal
+        for marker in (
+            "connectionerror",
+            "connecterror",
+            "networkerror",
+            "proxyerror",
+            "transporterror",
+        )
+    ):
+        return "transport"
+    return "unknown"
+
+
 def record_terminal_results(
     run_id: str,
     results: Iterable[Mapping[str, object]],
@@ -96,7 +217,7 @@ def record_terminal_results(
     if not normalized_run_id:
         raise ValueError("run_id is required")
 
-    rows: list[tuple[str, str, str, float, str, str, float]] = []
+    rows: list[tuple[str, str, str, float, str, str, str, float]] = []
     seen_sources: set[str] = set()
     for result in results:
         source_id = str(result.get("source_id") or "").strip()[:160]
@@ -104,6 +225,7 @@ def record_terminal_results(
             continue
         seen_sources.add(source_id)
         outcome = classify_terminal_status(result)
+        reason_code = classify_failure_reason(result)
         terminal_state = _bounded_terminal_state(result.get("state"))
         attempt_id = hashlib.sha256(
             f"{normalized_run_id}\0{source_id}".encode()
@@ -116,6 +238,7 @@ def record_terminal_results(
                 completed_epoch,
                 outcome,
                 terminal_state,
+                reason_code,
                 recorded_epoch,
             )
         )
@@ -139,8 +262,9 @@ def record_terminal_results(
                     finished_at,
                     outcome,
                     terminal_state,
+                    reason_code,
                     recorded_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 row,
             )
@@ -235,10 +359,19 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
                     )
                 ),
                 terminal_state TEXT NOT NULL,
+                reason_code TEXT NOT NULL DEFAULT 'unknown',
                 recorded_at REAL NOT NULL
             )
             """
         )
+        columns = {
+            str(row[1]) for row in connection.execute("PRAGMA table_info(source_attempts)")
+        }
+        if "reason_code" not in columns:
+            connection.execute(
+                "ALTER TABLE source_attempts "
+                "ADD COLUMN reason_code TEXT NOT NULL DEFAULT 'unknown'"
+            )
         connection.execute(
             """
             CREATE INDEX IF NOT EXISTS source_attempts_finished_at_idx
@@ -270,6 +403,21 @@ def _query_window(
         if outcome in counts:
             counts[str(outcome)] = int(count)
 
+    reason_rows = connection.execute(
+        """
+        SELECT COALESCE(reason_code, 'unknown'), COUNT(*)
+        FROM source_attempts
+        WHERE finished_at >= ? AND finished_at <= ?
+          AND outcome IN ('lkg_served', 'failed', 'timed_out')
+        GROUP BY COALESCE(reason_code, 'unknown')
+        """,
+        (from_at.timestamp(), report_at.timestamp()),
+    ).fetchall()
+    failure_reasons = {reason: 0 for reason in FAILURE_REASONS}
+    for reason, count in reason_rows:
+        bounded_reason = str(reason) if reason in failure_reasons else "unknown"
+        failure_reasons[bounded_reason] += int(count)
+
     total_attempts = sum(counts.values())
     eligible_attempts = sum(counts[outcome] for outcome in ELIGIBLE_OUTCOMES)
     full_fresh = counts["fresh_published"]
@@ -289,9 +437,20 @@ def _query_window(
         "total_attempts": total_attempts,
         "eligible_attempts": eligible_attempts,
         "counts": counts,
+        "failure_reasons": failure_reasons,
         "full_fresh_rate_pct": _percentage(full_fresh, eligible_attempts),
         "accepted_fresh_rate_pct": _percentage(accepted_fresh, eligible_attempts),
         "data_available_rate_pct": _percentage(data_available, eligible_attempts),
+        "freshness_slo": _slo_budget(
+            good_attempts=full_fresh,
+            eligible_attempts=eligible_attempts,
+            measurement_complete=coverage_ratio >= 1.0,
+        ),
+        "availability_slo": _slo_budget(
+            good_attempts=data_available,
+            eligible_attempts=eligible_attempts,
+            measurement_complete=coverage_ratio >= 1.0,
+        ),
     }
 
 
@@ -310,9 +469,20 @@ def _empty_report(report_at: datetime) -> dict[str, Any]:
                 "total_attempts": 0,
                 "eligible_attempts": 0,
                 "counts": {outcome: 0 for outcome in OUTCOMES},
+                "failure_reasons": {reason: 0 for reason in FAILURE_REASONS},
                 "full_fresh_rate_pct": None,
                 "accepted_fresh_rate_pct": None,
                 "data_available_rate_pct": None,
+                "freshness_slo": _slo_budget(
+                    good_attempts=0,
+                    eligible_attempts=0,
+                    measurement_complete=False,
+                ),
+                "availability_slo": _slo_budget(
+                    good_attempts=0,
+                    eligible_attempts=0,
+                    measurement_complete=False,
+                ),
             }
             for label, duration in WINDOWS
         ],
@@ -331,6 +501,8 @@ def _methodology() -> dict[str, Any]:
         ],
         "eligible_outcomes": list(ELIGIBLE_OUTCOMES),
         "excluded_outcomes": ["skipped"],
+        "slo_target_rate_pct": SLO_TARGET_RATE_PCT,
+        "failure_reason_values": list(FAILURE_REASONS),
     }
 
 
@@ -341,6 +513,58 @@ def _bounded_terminal_state(value: object) -> str:
         "skipped",
     }
     return state if state in allowed else "unknown_error"
+
+
+def _failure_signal(status: Mapping[str, object]) -> str:
+    values = (
+        status.get("last_refresh_state"),
+        status.get("last_refresh_failure_class"),
+        status.get("last_refresh_error"),
+        status.get("failure_class"),
+        status.get("state"),
+        status.get("error"),
+        status.get("detail"),
+    )
+    return " ".join(str(value).casefold()[:1000] for value in values if value)[:4000]
+
+
+def _bounded_http_status(value: object) -> int | None:
+    try:
+        status = int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return status if 100 <= status <= 599 else None
+
+
+def _slo_budget(
+    *,
+    good_attempts: int,
+    eligible_attempts: int,
+    measurement_complete: bool,
+) -> dict[str, Any]:
+    bad_attempts = max(0, eligible_attempts - good_attempts)
+    allowed_bad = eligible_attempts * ((100.0 - SLO_TARGET_RATE_PCT) / 100.0)
+    remaining = allowed_bad - bad_attempts
+    if not measurement_complete or eligible_attempts <= 0:
+        objective_status = "collecting"
+    elif good_attempts / eligible_attempts >= SLO_TARGET_RATE_PCT / 100.0:
+        objective_status = "meeting"
+    else:
+        objective_status = "breached"
+    return {
+        "target_rate_pct": SLO_TARGET_RATE_PCT,
+        "objective_status": objective_status,
+        "good_attempts": good_attempts,
+        "bad_attempts": bad_attempts,
+        "allowed_bad_attempts": round(allowed_bad, 2),
+        "bad_attempts_over_budget": max(0, math.ceil(bad_attempts - allowed_bad)),
+        "error_budget_remaining_attempts": round(remaining, 2),
+        "error_budget_consumed_pct": (
+            round((bad_attempts / allowed_bad) * 100.0, 2)
+            if allowed_bad > 0
+            else None
+        ),
+    }
 
 
 def _coverage_ratio(

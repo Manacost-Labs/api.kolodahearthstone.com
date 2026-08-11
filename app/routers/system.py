@@ -43,6 +43,38 @@ class ReliabilityCounts(BaseModel):
     skipped: int = Field(ge=0)
 
 
+class ReliabilityFailureReasons(BaseModel):
+    proxy_payment: int = Field(ge=0)
+    authentication: int = Field(ge=0)
+    rate_limited: int = Field(ge=0)
+    access_blocked: int = Field(ge=0)
+    upstream_4xx: int = Field(ge=0)
+    upstream_5xx: int = Field(ge=0)
+    timeout: int = Field(ge=0)
+    transport: int = Field(ge=0)
+    unavailable: int = Field(ge=0)
+    contract: int = Field(ge=0)
+    parse_error: int = Field(ge=0)
+    regression: int = Field(ge=0)
+    backend_policy: int = Field(ge=0)
+    ai_quarantine: int = Field(ge=0)
+    publication_sync: int = Field(ge=0)
+    preflight: int = Field(ge=0)
+    dependency: int = Field(ge=0)
+    unknown: int = Field(ge=0)
+
+
+class ReliabilitySLO(BaseModel):
+    target_rate_pct: float = Field(ge=0.0, le=100.0)
+    objective_status: Literal["collecting", "meeting", "breached"]
+    good_attempts: int = Field(ge=0)
+    bad_attempts: int = Field(ge=0)
+    allowed_bad_attempts: float = Field(ge=0.0)
+    bad_attempts_over_budget: int = Field(ge=0)
+    error_budget_remaining_attempts: float
+    error_budget_consumed_pct: float | None = Field(default=None, ge=0.0)
+
+
 class ReliabilityWindow(BaseModel):
     window: Literal["24h", "7d", "30d"]
     from_at: str
@@ -52,9 +84,12 @@ class ReliabilityWindow(BaseModel):
     total_attempts: int = Field(ge=0)
     eligible_attempts: int = Field(ge=0)
     counts: ReliabilityCounts
+    failure_reasons: ReliabilityFailureReasons
     full_fresh_rate_pct: float | None = Field(default=None, ge=0.0, le=100.0)
     accepted_fresh_rate_pct: float | None = Field(default=None, ge=0.0, le=100.0)
     data_available_rate_pct: float | None = Field(default=None, ge=0.0, le=100.0)
+    freshness_slo: ReliabilitySLO
+    availability_slo: ReliabilitySLO
 
 
 class ReliabilityMethodology(BaseModel):
@@ -65,6 +100,8 @@ class ReliabilityMethodology(BaseModel):
     limitations: list[str]
     eligible_outcomes: list[str]
     excluded_outcomes: list[str]
+    slo_target_rate_pct: float = Field(ge=0.0, le=100.0)
+    failure_reason_values: list[str]
 
 
 class ReliabilityReport(BaseModel):

@@ -11,6 +11,7 @@ import pytest
 from app.fetcher import _refresh_sources_unlocked, _run_tier_serial_browser
 from app.reliability_telemetry import (
     build_reliability_report,
+    classify_failure_reason,
     classify_terminal_status,
     record_terminal_results,
     reliability_cache_revision,
@@ -43,14 +44,77 @@ def test_terminal_statuses_have_stable_honest_outcomes() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("status", "reason"),
+    [
+        (_status("fresh"), "none"),
+        (
+            _status(
+                "proxy",
+                serving_cached_dataset=True,
+                last_refresh_failure_class="proxy_402",
+            ),
+            "proxy_payment",
+        ),
+        (_status("auth", state="fetch_error", http_status=401), "authentication"),
+        (_status("rate", state="fetch_error", http_status=429), "rate_limited"),
+        (_status("blocked", state="fetch_error", http_status=403), "access_blocked"),
+        (_status("server", state="fetch_error", http_status=502), "upstream_5xx"),
+        (_status("late", state="timed_out"), "timeout"),
+        (
+            _status(
+                "contract",
+                state="quality_error",
+                detail="source contract failed: too few rows",
+            ),
+            "contract",
+        ),
+        (
+            _status(
+                "regression",
+                serving_cached_dataset=True,
+                last_refresh_error="Dataset regression: metric count dropped",
+            ),
+            "regression",
+        ),
+        (
+            _status(
+                "ai",
+                serving_cached_dataset=True,
+                latest_ai_review={"quarantine": True},
+            ),
+            "ai_quarantine",
+        ),
+        (
+            _status(
+                "explicit",
+                state="fetch_error",
+                failure_reason_code="preflight",
+            ),
+            "preflight",
+        ),
+    ],
+)
+def test_failure_reasons_are_bounded(status: dict[str, object], reason: str) -> None:
+    assert classify_failure_reason(status) == reason
+
+
 def test_report_uses_one_logical_attempt_and_excludes_skips(tmp_path: Path) -> None:
     now = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
     path = tmp_path / "reliability.sqlite3"
     results = [
         _status("fresh"),
         _status("early", provisional=True),
-        _status("cached", serving_cached_dataset=True),
-        _status("failed", state="quality_error"),
+        _status(
+            "cached",
+            serving_cached_dataset=True,
+            last_refresh_failure_class="proxy_402",
+        ),
+        _status(
+            "failed",
+            state="quality_error",
+            detail="Dataset regression: metric count dropped",
+        ),
         _status("late", state="timed_out"),
         _status("locked", state="locked", skipped=True, reason="resource_locked"),
     ]
@@ -76,6 +140,21 @@ def test_report_uses_one_logical_attempt_and_excludes_skips(tmp_path: Path) -> N
     assert day["accepted_fresh_rate_pct"] == 40.0
     assert day["data_available_rate_pct"] == 60.0
     assert day["measurement_status"] == "collecting"
+    assert day["failure_reasons"]["proxy_payment"] == 1
+    assert day["failure_reasons"]["regression"] == 1
+    assert day["failure_reasons"]["timeout"] == 1
+    assert sum(day["failure_reasons"].values()) == 3
+    assert day["freshness_slo"] == {
+        "target_rate_pct": 99.0,
+        "objective_status": "collecting",
+        "good_attempts": 1,
+        "bad_attempts": 4,
+        "allowed_bad_attempts": 0.05,
+        "bad_attempts_over_budget": 4,
+        "error_budget_remaining_attempts": -3.95,
+        "error_budget_consumed_pct": 8000.0,
+    }
+    assert day["availability_slo"]["good_attempts"] == 3
 
 
 def test_report_has_observed_24h_7d_and_30d_boundaries(tmp_path: Path) -> None:
@@ -105,6 +184,7 @@ def test_report_has_observed_24h_7d_and_30d_boundaries(tmp_path: Path) -> None:
     assert report["methodology"]["completeness"] == "observed_attempts_only"
     assert "dedicated_pipeline_sources_excluded" in report["methodology"]["limitations"]
     assert report["coverage_started_at"] == (now - timedelta(days=31)).isoformat()
+    assert report["windows"][0]["freshness_slo"]["objective_status"] == "meeting"
 
 
 def test_empty_report_never_claims_one_hundred_percent(tmp_path: Path) -> None:
@@ -119,6 +199,53 @@ def test_empty_report_never_claims_one_hundred_percent(tmp_path: Path) -> None:
         assert window["accepted_fresh_rate_pct"] is None
         assert window["data_available_rate_pct"] is None
         assert window["measurement_status"] == "collecting"
+        assert window["freshness_slo"]["objective_status"] == "collecting"
+        assert window["freshness_slo"]["error_budget_consumed_pct"] is None
+
+
+def test_schema_migrates_existing_database_without_losing_rows(tmp_path: Path) -> None:
+    import sqlite3
+
+    now = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
+    path = tmp_path / "reliability.sqlite3"
+    connection = sqlite3.connect(path)
+    connection.execute(
+        """
+        CREATE TABLE source_attempts (
+            attempt_id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            source_id TEXT NOT NULL,
+            finished_at REAL NOT NULL,
+            outcome TEXT NOT NULL,
+            terminal_state TEXT NOT NULL,
+            recorded_at REAL NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        "INSERT INTO source_attempts VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ("old", "old-run", "old-source", now.timestamp(), "lkg_served", "ok", now.timestamp()),
+    )
+    connection.commit()
+    connection.close()
+
+    record_terminal_results(
+        "new-run",
+        [
+            _status(
+                "new-source",
+                serving_cached_dataset=True,
+                last_refresh_failure_class="proxy_402",
+            )
+        ],
+        finished_at=now,
+        path=path,
+    )
+
+    day = build_reliability_report(now=now, path=path)["windows"][0]
+    assert day["counts"]["lkg_served"] == 2
+    assert day["failure_reasons"]["proxy_payment"] == 1
+    assert day["failure_reasons"]["unknown"] == 1
 
 
 def test_concurrent_process_style_writers_do_not_lose_attempts(tmp_path: Path) -> None:
@@ -198,7 +325,13 @@ def test_preflight_failure_records_terminal_failures_for_selected_sources() -> N
     record.assert_called_once()
     run_id, results = record.call_args.args
     assert isinstance(run_id, str) and run_id
-    assert results == [{"source_id": source_id, "state": "fetch_error"}]
+    assert results == [
+        {
+            "source_id": source_id,
+            "state": "fetch_error",
+            "failure_reason_code": "preflight",
+        }
+    ]
 
 
 def test_prefetch_failure_records_terminal_failures_and_ends_context() -> None:
@@ -222,7 +355,13 @@ def test_prefetch_failure_records_terminal_failures_and_ends_context() -> None:
 
     record.assert_called_once()
     _run_id, results = record.call_args.args
-    assert results == [{"source_id": source_id, "state": "fetch_error"}]
+    assert results == [
+        {
+            "source_id": source_id,
+            "state": "fetch_error",
+            "failure_reason_code": "dependency",
+        }
+    ]
     end_refresh.assert_called_once()
 
 
