@@ -3,12 +3,17 @@ from __future__ import annotations
 import asyncio
 import unittest
 from datetime import UTC, datetime, timedelta
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 from urllib.parse import parse_qs, urlparse
 
 from app.hsguru_archetype_analysis import (
+    ANALYSIS_TIMEOUT_MS,
+    ANALYSIS_WAIT_MS,
+    _active_archetypes,
     _fetch_html,
     analysis_urls,
+    parse_card_stats_games,
     parse_card_stats_html,
     parse_class_matchups_html,
     refresh_hsguru_archetype_analysis,
@@ -80,6 +85,11 @@ CARD_STATS_LIVE_CELL_HTML = """
 </table>
 """
 
+CARD_STATS_SPARSE_HTML = (
+    '<span class="tw-font-mono">Games: 1,234</span>'
+    + CARD_STATS_HTML.replace("12,345", "12").replace("9,876", "20")
+)
+
 
 class HSGuruArchetypeAnalysisTest(unittest.TestCase):
     def test_fetch_html_runs_one_shared_provider_cascade_without_retries(self) -> None:
@@ -149,6 +159,26 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
             ["scrape_do", "firecrawl", "scrapfly"],
         )
 
+    def test_fetch_html_uses_ssr_wait_timeout_and_schema_validator(self) -> None:
+        html = '<span class="tw-font-mono">Games: 0</span>' + CARD_STATS_HTML
+        result = SimpleNamespace(
+            html=html,
+            backend="scrape_do_super",
+            request_credits=25,
+            final_url="https://www.hsguru.com/card-stats",
+        )
+        scrape = AsyncMock(return_value=result)
+        with patch(
+            "app.hsguru_archetype_analysis.scrape_source_with_options",
+            new=scrape,
+        ):
+            asyncio.run(_fetch_html("https://www.hsguru.com/card-stats?format=2"))
+
+        options = scrape.await_args.kwargs
+        self.assertEqual(options["wait_ms"], ANALYSIS_WAIT_MS)
+        self.assertEqual(options["timeout_ms"], ANALYSIS_TIMEOUT_MS)
+        self.assertTrue(options["accept_result"](result))
+
     def test_parses_class_matchups_and_excludes_total(self) -> None:
         rows = parse_class_matchups_html(MATCHUPS_HTML)
 
@@ -181,6 +211,10 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
         self.assertNotIn("↑", rows[0]["card_name"])
         self.assertNotEqual(rows[0]["card_id"], "126252")
 
+    def test_parses_card_stats_sample_games(self) -> None:
+        self.assertEqual(parse_card_stats_games(CARD_STATS_SPARSE_HTML), 1234)
+        self.assertIsNone(parse_card_stats_games(CARD_STATS_HTML))
+
     def test_builds_legend_past_week_urls_for_requested_format(self) -> None:
         urls = analysis_urls("Void Soul DH", "standard")
         card_filters = parse_qs(urlparse(urls["cards"]).query)
@@ -190,8 +224,52 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
         self.assertIn("rank=legend", urls["matchups"])
         self.assertIn("period=past_week", urls["matchups"])
         self.assertIn("show_counts=yes", urls["cards"])
-        self.assertEqual(card_filters["min_mull_count"], ["25"])
-        self.assertEqual(card_filters["min_drawn_count"], ["25"])
+        self.assertEqual(card_filters["min_mull_count"], ["0"])
+        self.assertEqual(card_filters["min_drawn_count"], ["0"])
+
+    def test_active_archetypes_come_from_matching_legend_week_slices(self) -> None:
+        dataset = {
+            "data": {
+                "structured": {
+                    "slices": [
+                        {
+                            "key": "standard|legend|past_week|any_player",
+                            "rows": [{"archetype": "Legend Mage"}],
+                        },
+                        {
+                            "key": "wild|legend|past_week|any_player",
+                            "rows": [{"archetype": "Wild Rogue"}],
+                        },
+                        {
+                            "key": "standard|all|past_week|any_player",
+                            "rows": [{"archetype": "Wrong Rank"}],
+                        },
+                    ],
+                    "current_catalog": {
+                        "archetypes": [
+                            {
+                                "format": "standard",
+                                "archetype": "Wrong Period",
+                                "has_decks": True,
+                            }
+                        ]
+                    },
+                }
+            }
+        }
+        with patch(
+            "app.hsguru_archetype_analysis.load_dataset",
+            return_value=dataset,
+        ):
+            rows = _active_archetypes()
+
+        self.assertEqual(
+            rows,
+            [
+                {"format": "standard", "archetype": "Legend Mage"},
+                {"format": "wild", "archetype": "Wild Rogue"},
+            ],
+        )
 
     def test_refresh_publishes_both_analysis_surfaces(self) -> None:
         async def fetch_html(url: str):
@@ -277,10 +355,52 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
         negative_cache = saved["payload"]["data"]["structured"]["negative_cache"]
         self.assertEqual(len(negative_cache), 1)
         self.assertEqual(negative_cache[0]["kind"], "card_stats")
-        self.assertEqual(negative_cache[0]["state"], "upstream_unavailable")
+        self.assertEqual(
+            negative_cache[0]["state"], "upstream_card_tallies_missing"
+        )
         checked_at = datetime.fromisoformat(negative_cache[0]["checked_at"])
         retry_after = datetime.fromisoformat(negative_cache[0]["retry_after"])
-        self.assertEqual(retry_after - checked_at, timedelta(days=7))
+        self.assertEqual(retry_after - checked_at, timedelta(hours=1))
+
+    def test_refresh_treats_locally_filtered_rows_as_valid_sparse_data(self) -> None:
+        async def fetch_html(url: str):
+            html = MATCHUPS_HTML if "/archetype/" in url else CARD_STATS_SPARSE_HTML
+            return html, {"backend": "scrape_do_super", "request_credits": 25}
+
+        saved = {}
+        with (
+            patch(
+                "app.hsguru_archetype_analysis._previous_analysis",
+                return_value={},
+            ),
+            patch(
+                "app.hsguru_archetype_analysis._previous_negative_cache",
+                return_value={},
+            ),
+            patch(
+                "app.hsguru_archetype_analysis.save_dataset",
+                side_effect=lambda _source_id, payload: saved.update(payload=payload),
+            ),
+            patch("app.hsguru_archetype_analysis.save_status"),
+        ):
+            result = asyncio.run(
+                refresh_hsguru_archetype_analysis(
+                    archetypes=[
+                        {"format": "standard", "archetype": "Sparse Mage"}
+                    ],
+                    fetch_html=fetch_html,
+                )
+            )
+
+        row = saved["payload"]["data"]["structured"]["archetypes"][0]
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["unavailable"], [])
+        self.assertEqual(row["state"], "ok")
+        self.assertEqual(row["card_stats_state"], "sparse_valid")
+        self.assertEqual(row["card_stats"], [])
+        self.assertEqual(
+            saved["payload"]["data"]["structured"]["negative_cache"], []
+        )
 
     def test_refresh_skips_card_stats_while_negative_cache_is_fresh(self) -> None:
         now = datetime(2026, 7, 24, 12, 0, tzinfo=UTC)
@@ -295,6 +415,7 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
             "archetype": "Small Sample Priest",
             "kind": "card_stats",
             "state": "upstream_unavailable",
+            "cache_version": 2,
             "min_mull_count": 25,
             "min_drawn_count": 25,
             "checked_at": (now - timedelta(days=1)).isoformat(),
@@ -468,6 +589,260 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
             saved["payload"]["data"]["structured"]["negative_cache"],
             [],
         )
+
+    def test_provider_circuit_stops_fanout_and_preserves_canonical_dataset(self) -> None:
+        calls = 0
+
+        async def fetch_html(_url: str):
+            nonlocal calls
+            calls += 1
+            raise RuntimeError("provider cascade failed")
+
+        cached_row = {
+            "format": "standard",
+            "archetype": "Cached Mage",
+            "state": "ok",
+            "class_matchups": [{"class_key": "mage"}],
+            "card_stats": [{"card_name": "Fireball"}],
+        }
+        saved_status = {}
+        targets = [
+            {"format": "standard", "archetype": f"Target {index}"}
+            for index in range(10)
+        ]
+        with (
+            patch(
+                "app.hsguru_archetype_analysis._previous_analysis",
+                return_value={
+                    ("standard", "cached mage"): cached_row
+                },
+            ),
+            patch(
+                "app.hsguru_archetype_analysis._previous_negative_cache",
+                return_value={},
+            ),
+            patch("app.hsguru_archetype_analysis.save_dataset") as save_dataset,
+            patch(
+                "app.hsguru_archetype_analysis.save_status",
+                side_effect=lambda _source_id, payload: saved_status.update(payload),
+            ),
+        ):
+            result = asyncio.run(
+                refresh_hsguru_archetype_analysis(
+                    archetypes=targets,
+                    concurrency=2,
+                    fetch_html=fetch_html,
+                )
+            )
+
+        self.assertFalse(result["ok"])
+        self.assertFalse(result["published"])
+        self.assertTrue(result["serving_cached_dataset"])
+        self.assertTrue(result["provider_circuit_open"])
+        self.assertLessEqual(calls, 6)
+        self.assertGreater(result["targets_remaining"], 0)
+        self.assertEqual(saved_status["errors_total"], len(result["errors"]))
+        save_dataset.assert_not_called()
+
+    def test_card_failures_open_circuit_despite_successful_matchups(self) -> None:
+        matchup_calls = 0
+        card_calls = 0
+
+        async def fetch_html(url: str):
+            nonlocal card_calls, matchup_calls
+            if "/archetype/" in url:
+                matchup_calls += 1
+                return MATCHUPS_HTML, {
+                    "backend": "scrape_do_super",
+                    "request_credits": 25,
+                }
+            card_calls += 1
+            raise RuntimeError("card provider path failed")
+
+        targets = [
+            {"format": "standard", "archetype": f"Mixed {index}"}
+            for index in range(12)
+        ]
+        with (
+            patch(
+                "app.hsguru_archetype_analysis._previous_analysis",
+                return_value={},
+            ),
+            patch(
+                "app.hsguru_archetype_analysis._previous_negative_cache",
+                return_value={},
+            ),
+            patch("app.hsguru_archetype_analysis.save_dataset") as save_dataset,
+            patch("app.hsguru_archetype_analysis.save_status"),
+        ):
+            result = asyncio.run(
+                refresh_hsguru_archetype_analysis(
+                    archetypes=targets,
+                    concurrency=2,
+                    fetch_html=fetch_html,
+                )
+            )
+
+        self.assertTrue(result["provider_circuit_open"])
+        self.assertEqual(result["provider_circuit_kind"], "card_stats")
+        self.assertLessEqual(card_calls, 4)
+        self.assertLess(matchup_calls, len(targets))
+        save_dataset.assert_not_called()
+
+    def test_full_refresh_resumes_only_completed_sidecar_targets(self) -> None:
+        targets = [
+            {"format": "standard", "archetype": f"Resume {index}"}
+            for index in range(6)
+        ]
+        first_calls = 0
+
+        async def first_fetch(url: str):
+            nonlocal first_calls
+            first_calls += 1
+            if first_calls > 4:
+                raise RuntimeError("temporary provider outage")
+            if "/archetype/" in url:
+                return MATCHUPS_HTML, {
+                    "backend": "scrape_do_super",
+                    "request_credits": 25,
+                }
+            return CARD_STATS_HTML, {
+                "backend": "scrape_do_super",
+                "request_credits": 25,
+            }
+
+        second_calls = 0
+
+        async def second_fetch(url: str):
+            nonlocal second_calls
+            second_calls += 1
+            if "/archetype/" in url:
+                return MATCHUPS_HTML, {
+                    "backend": "scrape_do_super",
+                    "request_credits": 25,
+                }
+            return CARD_STATS_HTML, {
+                "backend": "scrape_do_super",
+                "request_credits": 25,
+            }
+
+        with (
+            patch(
+                "app.hsguru_archetype_analysis._active_archetypes",
+                return_value=targets,
+            ),
+            patch(
+                "app.hsguru_archetype_analysis._previous_analysis",
+                return_value={},
+            ),
+            patch(
+                "app.hsguru_archetype_analysis._previous_negative_cache",
+                return_value={},
+            ),
+            patch("app.hsguru_archetype_analysis.save_dataset") as save_dataset,
+            patch("app.hsguru_archetype_analysis.save_status"),
+        ):
+            first = asyncio.run(
+                refresh_hsguru_archetype_analysis(
+                    concurrency=1,
+                    fetch_html=first_fetch,
+                )
+            )
+            second = asyncio.run(
+                refresh_hsguru_archetype_analysis(
+                    concurrency=1,
+                    fetch_html=second_fetch,
+                )
+            )
+
+        self.assertFalse(first["published"])
+        self.assertEqual(first["targets_completed"], 2)
+        self.assertTrue(second["published"])
+        self.assertEqual(second["resumed_targets"], 2)
+        self.assertEqual(second_calls, 8)
+        save_dataset.assert_called_once()
+
+    def test_expired_checkpoint_gap_is_retried_and_stale_unavailable_is_cleared(
+        self,
+    ) -> None:
+        now = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
+        target = {"format": "standard", "archetype": "Recovered Mage"}
+        checkpoint_row = {
+            **target,
+            "state": "partial",
+            "class_matchups": [{"class_key": "mage"}],
+            "card_stats": [],
+            "matchups_state": "complete",
+            "card_stats_state": "source_no_data",
+        }
+        checkpoint = {
+            "state": "in_progress",
+            "schema_version": 2,
+            "rank": "legend",
+            "period": "past_week",
+            "started_at": (now - timedelta(minutes=90)).isoformat(),
+            "completed": [target],
+            "rows": [checkpoint_row],
+            "negative_cache": [
+                {
+                    **target,
+                    "kind": "card_stats",
+                    "state": "source_no_data",
+                    "cache_version": 2,
+                    "min_mull_count": 25,
+                    "min_drawn_count": 25,
+                    "checked_at": (now - timedelta(minutes=90)).isoformat(),
+                    "retry_after": (now - timedelta(minutes=30)).isoformat(),
+                }
+            ],
+            "unavailable": [
+                {
+                    **target,
+                    "kind": "card_stats",
+                    "state": "source_no_data",
+                    "reason": "old sparse result",
+                }
+            ],
+        }
+        calls = 0
+
+        async def fetch_html(url: str):
+            nonlocal calls
+            calls += 1
+            if "/archetype/" in url:
+                return MATCHUPS_HTML, {"backend": "scrape_do_super"}
+            return CARD_STATS_HTML, {"backend": "scrape_do_super"}
+
+        with (
+            patch(
+                "app.hsguru_archetype_analysis._active_archetypes",
+                return_value=[target],
+            ),
+            patch(
+                "app.hsguru_archetype_analysis._previous_analysis",
+                return_value={},
+            ),
+            patch(
+                "app.hsguru_archetype_analysis._previous_negative_cache",
+                return_value={},
+            ),
+            patch(
+                "app.hsguru_archetype_analysis._load_refresh_checkpoint",
+                return_value=checkpoint,
+            ),
+            patch("app.hsguru_archetype_analysis._utc_now", return_value=now),
+            patch("app.hsguru_archetype_analysis.save_baseline"),
+            patch("app.hsguru_archetype_analysis.save_dataset"),
+            patch("app.hsguru_archetype_analysis.save_status"),
+        ):
+            result = asyncio.run(
+                refresh_hsguru_archetype_analysis(fetch_html=fetch_html)
+            )
+
+        self.assertTrue(result["published"])
+        self.assertEqual(result["resumed_targets"], 0)
+        self.assertEqual(result["unavailable"], [])
+        self.assertEqual(calls, 2)
 
 
 if __name__ == "__main__":

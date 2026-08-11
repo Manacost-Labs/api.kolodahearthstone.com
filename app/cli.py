@@ -743,6 +743,15 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
         print(json.dumps(result, ensure_ascii=False, indent=2))
+        if args.scheduled and result.get("state") == "locked":
+            return int(ExitCode.DEGRADED)
+        if args.scheduled and result.get("retryable"):
+            return int(ExitCode.ERROR)
+        if args.scheduled and (
+            result.get("serving_cached_dataset")
+            or result.get("state") not in {SourceState.OK, "locked"}
+        ):
+            return int(ExitCode.DEGRADED)
         if result.get("ok"):
             return int(ExitCode.OK)
         if args.scheduled and int(result.get("archetypes") or 0) > 0:

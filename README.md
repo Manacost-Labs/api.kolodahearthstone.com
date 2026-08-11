@@ -285,7 +285,15 @@ docker exec hs-data-api python -m app.cli quality-check
 
 # Длительный HSGuru pipeline
 docker exec hs-data-api python -m app.cli refresh-hsguru-meta-matrix --concurrency 2
+docker compose run --rm api python -m app.cli \
+  refresh-hsguru-archetype-analysis --scheduled --concurrency 4
 ```
+
+Archetype analysis берёт цели из точных срезов `legend/past_week`, различает
+корректно разреженные post-patch card stats и сбой провайдера, а прогресс пишет
+во внутренний sidecar. До успешного завершения canonical dataset не меняется;
+после трёх последовательных отказов provider chain fanout останавливается и API
+продолжает обслуживать последний проверенный набор.
 
 Scheduled команды могут завершиться кодом `10`; это не свежий успех, а
 обслуживаемая деградация. Для ручного health gate не маскируйте этот код и

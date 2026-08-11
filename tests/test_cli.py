@@ -197,6 +197,42 @@ class CliTest(unittest.TestCase):
 
         self.assertEqual(exit_code, 10)
 
+    def test_scheduled_archetype_retryable_failure_requests_restart(self) -> None:
+        result = {
+            "ok": False,
+            "state": "partial",
+            "archetypes": 146,
+            "retryable": True,
+            "serving_cached_dataset": True,
+        }
+        with patch(
+            "app.hsguru_archetype_analysis.refresh_hsguru_archetype_analysis",
+            new=AsyncMock(return_value=result),
+        ):
+            exit_code = cli.main(
+                ["refresh-hsguru-archetype-analysis", "--scheduled"]
+            )
+
+        self.assertEqual(exit_code, 1)
+
+    def test_scheduled_archetype_lock_is_handled_degradation(self) -> None:
+        result = {
+            "ok": True,
+            "published": False,
+            "state": "locked",
+            "skipped": True,
+            "reason": "resource_locked",
+        }
+        with patch(
+            "app.hsguru_archetype_analysis.refresh_hsguru_archetype_analysis",
+            new=AsyncMock(return_value=result),
+        ):
+            exit_code = cli.main(
+                ["refresh-hsguru-archetype-analysis", "--scheduled"]
+            )
+
+        self.assertEqual(exit_code, 10)
+
     def test_scheduled_refresh_reports_handled_degradation_separately(self) -> None:
         results = [
             {
