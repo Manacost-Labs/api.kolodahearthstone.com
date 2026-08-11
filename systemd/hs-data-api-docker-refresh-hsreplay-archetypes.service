@@ -1,7 +1,7 @@
 [Unit]
 Description=Refresh HSReplay Standard archetype SQLite database in Docker
 Requires=hs-data-api-docker.service
-After=hs-data-api-docker.service network-online.target
+After=hs-data-api-docker.service network-online.target hs-data-api-docker-firecrawl-hsreplay-map.service
 
 [Service]
 Type=oneshot

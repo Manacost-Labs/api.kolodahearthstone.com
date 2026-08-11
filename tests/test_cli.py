@@ -577,6 +577,23 @@ class CliTest(unittest.TestCase):
         resource_locks.return_value.__enter__.assert_called_once_with()
         build.assert_called_once_with()
 
+    def test_scrape_do_map_command_refreshes_map_and_index(self) -> None:
+        with (
+            patch("app.resource_locks.ResourceLockSet") as resource_locks,
+            patch(
+                "app.firecrawl_map.refresh_hsreplay_map_and_index",
+                return_value={"ok": True, "provider": "scrape_do"},
+            ) as refresh,
+            redirect_stdout(io.StringIO()),
+        ):
+            exit_code = cli.main(["scrape-do-map-hsreplay"])
+
+        self.assertEqual(exit_code, 0)
+        resource_locks.assert_called_once_with(
+            ["derived:hsreplay-index", "derived:hsreplay-map"]
+        )
+        refresh.assert_called_once_with()
+
     def test_rebuild_index_reports_expected_lock_overlap_as_skipped(self) -> None:
         output = io.StringIO()
         owner = {

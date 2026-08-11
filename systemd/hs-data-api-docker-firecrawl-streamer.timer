@@ -1,5 +1,5 @@
 [Unit]
-Description=Refresh HSGuru streamer decks via Firecrawl in Docker hourly
+Description=Refresh HSGuru streamer decks through shared providers every hour
 
 [Timer]
 OnCalendar=*-*-* *:15:00 Europe/Warsaw

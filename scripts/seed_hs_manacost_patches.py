@@ -2,22 +2,24 @@
 from __future__ import annotations
 
 import argparse
-from datetime import UTC, datetime
 import html
-from html.parser import HTMLParser
 import json
-from pathlib import Path
 import re
 import sys
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
+from datetime import UTC, datetime
+from html.parser import HTMLParser
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.patches_db import count_patches, delete_patches_not_in, upsert_patch
+from app.patches_db import count_patches, delete_patches_not_in, get_patch, upsert_patch
 
 USER_AGENT = "HSDataAPI/0.1 (+https://api.hs-manacost.ru)"
 WIKI_PATCHES_URL = "https://hearthstone.wiki.gg/wiki/Patches"
@@ -43,6 +45,38 @@ BLOCKED_SLUG_FRAGMENTS = (
     "league-of-legends",
 )
 WP_POST_CACHE: dict[str, dict] = {}
+FETCH_ATTEMPTS = 3
+FETCH_RETRY_DELAYS_SECONDS = (1.0, 3.0)
+RETRYABLE_HTTP_STATUSES = frozenset({408, 425, 429, 500, 502, 503, 504})
+PARTIAL_EXIT_CODE = 10
+ALLOWED_HS_MANACOST_HOSTS = frozenset({"hs-manacost.ru", "www.hs-manacost.ru"})
+MAX_CONSECUTIVE_DETAIL_FAILURES = 3
+MAX_RUN_SECONDS = 30 * 60
+
+
+class SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def __init__(self, allowed_hosts: frozenset[str]) -> None:
+        super().__init__()
+        self.allowed_hosts = allowed_hosts
+
+    def redirect_request(
+        self,
+        req: urllib.request.Request,
+        fp,
+        code: int,
+        msg: str,
+        headers,
+        newurl: str,
+    ) -> urllib.request.Request | None:
+        if not _is_allowed_https_url(newurl, self.allowed_hosts):
+            raise urllib.error.HTTPError(
+                newurl,
+                code,
+                "Redirect target is not an approved HTTPS host",
+                headers,
+                fp,
+            )
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
 class TextExtractor(HTMLParser):
@@ -104,10 +138,69 @@ class HeadingExtractor(HTMLParser):
             self.current_text.append(data.strip())
 
 
+def _is_retryable_fetch_error(exc: OSError) -> bool:
+    if isinstance(exc, urllib.error.HTTPError):
+        return exc.code in RETRYABLE_HTTP_STATUSES
+    return True
+
+
+def _is_allowed_https_url(url: str, allowed_hosts: frozenset[str]) -> bool:
+    try:
+        parsed = urllib.parse.urlsplit(url)
+        port = parsed.port
+    except ValueError:
+        return False
+    return (
+        parsed.scheme == "https"
+        and parsed.hostname in allowed_hosts
+        and parsed.username is None
+        and parsed.password is None
+        and port in {None, 443}
+    )
+
+
+def _is_allowed_hs_manacost_url(url: str) -> bool:
+    return _is_allowed_https_url(url, ALLOWED_HS_MANACOST_HOSTS)
+
+
+def _contributes_to_detail_circuit(exc: BaseException) -> bool:
+    if isinstance(exc, json.JSONDecodeError):
+        return True
+    if isinstance(exc, OSError):
+        return _is_retryable_fetch_error(exc)
+    return False
+
+
+def _open_url(
+    req: urllib.request.Request,
+    *,
+    timeout: float,
+    allowed_hosts: frozenset[str],
+):
+    opener = urllib.request.build_opener(SafeRedirectHandler(allowed_hosts))
+    return opener.open(req, timeout=timeout)
+
+
 def fetch_text(url: str) -> str:
+    parsed = urllib.parse.urlsplit(url)
+    initial_host = parsed.hostname
+    allowed_hosts = (
+        ALLOWED_HS_MANACOST_HOSTS
+        if initial_host in ALLOWED_HS_MANACOST_HOSTS
+        else frozenset({initial_host}) if initial_host else frozenset()
+    )
+    if not _is_allowed_https_url(url, allowed_hosts):
+        raise ValueError("Source URL must use its approved HTTPS host")
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        return resp.read().decode("utf-8", "ignore")
+    for attempt in range(1, FETCH_ATTEMPTS + 1):
+        try:
+            with _open_url(req, timeout=30, allowed_hosts=allowed_hosts) as resp:
+                return resp.read().decode("utf-8", "ignore")
+        except OSError as exc:
+            if attempt >= FETCH_ATTEMPTS or not _is_retryable_fetch_error(exc):
+                raise
+            time.sleep(FETCH_RETRY_DELAYS_SECONDS[attempt - 1])
+    raise AssertionError("unreachable")
 
 
 def latest_wiki_versions(limit: int | None) -> list[str]:
@@ -360,19 +453,30 @@ def title_matches_patch(title: str, wiki_version: str) -> str | None:
 def hs_manacost_post_urls() -> list[str]:
     root = ET.fromstring(fetch_text(HS_MANACOST_SITEMAP_URL))
     ns = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
-    sitemap_urls = [
-        loc.text
+    sitemap_candidates = [
+        loc.text.strip()
         for loc in root.findall(".//sm:loc", ns)
         if loc.text and "post-sitemap" in loc.text
     ]
+    invalid_sitemaps = [
+        sitemap_url
+        for sitemap_url in sitemap_candidates
+        if not _is_allowed_hs_manacost_url(sitemap_url)
+    ]
+    if invalid_sitemaps:
+        raise RuntimeError("hs-manacost.ru sitemap referenced an unapproved host")
+    if not sitemap_candidates:
+        raise RuntimeError("hs-manacost.ru sitemap returned no post sitemaps")
     urls: list[str] = []
-    for sitemap_url in sitemap_urls:
+    for sitemap_url in sitemap_candidates:
         sitemap = ET.fromstring(fetch_text(sitemap_url))
         urls.extend(
-            loc.text
+            loc.text.strip()
             for loc in sitemap.findall(".//sm:loc", ns)
-            if loc.text
+            if loc.text and _is_allowed_hs_manacost_url(loc.text.strip())
         )
+    if not urls:
+        raise RuntimeError("hs-manacost.ru post sitemaps returned no approved post URLs")
     return urls
 
 
@@ -539,6 +643,7 @@ def main() -> int:
     if len(argv) == 1 and argv[0].isdigit():
         argv = ["--limit", argv[0]]
     args = parse_args(argv)
+    started_at = time.monotonic()
     limit = None if args.all else args.limit
     catalog = combined_patch_catalog(limit)
     if args.all and not args.matched_only:
@@ -547,21 +652,56 @@ def main() -> int:
     post_urls = hs_manacost_post_urls()
     stored: list[dict[str, str | None]] = []
     missing: list[str] = []
+    failed: list[dict[str, str]] = []
+    preserved_matched: list[str] = []
+    not_attempted: list[str] = []
+    consecutive_detail_failures = 0
+    circuit_open = False
+    deadline_reached = False
     for wiki_rank, catalog_item in enumerate(catalog):
+        if time.monotonic() - started_at >= MAX_RUN_SECONDS:
+            deadline_reached = True
+            not_attempted.extend(item["version"] for item in catalog[wiki_rank:])
+            break
         version = catalog_item["version"]
         official = {key: value for key, value in catalog_item.items() if key != "version"}
         source_url, hs_version = find_patch_url(post_urls, version)
         if source_url and hs_version:
-            patch = build_patch(
-                version,
-                source_url,
-                hs_version,
-                wiki_rank=wiki_rank,
-                official=official,
-            )
+            try:
+                patch = build_patch(
+                    version,
+                    source_url,
+                    hs_version,
+                    wiki_rank=wiki_rank,
+                    official=official,
+                )
+            except (OSError, RuntimeError, json.JSONDecodeError) as exc:
+                failed.append({"version": version, "error_type": type(exc).__name__})
+                if _contributes_to_detail_circuit(exc):
+                    consecutive_detail_failures += 1
+                else:
+                    consecutive_detail_failures = 0
+                if consecutive_detail_failures >= MAX_CONSECUTIVE_DETAIL_FAILURES:
+                    circuit_open = True
+                    not_attempted.extend(
+                        item["version"] for item in catalog[wiki_rank + 1 :]
+                    )
+                    break
+                continue
+            consecutive_detail_failures = 0
         else:
             missing.append(version)
             if args.matched_only:
+                continue
+            existing = get_patch(version, include_content=False)
+            if existing and existing.get("match_state") == "matched":
+                preserved_matched.append(version)
+                failed.append(
+                    {
+                        "version": version,
+                        "error_type": "PreviouslyMatchedArticleMissing",
+                    }
+                )
                 continue
             patch = build_wiki_patch(version, wiki_rank=wiki_rank, official=official)
         upsert_patch(patch)
@@ -577,15 +717,29 @@ def main() -> int:
                 "match_state": patch.get("match_state"),
             }
         )
-    deleted_stale = delete_patches_not_in(set(versions)) if args.all and not args.matched_only else 0
+    partial = bool(failed or not_attempted)
+    deleted_stale = (
+        delete_patches_not_in(set(versions))
+        if args.all and not args.matched_only and not partial
+        else 0
+    )
     print(
         json.dumps(
             {
-                "ok": True,
+                "ok": not partial,
+                "state": "partial" if partial else "ok",
                 "versions_seen": len(versions),
                 "stored_count": len(stored),
                 "matched_count": len([item for item in stored if item.get("match_state") == "matched"]),
                 "missing_manacost_count": len(missing),
+                "failed_count": len(failed),
+                "failed_versions": failed,
+                "preserved_matched_count": len(preserved_matched),
+                "preserved_matched_versions": preserved_matched,
+                "not_attempted_count": len(not_attempted),
+                "not_attempted_versions": not_attempted,
+                "circuit_open": circuit_open,
+                "deadline_reached": deadline_reached,
                 "deleted_stale_count": deleted_stale,
                 "missing_manacost_versions": missing,
                 "stored": stored,
@@ -594,7 +748,7 @@ def main() -> int:
             indent=2,
         )
     )
-    return 0
+    return PARTIAL_EXIT_CODE if partial else 0
 
 
 if __name__ == "__main__":

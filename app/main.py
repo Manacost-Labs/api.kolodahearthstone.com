@@ -677,7 +677,7 @@ def firecrawl_hsreplay_map() -> dict:
 
     payload = load_hsreplay_map()
     if payload is None:
-        raise HTTPException(status_code=404, detail="HSReplay Firecrawl map has not been generated yet")
+        raise HTTPException(status_code=404, detail="HSReplay sitemap map has not been generated yet")
     return payload
 
 
@@ -687,7 +687,7 @@ def firecrawl_hsreplay_index() -> dict:
 
     payload = load_hsreplay_index()
     if payload is None:
-        raise HTTPException(status_code=404, detail="HSReplay Firecrawl index has not been generated yet")
+        raise HTTPException(status_code=404, detail="HSReplay derived index has not been generated yet")
     return payload
 
 

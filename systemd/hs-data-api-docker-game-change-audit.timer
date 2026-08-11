@@ -2,7 +2,7 @@
 Description=Daily Hearthstone patch and content consistency audit
 
 [Timer]
-OnCalendar=*-*-* 09:15:00 Europe/Warsaw
+OnCalendar=*-*-* 11:15:00 Europe/Warsaw
 AccuracySec=1min
 RandomizedDelaySec=5min
 Persistent=true

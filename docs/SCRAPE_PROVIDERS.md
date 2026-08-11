@@ -68,8 +68,15 @@ secret environment после canary.
 Bright Data fallback используется только для HTML/raw HTML/markdown. Он
 намеренно пропускается, если caller передал `headers` — даже пустой dict — или
 запросил screenshot. Поэтому через этот слой нельзя отправлять cookies,
-авторизационные/custom headers или browser storage. Команда Firecrawl map и
-другие map-запросы остаются Firecrawl-only и на Bright Data не переключаются.
+авторизационные/custom headers или browser storage. Карта HSReplay получает
+официальные sitemap через Scrape.do без рендеринга; она не передаёт cookies и
+не переключается на Bright Data. Fan-out ограничен 32 дочерними sitemap,
+количество попыток и подтверждённые request credits считаются явно, а остаток
+баланса провайдера не записывается в публичный map snapshot.
+Map и derived index сначала полностью проходят проверку качества в памяти и
+только затем публикуются. Общий resource lock не допускает чтение индекса
+плановым обновлением архетипов во время замены, а systemd ограничивает map-job
+35 минутами.
 
 Endpoint Web Unlocker зафиксирован в коде как
 `https://api.brightdata.com/request`: переменной для его подмены нет. Ответ

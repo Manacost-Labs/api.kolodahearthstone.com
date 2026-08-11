@@ -52,7 +52,7 @@ snapshot, а старые снимки остаются для будущих т
 
 ## CLI
 
-Полное обновление всех Standard архетипов из Firecrawl index:
+Полное обновление всех Standard архетипов из derived sitemap index:
 
 ```bash
 python -m app.cli refresh-hsreplay-archetypes
@@ -102,8 +102,9 @@ sudo systemctl enable --now hs-data-api-docker-refresh-hsreplay-archetypes.timer
 Mon,Thu *-*-* 03:20:00 Europe/Warsaw
 ```
 
-Это даёт два снимка в неделю. Weekly Firecrawl map/index обновляется отдельно
-перед понедельничным refresh, чтобы список архетипов оставался актуальным.
+Это даёт два снимка в неделю. Weekly sitemap map/index через Scrape.do
+обновляется отдельно перед понедельничным refresh, чтобы список архетипов
+оставался актуальным.
 
 ## API
 

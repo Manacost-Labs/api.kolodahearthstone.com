@@ -1,7 +1,7 @@
 # Daily game-change audit
 
 The production host runs `hs-data-api-docker-game-change-audit.timer` every day
-at 09:15 Europe/Warsaw, after the normal data refresh and patch-catalog refresh.
+at 11:15 Europe/Warsaw, after the normal data refresh and patch-catalog refresh.
 It is a read-only publication audit: it never replaces a valid dataset with
 unverified upstream data.
 

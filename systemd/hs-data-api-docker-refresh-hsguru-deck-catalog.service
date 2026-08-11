@@ -1,5 +1,5 @@
 [Unit]
-Description=Refresh broad HSGuru deck catalogs through Firecrawl
+Description=Refresh broad HSGuru deck catalogs through Scrape.do
 Requires=hs-data-api-docker.service
 After=hs-data-api-docker.service network-online.target
 

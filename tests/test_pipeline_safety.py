@@ -46,9 +46,13 @@ class PipelineResourceLockTest(unittest.IsolatedAsyncioTestCase):
         with patch(
             "app.hsreplay_archetypes_db.ResourceLockSet",
             return_value=lock,
-        ):
+        ) as lock_set:
             result = await refresh_hsreplay_archetype_database()
 
+        lock_set.assert_called_once_with(
+            ["derived:hsreplay-index", "hsreplay_archetypes"],
+            metadata={"operation": "refresh_hsreplay_archetype_database"},
+        )
         self.assertTrue(result["ok"])
         self.assertFalse(result["published"])
         self.assertEqual(result["state"], "locked")

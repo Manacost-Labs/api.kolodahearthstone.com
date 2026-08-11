@@ -136,7 +136,7 @@ def _parse_deck_cards(
 def _archetypes_from_index() -> list[dict[str, Any]]:
     payload = load_hsreplay_index()
     if not payload:
-        raise RuntimeError("HSReplay Firecrawl index is missing; run firecrawl-map-hsreplay first")
+        raise RuntimeError("HSReplay derived index is missing; run scrape-do-map-hsreplay first")
     rows = payload.get("standard_unique_archetypes") or []
     if not isinstance(rows, list):
         return []
@@ -949,7 +949,7 @@ async def refresh_hsreplay_archetype_database(
     snapshots, status, compatibility export, or canonical production dataset.
     """
     locks = ResourceLockSet(
-        [SOURCE],
+        ["derived:hsreplay-index", SOURCE],
         metadata={"operation": "refresh_hsreplay_archetype_database"},
     )
     try:

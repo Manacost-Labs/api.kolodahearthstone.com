@@ -7,3 +7,6 @@ After=hs-data-api-docker.service network-online.target
 Type=oneshot
 WorkingDirectory=/srv/hs-data-api
 ExecStart=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm api python /app/scripts/seed_hs_manacost_patches.py --all
+SuccessExitStatus=10
+TimeoutStartSec=35min
+TimeoutStopSec=30s

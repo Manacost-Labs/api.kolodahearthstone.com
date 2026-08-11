@@ -1,5 +1,5 @@
 [Unit]
-Description=Refresh HSReplay Firecrawl crawl map and derived index weekly
+Description=Refresh HSReplay sitemap through Scrape.do and derived index weekly
 
 [Timer]
 OnCalendar=Mon *-*-* 02:35:00 Europe/Warsaw

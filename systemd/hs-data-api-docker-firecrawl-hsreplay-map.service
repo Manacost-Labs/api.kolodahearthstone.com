@@ -1,9 +1,11 @@
 [Unit]
-Description=Refresh HSReplay Firecrawl crawl map and derived index in Docker
+Description=Refresh HSReplay sitemap through Scrape.do and derived index in Docker
 Requires=hs-data-api-docker.service
 After=hs-data-api-docker.service network-online.target
 
 [Service]
 Type=oneshot
 WorkingDirectory=/srv/hs-data-api
-ExecStart=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm api python -m app.cli firecrawl-map-hsreplay
+ExecStart=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm api python -m app.cli scrape-do-map-hsreplay
+TimeoutStartSec=35min
+TimeoutStopSec=30s

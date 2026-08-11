@@ -210,7 +210,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     hsguru_recon.add_argument("--url", default="https://www.hsguru.com/meta?format=2&min_games=100&rank=legend")
     sub.add_parser(
         "firecrawl-map-hsreplay",
-        help="Run Firecrawl /v2/map for hsreplay.net and rebuild the derived HSReplay index.",
+        help="Compatibility alias: fetch HSReplay sitemaps through Scrape.do and rebuild the derived index.",
+    )
+    sub.add_parser(
+        "scrape-do-map-hsreplay",
+        help="Fetch HSReplay sitemaps through Scrape.do and rebuild the derived HSReplay index.",
     )
     sub.add_parser(
         "rebuild-hsreplay-index",
@@ -589,10 +593,17 @@ def main(argv: list[str] | None = None) -> int:
         result = asyncio.run(_recon())
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0 if result.get("ok") else 1
-    if args.command == "firecrawl-map-hsreplay":
+    if args.command in {"firecrawl-map-hsreplay", "scrape-do-map-hsreplay"}:
         from .firecrawl_map import refresh_hsreplay_map_and_index
+        from .resource_locks import ResourceLocked, ResourceLockSet
 
-        result = refresh_hsreplay_map_and_index()
+        try:
+            with ResourceLockSet(
+                ["derived:hsreplay-index", "derived:hsreplay-map"],
+            ):
+                result = refresh_hsreplay_map_and_index()
+        except ResourceLocked as exc:
+            result = {"ok": True, **exc.as_outcome()}
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0 if result.get("ok") else 1
     if args.command == "rebuild-hsreplay-index":

@@ -147,3 +147,43 @@ def test_docker_partial_safe_pipelines_accept_degraded_exit_code() -> None:
 
         assert command in service_text
         assert "SuccessExitStatus=10" in service_text
+
+
+def test_scrape_do_map_and_daily_audit_schedules_are_canonical() -> None:
+    systemd_dir = ROOT / "systemd"
+    map_service = (
+        systemd_dir / "hs-data-api-docker-firecrawl-hsreplay-map.service"
+    ).read_text(encoding="utf-8")
+    assert "python -m app.cli scrape-do-map-hsreplay" in map_service
+    assert "TimeoutStartSec=35min" in map_service
+
+    archetype_service = (
+        systemd_dir / "hs-data-api-docker-refresh-hsreplay-archetypes.service"
+    ).read_text(encoding="utf-8")
+    assert "After=" in archetype_service
+    assert "hs-data-api-docker-firecrawl-hsreplay-map.service" in archetype_service
+
+    streamer_timer = (
+        systemd_dir / "hs-data-api-docker-firecrawl-streamer.timer"
+    ).read_text(encoding="utf-8")
+    assert "OnCalendar=*-*-* *:15:00 Europe/Warsaw" in streamer_timer
+
+    patch_service = (
+        systemd_dir / "hs-data-api-docker-refresh-patches.service"
+    ).read_text(encoding="utf-8")
+    assert "SuccessExitStatus=10" in patch_service
+    assert "TimeoutStartSec=35min" in patch_service
+
+    deck_catalog_timer = (
+        systemd_dir / "hs-data-api-docker-refresh-hsguru-deck-catalog.timer"
+    ).read_text(encoding="utf-8")
+    assert deck_catalog_timer.count("OnCalendar=") == 1
+
+    patch_timer = (
+        systemd_dir / "hs-data-api-docker-refresh-patches.timer"
+    ).read_text(encoding="utf-8")
+    audit_timer = (
+        systemd_dir / "hs-data-api-docker-game-change-audit.timer"
+    ).read_text(encoding="utf-8")
+    assert "OnCalendar=*-*-* 10:20:00 Europe/Warsaw" in patch_timer
+    assert "OnCalendar=*-*-* 11:15:00 Europe/Warsaw" in audit_timer
