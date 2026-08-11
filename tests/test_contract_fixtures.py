@@ -8,6 +8,7 @@ from app.hsreplay_bg_heroes import (
     build_heroes_from_stats,
     merge_hero_stats,
     parse_hsreplay_bg_hero_stats_text,
+    reconcile_heroes_with_stats,
 )
 from app.hsreplay_cards_api import parse_cards_from_api_payloads
 from app.hsreplay_meta_api import normalize_meta_archetypes
@@ -105,6 +106,53 @@ class ContractFixturesTest(unittest.TestCase):
         self.assertNotEqual(heroes[0]["hero"], "—")
         self.assertEqual(heroes[0]["pick_rate"], "47.00%")
         self.assertEqual(heroes[0]["avg_placement"], "3.78")
+
+    def test_hsreplay_bg_hero_stats_recovers_rows_missing_from_rendered_page(self) -> None:
+        page_heroes = [
+            {
+                "hero": f"Page Hero {idx}",
+                "dbfId": 100_000 + idx,
+                "best_comp": "Механизмы",
+                "pick_rate": "1.00%",
+            }
+            for idx in range(30)
+        ]
+        stats = {
+            100_000 + idx: {
+                "placement_distribution": ["12.50%"] * 8,
+                "tier_v2": "A",
+                "api_pick_rate": f"{idx + 1:.2f}%",
+                "api_avg_placement": "4.50",
+                "best_composition_id": 8,
+            }
+            for idx in range(42)
+        }
+
+        heroes = reconcile_heroes_with_stats(page_heroes, stats)
+
+        self.assertEqual(len(heroes), 42)
+        by_dbf = {hero["dbfId"]: hero for hero in heroes}
+        self.assertEqual(by_dbf[100_000]["best_comp"], "Механизмы")
+        self.assertEqual(by_dbf[100_000]["pick_rate"], "1.00%")
+        self.assertEqual(by_dbf[100_041]["pick_rate"], "42.00%")
+        self.assertEqual(by_dbf[100_041]["tier"], "A")
+
+    def test_hsreplay_bg_hero_stats_does_not_expand_from_smaller_api_result(self) -> None:
+        page_heroes = [{"hero": f"Hero {idx}", "dbfId": idx} for idx in range(40)]
+        stats = {
+            idx: {
+                "placement_distribution": ["12.50%"] * 8,
+                "tier_v2": "A",
+                "api_pick_rate": "1.00%",
+                "api_avg_placement": "4.50",
+                "best_composition_id": 8,
+            }
+            for idx in range(30)
+        }
+
+        heroes = reconcile_heroes_with_stats(page_heroes, stats)
+
+        self.assertEqual(len(heroes), 40)
 
 
 if __name__ == "__main__":

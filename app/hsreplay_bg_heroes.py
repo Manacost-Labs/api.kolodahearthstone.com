@@ -217,6 +217,35 @@ def merge_hero_stats(
     return heroes
 
 
+def reconcile_heroes_with_stats(
+    heroes: list[dict[str, Any]],
+    stats_by_dbf: dict[int, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Enrich page rows and recover rows omitted by the rendered tier list."""
+    merged = merge_hero_stats([dict(hero) for hero in heroes], stats_by_dbf)
+    if len(stats_by_dbf) < 30 or len(stats_by_dbf) <= len(merged):
+        return merged
+
+    existing_dbf: set[int] = set()
+    for hero in merged:
+        try:
+            existing_dbf.add(int(hero["dbfId"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+
+    missing_stats = {
+        dbf_id: stats
+        for dbf_id, stats in stats_by_dbf.items()
+        if int(dbf_id) not in existing_dbf
+    }
+    merged.extend(build_heroes_from_stats(missing_stats))
+    return sorted(
+        merged,
+        key=lambda hero: float(str(hero.get("pick_rate") or "0").rstrip("%") or 0),
+        reverse=True,
+    )
+
+
 def parse_hsreplay_bg_heroes_html(html: str) -> list[dict[str, Any]]:
     soup = BeautifulSoup(html, "html.parser")
     heroes: list[dict[str, Any]] = []
@@ -292,17 +321,20 @@ async def fetch_hsreplay_battlegrounds_heroes(source: Source) -> dict[str, Any]:
     if status >= 400 or "Just a moment" in html or "cf-browser-verification" in html:
         raise RuntimeError(f"HSReplay Battlegrounds heroes blocked or unavailable (status={status})")
     heroes = parse_hsreplay_bg_heroes_html(html)
+    page_rows = len(heroes)
     if len(heroes) < 30 and _looks_unauthenticated(html):
         raise RuntimeError("HSReplay session not authenticated or premium data unavailable")
+    api_rows: int | None = None
+    reconciled_rows_added = 0
     try:
         stats_text = await fetch_text_via_flaresolverr(
             _HERO_STATS_API,
             source_id=source.id,
         )
         stats_by_dbf = parse_hsreplay_bg_hero_stats_text(stats_text)
-        heroes = merge_hero_stats(heroes, stats_by_dbf)
-        if len(heroes) < 30 and len(stats_by_dbf) >= 30:
-            heroes = build_heroes_from_stats(stats_by_dbf)
+        api_rows = len(stats_by_dbf)
+        heroes = reconcile_heroes_with_stats(heroes, stats_by_dbf)
+        reconciled_rows_added = max(len(heroes) - page_rows, 0)
     except Exception as exc:
         logger.warning("Could not enrich HSReplay BG heroes placement distribution: %s", exc)
     return {
@@ -313,6 +345,9 @@ async def fetch_hsreplay_battlegrounds_heroes(source: Source) -> dict[str, Any]:
             "backend": "hsreplay_premium_flaresolverr",
             "status": status,
             "url": solution.get("url") or source.url,
+            "page_rows": page_rows,
+            "api_rows": api_rows,
+            "reconciled_rows_added": reconciled_rows_added,
         },
         "filters": {
             "mmr_percentile": "TOP_50_PERCENT",
