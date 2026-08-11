@@ -282,7 +282,9 @@ class FirestoneStandardIntegrationTest(unittest.TestCase):
         self.assertEqual(estimate_filled_metric_count(SOURCE, dataset), 23)
 
     def test_early_post_patch_mode_allows_small_but_complete_reset(self) -> None:
-        previous = {"structured": _normalized_payload(deck_count=150, archetype_count=40)}
+        previous = {
+            "structured": _normalized_payload(deck_count=150, archetype_count=40)
+        }
         current = {"structured": _normalized_payload(deck_count=10, archetype_count=10)}
 
         regressed, _message, _extra = check_dataset_regression(
