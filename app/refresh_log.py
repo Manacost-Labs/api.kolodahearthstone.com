@@ -39,6 +39,8 @@ ACTION_GROUPS: dict[str, str] = {
     "proxy.health.begin": "proxy",
     "proxy.health.ok": "proxy",
     "proxy.health.fail": "proxy",
+    "routing.proxy_probe.fail": "proxy",
+    "routing.proxy_circuit.skip": "proxy",
     "source.begin": "source",
     "source.end": "source",
     "source.complete": "source",

@@ -73,6 +73,7 @@ class _HsReplayTransportState:
 
     lock: threading.Lock = field(default_factory=threading.Lock)
     proxy_circuit_error: ProxyPaymentRequiredError | None = None
+    proxy_circuit_skip_logged: bool = False
     proxy_probe_completed: bool = False
     proxy_probe_task: asyncio.Task[str] | None = None
     scrape_do_requests_reserved: int = 0
@@ -134,6 +135,37 @@ def _current_proxy_circuit_error() -> ProxyPaymentRequiredError | None:
     state = _current_transport_state()
     with state.lock:
         return state.proxy_circuit_error
+
+
+def _log_proxy_circuit_skip_once(
+    *,
+    source_id: str,
+    channel: str,
+    proxy_error: ProxyPaymentRequiredError,
+) -> None:
+    """Log one refresh-scoped signal that the open proxy circuit saved a call."""
+
+    state = _current_transport_state()
+    with state.lock:
+        if state.proxy_circuit_skip_logged:
+            return
+        state.proxy_circuit_skip_logged = True
+
+    try:
+        log_action(
+            "routing.proxy_circuit.skip",
+            source_id=source_id,
+            level="info",
+            detail="proxy-backed HSReplay JSON channels skipped after CONNECT failure",
+            extra={
+                "channel": channel,
+                "proxy_status": proxy_error.status_code,
+                "scope": "refresh",
+                "deduplicated": True,
+            },
+        )
+    except OSError as exc:
+        logger.debug("Could not persist HSReplay proxy skip telemetry: %s", exc)
 
 
 def _json_transport_label(channel: str, *, proxy_backed: bool) -> str:
@@ -862,12 +894,10 @@ async def _fetch_hsreplay_json_serialized(
         if proxy_backed and circuit_error is not None:
             first_proxy_error = first_proxy_error or circuit_error
             errors.append(f"{label}: skipped after proxy CONNECT failure")
-            log_action(
-                "routing.channel.skip",
+            _log_proxy_circuit_skip_once(
                 source_id=source_id,
-                level="warn",
-                detail="proxy-backed HSReplay JSON channel skipped after CONNECT failure",
-                extra={"channel": label, "proxy_status": circuit_error.status_code},
+                channel=label,
+                proxy_error=circuit_error,
             )
             continue
         if not proxy_backed:
@@ -918,15 +948,10 @@ async def _fetch_hsreplay_json_serialized(
         except _HsReplayProxyCircuitOpen as exc:
             first_proxy_error = first_proxy_error or exc.proxy_error
             errors.append(f"{label}: skipped after proxy CONNECT failure")
-            log_action(
-                "routing.channel.skip",
+            _log_proxy_circuit_skip_once(
                 source_id=source_id,
-                level="warn",
-                detail="proxy-backed HSReplay JSON channel skipped after CONNECT failure",
-                extra={
-                    "channel": label,
-                    "proxy_status": exc.proxy_error.status_code,
-                },
+                channel=label,
+                proxy_error=exc.proxy_error,
             )
             continue
         except ProxyPaymentRequiredError as exc:

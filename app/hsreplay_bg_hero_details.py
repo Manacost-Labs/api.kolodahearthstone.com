@@ -36,6 +36,11 @@ CORE_DETAIL_SECTIONS = (
     "combat_winrate",
     "compositions",
 )
+# A detail request is only counted after all six HSReplay endpoints returned
+# parseable JSON. Empty series are therefore valid post-patch data, not a fetch
+# failure. Keep a lower non-empty-content floor to reject mass-empty payloads
+# without rejecting newly reset statistics.
+CORE_DETAIL_MIN_COVERAGE = 0.60
 
 
 def _pct(value: Any) -> str | None:
@@ -499,10 +504,15 @@ async def _refresh_bg_hero_details_unlocked(
         quality_errors.append(
             f"hero detail coverage too low ({len(details)}/{requested_details}; minimum {minimum_details})"
         )
+    minimum_core_sections = max(
+        20,
+        math.ceil(requested_details * CORE_DETAIL_MIN_COVERAGE),
+    )
     for section, count in core_section_counts.items():
-        if count < minimum_details:
+        if count < minimum_core_sections:
             quality_errors.append(
-                f"{section} coverage too low ({count}/{requested_details}; minimum {minimum_details})"
+                f"{section} coverage too low "
+                f"({count}/{requested_details}; minimum {minimum_core_sections})"
             )
     quality_ok = not quality_errors
     dataset = {
@@ -698,25 +708,44 @@ def _load_valid_bg_hero_details_snapshot(
         if isinstance(cached_heroes, list)
         else 20
     )
+    minimum_core_sections = (
+        max(20, math.ceil(len(cached_heroes) * CORE_DETAIL_MIN_COVERAGE))
+        if isinstance(cached_heroes, list)
+        else 20
+    )
     if not (
         cached_structured.get("type") == "bg_hero_details"
         and isinstance(cached_heroes, list)
         and len(cached_heroes) >= 30
+        and all(_is_valid_cached_hero(hero) for hero in cached_heroes)
         and isinstance(cached_details, dict)
         and len(cached_details) >= minimum_details
+        and all(
+            _is_valid_cached_hero_detail(detail)
+            for detail in cached_details.values()
+        )
         and isinstance(cached_duos_heroes, list)
         and len(cached_duos_heroes) >= 20
+        and all(_is_valid_cached_hero(hero) for hero in cached_duos_heroes)
     ):
         return None
-    valid_details = [
-        detail for detail in cached_details.values() if isinstance(detail, dict)
-    ]
     if any(
-        sum(bool(detail.get(section)) for detail in valid_details) < minimum_details
+        sum(bool(detail[section]) for detail in cached_details.values())
+        < minimum_core_sections
         for section in CORE_DETAIL_SECTIONS
     ):
         return None
     return cached_dataset, cached_structured
+
+
+def _is_valid_cached_hero(value: Any) -> bool:
+    return isinstance(value, dict) and isinstance(value.get("dbfId"), int)
+
+
+def _is_valid_cached_hero_detail(value: Any) -> bool:
+    if not isinstance(value, dict) or not _is_valid_cached_hero(value.get("hero")):
+        return False
+    return all(isinstance(value.get(section), list) for section in CORE_DETAIL_SECTIONS)
 
 
 def _preserve_bg_hero_details_after_failure(

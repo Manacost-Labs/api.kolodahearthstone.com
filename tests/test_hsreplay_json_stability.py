@@ -162,6 +162,7 @@ def test_proxy_failure_skips_proxy_channels_then_uses_scrape_do() -> None:
             side_effect=lambda label, *_: label != "scrape_do",
         ),
         patch("app.hsreplay_client.api_json_retry_delay_seconds", return_value=0),
+        patch("app.hsreplay_client.log_action") as log_action,
     ):
         result = asyncio.run(
             fetch_hsreplay_json(
@@ -173,6 +174,19 @@ def test_proxy_failure_skips_proxy_channels_then_uses_scrape_do() -> None:
     assert result == {"series": {"data": [1]}}
     assert calls == ["curl_cffi", "scrape_do"]
     assert hsreplay_proxy_circuit_is_open()
+    proxy_skips = [
+        call
+        for call in log_action.call_args_list
+        if call.args[0] == "routing.proxy_circuit.skip"
+    ]
+    assert len(proxy_skips) == 1
+    assert proxy_skips[0].kwargs["level"] == "info"
+    assert proxy_skips[0].kwargs["extra"] == {
+        "channel": "flaresolverr",
+        "proxy_status": 402,
+        "scope": "refresh",
+        "deduplicated": True,
+    }
 
 
 def test_independent_provider_failure_is_not_misreported_as_proxy_failure() -> None:
@@ -501,8 +515,13 @@ def test_concurrent_cache_keys_single_flight_initial_proxy_failure() -> None:
     proxy_skips = [
         call
         for call in log_action.call_args_list
-        if call.args[0] == "routing.channel.skip"
+        if call.args[0] == "routing.proxy_circuit.skip"
         and call.kwargs.get("extra", {}).get("proxy_status") == 402
+    ]
+    legacy_proxy_skips = [
+        call
+        for call in log_action.call_args_list
+        if call.args[0] == "routing.channel.skip"
     ]
     physical_proxy_failures = [
         call
@@ -511,8 +530,46 @@ def test_concurrent_cache_keys_single_flight_initial_proxy_failure() -> None:
         and call.kwargs.get("extra", {}).get("proxy_status") == 402
     ]
     assert len(proxy_failures) == 1
-    assert len(proxy_skips) == 3
+    assert len(proxy_skips) == 1
+    assert legacy_proxy_skips == []
     assert len(physical_proxy_failures) == 1
+
+
+def test_proxy_circuit_skip_dedup_resets_with_refresh_state() -> None:
+    from app.hsreplay_client import _log_proxy_circuit_skip_once
+    from app.refresh_log import ACTION_GROUPS
+
+    proxy_error = ProxyPaymentRequiredError(
+        "Residential proxy CONNECT rejected the request",
+        status_code=402,
+    )
+    with patch("app.hsreplay_client.log_action") as log_action:
+        for index in range(4):
+            _log_proxy_circuit_skip_once(
+                source_id=f"source-{index}",
+                channel="curl_cffi",
+                proxy_error=proxy_error,
+            )
+
+        reset_hsreplay_refresh_state()
+        _log_proxy_circuit_skip_once(
+            source_id="next-refresh",
+            channel="curl_cffi",
+            proxy_error=proxy_error,
+        )
+
+    proxy_skips = [
+        call
+        for call in log_action.call_args_list
+        if call.args[0] == "routing.proxy_circuit.skip"
+    ]
+    assert len(proxy_skips) == 2
+    assert [call.kwargs["source_id"] for call in proxy_skips] == [
+        "source-0",
+        "next-refresh",
+    ]
+    assert ACTION_GROUPS["routing.proxy_circuit.skip"] == "proxy"
+    assert ACTION_GROUPS["routing.proxy_probe.fail"] == "proxy"
 
 
 def test_successful_initial_proxy_probe_restores_parallel_fetches() -> None:

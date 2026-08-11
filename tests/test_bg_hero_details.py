@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 from starlette.testclient import TestClient
 
 from app.hsreplay_bg_hero_details import (
+    _load_valid_bg_hero_details_snapshot,
     _normalize_hero_power,
     _normalize_tavern_up,
     _tavern_recommendations,
@@ -47,6 +48,7 @@ class BattlegroundsHeroDetailsTest(unittest.TestCase):
                     "heroes": [{"dbfId": 50_000 + idx} for idx in range(30)],
                     "details": {
                         str(50_000 + idx): {
+                            "hero": {"dbfId": 50_000 + idx},
                             "tavern_up": [{}],
                             "hero_power": [{}],
                             "combat_winrate": [{}],
@@ -318,6 +320,30 @@ class BattlegroundsHeroDetailsTest(unittest.TestCase):
         self.assertEqual(result["state"], "fetch_error")
         self.assertEqual(save_status.call_args.args[1]["state"], "fetch_error")
 
+    def test_mixed_corrupt_rows_are_not_accepted_as_last_known_good(self) -> None:
+        solo_corrupt = self._cached_snapshot()
+        solo_corrupt["data"]["structured"]["heroes"][0] = "corrupt"
+        detail_corrupt = self._cached_snapshot()
+        detail_corrupt["data"]["structured"]["details"]["50000"] = "corrupt"
+        section_corrupt = self._cached_snapshot()
+        section_corrupt["data"]["structured"]["details"]["50000"][
+            "tavern_up"
+        ] = "corrupt"
+        duos_corrupt = self._cached_snapshot()
+        duos_corrupt["data"]["structured"]["duos"]["heroes"][0] = "corrupt"
+
+        for label, snapshot in (
+            ("solo hero", solo_corrupt),
+            ("hero detail", detail_corrupt),
+            ("detail section", section_corrupt),
+            ("duos hero", duos_corrupt),
+        ):
+            with self.subTest(label=label), patch(
+                "app.hsreplay_bg_hero_details.load_dataset",
+                return_value=snapshot,
+            ):
+                self.assertIsNone(_load_valid_bg_hero_details_snapshot())
+
     def test_composition_labels_failure_does_not_block_complete_refresh(self) -> None:
         solo = self._hero_index(30, mode="solo")
         duos = self._hero_index(20, mode="duos")
@@ -414,6 +440,48 @@ class BattlegroundsHeroDetailsTest(unittest.TestCase):
             if call.args[0] == "hsreplay_battlegrounds_hero_details"
         )
         self.assertEqual(detail_status["rows_total"], 30)
+
+    def test_post_patch_sparse_sections_are_valid_when_every_detail_was_fetched(self) -> None:
+        solo = self._hero_index(115, mode="solo")
+        duos = self._hero_index(20, mode="duos")
+
+        async def detail(dbf_id: int, **_kwargs: object) -> dict:
+            has_accumulated_stats = dbf_id < 50_069
+            rows = [{}] if has_accumulated_stats else []
+            return {
+                "hero": {"dbfId": dbf_id},
+                "best_composition": None,
+                "tavern_up": rows,
+                "hero_power": rows,
+                "combat_winrate": rows,
+                "compositions": rows,
+            }
+
+        with (
+            patch("app.hsreplay_bg_hero_details._composition_names", new=AsyncMock(return_value={})),
+            patch(
+                "app.hsreplay_bg_hero_details.fetch_hero_index",
+                new=AsyncMock(side_effect=[solo, duos]),
+            ),
+            patch("app.hsreplay_bg_hero_details.fetch_hero_detail", side_effect=detail),
+            patch("app.hsreplay_bg_hero_details.load_dataset", return_value=None),
+            patch("app.hsreplay_bg_hero_details.save_dataset"),
+            patch("app.hsreplay_bg_hero_details.save_status"),
+        ):
+            result = asyncio.run(refresh_bg_hero_details())
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["published"])
+        self.assertEqual(result["detail_coverage"], 1.0)
+        self.assertEqual(
+            result["core_section_counts"],
+            {
+                "tavern_up": 69,
+                "hero_power": 69,
+                "combat_winrate": 69,
+                "compositions": 69,
+            },
+        )
 
 
 if __name__ == "__main__":
