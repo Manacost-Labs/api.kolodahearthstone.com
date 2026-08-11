@@ -31,7 +31,7 @@ from .hsreplay_auth import hsreplay_cookies_for_fetch
 from .proxy_errors import ProxyPaymentRequiredError, proxy_tunnel_error
 from .refresh_context import get_cached_hsreplay_json, set_cached_hsreplay_json
 from .refresh_log import log_action
-from .scrape_do_backend import scrape_url
+from .scrape_do_backend import ScrapeDoRequestError, scrape_url
 from .scrapers.http_resilience import (
     DEFAULT_BACKOFF_SECONDS,
     build_fetch_headers,
@@ -51,6 +51,7 @@ logger = logging.getLogger(__name__)
 JINA_PREFIX = "https://r.jina.ai/"
 _COOKIE_NAME = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
 _SCRAPE_DO_STANDARD_CREDIT_RESERVATION = 1
+_SCRAPE_DO_MAX_RETRY_DELAY_SECONDS = 30.0
 
 
 class HsReplayScrapeDoBudgetError(RuntimeError):
@@ -65,6 +66,8 @@ class _HsReplayTransportState:
     proxy_circuit_error: ProxyPaymentRequiredError | None = None
     scrape_do_requests_reserved: int = 0
     scrape_do_credits_reserved: int = 0
+    json_cache_transports: dict[str, str] = field(default_factory=dict)
+    source_json_transports: dict[str, set[str]] = field(default_factory=dict)
     scrape_do_semaphore: asyncio.Semaphore = field(
         default_factory=lambda: asyncio.Semaphore(
             hsreplay_scrape_do_max_concurrency()
@@ -119,6 +122,42 @@ def _current_proxy_circuit_error() -> ProxyPaymentRequiredError | None:
     state = _current_transport_state()
     with state.lock:
         return state.proxy_circuit_error
+
+
+def _json_transport_label(channel: str, *, proxy_backed: bool) -> str:
+    if proxy_backed:
+        return "residential_httpx"
+    if channel in {"curl_cffi", "direct", "flaresolverr", "jina"}:
+        return f"proxyless_{channel}"
+    return channel
+
+
+def _record_json_transport(
+    *,
+    cache_key: str,
+    source_id: str,
+    transport_backend: str,
+) -> None:
+    state = _current_transport_state()
+    with state.lock:
+        state.json_cache_transports[cache_key] = transport_backend
+        state.source_json_transports.setdefault(source_id, set()).add(
+            transport_backend
+        )
+
+
+def consume_hsreplay_json_transport_backend(source_id: str) -> str | None:
+    """Return and clear the successful JSON transports for one source run."""
+
+    state = _current_transport_state()
+    with state.lock:
+        transports = state.source_json_transports.pop(source_id, set())
+    if not transports:
+        return None
+    normalized = sorted(transports)
+    if len(normalized) == 1:
+        return normalized[0]
+    return f"mixed[{','.join(normalized)}]"
 
 
 def _scrape_do_gate() -> asyncio.Semaphore:
@@ -479,26 +518,62 @@ async def _fetch_text_via_scrape_do(url: str, *, source_id: str) -> str:
         # unrelated browser/request headers and the value is never logged.
         headers["Cookie"] = cookie_header
 
-    async with _scrape_do_gate():
-        _reserve_scrape_do_request()
-        result = await scrape_url(
-            url,
-            render=False,
-            super_proxy=False,
-            headers=headers or None,
-            forward_headers=False,
-        )
-        _assert_exact_hsreplay_https_url(result.final_url)
-        _account_scrape_do_actual_cost(result.request_cost)
-        log_action(
-            "provider.scrape_do.hsreplay_json.ok",
-            source_id=source_id,
-            backend="scrape_do",
-            http_status=result.status_code,
-            bytes_out=result.content_length,
-            extra={"render": False, "request_cost": result.request_cost},
-        )
-        return result.html
+    attempts = max(1, min(api_json_attempts_per_channel(), 3))
+    retryable_statuses = {403, 408, 425, 429, 500, 502, 503, 504}
+    for attempt in range(1, attempts + 1):
+        try:
+            async with _scrape_do_gate():
+                _reserve_scrape_do_request()
+                result = await scrape_url(
+                    url,
+                    render=False,
+                    super_proxy=False,
+                    headers=headers or None,
+                    forward_headers=False,
+                )
+            _assert_exact_hsreplay_https_url(result.final_url)
+            _account_scrape_do_actual_cost(result.request_cost)
+            log_action(
+                "provider.scrape_do.hsreplay_json.ok",
+                source_id=source_id,
+                backend="scrape_do",
+                http_status=result.status_code,
+                bytes_out=result.content_length,
+                attempt=attempt,
+                extra={"render": False, "request_cost": result.request_cost},
+            )
+            return result.html
+        except ScrapeDoRequestError as exc:
+            retryable = bool(
+                exc.retryable or exc.status_code in retryable_statuses
+            )
+            log_action(
+                "provider.scrape_do.hsreplay_json.retry",
+                source_id=source_id,
+                backend="scrape_do",
+                level="warn",
+                error_type=type(exc).__name__,
+                attempt=attempt,
+                extra={
+                    "provider_status": exc.status_code,
+                    "retryable": retryable,
+                },
+            )
+            if not retryable or attempt >= attempts:
+                raise
+            delay = (
+                exc.retry_after_seconds
+                if exc.retry_after_seconds is not None
+                else api_json_retry_delay_seconds()
+            )
+            await asyncio.sleep(
+                min(
+                    _SCRAPE_DO_MAX_RETRY_DELAY_SECONDS,
+                    max(0.0, delay),
+                )
+            )
+
+    raise RuntimeError("Scrape.do HSReplay JSON attempts exhausted")
 
 
 def _channel_uses_residential_proxy(
@@ -591,6 +666,13 @@ async def fetch_hsreplay_json(
     key = cache_key or api_url
     cached = get_cached_hsreplay_json(key)
     if cached is not None:
+        state = _current_transport_state()
+        with state.lock:
+            cached_transport = state.json_cache_transports.get(key)
+            if cached_transport is not None:
+                state.source_json_transports.setdefault(source_id, set()).add(
+                    cached_transport
+                )
         log_action(
             "api.route.ok",
             source_id=source_id,
@@ -629,6 +711,14 @@ async def fetch_hsreplay_json(
             payload = extract_json_payload(body)
             if isinstance(payload, (dict, list)):
                 result = _payload_to_dict(payload)
+                _record_json_transport(
+                    cache_key=key,
+                    source_id=source_id,
+                    transport_backend=_json_transport_label(
+                        label,
+                        proxy_backed=proxy_backed,
+                    ),
+                )
                 log_action(
                     "api.route.ok",
                     source_id=source_id,

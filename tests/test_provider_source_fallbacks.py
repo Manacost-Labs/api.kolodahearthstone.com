@@ -4,7 +4,6 @@ import asyncio
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from app.fetcher import (
@@ -43,6 +42,12 @@ METASTATS_MATCHUPS_SOURCE = Source(
     url="https://metastats.net/hearthstone/archetype/matchup/",
     site="metastats",
     category="matchups",
+)
+HSREPLAY_SOURCE = Source(
+    id="hsreplay_cards_gold",
+    url="https://hsreplay.net/cards/",
+    site="hsreplay",
+    category="ranked",
 )
 
 
@@ -162,7 +167,8 @@ class ProviderSourceFallbackTest(unittest.TestCase):
             structured,
             backend="heartharena_api",
         )
-        self.assertEqual(parsed["_backend"], "scrape_do")
+        self.assertEqual(parsed["_backend"], "heartharena_api")
+        self.assertEqual(parsed["_transport_backend"], "scrape_do")
         self.assertNotIn("_fetch_backend", parsed["structured"])
         self.assertNotIn("_fetch_backend", parsed["hsreplay_extracted"])
         with patch.dict(
@@ -172,7 +178,7 @@ class ProviderSourceFallbackTest(unittest.TestCase):
             self.assertFalse(
                 _source_uses_residential_proxy(
                     HEARTHARENA_SOURCE,
-                    parsed["_backend"],
+                    parsed["_transport_backend"],
                 )
             )
 
@@ -210,6 +216,7 @@ class ProviderSourceFallbackTest(unittest.TestCase):
         cached = {
             "fetched_at": "2026-08-10T00:00:00+00:00",
             "backend": "heartharena_api",
+            "transport_backend": "scrape_do",
             "content_length": len(valid_html),
             "data": {
                 "title": "HearthArena card tier-list",
@@ -229,24 +236,44 @@ class ProviderSourceFallbackTest(unittest.TestCase):
             ),
             patch("app.fetcher.save_status"),
             patch("app.fetcher.log_action"),
+            patch.dict(
+                "os.environ",
+                {"HS_FETCH_PROXY_URL": "http://user:pass@geo.iproyal.com:1234"},
+            ),
         ):
             status = _preserve_cached_ok_status(HEARTHARENA_SOURCE, failed)
 
         self.assertIsNotNone(status)
         assert status is not None
         self.assertEqual(status["state"], "ok")
+        self.assertEqual(status["backend"], "heartharena_api")
+        self.assertEqual(status["transport_backend"], "scrape_do")
+        self.assertFalse(status["used_residential_proxy"])
         self.assertTrue(status["serving_cached_dataset"])
         self.assertEqual(status["last_refresh_state"], "fetch_error")
 
-    def test_cloud_provenance_reaches_status_without_leaking_internal_field(self) -> None:
-        with patch("app.heartharena.card_from_id", return_value={}):
-            structured = parse_heartharena_tierlist(_heartharena_html())
-        structured["_fetch_backend"] = "scrape_do"
+    def test_cloud_transport_passes_real_publish_gate_without_leaking(self) -> None:
+        structured = {
+            "type": "metastats_decks",
+            "decks": [
+                {
+                    "archetype_name": f"Deck {index}",
+                    "win_rate": "52%",
+                    "games": 100,
+                }
+                for index in range(44)
+            ],
+            "classes_parsed": list(CLASSES),
+            "total_decks": 44,
+            "_fetch_backend": "scrape_do",
+        }
         parsed = _dataset_from_structured(
-            HEARTHARENA_SOURCE,
+            METASTATS_SOURCE,
             structured,
-            backend="heartharena_api",
+            backend="metastats_api",
         )
+        self.assertEqual(parsed["_backend"], "metastats_api")
+        self.assertEqual(parsed["_transport_backend"], "scrape_do")
 
         with (
             TemporaryDirectory() as temp_dir,
@@ -260,12 +287,8 @@ class ProviderSourceFallbackTest(unittest.TestCase):
                 new=AsyncMock(return_value=parsed),
             ),
             patch(
-                "app.fetcher.validate_candidate_for_publish",
-                return_value=SimpleNamespace(ok=True, reason="ok", extra={}),
-            ),
-            patch(
                 "app.fetcher.quality_metrics",
-                return_value={"quality_score": 1.0, "rows_total": 300},
+                return_value={"quality_score": 1.0, "rows_total": 44},
             ),
             patch(
                 "app.fetcher._review_candidate_with_ai",
@@ -274,17 +297,113 @@ class ProviderSourceFallbackTest(unittest.TestCase):
             patch(
                 "app.fetcher._save_dataset_with_checks",
                 return_value=(False, None, {}),
-            ),
+            ) as save_dataset,
             patch("app.fetcher.firecrawl_primary_source_ids", return_value=set()),
             patch("app.fetcher.firecrawl_fallback_source_ids", return_value=set()),
-            patch("app.fetcher.log_action"),
+            patch("app.fetcher.log_action") as log_action,
         ):
-            status = asyncio.run(fetch_source(None, HEARTHARENA_SOURCE))
+            status = asyncio.run(fetch_source(None, METASTATS_SOURCE))
 
         self.assertEqual(status["state"], "ok")
-        self.assertEqual(status["backend"], "scrape_do")
+        self.assertEqual(status["backend"], "metastats_api")
+        self.assertEqual(status["transport_backend"], "scrape_do")
         self.assertFalse(status["used_residential_proxy"])
         self.assertNotIn("_fetch_backend", parsed["structured"])
+        self.assertNotIn("_transport_backend", parsed)
+        saved_dataset = save_dataset.call_args.args[1]
+        self.assertEqual(saved_dataset["backend"], "metastats_api")
+        self.assertEqual(saved_dataset["transport_backend"], "scrape_do")
+        self.assertFalse(saved_dataset["used_residential_proxy"])
+        self.assertNotIn("_transport_backend", saved_dataset["data"])
+        telemetry_extras = [
+            logged.kwargs.get("extra")
+            for logged in log_action.call_args_list
+            if logged.args
+            and logged.args[0] in {"api.validate.ok", "api.route.ok"}
+        ]
+        self.assertEqual(len(telemetry_extras), 2)
+        self.assertTrue(
+            all(
+                isinstance(extra, dict)
+                and extra.get("transport_backend") == "scrape_do"
+                for extra in telemetry_extras
+            )
+        )
+
+    def test_transport_backend_is_allowlisted_and_mixed_value_is_canonical(self) -> None:
+        structured = {
+            "type": "metastats_decks",
+            "decks": [],
+            "_fetch_backend": "mixed[scrape_do,residential_httpx,scrape_do]",
+        }
+        parsed = _dataset_from_structured(
+            METASTATS_SOURCE,
+            structured,
+            backend="metastats_api",
+        )
+
+        self.assertEqual(
+            parsed["_transport_backend"],
+            "mixed[residential_httpx,scrape_do]",
+        )
+
+        structured["_fetch_backend"] = "mixed[residential_httpx,unknown]"
+        rejected = _dataset_from_structured(
+            METASTATS_SOURCE,
+            structured,
+            backend="metastats_api",
+        )
+        self.assertNotIn("_transport_backend", rejected)
+        self.assertNotIn("_fetch_backend", rejected["structured"])
+
+    def test_hsreplay_scrape_do_transport_is_not_counted_as_residential(self) -> None:
+        with patch(
+            "app.hsreplay_client.consume_hsreplay_json_transport_backend",
+            return_value="scrape_do",
+        ):
+            parsed = _dataset_from_structured(
+                HSREPLAY_SOURCE,
+                {
+                    "type": "card_stats",
+                    "cards": [{"id": "TEST_001", "deck_winrate": 52.0}],
+                },
+                backend="hsreplay_cards_api",
+            )
+
+        self.assertEqual(parsed["_backend"], "hsreplay_cards_api")
+        self.assertEqual(parsed["_transport_backend"], "scrape_do")
+        with patch.dict(
+            "os.environ",
+            {"HS_FETCH_PROXY_URL": "http://user:pass@geo.iproyal.com:1234"},
+        ):
+            self.assertFalse(
+                _source_uses_residential_proxy(
+                    HSREPLAY_SOURCE,
+                    parsed["_transport_backend"],
+                )
+            )
+
+    def test_proxyless_transport_labels_do_not_change_legacy_backend_accounting(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {"HS_FETCH_PROXY_URL": "http://user:pass@geo.iproyal.com:1234"},
+        ):
+            self.assertTrue(_source_uses_residential_proxy(HSREPLAY_SOURCE, "direct"))
+            self.assertTrue(
+                _source_uses_residential_proxy(HSREPLAY_SOURCE, "curl_cffi")
+            )
+            self.assertFalse(
+                _source_uses_residential_proxy(
+                    HSREPLAY_SOURCE,
+                    "proxyless_direct",
+                )
+            )
+            self.assertFalse(
+                _source_uses_residential_proxy(
+                    HSREPLAY_SOURCE,
+                    "proxyless_curl_cffi",
+                )
+            )
 
     def test_metastats_fetches_all_classes_with_concurrency_at_most_two(self) -> None:
         active = 0
@@ -325,7 +444,8 @@ class ProviderSourceFallbackTest(unittest.TestCase):
             structured,
             backend="metastats_api",
         )
-        self.assertEqual(parsed["_backend"], "residential_httpx")
+        self.assertEqual(parsed["_backend"], "metastats_api")
+        self.assertEqual(parsed["_transport_backend"], "residential_httpx")
         self.assertNotIn("_fetch_backend", parsed["structured"])
         with patch.dict(
             "os.environ",
@@ -334,7 +454,7 @@ class ProviderSourceFallbackTest(unittest.TestCase):
             self.assertTrue(
                 _source_uses_residential_proxy(
                     METASTATS_SOURCE,
-                    parsed["_backend"],
+                    parsed["_transport_backend"],
                 )
             )
         cloud.assert_not_awaited()

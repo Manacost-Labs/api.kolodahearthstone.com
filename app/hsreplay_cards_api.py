@@ -339,6 +339,7 @@ async def fetch_hsreplay_ranked_cards(source: Source, *, locale: str = "ruRU") -
     sort_mode = _sort_mode(source)
     api_url = _analytics_card_list_url(source)
     proxy_attempts: list[dict[str, str]] = []
+    fetch_backend: str | None = None
     try:
         api_payload = await fetch_hsreplay_json(
             api_url,
@@ -359,6 +360,7 @@ async def fetch_hsreplay_ranked_cards(source: Source, *, locale: str = "ruRU") -
         )
         api_payload = fallback.payload
         backend = f"hsreplay_cards_api+{fallback.backend}"
+        fetch_backend = fallback.backend
         proxy_attempts = [
             {"backend": "direct", "state": "failed", "error_type": type(direct_error).__name__},
             *fallback.attempts,
@@ -409,7 +411,7 @@ async def fetch_hsreplay_ranked_cards(source: Source, *, locale: str = "ruRU") -
             f"metrics={metrics}/20"
         )
 
-    return {
+    structured = {
         "type": "card_stats",
         "cards": cards,
         "blocked": False,
@@ -426,6 +428,9 @@ async def fetch_hsreplay_ranked_cards(source: Source, *, locale: str = "ruRU") -
             "diagnostics": diagnostics,
         },
     }
+    if fetch_backend is not None:
+        structured["_fetch_backend"] = fetch_backend
+    return structured
 
 
 def _query_param(source: Source, key: str) -> str | None:

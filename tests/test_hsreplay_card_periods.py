@@ -268,6 +268,7 @@ def test_ranked_cards_uses_proxy_fallback_after_direct_failure(monkeypatch: pyte
     result = asyncio.run(fetch_hsreplay_ranked_cards(source))
     assert result["time_range"] == "LAST_3_DAYS"
     assert result["source"]["backend"] == "hsreplay_cards_api+scrape_do"
+    assert result["_fetch_backend"] == "scrape_do"
     assert result["source"]["diagnostics"]["proxy_attempts"][0] == {
         "backend": "direct",
         "state": "failed",

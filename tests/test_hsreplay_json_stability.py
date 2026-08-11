@@ -14,12 +14,14 @@ from app.hsreplay_client import (
     _channel_urls,
     _fetch_text_via_curl_cffi_sync,
     _fetch_text_via_scrape_do,
+    consume_hsreplay_json_transport_backend,
     fetch_hsreplay_json,
     fetch_text_via_curl_cffi,
     hsreplay_proxy_circuit_is_open,
     reset_hsreplay_refresh_state,
 )
 from app.proxy_errors import ProxyPaymentRequiredError, proxy_tunnel_error
+from app.scrape_do_backend import ScrapeDoRequestError, ScrapeDoScrape
 from app.scrapers.rotator import (
     reset_backend_circuits,
     residential_proxy_circuit_error,
@@ -248,6 +250,115 @@ def test_archetype_dictionary_uses_json_channel_cascade() -> None:
         source_id="dictionary-test",
         cache_key="hsreplay:archetype-dictionary:ru",
     )
+
+
+def test_scrape_do_retries_temporary_target_rejection_then_succeeds() -> None:
+    scrape = AsyncMock(
+        side_effect=[
+            ScrapeDoRequestError("temporary target rejection", status_code=403),
+            ScrapeDoScrape(
+                html='{"ok": true}',
+                status_code=200,
+                final_url="https://hsreplay.net/api/test",
+                request_cost=1,
+                credits_remaining=100,
+                super_proxy=False,
+            ),
+        ]
+    )
+    with (
+        patch("app.hsreplay_client.scrape_url", scrape),
+        patch("app.hsreplay_client.api_json_attempts_per_channel", return_value=2),
+        patch("app.hsreplay_client.api_json_retry_delay_seconds", return_value=0),
+        patch("app.hsreplay_client.hsreplay_cookies_for_fetch", return_value=[]),
+    ):
+        body = asyncio.run(
+            _fetch_text_via_scrape_do(
+                "https://hsreplay.net/api/test",
+                source_id="retry-test",
+            )
+        )
+
+    assert body == '{"ok": true}'
+    assert scrape.await_count == 2
+
+
+def test_scrape_do_retry_after_is_bounded() -> None:
+    scrape = AsyncMock(
+        side_effect=[
+            ScrapeDoRequestError(
+                "temporary throttling",
+                status_code=429,
+                retry_after_seconds=3600,
+            ),
+            ScrapeDoScrape(
+                html='{"ok": true}',
+                status_code=200,
+                final_url="https://hsreplay.net/api/test",
+                request_cost=1,
+                credits_remaining=100,
+                super_proxy=False,
+            ),
+        ]
+    )
+    sleep = AsyncMock()
+    with (
+        patch("app.hsreplay_client.scrape_url", scrape),
+        patch("app.hsreplay_client.api_json_attempts_per_channel", return_value=2),
+        patch("app.hsreplay_client.asyncio.sleep", sleep),
+        patch("app.hsreplay_client.hsreplay_cookies_for_fetch", return_value=[]),
+    ):
+        asyncio.run(
+            _fetch_text_via_scrape_do(
+                "https://hsreplay.net/api/test",
+                source_id="bounded-retry-test",
+            )
+        )
+
+    sleep.assert_awaited_once_with(30.0)
+
+
+def test_hsreplay_json_records_successful_scrape_do_transport() -> None:
+    with (
+        patch(
+            "app.hsreplay_client._channel_urls",
+            return_value=[("scrape_do", "https://hsreplay.net/api/test")],
+        ),
+        patch(
+            "app.hsreplay_client._fetch_body_for_channel",
+            new=AsyncMock(return_value='{"ok": true}'),
+        ),
+        patch("app.hsreplay_client.get_cached_hsreplay_json", return_value=None),
+        patch("app.hsreplay_client.set_cached_hsreplay_json"),
+    ):
+        asyncio.run(
+            fetch_hsreplay_json(
+                "https://hsreplay.net/api/test",
+                source_id="transport-test",
+            )
+        )
+
+    assert consume_hsreplay_json_transport_backend("transport-test") == "scrape_do"
+
+
+def test_scrape_do_does_not_retry_account_failure() -> None:
+    scrape = AsyncMock(
+        side_effect=ScrapeDoRequestError("account rejected", status_code=401)
+    )
+    with (
+        patch("app.hsreplay_client.scrape_url", scrape),
+        patch("app.hsreplay_client.api_json_attempts_per_channel", return_value=3),
+        patch("app.hsreplay_client.hsreplay_cookies_for_fetch", return_value=[]),
+        pytest.raises(ScrapeDoRequestError),
+    ):
+        asyncio.run(
+            _fetch_text_via_scrape_do(
+                "https://hsreplay.net/api/test",
+                source_id="no-retry-test",
+            )
+        )
+
+    scrape.assert_awaited_once()
 
 
 def test_concurrent_refresh_contexts_do_not_reset_each_other() -> None:

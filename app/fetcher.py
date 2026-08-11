@@ -281,6 +281,7 @@ def _status_payload(
     detail: str | None = None,
     content_length: int | None = None,
     backend: str | None = None,
+    transport_backend: str | None = None,
     used_residential_proxy: bool | None = None,
     quality: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -302,6 +303,8 @@ def _status_payload(
     }
     if backend:
         payload["backend"] = backend
+    if transport_backend:
+        payload["transport_backend"] = transport_backend
     if used_residential_proxy is not None:
         payload["used_residential_proxy"] = used_residential_proxy
     if quality:
@@ -325,24 +328,50 @@ def _attach_failure_class(
     return status
 
 
+_TRANSPORT_BACKENDS = frozenset(
+    {
+        "brightdata_web_unlocker",
+        "firecrawl",
+        "proxyless_curl_cffi",
+        "proxyless_direct",
+        "proxyless_flaresolverr",
+        "proxyless_jina",
+        "residential_httpx",
+        "scrape_do",
+        "scrape_do_super",
+        "scrapfly",
+    }
+)
+
+
+def _sanitize_transport_backend(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    candidate = value.strip()
+    if candidate in _TRANSPORT_BACKENDS:
+        return candidate
+    if not candidate.startswith("mixed[") or not candidate.endswith("]"):
+        return None
+    parts = candidate[6:-1].split(",")
+    if not parts or any(part not in _TRANSPORT_BACKENDS for part in parts):
+        return None
+    normalized = sorted(set(parts))
+    if len(normalized) == 1:
+        return normalized[0]
+    return f"mixed[{','.join(normalized)}]"
+
+
 def _source_uses_residential_proxy(source: Source, backend: str | None) -> bool:
     if not fetch_proxy_url() or not backend:
         return False
+    transport_backend = _sanitize_transport_backend(backend)
+    if transport_backend is not None:
+        return "residential_httpx" in transport_backend
     if backend == "flaresolverr":
         from .scrapers.proxy import source_can_use_flaresolverr_without_proxy
 
         return not source_can_use_flaresolverr_without_proxy(source)
     if backend == "hsreplay_premium_flaresolverr":
-        return False
-    if backend == "residential_httpx" or "residential_httpx" in backend:
-        return True
-    if backend in {
-        "brightdata_web_unlocker",
-        "firecrawl",
-        "scrape_do",
-        "scrape_do_super",
-        "scrapfly",
-    }:
         return False
     if backend in {"direct", "patchright", "scrapling", "curl_cffi", "cloudscraper", "cloakbrowser"}:
         return True
@@ -410,6 +439,10 @@ def _preserve_cached_ok_status(source: Source, failed_status: dict[str, Any]) ->
         return None
 
     cached_at = str(dataset.get("fetched_at") or failed_status.get("fetched_at") or now_iso())
+    transport_backend = _sanitize_transport_backend(dataset.get("transport_backend"))
+    if transport_backend is None:
+        cached_backend = dataset.get("backend")
+        transport_backend = str(cached_backend) if cached_backend else None
     status = _status_payload(
         source,
         SourceState.OK,
@@ -418,6 +451,11 @@ def _preserve_cached_ok_status(source: Source, failed_status: dict[str, Any]) ->
         final_url=dataset.get("final_url") or source.url,
         content_length=dataset.get("content_length"),
         backend=dataset.get("backend"),
+        transport_backend=transport_backend,
+        used_residential_proxy=_source_uses_residential_proxy(
+            source,
+            transport_backend,
+        ),
         detail="Serving cached dataset; latest live refresh failed.",
     )
     _attach_provisional_status(status, _provisional_metadata_from_parsed(parsed))
@@ -452,7 +490,10 @@ def _preserve_cached_ok_status(source: Source, failed_status: dict[str, Any]) ->
         backend=status.get("backend"),
         level="warn",
         detail=str(status["last_refresh_error"])[:500],
-        extra={"last_refresh_state": status.get("last_refresh_state")},
+        extra={
+            "last_refresh_state": status.get("last_refresh_state"),
+            "transport_backend": transport_backend,
+        },
     )
     return status
 
@@ -792,21 +833,26 @@ async def _maybe_stale_data_alert(source: Source, status: dict[str, Any]) -> Non
         await send_telegram_alert(source.id, "stale_data", detail, source.url)
 
 
-def _dataset_from_structured(source: Source, structured: dict[str, Any], *, backend: str) -> dict[str, Any]:
+def _dataset_from_structured(
+    source: Source,
+    structured: dict[str, Any],
+    *,
+    backend: str,
+) -> dict[str, Any]:
     import json as json_mod
 
     from .structured_schema import validate_structured_schema
 
     public_structured = dict(structured)
-    candidate_backend = public_structured.pop("_fetch_backend", None)
-    effective_backend = (
-        candidate_backend.strip()
-        if isinstance(candidate_backend, str) and candidate_backend.strip()
-        else backend
-    )
+    candidate_transport = public_structured.pop("_fetch_backend", None)
+    if candidate_transport is None and source.site == "hsreplay":
+        from .hsreplay_client import consume_hsreplay_json_transport_backend
+
+        candidate_transport = consume_hsreplay_json_transport_backend(source.id)
+    transport_backend = _sanitize_transport_backend(candidate_transport)
     schema_validation = validate_structured_schema(public_structured)
     body = json_mod.dumps(public_structured, ensure_ascii=False)
-    return {
+    parsed = {
         "source_id": source.id,
         "site": source.site,
         "category": source.category,
@@ -831,8 +877,11 @@ def _dataset_from_structured(source: Source, structured: dict[str, Any], *, back
             "text_lines": 0,
             "api_bytes": len(body.encode("utf-8")),
         },
-        "_backend": effective_backend,
+        "_backend": backend,
     }
+    if transport_backend is not None:
+        parsed["_transport_backend"] = transport_backend
+    return parsed
 
 
 def _dedupe_streamer_decks_parsed(parsed: dict[str, Any]) -> dict[str, Any]:
@@ -1435,15 +1484,24 @@ async def _fetch_source_with_active_lifecycle(
         try:
             parsed = await _fetch_hsreplay_api_source(source)
             if parsed is not None:
-                backend = parsed.pop("_backend", "hsreplay_api")
+                backend = str(parsed.pop("_backend", "hsreplay_api") or "hsreplay_api")
+                transport_backend = (
+                    _sanitize_transport_backend(parsed.pop("_transport_backend", None))
+                    or backend
+                )
+                used_residential_proxy = _source_uses_residential_proxy(
+                    source,
+                    transport_backend,
+                )
                 content_length = parsed.get("counts", {}).get("api_bytes", 0)
                 dataset = {
                     "source_id": source.id,
                     "fetched_at": fetched_at,
                     "data": parsed,
                     "backend": backend,
+                    "transport_backend": transport_backend,
                     "content_length": content_length,
-                    "used_residential_proxy": _source_uses_residential_proxy(source, backend),
+                    "used_residential_proxy": used_residential_proxy,
                     "runtime": runtime_version_info(),
                 }
                 publication_decision = None
@@ -1495,6 +1553,7 @@ async def _fetch_source_with_active_lifecycle(
                         "backend": backend,
                         "bytes_out": content_length,
                         "extra": {
+                            "transport_backend": transport_backend,
                             "quality_metrics": qmetrics,
                             "ai_review": ai_telemetry,
                         },
@@ -1518,8 +1577,9 @@ async def _fetch_source_with_active_lifecycle(
                         final_url=source.url,
                         content_length=content_length,
                         backend=backend,
+                        transport_backend=transport_backend,
                         detail=reg_msg if reg else None,
-                        used_residential_proxy=_source_uses_residential_proxy(source, backend),
+                        used_residential_proxy=used_residential_proxy,
                         quality=qmetrics,
                     )
                     _attach_ai_review_status(status, ai_telemetry)
@@ -1585,6 +1645,7 @@ async def _fetch_source_with_active_lifecycle(
                                     extra={
                                         "published_dataset_version": authoritative_version,
                                         "operation": "fetcher",
+                                        "transport_backend": transport_backend,
                                     },
                                 )
                             except Exception:
@@ -1597,7 +1658,10 @@ async def _fetch_source_with_active_lifecycle(
                         "backend": backend,
                         "tier": source_tier,
                         "bytes_out": content_length,
-                        "extra": provisional_metadata or None,
+                        "extra": {
+                            "transport_backend": transport_backend,
+                            **provisional_metadata,
+                        },
                     }
                     if publication_decision is not None:
                         _best_effort_log_action("api.route.ok", **route_log)
@@ -1644,7 +1708,8 @@ async def _fetch_source_with_active_lifecycle(
                     detail=reason,
                     content_length=content_length,
                     backend=backend,
-                    used_residential_proxy=_source_uses_residential_proxy(source, backend),
+                    transport_backend=transport_backend,
+                    used_residential_proxy=used_residential_proxy,
                     quality=qmetrics,
                 )
                 _attach_ai_review_status(status, ai_telemetry)
@@ -1708,6 +1773,7 @@ async def _fetch_source_with_active_lifecycle(
                     tier=source_tier,
                     level="warn",
                     extra={
+                        "transport_backend": transport_backend,
                         "quality_metrics": qmetrics,
                         "publish_gate": gate_extra,
                         "ai_review": ai_telemetry,
