@@ -6,12 +6,12 @@ from pathlib import Path
 from .trinket_slices import TRINKET_SLICE_SOURCE_IDS
 
 DEFAULT_DATA_DIR = "/var/lib/hs-data-api"
-DEFAULT_BACKENDS = "flaresolverr,scrapling,patchright,curl_cffi,cloudscraper"
-DEFAULT_HSGURU_BACKENDS = "flaresolverr,scrapling,curl_cffi,cloudscraper,patchright"
+DEFAULT_BACKENDS = "flaresolverr,patchright,scrapling,curl_cffi,cloudscraper"
+DEFAULT_HSGURU_BACKENDS = "flaresolverr,patchright,scrapling,curl_cffi,cloudscraper"
 DEFAULT_BACKENDS_LAB = (
     "cloakbrowser,flaresolverr,scrapling,patchright,curl_cffi,cloudscraper"
 )
-DEFAULT_HSREPLAY_JSON_CHANNELS = "curl_cffi,flaresolverr,scrape_do"
+DEFAULT_HSREPLAY_JSON_CHANNELS = "flaresolverr,scrape_do,curl_cffi"
 DEFAULT_HSREPLAY_MARKDOWN_CHANNELS = "flaresolverr,curl_cffi"
 
 

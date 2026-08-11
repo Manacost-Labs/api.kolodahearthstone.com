@@ -20,9 +20,10 @@ if grep -q '^HS_CLOAKBROWSER_HUMANIZE=' "$ENV_FILE" 2>/dev/null; then
   mv "${ENV_FILE}.tmp" "$ENV_FILE"
 fi
 
-upsert HS_FETCH_BACKENDS "flaresolverr,scrapling,patchright,curl_cffi,cloudscraper"
+upsert HS_FETCH_BACKENDS "flaresolverr,patchright,scrapling,curl_cffi,cloudscraper"
+upsert HS_HSGURU_FETCH_BACKENDS "flaresolverr,patchright,scrapling,curl_cffi,cloudscraper"
 upsert HS_FETCH_BACKENDS_LAB "cloakbrowser,flaresolverr,scrapling,patchright,curl_cffi,cloudscraper"
-upsert HS_HSREPLAY_JSON_CHANNELS "flaresolverr,curl_cffi"
+upsert HS_HSREPLAY_JSON_CHANNELS "flaresolverr,scrape_do,curl_cffi"
 upsert HS_HSREPLAY_MARKDOWN_CHANNELS "flaresolverr,curl_cffi"
 upsert HS_REFRESH_PREFLIGHT_STRICT "true"
 

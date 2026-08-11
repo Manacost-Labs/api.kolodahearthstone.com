@@ -32,8 +32,8 @@ flowchart TB
     Route -->|zerotoheroes, analytics| APIpath
     Route -->|protected cloud-capable| Cloud
     Route -->|hsguru, hsreplay HTML| Browser
-    APIpath -. route-specific .-> IPRoyal
-    Browser -. configured local route .-> IPRoyal
+    APIpath -. последний route-specific fallback .-> IPRoyal
+    Browser -. после proxyless backends .-> IPRoyal
     APIpath --> Quality
     Cloud --> Quality
     Browser --> Quality
@@ -44,10 +44,10 @@ flowchart TB
 
 | Слой | Механизм | Файл |
 |------|----------|------|
-| Обязательный прокси | `HS_FETCH_REQUIRE_PROXY=true` — origin не видит IP сервера | `proxy.py`, `config.py` |
+| Residential fallback | `HS_FETCH_REQUIRE_PROXY=true` сохраняет IPRoyal для разрешённых proxy-backed маршрутов; независимые proxyless/cloud-маршруты выполняются раньше | `proxy.py`, `config.py`, `fetch_routes.py` |
 | Route-aware preflight | Proxy/FlareSolverr блокируют только selection без независимого полезного маршрута | `fetch_routes.py`, `preflight.py` |
 | Cloud fallback | Scrape.do → Firecrawl → Bright Data opt-in → Scrapfly | `firecrawl_backend.py`, `brightdata_backend.py` |
-| Ротация бэкендов | HSGuru: FS → scrapling → patchright → curl; cap `HS_FETCH_BACKEND_MAX_SECONDS` | `rotator.py` |
+| Ротация бэкендов | HSGuru: FS → patchright → scrapling → curl → cloudscraper; cap `HS_FETCH_BACKEND_MAX_SECONDS` | `rotator.py` |
 | Stale Telegram | После `refresh --all`: `stale_ok` если status ok, но данные старше `HS_STALE_HOURS` | `stale_monitor.py` |
 | Jitter между **браузерными** источниками | 8с × random(0.75–1.25) (`HS_REFRESH_DELAY_BROWSER_ONLY=true`) | `fetcher.py` |
 | Параллель API-тиров | light_api до 5, medium_api до 2 + stagger 0.3–1.0с | `fetcher.py`, `source_tiers.py` |
@@ -120,7 +120,7 @@ flowchart TB
 | Browser | HSGuru meta/matchups | FlareSolverr (+ scrapling fallback) | Средняя (CF) |
 | API/HTML | HSReplay BG comps | FlareSolverr или curl_cffi HTML/markdown (`battlegrounds_comps_parse.py`) | Средняя |
 | Browser | HSReplay trinkets/trending | FlareSolverr / patchright | Средняя |
-| HTML parse | HearthArena tierlist | httpx + proxy | Высокая |
+| HTML parse | HearthArena tierlist | Scrape.do-first cloud cascade → residential fallback | Высокая |
 
 ## Stealth-бэкенды и lab-режим
 
@@ -141,7 +141,7 @@ flowchart TB
 
 | Переменная | По умолчанию | Назначение |
 |------------|--------------|------------|
-| `HS_HSREPLAY_JSON_CHANNELS` | `flaresolverr,curl_cffi` | JSON API (arena, и т.д.) |
+| `HS_HSREPLAY_JSON_CHANNELS` | `flaresolverr,scrape_do,curl_cffi` | JSON API: бесплатный solver → Scrape.do → residential fallback |
 | `HS_HSREPLAY_MARKDOWN_CHANNELS` | `flaresolverr,curl_cffi` | Markdown listing/detail; **без jina** (451) |
 
 BG comps: markdown с валидацией `_markdown_body_usable`; при провале — `fetch_hsreplay_html` + `extract_bg_comps`.
@@ -157,9 +157,10 @@ HS_FETCH_BACKEND_MAX_SECONDS=240
 HS_IPROYAL_SESSION_PER_SOURCE=false
 HS_IPROYAL_ROTATE_PER_FETCH=false
 HS_FLARESOLVERR_SESSION_PER_SOURCE=true
-HS_FETCH_BACKENDS=flaresolverr,scrapling,patchright,curl_cffi,cloudscraper
+HS_FETCH_BACKENDS=flaresolverr,patchright,scrapling,curl_cffi,cloudscraper
+HS_HSGURU_FETCH_BACKENDS=flaresolverr,patchright,scrapling,curl_cffi,cloudscraper
 HS_FETCH_BACKENDS_LAB=cloakbrowser,flaresolverr,scrapling,patchright,curl_cffi,cloudscraper
-HS_HSREPLAY_JSON_CHANNELS=flaresolverr,curl_cffi
+HS_HSREPLAY_JSON_CHANNELS=flaresolverr,scrape_do,curl_cffi
 HS_HSREPLAY_MARKDOWN_CHANNELS=flaresolverr,curl_cffi
 HS_REFRESH_PREFLIGHT_STRICT=true
 HS_REFRESH_PARALLEL_LIGHT=3

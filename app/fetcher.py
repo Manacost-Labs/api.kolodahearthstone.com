@@ -372,6 +372,10 @@ def _source_uses_residential_proxy(source: Source, backend: str | None) -> bool:
         from .scrapers.proxy import source_can_use_flaresolverr_without_proxy
 
         return not source_can_use_flaresolverr_without_proxy(source)
+    if backend == "hsreplay_flaresolverr":
+        from .scrapers.proxy import source_can_use_flaresolverr_without_proxy
+
+        return not source_can_use_flaresolverr_without_proxy(source)
     if backend == "hsreplay_premium_flaresolverr":
         return False
     if backend in {"direct", "patchright", "scrapling", "curl_cffi", "cloudscraper", "cloakbrowser"}:

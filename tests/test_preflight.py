@@ -162,6 +162,35 @@ class PreflightTest(unittest.IsolatedAsyncioTestCase):
             )
         )
 
+    async def test_hsreplay_probe_uses_scrape_do_before_residential_curl(self) -> None:
+        from app.preflight import probe_hsreplay_api
+
+        with (
+            patch(
+                "app.config.hsreplay_json_channels",
+                return_value=["flaresolverr", "scrape_do", "curl_cffi"],
+            ),
+            patch(
+                "app.hsreplay_client.fetch_text_via_flaresolverr",
+                new=AsyncMock(side_effect=RuntimeError("solver unavailable")),
+            ) as flaresolverr,
+            patch(
+                "app.hsreplay_client._fetch_text_via_scrape_do",
+                new=AsyncMock(return_value='{"series": {"data": [1]}}'),
+            ) as scrape_do,
+            patch(
+                "app.hsreplay_client.fetch_text_via_curl_cffi",
+                new=AsyncMock(return_value='{"series": {"data": [2]}}'),
+            ) as residential_curl,
+        ):
+            result = await probe_hsreplay_api()
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["channel"], "scrape_do")
+        flaresolverr.assert_awaited_once()
+        scrape_do.assert_awaited_once()
+        residential_curl.assert_not_awaited()
+
     @patch("app.preflight.refresh_preflight_strict", return_value=True)
     @patch(
         "app.preflight.run_refresh_preflight",

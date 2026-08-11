@@ -115,7 +115,7 @@ def _metastats_matchups_html() -> str:
 
 
 class ProviderSourceFallbackTest(unittest.TestCase):
-    def test_heartharena_proxy_402_switches_to_scrape_do_candidate(self) -> None:
+    def test_heartharena_prefers_scrape_do_without_residential_attempt(self) -> None:
         html = _heartharena_html()
 
         async def cloud(source: Source, **options):
@@ -156,10 +156,8 @@ class ProviderSourceFallbackTest(unittest.TestCase):
 
         self.assertEqual(structured["total_cards"], 300)
         self.assertEqual(structured["_fetch_backend"], "scrape_do")
-        self.assertIsNotNone(circuit_error)
-        assert circuit_error is not None
-        self.assertEqual(circuit_error.status_code, 402)
-        residential.assert_awaited_once()
+        self.assertIsNone(circuit_error)
+        residential.assert_not_awaited()
         provider.assert_awaited_once()
 
         parsed = _dataset_from_structured(
@@ -181,6 +179,28 @@ class ProviderSourceFallbackTest(unittest.TestCase):
                     parsed["_transport_backend"],
                 )
             )
+
+    def test_heartharena_cloud_failure_uses_residential_last(self) -> None:
+        html = _heartharena_html()
+        with (
+            patch(
+                "app.heartharena.scrape_source_with_options",
+                new=AsyncMock(side_effect=RuntimeError("cloud unavailable")),
+            ) as provider,
+            patch(
+                "app.heartharena._fetch_residential_html",
+                new=AsyncMock(return_value=html),
+            ) as residential,
+            patch("app.heartharena.card_from_id", return_value={}),
+        ):
+            structured = asyncio.run(
+                fetch_heartharena_tierlist(HEARTHARENA_SOURCE)
+            )
+
+        self.assertEqual(structured["total_cards"], 300)
+        self.assertEqual(structured["_fetch_backend"], "residential_httpx")
+        self.assertEqual(provider.await_count, 2)
+        residential.assert_awaited_once()
 
     def test_invalid_cloud_candidate_fails_and_common_gate_preserves_lkg(self) -> None:
         valid_html = _heartharena_html()
@@ -441,8 +461,14 @@ class ProviderSourceFallbackTest(unittest.TestCase):
                     "proxyless_curl_cffi",
                 )
             )
+            self.assertFalse(
+                _source_uses_residential_proxy(
+                    HSREPLAY_SOURCE,
+                    "hsreplay_flaresolverr",
+                )
+            )
 
-    def test_metastats_fetches_all_classes_with_concurrency_at_most_two(self) -> None:
+    def test_metastats_cloud_failure_uses_residential_with_bounded_concurrency(self) -> None:
         active = 0
         maximum_active = 0
         seen: list[str] = []
@@ -466,7 +492,7 @@ class ProviderSourceFallbackTest(unittest.TestCase):
             ),
             patch(
                 "app.metastats._fetch_cloud_html",
-                new=AsyncMock(),
+                new=AsyncMock(side_effect=RuntimeError("cloud unavailable")),
             ) as cloud,
         ):
             structured = asyncio.run(fetch_metastats_decks(METASTATS_SOURCE))
@@ -494,9 +520,37 @@ class ProviderSourceFallbackTest(unittest.TestCase):
                     parsed["_transport_backend"],
                 )
             )
-        cloud.assert_not_awaited()
+        self.assertEqual(cloud.await_count, len(CLASSES))
 
-    def test_metastats_matchups_proxy_402_uses_validated_cloud_candidate(self) -> None:
+    def test_metastats_prefers_cloud_for_every_class(self) -> None:
+        async def cloud(
+            source: Source,
+            *,
+            accept_html,
+        ) -> tuple[str, str]:
+            class_name = source.url.rstrip("/").rsplit("/", 1)[-1]
+            candidate = _metastats_class_html(class_name)
+            self.assertTrue(accept_html(candidate))
+            return candidate, "scrape_do"
+
+        with (
+            patch(
+                "app.metastats._fetch_cloud_html",
+                side_effect=cloud,
+            ) as cloud_fetch,
+            patch(
+                "app.metastats._fetch_residential_html",
+                new=AsyncMock(side_effect=AssertionError("must remain fallback")),
+            ) as residential,
+        ):
+            structured = asyncio.run(fetch_metastats_decks(METASTATS_SOURCE))
+
+        self.assertEqual(structured["total_decks"], len(CLASSES) * 4)
+        self.assertEqual(structured["_fetch_backend"], "scrape_do")
+        self.assertEqual(cloud_fetch.await_count, len(CLASSES))
+        residential.assert_not_awaited()
+
+    def test_metastats_matchups_prefers_validated_cloud_candidate(self) -> None:
         html = _metastats_matchups_html()
 
         async def cloud(source: Source, **options):
@@ -538,10 +592,8 @@ class ProviderSourceFallbackTest(unittest.TestCase):
 
         self.assertEqual(len(structured["matchups"]), 60)
         self.assertEqual(structured["_fetch_backend"], "scrape_do")
-        self.assertIsNotNone(circuit_error)
-        assert circuit_error is not None
-        self.assertEqual(circuit_error.status_code, 402)
-        residential.assert_awaited_once()
+        self.assertIsNone(circuit_error)
+        residential.assert_not_awaited()
         provider.assert_awaited_once()
 
     def test_metastats_aggregates_mixed_class_backend_provenance(self) -> None:

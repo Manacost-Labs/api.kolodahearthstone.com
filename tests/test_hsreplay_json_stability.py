@@ -106,6 +106,62 @@ def test_hsreplay_json_accepts_drf_browsable_api_response() -> None:
     )
 
 
+def test_cost_first_order_uses_scrape_do_before_residential_curl() -> None:
+    calls: list[str] = []
+
+    async def fetch(label: str, _url: str, *, source_id: str) -> str:
+        del source_id
+        calls.append(label)
+        if label == "flaresolverr":
+            raise RuntimeError("solver unavailable")
+        if label == "scrape_do":
+            return '{"series": {"data": [1]}}'
+        raise AssertionError("residential curl must remain the final fallback")
+
+    with (
+        patch("app.hsreplay_client._fetch_body_for_channel", side_effect=fetch),
+        patch("app.hsreplay_client.api_json_retry_delay_seconds", return_value=0),
+        patch("app.hsreplay_client.get_cached_hsreplay_json", return_value=None),
+        patch("app.hsreplay_client.set_cached_hsreplay_json"),
+    ):
+        result = asyncio.run(
+            fetch_hsreplay_json(
+                "https://hsreplay.net/api/test",
+                source_id="hsreplay_cards_legend_patch",
+            )
+        )
+
+    assert result == {"series": {"data": [1]}}
+    assert calls == ["flaresolverr", "scrape_do"]
+
+
+def test_cost_first_order_keeps_residential_curl_as_last_fallback() -> None:
+    calls: list[str] = []
+
+    async def fetch(label: str, _url: str, *, source_id: str) -> str:
+        del source_id
+        calls.append(label)
+        if label == "curl_cffi":
+            return '{"series": {"data": [2]}}'
+        raise RuntimeError(f"{label} unavailable")
+
+    with (
+        patch("app.hsreplay_client._fetch_body_for_channel", side_effect=fetch),
+        patch("app.hsreplay_client.api_json_retry_delay_seconds", return_value=0),
+        patch("app.hsreplay_client.get_cached_hsreplay_json", return_value=None),
+        patch("app.hsreplay_client.set_cached_hsreplay_json"),
+    ):
+        result = asyncio.run(
+            fetch_hsreplay_json(
+                "https://hsreplay.net/api/test",
+                source_id="hsreplay_cards_legend_patch",
+            )
+        )
+
+    assert result == {"series": {"data": [2]}}
+    assert calls == ["flaresolverr", "scrape_do", "curl_cffi"]
+
+
 @pytest.mark.parametrize(
     ("message", "status"),
     [
@@ -1017,11 +1073,11 @@ def test_preferred_and_configured_channels_are_merged_without_duplicates() -> No
     with (
         patch(
             "app.source_contracts.preferred_channels_for_source",
-            return_value=("curl_cffi", "flaresolverr"),
+            return_value=("flaresolverr", "scrape_do", "curl_cffi"),
         ),
         patch(
             "app.hsreplay_client.hsreplay_json_channels",
-            return_value=["flaresolverr", "scrape_do", "direct"],
+            return_value=["scrape_do", "curl_cffi", "direct"],
         ),
     ):
         labels = [
@@ -1032,7 +1088,7 @@ def test_preferred_and_configured_channels_are_merged_without_duplicates() -> No
             )
         ]
 
-    assert labels == ["curl_cffi", "flaresolverr", "scrape_do", "direct"]
+    assert labels == ["flaresolverr", "scrape_do", "curl_cffi", "direct"]
 
 
 def test_scrape_do_logs_never_include_cookie_values(

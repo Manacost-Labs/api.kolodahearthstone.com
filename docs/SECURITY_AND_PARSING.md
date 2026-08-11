@@ -366,8 +366,9 @@ Timer не должен совпадать с пиковой нагрузкой 
 
 ### 6.4. HearthArena
 
-- Прямой HTML tierlist (`/ru/tierlist`, fallback `/tierlist`)
-- `app/heartharena.py`, прокси, без Premium
+- HTML tierlist (`/ru/tierlist`, fallback `/tierlist`) через валидированный
+  Scrape.do-first cloud-каскад; residential proxy используется только последним
+- `app/heartharena.py`, без Premium
 - Quality: ≥300 карт, tier_id на карточках
 
 ---

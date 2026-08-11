@@ -108,14 +108,15 @@ Scrapfly могут ротировать ключи. Каждый HTTP 2xx-ка�
 ограничения и переменные конфигурации:
 [docs/SCRAPE_PROVIDERS.md](docs/SCRAPE_PROVIDERS.md).
 
-Для трёх специализированных источников действуют дополнительные узкие правила:
-HSReplay Arena запрашивает только явный JSON-срез последних четырёх дней;
-Hearthstone-Decks при недоступном residential proxy получает две публичные
-выдачи через Scrape.do-first каскад и публикует их лишь при полном покрытии
-`20 Standard + 20 Wild`; Vicious Syndicate после подтверждённого CONNECT
+Для специализированных источников действуют дополнительные узкие правила:
+HSReplay JSON использует cost-first порядок FlareSolverr → Scrape.do →
+residential curl_cffi. Публичные страницы HearthArena, MetaStats и
+Hearthstone-Decks сначала проходят валидированный Scrape.do-first cloud-каскад,
+а IPRoyal остаётся последним аварийным маршрутом. Hearthstone-Decks публикуется
+лишь при полном покрытии `20 Standard + 20 Wild`; Vicious Syndicate после подтверждённого CONNECT
 `402/407` может перейти на прямой HTTPS только для официального домена и только
-после URL-специфичной проверки report/deck/radar содержимого. Во всех трёх
-случаях неполный кандидат отклоняется, а API продолжает отдавать LKG.
+после URL-специфичной проверки report/deck/radar содержимого. Во всех случаях
+неполный кандидат отклоняется, а API продолжает отдавать LKG.
 
 ## AI-проверка кандидатов
 

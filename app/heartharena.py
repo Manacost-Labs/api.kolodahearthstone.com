@@ -226,7 +226,7 @@ async def _fetch_heartharena_cloud(source: Source) -> tuple[str, str]:
 
 
 async def fetch_heartharena_tierlist(source: Source) -> dict[str, Any]:
-    """Fetch HearthArena through residential egress, then the cloud chain."""
+    """Fetch HearthArena through the cloud chain, then residential fallback."""
 
     headers = {
         "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -238,6 +238,15 @@ async def fetch_heartharena_tierlist(source: Source) -> dict[str, Any]:
         ),
     }
     errors: list[str] = []
+    try:
+        html_content, backend = await _fetch_heartharena_cloud(source)
+    except Exception as exc:  # noqa: BLE001 - residential is an independent route
+        errors.append(f"cloud:{type(exc).__name__}")
+    else:
+        structured = parse_heartharena_tierlist(html_content)
+        structured["_fetch_backend"] = backend
+        return structured
+
     urls = tuple(dict.fromkeys((source.url, "https://www.heartharena.com/tierlist")))
     for fetch_url in urls:
         try:
@@ -250,10 +259,8 @@ async def fetch_heartharena_tierlist(source: Source) -> dict[str, Any]:
             from .scrapers.rotator import record_residential_proxy_failure
 
             record_residential_proxy_failure(exc)
-            html_content, backend = await _fetch_heartharena_cloud(source)
-            structured = parse_heartharena_tierlist(html_content)
-            structured["_fetch_backend"] = backend
-            return structured
+            errors.append(f"residential:HTTP_{exc.status_code}")
+            break
         except Exception as exc:  # noqa: BLE001 - try the alternate route
             errors.append(type(exc).__name__)
             continue
@@ -263,14 +270,7 @@ async def fetch_heartharena_tierlist(source: Source) -> dict[str, Any]:
             return structured
         errors.append("invalid_content")
 
-    try:
-        html_content, backend = await _fetch_heartharena_cloud(source)
-    except Exception as exc:
-        errors.append(type(exc).__name__)
-        raise RuntimeError(
-            "HearthArena fetch failed across residential and cloud routes "
-            f"({', '.join(errors)})"
-        ) from exc
-    structured = parse_heartharena_tierlist(html_content)
-    structured["_fetch_backend"] = backend
-    return structured
+    raise RuntimeError(
+        "HearthArena fetch failed across cloud and residential routes "
+        f"({', '.join(errors)})"
+    )

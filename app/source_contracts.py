@@ -29,7 +29,7 @@ class SourceContract:
     early_min_html_bytes: int | None = None
 
 
-HSREPLAY_JSON_CHANNELS = ("curl_cffi", "flaresolverr")
+HSREPLAY_JSON_CHANNELS = ("flaresolverr", "scrape_do", "curl_cffi")
 
 
 CONTRACTS: dict[str, SourceContract] = {

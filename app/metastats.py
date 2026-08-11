@@ -255,7 +255,25 @@ async def _fetch_metastats_class(
     async with semaphore:
         html_content = ""
         backend = ""
-        if not proxy_unavailable.is_set():
+        try:
+            html_content, backend = await _fetch_cloud_html(
+                class_source,
+                accept_html=lambda candidate: _metastats_class_html_is_usable(
+                    candidate,
+                    class_name,
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001 - residential is independent
+            logger.warning(
+                "MetaStats cloud class fetch failed class=%s error=%s",
+                class_name,
+                type(exc).__name__,
+            )
+
+        if (
+            not _metastats_class_html_is_usable(html_content, class_name)
+            and not proxy_unavailable.is_set()
+        ):
             try:
                 html_content = await _fetch_residential_html(source.id, url)
                 backend = "residential_httpx"
@@ -264,21 +282,12 @@ async def _fetch_metastats_class(
 
                 record_residential_proxy_failure(exc)
                 proxy_unavailable.set()
-            except Exception as exc:  # noqa: BLE001 - cloud is an independent route
+            except Exception as exc:  # noqa: BLE001 - source failure is handled below
                 logger.warning(
                     "MetaStats residential class fetch failed class=%s error=%s",
                     class_name,
                     type(exc).__name__,
                 )
-
-        if not _metastats_class_html_is_usable(html_content, class_name):
-            html_content, backend = await _fetch_cloud_html(
-                class_source,
-                accept_html=lambda candidate: _metastats_class_html_is_usable(
-                    candidate,
-                    class_name,
-                ),
-            )
 
         decks = parse_metastats_class_page(html_content, class_name)
         if not decks:
@@ -430,22 +439,8 @@ def parse_metastats_matchups(html_content: str) -> dict[str, Any]:
 
 async def fetch_metastats_matchups(source: Source) -> dict[str, Any]:
     html_content = ""
-    backend = "residential_httpx"
+    backend = ""
     try:
-        html_content = await _fetch_residential_html(source.id, source.url)
-    except ProxyPaymentRequiredError as exc:
-        from .scrapers.rotator import record_residential_proxy_failure
-
-        record_residential_proxy_failure(exc)
-        backend = ""
-    except Exception as exc:  # noqa: BLE001 - cloud is an independent route
-        logger.warning(
-            "MetaStats residential matchup fetch failed error=%s",
-            type(exc).__name__,
-        )
-
-    direct_candidate = parse_metastats_matchups(html_content)
-    if not _metastats_contract_is_usable(source.id, direct_candidate):
         html_content, backend = await _fetch_cloud_html(
             source,
             accept_html=lambda candidate: _metastats_contract_is_usable(
@@ -453,6 +448,32 @@ async def fetch_metastats_matchups(source: Source) -> dict[str, Any]:
                 parse_metastats_matchups(candidate),
             ),
         )
+    except Exception as exc:  # noqa: BLE001 - residential is an independent route
+        logger.warning(
+            "MetaStats cloud matchup fetch failed error=%s",
+            type(exc).__name__,
+        )
+
+    cloud_candidate = parse_metastats_matchups(html_content)
+    if not _metastats_contract_is_usable(source.id, cloud_candidate):
+        try:
+            html_content = await _fetch_residential_html(source.id, source.url)
+            backend = "residential_httpx"
+        except ProxyPaymentRequiredError as exc:
+            from .scrapers.rotator import record_residential_proxy_failure
+
+            record_residential_proxy_failure(exc)
+            raise RuntimeError(
+                "MetaStats matchups failed across cloud and residential routes"
+            ) from exc
+        except Exception as exc:
+            logger.warning(
+                "MetaStats residential matchup fetch failed error=%s",
+                type(exc).__name__,
+            )
+            raise RuntimeError(
+                "MetaStats matchups failed across cloud and residential routes"
+            ) from exc
     structured = parse_metastats_matchups(html_content)
     ok, reason, _report = contract_quality_ok(source.id, structured)
     if not ok:

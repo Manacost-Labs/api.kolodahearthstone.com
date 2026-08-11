@@ -27,8 +27,11 @@ class HsreplayClientTest(unittest.TestCase):
     def test_jina_url_prefix(self) -> None:
         self.assertTrue(jina_url("https://hsreplay.net/api/v1/x").startswith("https://r.jina.ai/"))
 
-    def test_default_json_channels_prefer_curl_cffi(self) -> None:
-        self.assertTrue(DEFAULT_HSREPLAY_JSON_CHANNELS.startswith("curl_cffi"))
+    def test_default_json_channels_use_cost_first_order(self) -> None:
+        self.assertEqual(
+            DEFAULT_HSREPLAY_JSON_CHANNELS,
+            "flaresolverr,scrape_do,curl_cffi",
+        )
 
     @patch("app.hsreplay_client.hsreplay_json_channels", return_value=["direct", "jina"])
     def test_channel_urls_order(self, _mock: object) -> None:

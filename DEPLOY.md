@@ -229,7 +229,7 @@ curl -s -H "X-API-Key: ${HS_API_KEY}" "http://127.0.0.1:8000/ops/events?action_g
 /srv/hs-data-api/venv/bin/python -m app.cli freshness-check --since-hours 48 --alert
 ```
 
-Для HSGuru используется отдельный `HS_HSGURU_FETCH_BACKENDS` (default: `flaresolverr,scrapling,curl_cffi,cloudscraper,patchright`). При Cloudflare/403 browser rotator burn-ит sticky proxy session; timeout и quality failures открывают circuit только для конкретного source, чтобы один плохой endpoint не выключал backend для всей HSGuru пачки.
+Для HSGuru используется отдельный `HS_HSGURU_FETCH_BACKENDS` (default: `flaresolverr,patchright,scrapling,curl_cffi,cloudscraper`): два proxyless backend идут раньше residential fallback. При Cloudflare/403 browser rotator burn-ит sticky proxy session; timeout и quality failures открывают circuit только для конкретного source, чтобы один плохой endpoint не выключал backend для всей HSGuru пачки.
 
 Recovery:
 

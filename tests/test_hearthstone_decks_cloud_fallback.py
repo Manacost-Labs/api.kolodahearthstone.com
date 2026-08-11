@@ -74,7 +74,7 @@ def _provider_result(
     )
 
 
-def test_proxy_402_uses_validated_cloud_lists_and_reuses_nested_cached_codes() -> None:
+def test_validated_cloud_lists_avoid_residential_and_reuse_cached_codes() -> None:
     provider_urls: list[str] = []
 
     async def cloud(source: Source, **options):
@@ -123,7 +123,35 @@ def test_proxy_402_uses_validated_cloud_lists_and_reuses_nested_cached_codes() -
     assert all(deck["deck_code_reused"] for deck in structured["decks"])
     assert len(provider_urls) == 2
     assert provider.await_count == 2
-    assert residential.await_count == 1
+    residential.assert_not_awaited()
+
+
+def test_cloud_failure_uses_residential_lists_as_last_fallback() -> None:
+    async def residential(_source_id: str, url: str) -> str:
+        format_name = "Wild" if "/wild-decks/" in url else "Standard"
+        return _list_html(format_name)
+
+    with (
+        patch(
+            "app.hearthstone_decks._fetch_residential_html",
+            side_effect=residential,
+        ) as residential_fetch,
+        patch(
+            "app.hearthstone_decks.scrape_source_with_options",
+            new=AsyncMock(side_effect=RuntimeError("cloud unavailable")),
+        ) as provider,
+        patch(
+            "app.hearthstone_decks.load_dataset",
+            return_value=_cached_dataset(),
+        ),
+    ):
+        structured = asyncio.run(fetch_hearthstone_decks(SOURCE))
+
+    assert structured["total_decks"] == 40
+    assert structured["with_deck_code"] == 40
+    assert structured["_fetch_backend"] == "residential_httpx"
+    assert provider.await_count == 2
+    assert residential_fetch.await_count == 2
 
 
 def test_cloud_list_candidate_with_fewer_than_twenty_rows_fails_closed() -> None:

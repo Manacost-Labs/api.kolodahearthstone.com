@@ -125,7 +125,10 @@ class SourceContractsTest(unittest.TestCase):
             )
         ]
 
-        self.assertEqual(labels[:2], ["curl_cffi", "flaresolverr"])
+        self.assertEqual(
+            labels[:3],
+            ["flaresolverr", "scrape_do", "curl_cffi"],
+        )
 
     def test_contract_field_fill_rejects_missing_hidden_columns(self) -> None:
         source = SOURCE_BY_ID["hsreplay_arena_cards_advanced"]

@@ -271,7 +271,27 @@ async def _fetch_list_page(
 ) -> tuple[list[dict[str, Any]], str, bool]:
     html = ""
     backend = ""
-    if not proxy_unavailable:
+    cloud_error: Exception | None = None
+    accept_html = lambda candidate: _list_html_is_usable(
+        candidate,
+        page_url=page_url,
+        format_name=format_name,
+    )
+    try:
+        html, backend = await _fetch_cloud_html(
+            source,
+            page_url,
+            accept_html=accept_html,
+        )
+    except Exception as exc:  # noqa: BLE001 - residential is independent
+        cloud_error = exc
+        logger.warning(
+            "Hearthstone-Decks cloud list fetch failed format=%s error=%s",
+            format_name,
+            type(exc).__name__,
+        )
+
+    if not accept_html(html) and not proxy_unavailable:
         try:
             html = await _fetch_residential_html(source.id, page_url)
             backend = "residential_httpx"
@@ -280,24 +300,18 @@ async def _fetch_list_page(
 
             record_residential_proxy_failure(exc)
             proxy_unavailable = True
-        except Exception as exc:  # noqa: BLE001 - cloud is independent
+        except Exception as exc:  # noqa: BLE001 - source failure is handled below
             logger.warning(
                 "Hearthstone-Decks residential list fetch failed format=%s error=%s",
                 format_name,
                 type(exc).__name__,
             )
 
-    accept_html = lambda candidate: _list_html_is_usable(
-        candidate,
-        page_url=page_url,
-        format_name=format_name,
-    )
-    if not accept_html(html):
-        html, backend = await _fetch_cloud_html(
-            source,
-            page_url,
-            accept_html=accept_html,
-        )
+    if not accept_html(html) and cloud_error is not None:
+        raise RuntimeError(
+            "Hearthstone-Decks cloud response failed validation and "
+            "residential fallback failed"
+        ) from cloud_error
 
     rows = parse_decks_list_html(
         html,

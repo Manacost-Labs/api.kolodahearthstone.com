@@ -154,6 +154,7 @@ async def probe_hsreplay_api() -> dict[str, Any]:
     """Lightweight HSReplay JSON probe using configured channels."""
     from .config import hsreplay_json_channels
     from .hsreplay_client import (
+        _fetch_text_via_scrape_do,
         extract_json_payload,
         fetch_text_via_curl_cffi,
         fetch_text_via_flaresolverr,
@@ -200,6 +201,10 @@ async def probe_hsreplay_api() -> dict[str, Any]:
                 )
             elif label == "curl_cffi":
                 body = await fetch_text_via_curl_cffi(
+                    HSREPLAY_PROBE_URL, source_id="preflight_hsreplay"
+                )
+            elif label == "scrape_do":
+                body = await _fetch_text_via_scrape_do(
                     HSREPLAY_PROBE_URL, source_id="preflight_hsreplay"
                 )
             else:

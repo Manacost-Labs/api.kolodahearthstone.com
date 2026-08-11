@@ -161,7 +161,7 @@ docker exec hs-data-api python -m app.cli brightdata-init-usage --billed-request
 | --- | --- |
 | `HS_SCRAPE_DO_TOKEN` | API token основного провайдера. |
 | `HS_SCRAPE_DO_TIMEOUT_SECONDS` | Wall timeout Scrape.do, `120`. |
-| `HS_HSREPLAY_JSON_CHANNELS` | Каскад HSReplay JSON; default `curl_cffi,flaresolverr,scrape_do`. Предпочтения контракта идут первыми, затем добавляются настроенные каналы без дублей. |
+| `HS_HSREPLAY_JSON_CHANNELS` | Каскад HSReplay JSON; default `flaresolverr,scrape_do,curl_cffi`: бесплатный локальный solver, затем оплаченная подписка Scrape.do, затем residential `curl_cffi`. Предпочтения контракта идут первыми, затем добавляются настроенные каналы без дублей. |
 | `HS_HSREPLAY_SCRAPE_DO_MAX_REQUESTS` | Атомарный лимит зарезервированных HSReplay JSON-вызовов Scrape.do на refresh, default `120`. Этого достаточно для текущего полного набора архетипов с запасом. |
 | `HS_HSREPLAY_SCRAPE_DO_MAX_CREDITS` | Атомарный credit ceiling HSReplay JSON на refresh, default `160`. Ошибочные и отклонённые вызовы не возвращают резерв. |
 | `HS_HSREPLAY_SCRAPE_DO_MAX_CONCURRENCY` | Параллельные HSReplay JSON-вызовы Scrape.do, default `2`. |
