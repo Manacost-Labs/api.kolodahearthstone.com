@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
 import sqlite3
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 from starlette.testclient import TestClient
@@ -9,7 +9,6 @@ from starlette.testclient import TestClient
 from app.main import app
 from app.public_cache import PUBLIC_CACHE_CONTROL, cache_revision
 from app.storage import save_dataset
-
 
 client = TestClient(app)
 
@@ -46,11 +45,15 @@ def test_v1_get_returns_etag_and_conditional_304() -> None:
 def test_dataset_etag_changes_with_fetched_at() -> None:
     source_id = "hsreplay_arena"
     first_time = (datetime.now(UTC) - timedelta(minutes=1)).isoformat()
-    save_dataset(source_id, {"source_id": source_id, "fetched_at": first_time, "data": {}})
+    save_dataset(
+        source_id, {"source_id": source_id, "fetched_at": first_time, "data": {}}
+    )
     first = client.get(f"/datasets/{source_id}")
 
     second_time = datetime.now(UTC).isoformat()
-    save_dataset(source_id, {"source_id": source_id, "fetched_at": second_time, "data": {}})
+    save_dataset(
+        source_id, {"source_id": source_id, "fetched_at": second_time, "data": {}}
+    )
     second = client.get(f"/datasets/{source_id}")
 
     assert first.status_code == second.status_code == 200
@@ -89,47 +92,105 @@ def test_cache_revision_is_best_effort_when_storage_is_unavailable() -> None:
 
 def test_hsguru_legend_deck_revision_reads_only_its_catalog() -> None:
     with (
-        patch("app.public_cache._dataset_timestamp", return_value="catalog-revision") as dataset_timestamp,
+        patch(
+            "app.public_cache._dataset_timestamp", return_value="catalog-revision"
+        ) as dataset_timestamp,
         patch("app.public_cache._latest_dataset_timestamp") as latest_timestamp,
+        patch(
+            "app.hsguru_decks.hsguru_matrix_cache_revision",
+            return_value="matrix-revision",
+        ),
     ):
         revision = cache_revision(
             "/v1/constructed/hsguru-deck",
             b"archetype=XL+Mill+Druid&format_name=wild&rank=legend",
         )
 
-    assert revision == "catalog-revision"
+    assert revision == "catalog-revision:matrix-revision"
     dataset_timestamp.assert_called_once_with("hsguru_deck_catalog_wild_legend")
     latest_timestamp.assert_not_called()
 
 
 def test_hsguru_all_rank_deck_revision_reads_its_preloaded_catalog() -> None:
     with (
-        patch("app.public_cache._dataset_timestamp", return_value="all-catalog-revision") as dataset_timestamp,
+        patch(
+            "app.public_cache._dataset_timestamp", return_value="all-catalog-revision"
+        ) as dataset_timestamp,
         patch("app.public_cache._latest_dataset_timestamp") as latest_timestamp,
+        patch(
+            "app.hsguru_decks.hsguru_matrix_cache_revision",
+            return_value="matrix-revision",
+        ),
     ):
         revision = cache_revision(
             "/v1/constructed/hsguru-deck",
             b"archetype=XL+HL+Exodia+Mage&format_name=wild&rank=all",
         )
 
-    assert revision == "all-catalog-revision"
+    assert revision == "all-catalog-revision:matrix-revision"
     dataset_timestamp.assert_called_once_with("hsguru_deck_catalog_wild_all")
     latest_timestamp.assert_not_called()
 
 
 def test_hsguru_other_rank_revision_uses_the_all_rank_fallback_catalog() -> None:
     with (
-        patch("app.public_cache._dataset_timestamp", return_value="all-catalog-revision") as dataset_timestamp,
+        patch(
+            "app.public_cache._dataset_timestamp", return_value="all-catalog-revision"
+        ) as dataset_timestamp,
         patch("app.public_cache._latest_dataset_timestamp") as latest_timestamp,
+        patch(
+            "app.hsguru_decks.hsguru_matrix_cache_revision",
+            return_value="matrix-revision",
+        ),
     ):
         revision = cache_revision(
             "/v1/constructed/hsguru-deck",
             b"archetype=Weapon+Rogue&format_name=wild&rank=diamond_4to1",
         )
 
-    assert revision == "all-catalog-revision"
+    assert revision == "all-catalog-revision:matrix-revision"
     dataset_timestamp.assert_called_once_with("hsguru_deck_catalog_wild_all")
     latest_timestamp.assert_not_called()
+
+
+def test_hsguru_archetype_revision_tracks_deck_join() -> None:
+    with patch(
+        "app.hsguru_decks.hsguru_matrix_cache_revision",
+        return_value="patch_36.2.0:joined-at",
+    ):
+        revision = cache_revision("/v1/hsguru/archetypes", b"format=wild")
+
+    assert revision == "patch_36.2.0:joined-at"
+
+
+def test_live_hsguru_deck_endpoint_never_returns_disk_based_304() -> None:
+    first_row = {
+        "archetype": "Big Shaman",
+        "format": "Wild",
+        "deck_code": "AAECAaoIFirstLiveDeckCode1234567890==",
+    }
+    second_row = {
+        **first_row,
+        "deck_code": "AAECAaoISecondLiveDeckCode123456789==",
+    }
+    url = (
+        "/v1/constructed/hsguru-deck?"
+        "archetype=Big%20Shaman&format_name=wild&rank=legend"
+    )
+    with patch(
+        "app.routers.constructed.exact_hsguru_decks",
+        side_effect=[[first_row], [second_row]],
+    ):
+        first = client.get(url)
+        second = client.get(
+            url,
+            headers={"If-None-Match": first.headers.get("etag", '"stale"')},
+        )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert "etag" not in first.headers
+    assert first.json()["data"][0]["deck_code"] != second.json()["data"][0]["deck_code"]
 
 
 def _consumer_decks_connection() -> sqlite3.Connection:
@@ -145,7 +206,17 @@ def _consumer_decks_connection() -> sqlite3.Connection:
     )
     conn.execute(
         "INSERT INTO decks VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (1, "consumer-test", "Spell Mage", "Spell Mage", "Mage", "standard", "AAECA-test", 52.5, "2026-07-12T08:00:00+00:00"),
+        (
+            1,
+            "consumer-test",
+            "Spell Mage",
+            "Spell Mage",
+            "Mage",
+            "standard",
+            "AAECA-test",
+            52.5,
+            "2026-07-12T08:00:00+00:00",
+        ),
     )
     return conn
 

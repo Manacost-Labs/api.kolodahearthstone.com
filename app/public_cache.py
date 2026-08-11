@@ -14,6 +14,11 @@ PUBLIC_CACHE_CONTROL = "public, max-age=300, stale-while-revalidate=600"
 
 
 def _cacheable_path(path: str) -> bool:
+    if path.startswith("/v1/constructed/hsguru-deck"):
+        # This endpoint can refresh an exact archetype in process without
+        # changing the disk catalogs. A disk-derived strong ETag could return
+        # a false 304 for a newer live result.
+        return False
     if path.startswith("/v1/system/parsing-reliability"):
         # This report has moving time-window boundaries and generated_at even
         # without a database write. A strong shared ETag would be dishonest.
@@ -22,12 +27,7 @@ def _cacheable_path(path: str) -> bool:
         return False
     if path.endswith("/health"):
         return False
-    return (
-        path == "/datasets"
-        or path.startswith("/datasets/")
-        or path.startswith("/api/")
-        or path.startswith("/v1/")
-    )
+    return path == "/datasets" or path.startswith(("/datasets/", "/api/", "/v1/"))
 
 
 def _dataset_timestamp(source_id: str) -> str | None:
@@ -84,18 +84,27 @@ def cache_revision(path: str, query_string: bytes) -> str:
         return _dataset_timestamp(source_id) or "not-cached"
     if path.startswith("/v1/arena/classes"):
         query = parse_qs(query_string.decode("utf-8", errors="ignore"))
-        source_id = (query.get("source_id") or ["hsreplay_arena_class_pages_firecrawl"])[0]
+        source_id = (
+            query.get("source_id") or ["hsreplay_arena_class_pages_firecrawl"]
+        )[0]
         return _dataset_timestamp(source_id) or "not-cached"
     if path.startswith(("/v1/bg/heroes", "/api/bg/heroes")):
         return _dataset_timestamp("hsreplay_battlegrounds_hero_details") or "not-cached"
     if path.startswith("/v1/constructed/hsguru-deck"):
+        from .hsguru_decks import hsguru_matrix_cache_revision
+
         query = parse_qs(query_string.decode("utf-8", errors="ignore"))
         format_name = (query.get("format_name") or ["standard"])[0]
         rank = (query.get("rank") or ["legend"])[0]
         if format_name in {"standard", "wild"}:
             catalog_rank = rank if rank in {"legend", "all"} else "all"
             source_id = f"hsguru_deck_catalog_{format_name}_{catalog_rank}"
-            return _dataset_timestamp(source_id) or "not-cached"
+            catalog_revision = _dataset_timestamp(source_id) or "not-cached"
+            return f"{catalog_revision}:{hsguru_matrix_cache_revision()}"
+    if path.startswith("/v1/hsguru/archetypes"):
+        from .hsguru_decks import hsguru_matrix_cache_revision
+
+        return hsguru_matrix_cache_revision()
     db_revision = _db_revision(path)
     if db_revision:
         return db_revision
@@ -133,12 +142,17 @@ class PublicCacheMiddleware:
         request = Request(scope, receive=receive)
         revision = cache_revision(path, scope.get("query_string") or b"")
         etag = build_etag(path, scope.get("query_string") or b"", revision)
-        requested_not_modified = _etag_matches(request.headers.get("if-none-match"), etag)
+        requested_not_modified = _etag_matches(
+            request.headers.get("if-none-match"), etag
+        )
         not_modified = False
 
         async def cache_headers(message: dict[str, Any]) -> None:
             nonlocal not_modified
-            if message.get("type") == "http.response.start" and 200 <= int(message.get("status") or 0) < 300:
+            if (
+                message.get("type") == "http.response.start"
+                and 200 <= int(message.get("status") or 0) < 300
+            ):
                 headers = MutableHeaders(scope=message)
                 headers["Cache-Control"] = PUBLIC_CACHE_CONTROL
                 headers["ETag"] = etag

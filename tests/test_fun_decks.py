@@ -2,8 +2,34 @@ from __future__ import annotations
 
 from collections import Counter
 from datetime import UTC, datetime
+from unittest.mock import patch
 
-from app.fun_decks import MetaReference, _balance_and_dedupe, _merge_history, detect_card_packages, jaccard_similarity, score_fun_deck
+from app.fun_decks import (
+    MetaReference,
+    _balance_and_dedupe,
+    _catalog_rows,
+    _merge_history,
+    detect_card_packages,
+    jaccard_similarity,
+    score_fun_deck,
+)
+
+
+def test_hsguru_catalog_rows_reject_previous_patch() -> None:
+    dataset = {
+        "period": "patch_36.1.0",
+        "data": [{"archetype": "Old Mage", "deck_code": "OLD"}],
+    }
+    with (
+        patch("app.fun_decks.load_dataset", return_value=dataset),
+        patch(
+            "app.hsguru_decks.current_hsguru_deck_period",
+            return_value="patch_36.2.0",
+        ),
+    ):
+        rows = _catalog_rows("hsguru_deck_catalog_wild_all")
+
+    assert rows == []
 
 
 def test_jaccard_identical_and_disjoint():
@@ -22,7 +48,9 @@ def test_score_marks_concept_outlier_as_fun():
         format_name="Standard",
         source_id="catalog",
     )
-    fun_cards = Counter({100: 2, 101: 2, 102: 2, 103: 2, 104: 2, 105: 1, 106: 1, 107: 1, 108: 1, 109: 1})
+    fun_cards = Counter(
+        {100: 2, 101: 2, 102: 2, 103: 2, 104: 2, 105: 1, 106: 1, 107: 1, 108: 1, 109: 1}
+    )
     scored = score_fun_deck(
         deck_code="FUN",
         title="Casino Yogg Mill Mage",
@@ -104,6 +132,7 @@ def test_detect_card_packages_reno_and_quest():
     packages = detect_card_packages(Counter({2883: 1, 53756: 1, 1: 1, 2: 1}))
     assert "reno_highlander" in packages
 
+
 def test_score_boosts_card_package_without_concept_title():
     meta = MetaReference(
         deck_code="META",
@@ -115,7 +144,20 @@ def test_score_boosts_card_package_without_concept_title():
         source_id="catalog",
     )
     # Far from meta + Mecha'thun marker, bland title.
-    fun_cards = Counter({120231: 1, 200: 2, 201: 2, 202: 2, 203: 2, 204: 1, 205: 1, 206: 1, 207: 1, 208: 1})
+    fun_cards = Counter(
+        {
+            120231: 1,
+            200: 2,
+            201: 2,
+            202: 2,
+            203: 2,
+            204: 1,
+            205: 1,
+            206: 1,
+            207: 1,
+            208: 1,
+        }
+    )
     scored = score_fun_deck(
         deck_code="FUNPKG",
         title="Custom Warlock",
@@ -144,7 +186,20 @@ def test_rejects_thief_priest_and_soothsayer_ladder_names():
         source_id="catalog",
     )
     # Far from meta + a quest marker must NOT save named ladder decks.
-    cards = Counter({117544: 1, 200: 2, 201: 2, 202: 2, 203: 2, 204: 1, 205: 1, 206: 1, 207: 1, 208: 1})
+    cards = Counter(
+        {
+            117544: 1,
+            200: 2,
+            201: 2,
+            202: 2,
+            203: 2,
+            204: 1,
+            205: 1,
+            206: 1,
+            207: 1,
+            208: 1,
+        }
+    )
     for title in ("Thief Priest", "Soothsayer Priest", "Quest Hunter"):
         scored = score_fun_deck(
             deck_code="LADDER",
@@ -160,7 +215,10 @@ def test_rejects_thief_priest_and_soothsayer_ladder_names():
             max_meta_similarity=0.42,
         )
         assert scored.is_fun is False, (title, scored.reasons, scored.fun_score)
-        assert "ladder_name_gate" in scored.reasons or "named_ladder_archetype" in scored.reasons
+        assert (
+            "ladder_name_gate" in scored.reasons
+            or "named_ladder_archetype" in scored.reasons
+        )
 
 
 def test_yogg_mill_not_blocked_by_unrelated_nearest_ladder_name():
@@ -173,7 +231,9 @@ def test_yogg_mill_not_blocked_by_unrelated_nearest_ladder_name():
         format_name="Standard",
         source_id="catalog",
     )
-    fun_cards = Counter({100: 2, 101: 2, 102: 2, 103: 2, 104: 2, 105: 1, 106: 1, 107: 1, 108: 1, 109: 1})
+    fun_cards = Counter(
+        {100: 2, 101: 2, 102: 2, 103: 2, 104: 2, 105: 1, 106: 1, 107: 1, 108: 1, 109: 1}
+    )
     scored = score_fun_deck(
         deck_code="FUN",
         title="Casino Yogg Mill Mage",
@@ -192,37 +252,47 @@ def test_yogg_mill_not_blocked_by_unrelated_nearest_ladder_name():
 
 
 def test_steal_package_requires_two_markers():
-    assert "steal_package" not in detect_card_packages(Counter({47211: 1, 1: 1}))  # Tess alone
-    assert "steal_package" in detect_card_packages(Counter({47211: 1, 52715: 1, 1: 1}))  # Tess+Lazul
+    assert "steal_package" not in detect_card_packages(
+        Counter({47211: 1, 1: 1})
+    )  # Tess alone
+    assert "steal_package" in detect_card_packages(
+        Counter({47211: 1, 52715: 1, 1: 1})
+    )  # Tess+Lazul
 
 
 def test_balance_limits_xl_hl_and_class_spam():
     rows = []
     for i in range(8):
-        rows.append({
-            "title": f"XL HL Rogue {i}",
+        rows.append(
+            {
+                "title": f"XL HL Rogue {i}",
+                "format": "Wild",
+                "class": "Rogue",
+                "deck_code": f"CODE{i}",
+                "fun_score": 1.0 - i * 0.01,
+                "max_meta_similarity": 0.1,
+            }
+        )
+    rows.append(
+        {
+            "title": "Switcheroo Priest",
             "format": "Wild",
-            "class": "Rogue",
-            "deck_code": f"CODE{i}",
-            "fun_score": 1.0 - i * 0.01,
-            "max_meta_similarity": 0.1,
-        })
-    rows.append({
-        "title": "Switcheroo Priest",
-        "format": "Wild",
-        "class": "Priest",
-        "deck_code": "PRIEST1",
-        "fun_score": 0.9,
-        "max_meta_similarity": 0.2,
-    })
-    rows.append({
-        "title": "Big Spell Mage",
-        "format": "Standard",
-        "class": "Mage",
-        "deck_code": "MAGE1",
-        "fun_score": 0.85,
-        "max_meta_similarity": 0.2,
-    })
+            "class": "Priest",
+            "deck_code": "PRIEST1",
+            "fun_score": 0.9,
+            "max_meta_similarity": 0.2,
+        }
+    )
+    rows.append(
+        {
+            "title": "Big Spell Mage",
+            "format": "Standard",
+            "class": "Mage",
+            "deck_code": "MAGE1",
+            "fun_score": 0.85,
+            "max_meta_similarity": 0.2,
+        }
+    )
     picked = _balance_and_dedupe(rows, per_format_keep=6)
     xl = [r for r in picked if "xl" in r["title"].lower()]
     assert len(xl) <= 4

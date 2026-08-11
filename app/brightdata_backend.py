@@ -233,7 +233,9 @@ def _parse_raw_response(raw: bytes, status_code: int) -> tuple[int, str]:
     try:
         body = raw.decode("utf-8")
     except UnicodeDecodeError:
-        raise BrightDataRequestError("Bright Data response is not valid UTF-8") from None
+        raise BrightDataRequestError(
+            "Bright Data response is not valid UTF-8"
+        ) from None
     if not body.strip():
         raise BrightDataRequestError("Bright Data returned an empty body")
     return status_code, body
@@ -307,8 +309,10 @@ def scrape_url_sync(
                 )
     except BrightDataRequestError as exc:
         billed = (
-            exc.billed if exc.billed is not None else debug.billed
-        ) if request_started else False
+            (exc.billed if exc.billed is not None else debug.billed)
+            if request_started
+            else False
+        )
         _ = finish_request(
             reservation.reservation_id,
             monthly_limit=monthly_limit,
@@ -317,17 +321,25 @@ def scrape_url_sync(
             circuit_failure_threshold=failure_threshold,
             circuit_cooldown_seconds=cooldown_seconds,
         )
+        # Preserve the conservative billing decision for upper-layer
+        # acquisition telemetry. Unknown outcomes after a started request are
+        # counted as billable by the state ledger and must be reported alike.
+        exc.billed = billed
         raise
     except Exception:  # noqa: BLE001 - always close the paid-request reservation
+        billed = debug.billed if request_started else False
         _ = finish_request(
             reservation.reservation_id,
             monthly_limit=monthly_limit,
-            billed=debug.billed if request_started else False,
+            billed=billed,
             succeeded=False,
             circuit_failure_threshold=failure_threshold,
             circuit_cooldown_seconds=cooldown_seconds,
         )
-        raise BrightDataRequestError("Bright Data request failed") from None
+        raise BrightDataRequestError(
+            "Bright Data request failed",
+            billed=billed,
+        ) from None
 
     snapshot = finish_request(
         reservation.reservation_id,

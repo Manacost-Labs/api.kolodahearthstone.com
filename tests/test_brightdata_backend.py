@@ -267,6 +267,7 @@ def test_unlocker_does_not_retry_or_reflect_sensitive_request_data(
     # cannot be exceeded after an ambiguous provider failure.
     assert state["billed_requests"] == 1
     assert state["consecutive_failures"] == 1
+    assert error.value.billed is None
 
 
 def test_unlocker_rejects_unsuccessful_api_response_without_exposing_body(
@@ -296,6 +297,7 @@ def test_unlocker_rejects_unsuccessful_api_response_without_exposing_body(
     )
     assert state["billed_requests"] == 0
     assert state["consecutive_failures"] == 1
+    assert error.value.billed is False
 
 
 def test_unlocker_honors_shorter_caller_timeout(
@@ -341,13 +343,14 @@ def test_rejected_content_is_billed_but_counts_as_circuit_failure(
         pytest.raises(
             BrightDataRequestError,
             match="response failed content validation",
-        ),
+        ) as error,
     ):
         scrape_url_sync(
             "https://93.184.216.34/page",
             source_id="allowed_source",
-            accept_html=lambda html: len(html) >= 2_000
-            and "just a moment" not in html.lower(),
+            accept_html=lambda html: (
+                len(html) >= 2_000 and "just a moment" not in html.lower()
+            ),
         )
 
     state = json.loads(
@@ -356,6 +359,7 @@ def test_rejected_content_is_billed_but_counts_as_circuit_failure(
     assert state["billed_requests"] == 1
     assert state["successful_requests"] == 0
     assert state["consecutive_failures"] == 1
+    assert error.value.billed is True
 
 
 def test_fractional_api_status_is_rejected(

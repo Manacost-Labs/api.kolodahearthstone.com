@@ -109,14 +109,46 @@ def test_firecrawl_rejects_empty_raw_json_body() -> None:
         )
 
 
+def test_firecrawl_prefers_filtered_source_url_over_canonical_og_url() -> None:
+    filtered_url = "https://www.hsguru.com/decks?format=2&period=patch_36.2.0"
+    source = Source(
+        "hsguru_filtered_url_test",
+        filtered_url,
+        "hsguru",
+        "deck_catalog",
+    )
+    envelope = {
+        "success": True,
+        "data": {
+            "html": '<div class="deck_stats_viewport">ok</div>',
+            "metadata": {
+                "statusCode": 200,
+                "sourceURL": filtered_url,
+                "ogUrl": "https://www.hsguru.com/decks",
+            },
+        },
+    }
+
+    with patch.object(
+        urllib.request,
+        "urlopen",
+        return_value=_Response(envelope),
+    ):
+        result = firecrawl_backend._scrape_once(
+            source,
+            api_key="fc-canary",
+            formats=["html"],
+        )
+
+    assert result.final_url == filtered_url
+
+
 def test_shared_cascade_result_preserves_scrape_do_backend() -> None:
     from app import hsreplay_card_periods
 
     card_list = {"series": {"data": [{"dbfId": 2, "includedPopularity": 3.5}]}}
 
-    async def scrape_card_period_page(
-        _url: str, *, source_id: str
-    ) -> FirecrawlScrape:
+    async def scrape_card_period_page(_url: str, *, source_id: str) -> FirecrawlScrape:
         assert source_id == "hsreplay_cards_legend_patch"
         return FirecrawlScrape(
             html=json.dumps(card_list),
@@ -236,7 +268,9 @@ def test_card_period_uses_one_shared_provider_cascade() -> None:
     assert result.payload == card_list
 
 
-def test_ranked_cards_uses_proxy_fallback_after_direct_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ranked_cards_uses_proxy_fallback_after_direct_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from app import hsreplay_card_periods, hsreplay_cards_api, hsreplay_client
 
     source = Source(
@@ -262,8 +296,14 @@ def test_ranked_cards_uses_proxy_fallback_after_direct_failure(monkeypatch: pyte
         for index in range(1, 31)
     ]
     monkeypatch.setattr(hsreplay_client, "fetch_hsreplay_json", direct_failure)
-    monkeypatch.setattr(hsreplay_card_periods, "fetch_hsreplay_card_period_json", fallback_success)
-    monkeypatch.setattr(hsreplay_cards_api, "parse_cards_from_api_payloads", lambda *_args, **_kwargs: cards)
+    monkeypatch.setattr(
+        hsreplay_card_periods, "fetch_hsreplay_card_period_json", fallback_success
+    )
+    monkeypatch.setattr(
+        hsreplay_cards_api,
+        "parse_cards_from_api_payloads",
+        lambda *_args, **_kwargs: cards,
+    )
 
     result = asyncio.run(fetch_hsreplay_ranked_cards(source))
     assert result["time_range"] == "LAST_3_DAYS"
@@ -295,7 +335,9 @@ def test_dynamic_card_period_uses_final_source_id_and_json_bright_acceptance() -
             final_url=source.url,
         )
 
-    with patch.object(firecrawl_backend, "scrape_source_with_options", side_effect=scrape):
+    with patch.object(
+        firecrawl_backend, "scrape_source_with_options", side_effect=scrape
+    ):
         result = asyncio.run(
             _scrape_card_period_page(
                 "https://hsreplay.net/analytics/query/card_list/",

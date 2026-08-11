@@ -5,6 +5,7 @@ import base64
 import binascii
 import json
 import random
+import re
 import time
 import urllib.error
 import urllib.request
@@ -17,6 +18,7 @@ from bs4 import BeautifulSoup, NavigableString
 
 from .brightdata_backend import (
     BrightDataPolicyError,
+    BrightDataRequestError,
     _assert_public_https_target,
     brightdata_configured_for_source,
 )
@@ -37,7 +39,9 @@ from .firecrawl_keys import (
 )
 from .scrape_do_backend import (
     ScrapeDoAccountError,
+    ScrapeDoContentError,
     ScrapeDoRequestError,
+    ScrapeDoScrape,
     ScrapeDoTransientError,
     scrape_url_sync,
 )
@@ -54,6 +58,58 @@ _HTML_SITE_MIN_BYTES = 256
 
 
 ProviderResultValidator = Callable[["FirecrawlScrape"], bool]
+ProviderAttemptObserver = Callable[["FirecrawlScrape", bool], None]
+ProviderFailureObserver = Callable[[dict[str, Any]], None]
+
+
+def _provider_error_code(exc: Exception) -> str:
+    known = re.search(
+        r"\b(ROTATION_FAILED|PAYMENT_REQUIRED|AUTHENTICATION_FAILED|"
+        r"CONCURRENT_REQUEST_LIMIT|RATE_LIMITED)\b",
+        str(exc),
+    )
+    return known.group(1) if known else type(exc).__name__
+
+
+def _notify_provider_failure(
+    observer: ProviderFailureObserver | None,
+    backend: str,
+    exc: Exception,
+    *,
+    profile_attempt: int | None = None,
+    provider_attempt: int | None = None,
+    super_proxy: bool | None = None,
+) -> None:
+    if observer is None:
+        return
+    status = getattr(exc, "status_code", None)
+    if status is None and isinstance(exc, ScrapeDoContentError):
+        status = exc.scrape.status_code
+    if status is None:
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+    request_credits = getattr(exc, "request_cost", 0)
+    if isinstance(exc, ScrapeDoContentError):
+        request_credits = exc.scrape.request_cost
+    elif isinstance(exc, BrightDataRequestError):
+        request_credits = 0 if exc.billed is False else 1
+    event = {
+        "backend": backend,
+        "state": "failed",
+        "http_status": int(status or 0),
+        "request_credits": int(request_credits or 0),
+        "error_type": type(exc).__name__,
+        "error_code": _provider_error_code(exc),
+    }
+    if profile_attempt is not None:
+        event["profile_attempt"] = profile_attempt
+    if provider_attempt is not None:
+        event["provider_attempt"] = provider_attempt
+    if super_proxy is not None:
+        event["super_proxy"] = super_proxy
+    try:
+        observer(event)
+    except Exception:  # noqa: BLE001,S110 - telemetry must not break acquisition
+        pass
 
 
 @dataclass(frozen=True)
@@ -367,6 +423,8 @@ def _scrape_via_scrape_do(
     wait_ms: int | None,
     timeout_ms: int | None,
     reason: str,
+    attempt_observer: ProviderAttemptObserver | None = None,
+    failure_observer: ProviderFailureObserver | None = None,
 ) -> FirecrawlScrape:
     if not scrape_do_token():
         raise RuntimeError(reason or "Scrape.do is not configured")
@@ -375,6 +433,7 @@ def _scrape_via_scrape_do(
     errors: list[str] = []
     scraped = None
     attempts = 0
+    last_failure: Exception | None = None
     for super_proxy in profiles:
         for profile_attempt in range(1, 3):
             attempts += 1
@@ -390,14 +449,73 @@ def _scrape_via_scrape_do(
                     full_screenshot=full_screenshot,
                 )
                 if is_session_blocked(scraped.status_code, scraped.html):
+                    if attempt_observer is not None:
+                        attempt_observer(
+                            _scrape_do_result(
+                                scraped,
+                                formats=formats,
+                                attempts=attempts,
+                                profile_attempt=profile_attempt,
+                                reason=reason,
+                            ),
+                            False,
+                        )
                     errors.append(
                         f"{'super' if super_proxy else 'standard'} "
                         f"attempt {profile_attempt}: blocked_or_challenge_content"
                     )
+                    last_failure = ScrapeDoRequestError(
+                        "Scrape.do returned blocked or challenge content",
+                        status_code=scraped.status_code,
+                        super_proxy=super_proxy,
+                    )
+                    _notify_provider_failure(
+                        failure_observer,
+                        "scrape_do_super" if super_proxy else "scrape_do",
+                        last_failure,
+                        profile_attempt=profile_attempt,
+                        provider_attempt=attempts,
+                        super_proxy=super_proxy,
+                    )
                     scraped = None
                     break
                 break
+            except ScrapeDoContentError as exc:
+                last_failure = exc
+                if attempt_observer is not None:
+                    attempt_observer(
+                        _scrape_do_result(
+                            exc.scrape,
+                            formats=formats,
+                            attempts=attempts,
+                            profile_attempt=profile_attempt,
+                            reason=reason,
+                        ),
+                        False,
+                    )
+                _notify_provider_failure(
+                    failure_observer,
+                    "scrape_do_super" if super_proxy else "scrape_do",
+                    exc,
+                    profile_attempt=profile_attempt,
+                    provider_attempt=attempts,
+                    super_proxy=super_proxy,
+                )
+                errors.append(
+                    f"{'super' if super_proxy else 'standard'} "
+                    f"attempt {profile_attempt}: {type(exc).__name__}"
+                )
+                break
             except ScrapeDoAccountError as exc:
+                last_failure = exc
+                _notify_provider_failure(
+                    failure_observer,
+                    "scrape_do_super" if super_proxy else "scrape_do",
+                    exc,
+                    profile_attempt=profile_attempt,
+                    provider_attempt=attempts,
+                    super_proxy=super_proxy,
+                )
                 errors.append(
                     f"{'super' if super_proxy else 'standard'} "
                     f"attempt {profile_attempt}: {type(exc).__name__}: "
@@ -406,6 +524,15 @@ def _scrape_via_scrape_do(
                 # The next Scrape.do profile shares the same subscription.
                 raise
             except ScrapeDoTransientError as exc:
+                last_failure = exc
+                _notify_provider_failure(
+                    failure_observer,
+                    "scrape_do_super" if super_proxy else "scrape_do",
+                    exc,
+                    profile_attempt=profile_attempt,
+                    provider_attempt=attempts,
+                    super_proxy=super_proxy,
+                )
                 errors.append(
                     f"{'super' if super_proxy else 'standard'} "
                     f"attempt {profile_attempt}: {type(exc).__name__}: "
@@ -421,6 +548,15 @@ def _scrape_via_scrape_do(
                     continue
                 break
             except ScrapeDoRequestError as exc:
+                last_failure = exc
+                _notify_provider_failure(
+                    failure_observer,
+                    "scrape_do_super" if super_proxy else "scrape_do",
+                    exc,
+                    profile_attempt=profile_attempt,
+                    provider_attempt=attempts,
+                    super_proxy=super_proxy,
+                )
                 errors.append(
                     f"{'super' if super_proxy else 'standard'} "
                     f"attempt {profile_attempt}: {type(exc).__name__}: "
@@ -431,6 +567,15 @@ def _scrape_via_scrape_do(
                     break
                 raise
             except Exception as exc:  # noqa: BLE001 - normalize provider failures
+                last_failure = exc
+                _notify_provider_failure(
+                    failure_observer,
+                    "scrape_do_super" if super_proxy else "scrape_do",
+                    exc,
+                    profile_attempt=profile_attempt,
+                    provider_attempt=attempts,
+                    super_proxy=super_proxy,
+                )
                 errors.append(
                     f"{'super' if super_proxy else 'standard'} "
                     f"attempt {profile_attempt}: {type(exc).__name__}: "
@@ -440,7 +585,26 @@ def _scrape_via_scrape_do(
         if scraped is not None:
             break
     if scraped is None:
+        if last_failure is not None:
+            raise last_failure
         raise RuntimeError(f"Scrape.do failed: {'; '.join(errors)}")
+    return _scrape_do_result(
+        scraped,
+        formats=formats,
+        attempts=attempts,
+        profile_attempt=profile_attempt,
+        reason=reason,
+    )
+
+
+def _scrape_do_result(
+    scraped: ScrapeDoScrape,
+    *,
+    formats: list[Any] | None,
+    attempts: int,
+    profile_attempt: int,
+    reason: str,
+) -> FirecrawlScrape:
     html = scraped.html
     requested = formats or ["html", "markdown"]
     markdown = _html_to_markdown(html) if "markdown" in requested else ""
@@ -454,6 +618,8 @@ def _scrape_via_scrape_do(
             "scrapeDoCreditsUsed": scraped.request_cost,
             "scrapeDoRemainingCredits": scraped.credits_remaining,
             "scrapeDoAttempts": attempts,
+            "scrapeDoProfileAttempt": profile_attempt,
+            "scrapeDoSuperProxy": scraped.super_proxy,
             "providerPolicy": _PROVIDER_POLICY,
             "providerChainReason": reason[:500],
             "firecrawlFallbackReason": reason[:500],
@@ -523,7 +689,7 @@ def _scrape_once(
         metadata=metadata,
         status_code=int(metadata.get("statusCode") or 200),
         final_url=str(
-            metadata.get("ogUrl") or metadata.get("sourceURL") or source.fetch_url
+            metadata.get("sourceURL") or metadata.get("ogUrl") or source.fetch_url
         ),
     )
 
@@ -712,15 +878,22 @@ def _require_accepted_provider_result(
     formats: list[Any] | None,
     accept_html: Callable[[str], bool] | None,
     accept_result: ProviderResultValidator | None,
+    attempt_observer: ProviderAttemptObserver | None = None,
 ) -> FirecrawlScrape:
     scraped = _normalize_requested_screenshot(scraped, formats)
-    if not _accepted_provider_result(
+    accepted = _accepted_provider_result(
         scraped,
         source,
         formats=formats,
         accept_html=accept_html,
         accept_result=accept_result,
-    ):
+    )
+    if attempt_observer is not None:
+        try:
+            attempt_observer(scraped, accepted)
+        except Exception:  # noqa: BLE001,S110 - telemetry must not break acquisition
+            pass
+    if not accepted:
         raise RuntimeError(f"{provider} response failed content validation")
     return scraped
 
@@ -738,6 +911,8 @@ def _scrape_sync(
     brightdata_accept_html: Callable[[str], bool] | None = None,
     brightdata_render: bool = True,
     accept_result: ProviderResultValidator | None = None,
+    attempt_observer: ProviderAttemptObserver | None = None,
+    failure_observer: ProviderFailureObserver | None = None,
 ) -> FirecrawlScrape:
     """Fetch through Scrape.do → Firecrawl → Bright Data → Scrapfly."""
     errors: list[str] = []
@@ -754,11 +929,14 @@ def _scrape_sync(
                     wait_ms=wait_ms,
                     timeout_ms=timeout_ms,
                     reason="primary",
+                    attempt_observer=attempt_observer,
+                    failure_observer=failure_observer,
                 ),
                 source,
                 formats=formats,
                 accept_html=brightdata_accept_html,
                 accept_result=accept_result,
+                attempt_observer=attempt_observer,
             )
         except Exception as exc:  # noqa: BLE001 - provider boundary
             errors.append(f"scrape_do: {type(exc).__name__}: {str(exc)[:300]}")
@@ -780,8 +958,10 @@ def _scrape_sync(
                 formats=formats,
                 accept_html=brightdata_accept_html,
                 accept_result=accept_result,
+                attempt_observer=attempt_observer,
             )
         except Exception as exc:  # noqa: BLE001 - provider boundary
+            _notify_provider_failure(failure_observer, "firecrawl", exc)
             errors.append(f"firecrawl: {type(exc).__name__}: {str(exc)[:300]}")
 
     brightdata_formats_allowed = all(
@@ -793,6 +973,11 @@ def _scrape_sync(
         try:
             brightdata_available = brightdata_configured_for_source(source.id)
         except Exception as exc:  # noqa: BLE001 - isolate provider configuration
+            _notify_provider_failure(
+                failure_observer,
+                "brightdata_web_unlocker",
+                exc,
+            )
             errors.append(
                 f"brightdata: {type(exc).__name__}: configuration unavailable"
             )
@@ -841,8 +1026,14 @@ def _scrape_sync(
                 formats=formats,
                 accept_html=brightdata_accept_html,
                 accept_result=accept_result,
+                attempt_observer=attempt_observer,
             )
         except Exception as exc:  # noqa: BLE001 - provider boundary
+            _notify_provider_failure(
+                failure_observer,
+                "brightdata_web_unlocker",
+                exc,
+            )
             errors.append(f"brightdata: {type(exc).__name__}: {str(exc)[:300]}")
 
     scrapfly_available = False
@@ -850,6 +1041,7 @@ def _scrape_sync(
         try:
             scrapfly_available = scrapfly_configured()
         except Exception as exc:  # noqa: BLE001 - isolate provider configuration
+            _notify_provider_failure(failure_observer, "scrapfly", exc)
             errors.append(f"scrapfly: {type(exc).__name__}: configuration unavailable")
     if scrapfly_available:
         try:
@@ -867,8 +1059,10 @@ def _scrape_sync(
                 formats=formats,
                 accept_html=brightdata_accept_html,
                 accept_result=accept_result,
+                attempt_observer=attempt_observer,
             )
         except Exception as exc:  # noqa: BLE001 - provider boundary
+            _notify_provider_failure(failure_observer, "scrapfly", exc)
             errors.append(f"scrapfly: {type(exc).__name__}: {str(exc)[:300]}")
 
     detail = "; ".join(errors) if errors else "no scrape providers configured"
@@ -906,6 +1100,8 @@ async def scrape_source_with_options(
     brightdata_accept_html: Callable[[str], bool] | None = None,
     brightdata_render: bool = True,
     accept_result: ProviderResultValidator | None = None,
+    attempt_observer: ProviderAttemptObserver | None = None,
+    failure_observer: ProviderFailureObserver | None = None,
 ) -> FirecrawlScrape:
     return await asyncio.to_thread(
         _scrape_sync,
@@ -920,4 +1116,6 @@ async def scrape_source_with_options(
         brightdata_accept_html=brightdata_accept_html,
         brightdata_render=brightdata_render,
         accept_result=accept_result,
+        attempt_observer=attempt_observer,
+        failure_observer=failure_observer,
     )

@@ -31,10 +31,14 @@ class ScrapeDoRequestError(RuntimeError):
         *,
         status_code: int | None = None,
         retry_after_seconds: float | None = None,
+        request_cost: int = 0,
+        super_proxy: bool = False,
     ) -> None:
         super().__init__(message)
         self.status_code = status_code
         self.retry_after_seconds = retry_after_seconds
+        self.request_cost = max(0, int(request_cost))
+        self.super_proxy = super_proxy
 
 
 class ScrapeDoTransientError(ScrapeDoRequestError):
@@ -60,6 +64,14 @@ class ScrapeDoScrape:
     @property
     def content_length(self) -> int:
         return len(self.html.encode("utf-8", errors="replace"))
+
+
+class ScrapeDoContentError(RuntimeError):
+    """A billed Scrape.do response that failed response-body decoding."""
+
+    def __init__(self, message: str, *, scrape: ScrapeDoScrape) -> None:
+        super().__init__(message)
+        self.scrape = scrape
 
 
 def _header_int(headers: Mapping[str, str], name: str) -> int | None:
@@ -174,25 +186,60 @@ def scrape_url_sync(
             error_type = ScrapeDoAccountError
         else:
             error_type = ScrapeDoRequestError
+        error_headers = {
+            key.lower(): value for key, value in (exc.headers or {}).items()
+        }
         raise error_type(
             f"Scrape.do HTTP {exc.code}: {detail[:300]}",
             status_code=exc.code,
             retry_after_seconds=_retry_after_seconds(exc.headers or {}),
+            request_cost=_header_int(
+                error_headers,
+                "scrape.do-request-cost",
+            )
+            or 0,
+            super_proxy=super_proxy,
         ) from exc
     except urllib.error.URLError as exc:
         raise ScrapeDoTransientError(
-            f"Scrape.do transport error: {exc.reason}"
+            f"Scrape.do transport error: {exc.reason}",
+            super_proxy=super_proxy,
         ) from exc
     except TimeoutError as exc:
-        raise ScrapeDoTransientError("Scrape.do request timed out") from exc
+        raise ScrapeDoTransientError(
+            "Scrape.do request timed out",
+            super_proxy=super_proxy,
+        ) from exc
     body = raw.decode("utf-8", errors="replace")
+    request_cost = _header_int(response_headers, "scrape.do-request-cost")
+    if request_cost is None:
+        request_cost = (
+            25 if render and super_proxy else 10 if super_proxy else 5 if render else 1
+        )
+
+    def content_error(message: str, *, parsed_html: str = "") -> ScrapeDoContentError:
+        return ScrapeDoContentError(
+            message,
+            scrape=ScrapeDoScrape(
+                html=parsed_html,
+                status_code=status_code,
+                final_url=final_url,
+                request_cost=request_cost,
+                credits_remaining=_header_int(
+                    response_headers,
+                    "scrape.do-remaining-credits",
+                ),
+                super_proxy=super_proxy,
+            ),
+        )
+
     image: str | None = None
     html = body
     if screenshot:
         try:
             payload = json.loads(body)
         except json.JSONDecodeError as exc:
-            raise RuntimeError(
+            raise content_error(
                 "Scrape.do screenshot response is not valid JSON"
             ) from exc
         shots = payload.get("screenShots") if isinstance(payload, dict) else None
@@ -202,14 +249,12 @@ def scrape_url_sync(
         content = payload.get("content") if isinstance(payload, dict) else None
         html = str(content) if isinstance(content, str) else ""
         if not image:
-            raise RuntimeError("Scrape.do screenshot response did not include an image")
+            raise content_error(
+                "Scrape.do screenshot response did not include an image",
+                parsed_html=html,
+            )
     if not html.strip() and not image:
-        raise RuntimeError("Scrape.do returned an empty body")
-    request_cost = _header_int(response_headers, "scrape.do-request-cost")
-    if request_cost is None:
-        request_cost = (
-            25 if render and super_proxy else 10 if super_proxy else 5 if render else 1
-        )
+        raise content_error("Scrape.do returned an empty body")
     return ScrapeDoScrape(
         html=html,
         status_code=status_code,

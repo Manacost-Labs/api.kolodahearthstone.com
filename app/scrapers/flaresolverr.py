@@ -5,12 +5,20 @@ import random
 
 import httpx
 
-from ..config import flaresolverr_hsguru_wait_ms, flaresolverr_url, request_timeout_seconds
+from ..config import (
+    flaresolverr_hsguru_wait_ms,
+    flaresolverr_url,
+    request_timeout_seconds,
+)
 from ..hsreplay_auth import hsreplay_cookies_for_fetch
 from ..sources import Source
 from .base import FetchResult
 from .flaresolverr_session import FlareSolverrSession, flaresolverr_request_timeout_ms
-from .proxy import assert_proxy_configured, proxy_dict_for_flaresolverr, source_can_use_flaresolverr_without_proxy
+from .proxy import (
+    assert_proxy_configured,
+    proxy_dict_for_flaresolverr,
+    source_can_use_flaresolverr_without_proxy,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +30,7 @@ def set_flaresolverr_source(source_id: str | None) -> None:
     global _current_source_id
     _current_source_id = source_id
 
+
 _active_session: FlareSolverrSession | None = None
 
 
@@ -30,7 +39,11 @@ def set_active_flaresolverr_session(session: FlareSolverrSession | None) -> None
     _active_session = session
 
 
-async def fetch_via_flaresolverr(source: Source) -> FetchResult:
+async def fetch_via_flaresolverr(
+    source: Source,
+    *,
+    wait_ms: int | None = None,
+) -> FetchResult:
     if not source_can_use_flaresolverr_without_proxy(source):
         assert_proxy_configured()
     payload: dict = {
@@ -48,9 +61,11 @@ async def fetch_via_flaresolverr(source: Source) -> FetchResult:
         if cookies:
             payload["cookies"] = cookies
     if source.site == "hsguru":
-        wait_ms = flaresolverr_hsguru_wait_ms()
-        if wait_ms > 0:
-            payload["wait"] = wait_ms
+        effective_wait_ms = (
+            flaresolverr_hsguru_wait_ms() if wait_ms is None else max(0, wait_ms)
+        )
+        if effective_wait_ms > 0:
+            payload["wait"] = effective_wait_ms
 
     timeout = httpx.Timeout(request_timeout_seconds() + 30.0)
     async with httpx.AsyncClient(timeout=timeout) as client:
@@ -84,17 +99,28 @@ async def fetch_via_flaresolverr(source: Source) -> FetchResult:
                 await asyncio.sleep(random.uniform(6.0, 10.0))
                 base_wait = flaresolverr_hsguru_wait_ms()
                 retry_payload = dict(payload)
-                retry_payload["wait"] = max(int(retry_payload.get("wait") or 0), base_wait + 15000)
+                retry_payload["wait"] = max(
+                    int(retry_payload.get("wait") or 0), base_wait + 15000
+                )
                 try:
-                    retry_resp = await client.post(flaresolverr_url(), json=retry_payload)
+                    retry_resp = await client.post(
+                        flaresolverr_url(), json=retry_payload
+                    )
                     retry_resp.raise_for_status()
                     retry_body = retry_resp.json()
                     if retry_body.get("status") == "ok":
                         rsol = retry_body.get("solution") or {}
                         rhtml = rsol.get("response") or ""
                         rstatus = int(rsol.get("status") or 200)
-                        if len(rhtml) > len(html) or len(re.findall(r"<tr\b", rhtml, re.I)) > rough_rows:
-                            html, final_url, status = rhtml, rsol.get("url") or final_url, rstatus
+                        if (
+                            len(rhtml) > len(html)
+                            or len(re.findall(r"<tr\b", rhtml, re.I)) > rough_rows
+                        ):
+                            html, final_url, status = (
+                                rhtml,
+                                rsol.get("url") or final_url,
+                                rstatus,
+                            )
                     else:
                         logger.warning(
                             "FlareSolverr HSGuru settle retry returned non-ok for %s: %s",
@@ -102,7 +128,11 @@ async def fetch_via_flaresolverr(source: Source) -> FetchResult:
                             retry_body.get("message") or retry_body,
                         )
                 except Exception as exc:
-                    logger.warning("FlareSolverr HSGuru settle retry failed for %s: %s", source.id, exc)
+                    logger.warning(
+                        "FlareSolverr HSGuru settle retry failed for %s: %s",
+                        source.id,
+                        exc,
+                    )
 
     return FetchResult(
         html=html,

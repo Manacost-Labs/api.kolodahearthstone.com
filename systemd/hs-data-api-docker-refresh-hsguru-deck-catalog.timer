@@ -2,7 +2,7 @@
 Description=Refresh broad HSGuru deck catalogs daily
 
 [Timer]
-OnCalendar=*-*-* 00:20:00 Europe/Warsaw
+OnCalendar=*-*-* 00:40:00 Europe/Warsaw
 AccuracySec=5min
 Persistent=true
 

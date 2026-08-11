@@ -8,7 +8,9 @@ from .trinket_slices import TRINKET_SLICE_SOURCE_IDS
 DEFAULT_DATA_DIR = "/var/lib/hs-data-api"
 DEFAULT_BACKENDS = "flaresolverr,scrapling,patchright,curl_cffi,cloudscraper"
 DEFAULT_HSGURU_BACKENDS = "flaresolverr,scrapling,curl_cffi,cloudscraper,patchright"
-DEFAULT_BACKENDS_LAB = "cloakbrowser,flaresolverr,scrapling,patchright,curl_cffi,cloudscraper"
+DEFAULT_BACKENDS_LAB = (
+    "cloakbrowser,flaresolverr,scrapling,patchright,curl_cffi,cloudscraper"
+)
 DEFAULT_HSREPLAY_JSON_CHANNELS = "curl_cffi,flaresolverr,scrape_do"
 DEFAULT_HSREPLAY_MARKDOWN_CHANNELS = "flaresolverr,curl_cffi"
 
@@ -23,7 +25,9 @@ def cloakbrowser_display() -> str:
 
 
 def firecrawl_map_hsreplay_url() -> str:
-    return os.environ.get("HS_FIRECRAWL_MAP_HSREPLAY_URL", "https://hsreplay.net").strip()
+    return os.environ.get(
+        "HS_FIRECRAWL_MAP_HSREPLAY_URL", "https://hsreplay.net"
+    ).strip()
 
 
 def firecrawl_map_hsreplay_limit(default: int = 5000) -> int:
@@ -98,7 +102,10 @@ def fetch_proxy_url() -> str | None:
 
 def fetch_require_proxy() -> bool:
     return os.environ.get("HS_FETCH_REQUIRE_PROXY", "true").strip().lower() in {
-        "1", "true", "yes", "on",
+        "1",
+        "true",
+        "yes",
+        "on",
     }
 
 
@@ -131,7 +138,9 @@ def flaresolverr_url() -> str:
 
 
 def hsreplay_cookie_path() -> Path:
-    return Path(os.environ.get("HSREPLAY_COOKIE_PATH", "/etc/hs-data-api-hsreplay-cookies.json"))
+    return Path(
+        os.environ.get("HSREPLAY_COOKIE_PATH", "/etc/hs-data-api-hsreplay-cookies.json")
+    )
 
 
 def fetch_max_retries() -> int:
@@ -192,9 +201,19 @@ def flaresolverr_hsguru_wait_ms() -> int:
     return max(0, int(os.environ.get("HS_FLARESOLVERR_HSGURU_WAIT_MS", "30000")))
 
 
+def flaresolverr_hsguru_decks_wait_ms() -> int:
+    """Deck pages are server-rendered; avoid the long meta-table hydration wait."""
+    return max(
+        0,
+        int(os.environ.get("HS_FLARESOLVERR_HSGURU_DECKS_WAIT_MS", "0")),
+    )
+
+
 def flaresolverr_session_per_source() -> bool:
     """New FlareSolverr browser session per source during refresh (better IP/cookie isolation)."""
-    return os.environ.get("HS_FLARESOLVERR_SESSION_PER_SOURCE", "true").strip().lower() in {
+    return os.environ.get(
+        "HS_FLARESOLVERR_SESSION_PER_SOURCE", "true"
+    ).strip().lower() in {
         "1",
         "true",
         "yes",
@@ -217,7 +236,9 @@ def hsreplay_password() -> str | None:
 
 
 def hsreplay_storage_path() -> Path:
-    return Path(os.environ.get("HSREPLAY_STORAGE_PATH", str(data_dir() / "hsreplay-auth.json")))
+    return Path(
+        os.environ.get("HSREPLAY_STORAGE_PATH", str(data_dir() / "hsreplay-auth.json"))
+    )
 
 
 def vicious_syndicate_storage_path() -> Path:
@@ -240,9 +261,7 @@ def hsguru_storage_path() -> Path:
 
 def scrape_do_token() -> str | None:
     value = (
-        os.environ.get("HS_SCRAPE_DO_TOKEN")
-        or os.environ.get("SCRAPE_DO_TOKEN")
-        or ""
+        os.environ.get("HS_SCRAPE_DO_TOKEN") or os.environ.get("SCRAPE_DO_TOKEN") or ""
     ).strip()
     return value or None
 
@@ -337,9 +356,7 @@ def brightdata_timeout_seconds() -> float:
 
 def brightdata_circuit_failure_threshold() -> int:
     try:
-        configured = int(
-            os.environ.get("HS_BRIGHTDATA_CIRCUIT_FAILURE_THRESHOLD", "3")
-        )
+        configured = int(os.environ.get("HS_BRIGHTDATA_CIRCUIT_FAILURE_THRESHOLD", "3"))
     except ValueError:
         configured = 3
     return max(1, configured)
@@ -416,9 +433,7 @@ def ai_review_max_prompt_chars() -> int:
 
 def ai_review_confidence_threshold() -> float:
     try:
-        value = float(
-            os.environ.get("HS_AI_REVIEW_CONFIDENCE_THRESHOLD", "0.90")
-        )
+        value = float(os.environ.get("HS_AI_REVIEW_CONFIDENCE_THRESHOLD", "0.90"))
     except ValueError:
         value = 0.90
     return min(1.0, max(0.5, value))
@@ -485,7 +500,8 @@ def refresh_parallel_medium() -> int:
         import logging
 
         logging.getLogger(__name__).warning(
-            "HS_REFRESH_PARALLEL_MEDIUM=%s >2 — elevated API concurrency; watch for source throttling", v
+            "HS_REFRESH_PARALLEL_MEDIUM=%s >2 — elevated API concurrency; watch for source throttling",
+            v,
         )
     return v
 
@@ -500,7 +516,9 @@ def refresh_preflight_strict() -> bool:
 
 
 def refresh_preflight_probe_hsreplay() -> bool:
-    return os.environ.get("HS_REFRESH_PREFLIGHT_PROBE_HSREPLAY", "true").strip().lower() in {
+    return os.environ.get(
+        "HS_REFRESH_PREFLIGHT_PROBE_HSREPLAY", "true"
+    ).strip().lower() in {
         "1",
         "true",
         "yes",
@@ -540,7 +558,9 @@ def hsreplay_json_channels() -> list[str]:
 
 def hsreplay_markdown_channels() -> list[str]:
     """Channels for HSReplay markdown pages (BG comps); Jina omitted by default (451)."""
-    raw = os.environ.get("HS_HSREPLAY_MARKDOWN_CHANNELS", DEFAULT_HSREPLAY_MARKDOWN_CHANNELS)
+    raw = os.environ.get(
+        "HS_HSREPLAY_MARKDOWN_CHANNELS", DEFAULT_HSREPLAY_MARKDOWN_CHANNELS
+    )
     return [part.strip().lower() for part in raw.split(",") if part.strip()]
 
 
@@ -558,7 +578,9 @@ def telegram_alert_dedup_seconds() -> int:
 
 
 def log_rotate_max_bytes() -> int:
-    return max(1_000_000, int(os.environ.get("HS_LOG_ROTATE_MAX_BYTES", str(50 * 1024 * 1024))))
+    return max(
+        1_000_000, int(os.environ.get("HS_LOG_ROTATE_MAX_BYTES", str(50 * 1024 * 1024)))
+    )
 
 
 def log_rotate_max_age_days() -> int:
@@ -569,7 +591,11 @@ def quality_thresholds_path() -> Path:
     return Path(
         os.environ.get(
             "HS_QUALITY_THRESHOLDS_PATH",
-            str(Path(__file__).resolve().parent.parent / "config" / "quality_thresholds.json"),
+            str(
+                Path(__file__).resolve().parent.parent
+                / "config"
+                / "quality_thresholds.json"
+            ),
         )
     )
 
@@ -608,7 +634,9 @@ def fun_deck_min_score() -> float:
 
 
 def fun_deck_max_meta_similarity() -> float:
-    return min(1.0, max(0.0, float(os.environ.get("HS_FUN_DECK_MAX_META_SIMILARITY", "0.42"))))
+    return min(
+        1.0, max(0.0, float(os.environ.get("HS_FUN_DECK_MAX_META_SIMILARITY", "0.42")))
+    )
 
 
 def fun_deck_retention_hours() -> int:
@@ -682,11 +710,15 @@ def firecrawl_fallback_source_ids() -> set[str]:
 
 
 def firecrawl_fallback_max_attempts_per_refresh() -> int:
-    return max(0, int(os.environ.get("HS_FIRECRAWL_FALLBACK_MAX_ATTEMPTS_PER_REFRESH", "8")))
+    return max(
+        0, int(os.environ.get("HS_FIRECRAWL_FALLBACK_MAX_ATTEMPTS_PER_REFRESH", "8"))
+    )
 
 
 def firecrawl_fallback_max_attempts_per_source() -> int:
-    return max(1, int(os.environ.get("HS_FIRECRAWL_FALLBACK_MAX_ATTEMPTS_PER_SOURCE", "2")))
+    return max(
+        1, int(os.environ.get("HS_FIRECRAWL_FALLBACK_MAX_ATTEMPTS_PER_SOURCE", "2"))
+    )
 
 
 def fingerprint_node_enabled() -> bool:
@@ -727,7 +759,9 @@ def cloakbrowser_headless() -> bool:
 
 def cloakbrowser_hsguru_headless() -> bool:
     """HSGuru often needs headed mode even with CloakBrowser patches."""
-    return os.environ.get("HS_CLOAKBROWSER_HSGURU_HEADLESS", "false").strip().lower() in {
+    return os.environ.get(
+        "HS_CLOAKBROWSER_HSGURU_HEADLESS", "false"
+    ).strip().lower() in {
         "1",
         "true",
         "yes",

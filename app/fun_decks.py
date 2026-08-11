@@ -90,25 +90,29 @@ _LADDER_ARCHETYPE_RE = re.compile(
 )
 
 # Packages that prove a brew; quest alone is too common on ladder.
-_SPICY_PACKAGES = frozenset({
-    "reno_highlander",
-    "odd_even",
-    "mechathun",
-    "togwaggle_mill",
-    "cthun",
-    "whizbang",
-    "sathrovarr",
-    "yogg_package",
-    "steal_package",
-})
-_NEUTRAL_PACKAGES = frozenset({
-    "quest_package",
-    "patches",
-    "galakrondish_finley",
-    "nzothish_darkness",
-    "highlander_curve",
-    "xl_package",
-})
+_SPICY_PACKAGES = frozenset(
+    {
+        "reno_highlander",
+        "odd_even",
+        "mechathun",
+        "togwaggle_mill",
+        "cthun",
+        "whizbang",
+        "sathrovarr",
+        "yogg_package",
+        "steal_package",
+    }
+)
+_NEUTRAL_PACKAGES = frozenset(
+    {
+        "quest_package",
+        "patches",
+        "galakrondish_finley",
+        "nzothish_darkness",
+        "highlander_curve",
+        "xl_package",
+    }
+)
 
 # "Egg *" can be fun off-class brew, but Egg Warrior is often ladder-adjacent.
 _EGG_TITLE_RE = re.compile(r"\begg\b", re.IGNORECASE)
@@ -121,10 +125,14 @@ _TOKEN_RE = re.compile(r"[a-z0-9]+")
 
 # Stable collectible markers for d0nkey-style package detection (dbfId).
 _PACKAGE_MARKERS: dict[str, frozenset[int]] = {
-    "reno_highlander": frozenset({2883, 103471, 53756}),  # Reno Jackson, Reno Lone Ranger, Zephrys
+    "reno_highlander": frozenset(
+        {2883, 103471, 53756}
+    ),  # Reno Jackson, Reno Lone Ranger, Zephrys
     "odd_even": frozenset({48158, 116160}),  # Baku, Genn
     "mechathun": frozenset({120231}),
-    "togwaggle_mill": frozenset({46589, 69830, 69847, 69869}),  # Tog, Coldlight, Cho, Naturalize
+    "togwaggle_mill": frozenset(
+        {46589, 69830, 69847, 69869}
+    ),  # Tog, Coldlight, Cho, Naturalize
     "cthun": frozenset({102680}),
     "whizbang": frozenset({50477}),
     "sathrovarr": frozenset({56189}),
@@ -132,16 +140,24 @@ _PACKAGE_MARKERS: dict[str, frozenset[int]] = {
     "nzothish_darkness": frozenset({46454}),
     "galakrondish_finley": frozenset({2948}),
     # Steal/generate-from-opponent package (need 2+ hits; see detect_card_packages).
-    "steal_core": frozenset({
-        47211, 86539, 121643,  # Tess Greymane
-        52715, 54816, 111374,  # Madame Lazul
-        59643,  # Mindrender Illucia
-        77368, 118073,  # Identity Theft
-        50278,  # Seance
-        38876,  # Shadowcaster
-        40701,  # Inkmaster Solia
-        60066, 69566,  # Psychic Conjurer
-    }),
+    "steal_core": frozenset(
+        {
+            47211,
+            86539,
+            121643,  # Tess Greymane
+            52715,
+            54816,
+            111374,  # Madame Lazul
+            59643,  # Mindrender Illucia
+            77368,
+            118073,  # Identity Theft
+            50278,  # Seance
+            38876,  # Shadowcaster
+            40701,  # Inkmaster Solia
+            60066,
+            69566,  # Psychic Conjurer
+        }
+    ),
 }
 
 _package_quest_ids: frozenset[int] | None = None
@@ -206,7 +222,6 @@ def detect_card_packages(cards: Counter[int]) -> tuple[str, ...]:
     if total_cards >= 39:
         hits.append("xl_package")
     return tuple(dict.fromkeys(hits))
-
 
 
 @dataclass(frozen=True)
@@ -324,6 +339,11 @@ def jaccard_similarity(left: Counter[int], right: Counter[int]) -> float:
 
 def _catalog_rows(source_id: str) -> list[dict[str, Any]]:
     dataset = load_dataset(source_id) or {}
+    if source_id.startswith("hsguru_deck_catalog_"):
+        from .hsguru_decks import current_hsguru_deck_period
+
+        if str(dataset.get("period") or "") != current_hsguru_deck_period():
+            return []
     data = dataset.get("data")
     if isinstance(data, list):
         return [row for row in data if isinstance(row, dict)]
@@ -405,7 +425,9 @@ def build_meta_references(
                 MetaReference(
                     deck_code=code,
                     cards=cards,
-                    archetype=str(row.get("archetype") or row.get("title") or "").strip(),
+                    archetype=str(
+                        row.get("archetype") or row.get("title") or ""
+                    ).strip(),
                     hero_class=str(row.get("class") or "").strip(),
                     games=games,
                     format_name=str(row.get("format") or "").strip(),
@@ -416,12 +438,16 @@ def build_meta_references(
     return refs
 
 
-def build_archetype_volume(catalog_source_ids: tuple[str, ...] = META_CATALOG_SOURCE_IDS) -> dict[str, int]:
+def build_archetype_volume(
+    catalog_source_ids: tuple[str, ...] = META_CATALOG_SOURCE_IDS,
+) -> dict[str, int]:
     """Total games per archetype name — high volume ⇒ established ladder package."""
     volume: dict[str, int] = defaultdict(int)
     for source_id in catalog_source_ids:
         for row in _catalog_rows(source_id):
-            name = str(row.get("archetype") or row.get("title") or "").strip().casefold()
+            name = (
+                str(row.get("archetype") or row.get("title") or "").strip().casefold()
+            )
             games = _parse_games(row.get("games")) or 0
             if name and games:
                 volume[name] += games
@@ -447,13 +473,19 @@ def build_archetype_popularity(
                 if not isinstance(arch, dict):
                     continue
                 name = str(arch.get("archetype") or "").strip().casefold()
-                pct = _parse_popularity_pct(arch.get("popularity") or arch.get("raw_popularity"))
+                pct = _parse_popularity_pct(
+                    arch.get("popularity") or arch.get("raw_popularity")
+                )
                 if name and pct is not None:
                     popularity[name] = max(popularity.get(name, 0.0), pct)
         for row in structured.get("strategies") or []:
             if not isinstance(row, dict):
                 continue
-            name = str(row.get("Archetype") or row.get("archetype") or "").strip().casefold()
+            name = (
+                str(row.get("Archetype") or row.get("archetype") or "")
+                .strip()
+                .casefold()
+            )
             pct = _parse_popularity_pct(row.get("Popularity") or row.get("popularity"))
             if name and pct is not None:
                 popularity[name] = max(popularity.get(name, 0.0), pct)
@@ -605,10 +637,7 @@ def score_fun_deck(
     # Quest/XL alone do not prove "fun" — need spicy packages or meme title cues.
     concept = title_concept or bool(spicy)
     rare_name = (
-        bool(title_name)
-        and volume < 250
-        and not title_known
-        and not ladder_named
+        bool(title_name) and volume < 250 and not title_known and not ladder_named
     )
 
     unique_cards = len(bag)
@@ -650,8 +679,13 @@ def score_fun_deck(
         reasons.append("xl_shape")
     # Soft tax: generic XL/HL titles are common Wild ladder niches, not unique fun.
     title_cf = title_name.casefold()
-    if ("xl" in title_cf or "highlander" in title_cf or re.search(r"\bhl\b", title_cf)) and not (
-        title_concept and any(k in title_cf for k in ("mill", "yogg", "exodia", "casino", "joke", "meme"))
+    if (
+        "xl" in title_cf or "highlander" in title_cf or re.search(r"\bhl\b", title_cf)
+    ) and not (
+        title_concept
+        and any(
+            k in title_cf for k in ("mill", "yogg", "exodia", "casino", "joke", "meme")
+        )
     ):
         score -= 0.06
         reasons.append("xl_hl_diversity_tax")
@@ -713,7 +747,12 @@ def score_fun_deck(
     if title_matches_nearest and (pop or 0) >= 0.2 and not spicy and not title_concept:
         hard_fail = True
         reasons.append("self_named_gate")
-    if not concept and not rare_name and not (highlanderish and spicy) and similarity > 0.36:
+    if (
+        not concept
+        and not rare_name
+        and not (highlanderish and spicy)
+        and similarity > 0.36
+    ):
         hard_fail = True
         reasons.append("needs_concept_or_outlier_signal")
 
@@ -821,7 +860,9 @@ def _deck_title(row: dict[str, Any]) -> str:
     return raw.strip()
 
 
-def _normalize_fun_row(row: dict[str, Any], scored: FunDeckScore, *, seen_at: str) -> dict[str, Any]:
+def _normalize_fun_row(
+    row: dict[str, Any], scored: FunDeckScore, *, seen_at: str
+) -> dict[str, Any]:
     code = str(row.get("deck_code") or "").strip()
     return {
         "deck_code": code,
@@ -882,10 +923,13 @@ def _merge_history(
         title = str(row.get("title") or "")
         if _ladder_archetype_name(title):
             pkgs = tuple(
-                str(x)[4:] for x in (row.get("reasons") or [])
+                str(x)[4:]
+                for x in (row.get("reasons") or [])
                 if str(x).startswith("pkg:")
             )
-            meme_twist = bool(re.search(r"\b(xl|hl|reno|mill|yogg)\b", title, re.IGNORECASE))
+            meme_twist = bool(
+                re.search(r"\b(xl|hl|reno|mill|yogg)\b", title, re.IGNORECASE)
+            )
             if not (meme_twist and _spicy_packages(pkgs)):
                 continue
         by_code[code] = dict(row)
@@ -898,7 +942,9 @@ def _merge_history(
         if prev:
             merged = dict(prev)
             merged.update(row)
-            merged["first_seen_at"] = prev.get("first_seen_at") or row.get("first_seen_at")
+            merged["first_seen_at"] = prev.get("first_seen_at") or row.get(
+                "first_seen_at"
+            )
             merged["last_seen_at"] = row.get("last_seen_at") or prev.get("last_seen_at")
             if float(prev.get("fun_score") or 0) > float(row.get("fun_score") or 0):
                 for key in (
@@ -969,7 +1015,9 @@ def _pick_diverse(
     return picked
 
 
-def _balance_and_dedupe(rows: list[dict[str, Any]], *, per_format_keep: int = 22) -> list[dict[str, Any]]:
+def _balance_and_dedupe(
+    rows: list[dict[str, Any]], *, per_format_keep: int = 22
+) -> list[dict[str, Any]]:
     """Dedupe by title+format, then keep a diverse Standard/Wild top list."""
     rows = sorted(
         rows,
@@ -1009,7 +1057,9 @@ def _balance_and_dedupe(rows: list[dict[str, Any]], *, per_format_keep: int = 22
             )
         )
     picked_codes = {str(row.get("deck_code") or "") for row in balanced}
-    leftovers = [row for row in deduped if str(row.get("deck_code") or "") not in picked_codes]
+    leftovers = [
+        row for row in deduped if str(row.get("deck_code") or "") not in picked_codes
+    ]
     leftovers.sort(key=lambda row: -float(row.get("fun_score") or 0))
     target_total = per_format_keep * 2
     class_counts: dict[str, int] = defaultdict(int)
@@ -1093,7 +1143,9 @@ def _refresh_fun_decks_unlocked(
         format_counts[_format_bucket(format_name)] += 1
 
     previous = load_dataset(SOURCE_ID) or {}
-    previous_data = previous.get("data") if isinstance(previous.get("data"), dict) else {}
+    previous_data = (
+        previous.get("data") if isinstance(previous.get("data"), dict) else {}
+    )
     previous_rows: list[dict[str, Any]] = []
     if isinstance(previous_data, dict):
         structured = previous_data.get("structured") or {}
@@ -1107,12 +1159,8 @@ def _refresh_fun_decks_unlocked(
     # Focused refresh only updates that format; keep the other side from history.
     if focus in {"standard", "wild"}:
         previous_rows = [
-            row for row in previous_rows
-            if _format_bucket(row.get("format")) != focus
-        ] + [
-            row for row in previous_rows
-            if _format_bucket(row.get("format")) == focus
-        ]
+            row for row in previous_rows if _format_bucket(row.get("format")) != focus
+        ] + [row for row in previous_rows if _format_bucket(row.get("format")) == focus]
 
     merged = _merge_history(
         previous_rows,
@@ -1135,9 +1183,15 @@ def _refresh_fun_decks_unlocked(
                 out.append(row)
             return out
 
-        std_rows = _dedupe_titles([r for r in merged if _format_bucket(r.get("format")) == "standard"])
-        wild_rows = _dedupe_titles([r for r in merged if _format_bucket(r.get("format")) == "wild"])
-        other_rows = _dedupe_titles([r for r in merged if _format_bucket(r.get("format")) == "other"])
+        std_rows = _dedupe_titles(
+            [r for r in merged if _format_bucket(r.get("format")) == "standard"]
+        )
+        wild_rows = _dedupe_titles(
+            [r for r in merged if _format_bucket(r.get("format")) == "wild"]
+        )
+        other_rows = _dedupe_titles(
+            [r for r in merged if _format_bucket(r.get("format")) == "other"]
+        )
         published = (
             _pick_diverse(std_rows, limit=28, max_per_class=4, max_xl_hl=6)
             + _pick_diverse(wild_rows, limit=18, max_per_class=3, max_xl_hl=4)

@@ -11,7 +11,7 @@ from unittest.mock import call, patch
 import pytest
 
 from app.firecrawl_backend import _scrape_sync, scrape_source
-from app.scrape_do_backend import ScrapeDoScrape
+from app.scrape_do_backend import ScrapeDoScrape, ScrapeDoTransientError
 from app.sources import Source
 
 SOURCE = Source(
@@ -187,6 +187,93 @@ def test_firecrawl_runs_after_scrape_do_failure() -> None:
     scrapfly.assert_not_called()
 
 
+def test_scrape_do_retry_telemetry_keeps_recovered_502_attempt() -> None:
+    failures: list[dict[str, object]] = []
+    attempts: list[tuple[str, bool]] = []
+    transient = ScrapeDoTransientError(
+        "ROTATION_FAILED",
+        status_code=502,
+        super_proxy=True,
+    )
+    recovered = scrape_do_result(
+        html=valid_small_hsguru_html(),
+        super_proxy=True,
+        source=HSGURU_SOURCE,
+    )
+
+    with (
+        patch("app.firecrawl_backend.scrape_do_token", return_value="configured"),
+        patch(
+            "app.firecrawl_backend.scrape_url_sync",
+            side_effect=[transient, recovered],
+        ),
+        patch("app.firecrawl_backend.time.sleep"),
+    ):
+        result = _scrape_sync(
+            HSGURU_SOURCE,
+            formats=["html"],
+            skip_providers={"firecrawl", "brightdata", "scrapfly"},
+            attempt_observer=lambda item, accepted: attempts.append(
+                (item.backend, accepted)
+            ),
+            failure_observer=failures.append,
+        )
+
+    assert result.backend == "scrape_do_super"
+    assert attempts == [("scrape_do_super", True)]
+    assert failures == [
+        {
+            "backend": "scrape_do_super",
+            "state": "failed",
+            "http_status": 502,
+            "request_credits": 0,
+            "error_type": "ScrapeDoTransientError",
+            "error_code": "ROTATION_FAILED",
+            "profile_attempt": 1,
+            "provider_attempt": 1,
+            "super_proxy": True,
+        }
+    ]
+    assert result.metadata["scrapeDoAttempts"] == 2
+    assert result.metadata["scrapeDoProfileAttempt"] == 2
+
+
+def test_scrape_do_terminal_retry_reports_each_http_attempt_once() -> None:
+    failures: list[dict[str, object]] = []
+    errors = [
+        ScrapeDoTransientError(
+            "ROTATION_FAILED",
+            status_code=502,
+            super_proxy=True,
+        ),
+        ScrapeDoTransientError(
+            "CONCURRENT_REQUEST_LIMIT",
+            status_code=429,
+            super_proxy=True,
+        ),
+    ]
+
+    with (
+        patch("app.firecrawl_backend.scrape_do_token", return_value="configured"),
+        patch("app.firecrawl_backend.scrape_url_sync", side_effect=errors),
+        patch("app.firecrawl_backend.time.sleep"),
+        pytest.raises(RuntimeError, match="All scrape providers failed"),
+    ):
+        _scrape_sync(
+            HSGURU_SOURCE,
+            formats=["html"],
+            skip_providers={"firecrawl", "brightdata", "scrapfly"},
+            failure_observer=failures.append,
+        )
+
+    assert [event["http_status"] for event in failures] == [502, 429]
+    assert [event["provider_attempt"] for event in failures] == [1, 2]
+    assert [event["error_code"] for event in failures] == [
+        "ROTATION_FAILED",
+        "CONCURRENT_REQUEST_LIMIT",
+    ]
+
+
 def test_scrapfly_runs_after_scrape_do_firecrawl_and_unavailable_brightdata() -> None:
     from app.scrapfly_backend import ScrapflyScrape
 
@@ -341,6 +428,48 @@ def test_brightdata_success_does_not_inspect_scrapfly_configuration() -> None:
     assert result.backend == "brightdata_web_unlocker"
     brightdata.assert_called_once()
     scrapfly_configured.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("billed", "expected_units"),
+    [(True, 1), (False, 0), (None, 1)],
+)
+def test_brightdata_failure_telemetry_matches_budget_accounting(
+    billed: bool | None,
+    expected_units: int,
+) -> None:
+    from app.brightdata_backend import BrightDataRequestError
+
+    failures: list[dict[str, object]] = []
+    with (
+        patch("app.firecrawl_backend.scrape_do_token", return_value=None),
+        patch(
+            "app.firecrawl_backend.acquire_firecrawl_key",
+            side_effect=RuntimeError("Firecrawl unavailable"),
+        ),
+        patch(
+            "app.firecrawl_backend.brightdata_configured_for_source",
+            return_value=True,
+        ),
+        patch(
+            "app.firecrawl_backend.brightdata_scrape_url_sync",
+            side_effect=BrightDataRequestError(
+                "Bright Data request failed",
+                billed=billed,
+            ),
+        ),
+        patch(
+            "app.firecrawl_backend.scrapfly_configured",
+            return_value=False,
+        ),
+        pytest.raises(RuntimeError, match="All scrape providers failed"),
+    ):
+        _scrape_sync(SOURCE, formats=["html"], failure_observer=failures.append)
+
+    event = next(
+        item for item in failures if item["backend"] == "brightdata_web_unlocker"
+    )
+    assert event["request_credits"] == expected_units
 
 
 def test_scrapfly_is_fourth_after_brightdata_failure() -> None:

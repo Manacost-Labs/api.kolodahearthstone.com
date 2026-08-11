@@ -126,7 +126,9 @@ def patch_periods_from_html(page_html: str) -> tuple[str, ...]:
     periods: set[str] = set()
     soup = BeautifulSoup(page_html, "lxml")
     for link in soup.find_all("a", href=True):
-        values = parse_qs(urlparse(str(link.get("href") or "")).query).get("period") or []
+        values = (
+            parse_qs(urlparse(str(link.get("href") or "")).query).get("period") or []
+        )
         for value in values:
             if re.fullmatch(r"patch_\d+(?:\.\d+){1,3}", value):
                 periods.add(value)
@@ -144,7 +146,11 @@ def iter_slice_specs(periods: tuple[str, ...] = PERIODS) -> tuple[SliceSpec, ...
         }
         query = urlencode(params)
         key = "|".join((format_name, rank, period, coin))
-        specs.append(SliceSpec(format_name, rank, period, coin, key, f"{HSGURU_META_URL}?{query}"))
+        specs.append(
+            SliceSpec(
+                format_name, rank, period, coin, key, f"{HSGURU_META_URL}?{query}"
+            )
+        )
     return tuple(specs)
 
 
@@ -182,10 +188,7 @@ def _canonical_archetype_url(value: str) -> str:
 
 
 def _archetype_class(cell: Any) -> str:
-    classes = {
-        str(value).casefold()
-        for value in (cell.get("class") or [])
-    }
+    classes = {str(value).casefold() for value in (cell.get("class") or [])}
     return next(
         (name for name in sorted(_CLASS_TOKENS) if name in classes),
         "",
@@ -222,7 +225,10 @@ def parse_meta_table(page_html: str) -> MetaTableParseResult:
     indexes: dict[str, int] = {}
     for table in soup.find_all("table"):
         header_row = table.find("thead") or table.find("tr")
-        headers = [_header(cell.get_text(" ", strip=True)) for cell in header_row.find_all("th")]
+        headers = [
+            _header(cell.get_text(" ", strip=True))
+            for cell in header_row.find_all("th")
+        ]
         candidate = {
             field: headers.index(label)
             for label, field in _REQUIRED_HEADERS.items()
@@ -292,14 +298,10 @@ def parse_meta_table(page_html: str) -> MetaTableParseResult:
             rows.append(group[0]["row"])
             continue
 
-        identities = {
-            (str(item["source_url"]), str(item["class"]))
-            for item in group
-        }
+        identities = {(str(item["source_url"]), str(item["class"])) for item in group}
         archetype = str(group[0]["row"]["archetype"])
         missing_identity = any(
-            not source_url or not class_name
-            for source_url, class_name in identities
+            not source_url or not class_name for source_url, class_name in identities
         )
         if len(identities) != 1 or missing_identity:
             rendered = ", ".join(
@@ -373,17 +375,16 @@ def _carry_forward_missing_slices(
     cached_dataset: dict[str, Any] | None,
     errors: list[dict[str, str]],
 ) -> tuple[list[dict[str, Any]], int]:
-    cached_structured = (
-        (((cached_dataset or {}).get("data") or {}).get("structured") or {})
-    )
+    cached_structured = ((cached_dataset or {}).get("data") or {}).get(
+        "structured"
+    ) or {}
     cached_by_key = {
         str(item.get("key") or ""): item
         for item in cached_structured.get("slices") or []
         if isinstance(item, dict) and item.get("key")
     }
     error_by_key = {
-        str(item.get("key") or ""): str(item.get("error") or "")
-        for item in errors
+        str(item.get("key") or ""): str(item.get("error") or "") for item in errors
     }
     slices = list(fresh_slices)
     fresh_keys = {str(item.get("key") or "") for item in fresh_slices}
@@ -396,9 +397,7 @@ def _carry_forward_missing_slices(
         if not previous:
             continue
         fallback = deepcopy(previous)
-        fallback["fetched_at"] = str(
-            fallback.get("fetched_at") or cached_fetched_at
-        )
+        fallback["fetched_at"] = str(fallback.get("fetched_at") or cached_fetched_at)
         fallback["quality"] = {
             **(
                 fallback.get("quality")
@@ -426,19 +425,14 @@ def _carry_forward_current_catalog(
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str]]:
     """Fill a failed current-format scrape from the same patch snapshot."""
     cached_catalog = (
-        (((cached_dataset or {}).get("data") or {}).get("structured") or {})
-        .get("current_catalog", {})
-    )
-    cached_period = str(
-        ((cached_catalog.get("criteria") or {}).get("period") or "")
-    )
+        ((cached_dataset or {}).get("data") or {}).get("structured") or {}
+    ).get("current_catalog", {})
+    cached_period = str((cached_catalog.get("criteria") or {}).get("period") or "")
     if cached_period != current_period:
         return fresh_rows, acquisitions, []
 
     present_formats = {
-        str(row.get("format") or "")
-        for row in fresh_rows
-        if isinstance(row, dict)
+        str(row.get("format") or "") for row in fresh_rows if isinstance(row, dict)
     }
     rows = list(fresh_rows)
     acquisition_rows = list(acquisitions)
@@ -450,8 +444,7 @@ def _carry_forward_current_catalog(
         carried = [
             deepcopy(row)
             for row in previous_rows
-            if isinstance(row, dict)
-            and str(row.get("format") or "") == format_name
+            if isinstance(row, dict) and str(row.get("format") or "") == format_name
         ]
         if not carried:
             continue
@@ -498,16 +491,13 @@ async def _discover_hsguru_patch_period(
     cached_dataset: dict[str, Any] | None,
 ) -> tuple[str, dict[str, Any] | None]:
     fallback = await asyncio.to_thread(resolve_current_patch_period, cached_dataset)
-    url = (
-        f"{HSGURU_META_URL}?"
-        + urlencode(
-            {
-                "format": _FORMAT_QUERY["standard"],
-                "rank": "all",
-                "period": "past_day",
-                "min_games": MIN_GAMES[0],
-            }
-        )
+    url = f"{HSGURU_META_URL}?" + urlencode(
+        {
+            "format": _FORMAT_QUERY["standard"],
+            "rank": "all",
+            "period": "past_day",
+            "min_games": MIN_GAMES[0],
+        }
     )
     source = Source(
         id=f"{SOURCE_ID}:patch-discovery",
@@ -544,10 +534,10 @@ async def _discover_hsguru_patch_period(
 
 def _current_catalog_url(format_name: str, period: str) -> str:
     params = {
-        'format': _FORMAT_QUERY[format_name],
-        'rank': 'all',
-        'period': period,
-        'min_games': CURRENT_MIN_GAMES,
+        "format": _FORMAT_QUERY[format_name],
+        "rank": "all",
+        "period": period,
+        "min_games": CURRENT_MIN_GAMES,
     }
     return f"{HSGURU_META_URL}?{urlencode(params)}"
 
@@ -601,6 +591,8 @@ def _normalize_current_rows(
 def enrich_current_rows_with_cached_decks(
     rows: list[dict[str, Any]],
     cached_dataset: dict[str, Any] | None = None,
+    *,
+    sample_period: str | None = None,
 ) -> None:
     """Attach locally cached HSGuru builds without spending scrape credits.
 
@@ -608,24 +600,41 @@ def enrich_current_rows_with_cached_decks(
     Reusing it here keeps the archetype snapshot self-contained while avoiding
     one paid page request per archetype on every matrix refresh.
     """
+    effective_sample_period = sample_period or "past_30_days"
     previous_rows = (
-        ((((cached_dataset or {}).get("data") or {}).get("structured") or {})
+        (((cached_dataset or {}).get("data") or {}).get("structured") or {})
         .get("current_catalog", {})
-        .get("archetypes", []))
+        .get("archetypes", [])
     )
-    previous_decks = {
-        (
-            str(row.get("format") or ""),
-            str(row.get("archetype") or "").casefold(),
-        ): row.get("decks") or []
-        for row in previous_rows
-        if isinstance(row, dict)
-    }
+    previous_decks: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for row in previous_rows if isinstance(previous_rows, list) else []:
+        if not isinstance(row, dict):
+            continue
+        decks = [
+            deck
+            for deck in row.get("decks") or []
+            if isinstance(deck, dict)
+            and (
+                sample_period is None
+                or str(deck.get("sample_period") or "") == effective_sample_period
+            )
+        ]
+        previous_decks[
+            (
+                str(row.get("format") or ""),
+                str(row.get("archetype") or "").casefold(),
+            )
+        ] = decks
 
     for row in rows:
         format_name = str(row.get("format") or "")
         archetype = str(row.get("archetype") or "")
-        decks = cached_hsguru_catalog_decks(archetype, format_name, "all")
+        decks = cached_hsguru_catalog_decks(
+            archetype,
+            format_name,
+            "all",
+            period=effective_sample_period,
+        )
         if not decks:
             decks = previous_decks.get((format_name, archetype.casefold()), [])
 
@@ -642,7 +651,9 @@ def enrich_current_rows_with_cached_decks(
                 {
                     **deck,
                     "sample_rank": deck.get("sample_rank") or "all",
-                    "sample_period": deck.get("sample_period") or "past_30_days",
+                    "sample_period": (
+                        deck.get("sample_period") or effective_sample_period
+                    ),
                 }
             )
         merged.sort(
@@ -662,9 +673,7 @@ def _current_catalog_coverage(
 ) -> dict[str, dict[str, int]]:
     return {
         format_name: {
-            "archetypes": sum(
-                1 for row in rows if row["format"] == format_name
-            ),
+            "archetypes": sum(1 for row in rows if row["format"] == format_name),
             "with_decks": sum(
                 1
                 for row in rows
@@ -676,9 +685,7 @@ def _current_catalog_coverage(
                 if row["format"] == format_name
             ),
             "games": sum(
-                int(row["games"])
-                for row in rows
-                if row["format"] == format_name
+                int(row["games"]) for row in rows if row["format"] == format_name
             ),
         }
         for format_name in FORMATS
@@ -688,13 +695,18 @@ def _current_catalog_coverage(
 def _refresh_current_catalog_deck_join_unlocked() -> dict[str, Any]:
     """Rejoin refreshed deck catalogs into the current archetype snapshot."""
     dataset = load_dataset(SOURCE_ID)
-    structured = (((dataset or {}).get("data") or {}).get("structured") or {})
+    structured = ((dataset or {}).get("data") or {}).get("structured") or {}
     catalog = structured.get("current_catalog") or {}
     rows = catalog.get("archetypes")
     if not isinstance(rows, list) or not rows:
         raise RuntimeError("Current HSGuru archetype catalog is unavailable")
 
-    enrich_current_rows_with_cached_decks(rows, dataset)
+    sample_period = str((catalog.get("criteria") or {}).get("period") or "unknown")
+    enrich_current_rows_with_cached_decks(
+        rows,
+        dataset,
+        sample_period=sample_period,
+    )
     joined_at = datetime.now(UTC).isoformat()
     catalog["coverage"] = _current_catalog_coverage(rows)
     catalog["deck_catalog"] = {
@@ -704,7 +716,7 @@ def _refresh_current_catalog_deck_join_unlocked() -> dict[str, Any]:
             "hsguru_deck_catalog_wild_all",
         ],
         "sample_rank": "all",
-        "sample_period": "past_30_days",
+        "sample_period": sample_period,
     }
     structured["schema_version"] = max(int(structured.get("schema_version") or 0), 7)
     save_dataset(SOURCE_ID, dataset)
@@ -953,9 +965,7 @@ async def _refresh_hsguru_meta_matrix_unlocked(
                     "rows": parsed.rows,
                     "row_counts": {
                         str(min_games): sum(
-                            1
-                            for row in parsed.rows
-                            if int(row["games"]) >= min_games
+                            1 for row in parsed.rows if int(row["games"]) >= min_games
                         )
                         for min_games in MIN_GAMES
                     },
@@ -1002,16 +1012,13 @@ async def _refresh_hsguru_meta_matrix_unlocked(
         errors=errors,
     )
     content_length = sum(
-        int(item.get("content_length") or 0)
-        for item in slice_acquisition
+        int(item.get("content_length") or 0) for item in slice_acquisition
     )
     firecrawl_credits_used = sum(
-        float(item.get("firecrawl_credits_used") or 0)
-        for item in slice_acquisition
+        float(item.get("firecrawl_credits_used") or 0) for item in slice_acquisition
     )
     scrape_do_credits_used = sum(
-        int(item.get("scrape_do_credits_used") or 0)
-        for item in slice_acquisition
+        int(item.get("scrape_do_credits_used") or 0) for item in slice_acquisition
     )
     current_rows: list[dict[str, Any]] = []
     current_acquisition: list[dict[str, Any]] = []
@@ -1041,10 +1048,7 @@ async def _refresh_hsguru_meta_matrix_unlocked(
     run.heartbeat(phase="current_catalog")
     try:
         current_results = await asyncio.gather(
-            *(
-                fetch_current(format_name)
-                for format_name in FORMATS
-            ),
+            *(fetch_current(format_name) for format_name in FORMATS),
             return_exceptions=True,
         )
         for format_name, result in zip(FORMATS, current_results, strict=True):
@@ -1079,11 +1083,14 @@ async def _refresh_hsguru_meta_matrix_unlocked(
     current_rows.sort(
         key=lambda row: (row["format"], -int(row["games"]), row["archetype"])
     )
-    enrich_current_rows_with_cached_decks(current_rows, cached_dataset)
+    enrich_current_rows_with_cached_decks(
+        current_rows,
+        cached_dataset,
+        sample_period=current_period,
+    )
     current_coverage = _current_catalog_coverage(current_rows)
-    current_complete = (
-        current_period is not None
-        and all(current_coverage[name]["archetypes"] > 0 for name in FORMATS)
+    current_complete = current_period is not None and all(
+        current_coverage[name]["archetypes"] > 0 for name in FORMATS
     )
     duplicate_groups: list[dict[str, Any]] = []
     duplicate_rows_merged = 0
@@ -1099,14 +1106,11 @@ async def _refresh_hsguru_meta_matrix_unlocked(
             if isinstance(group, dict)
         )
     for acquisition in current_acquisition:
-        duplicate_rows_merged += int(
-            acquisition.get("duplicate_rows_merged") or 0
-        )
+        duplicate_rows_merged += int(acquisition.get("duplicate_rows_merged") or 0)
         duplicate_groups.extend(
             {
                 "key": (
-                    f"current|{acquisition.get('format') or 'unknown'}"
-                    f"|{current_period}"
+                    f"current|{acquisition.get('format') or 'unknown'}|{current_period}"
                 ),
                 **group,
             }
@@ -1114,7 +1118,8 @@ async def _refresh_hsguru_meta_matrix_unlocked(
             if isinstance(group, dict)
         )
     firecrawl_credits_used += sum(
-        float(item.get("request_credits") or 0) for item in current_acquisition
+        float(item.get("request_credits") or 0)
+        for item in current_acquisition
         if item.get("backend") == "firecrawl"
     )
     scrape_do_credits_used += sum(
@@ -1124,18 +1129,14 @@ async def _refresh_hsguru_meta_matrix_unlocked(
     )
     if patch_discovery_acquisition:
         backend = str(patch_discovery_acquisition.get("backend") or "")
-        request_credits = int(
-            patch_discovery_acquisition.get("request_credits") or 0
-        )
+        request_credits = int(patch_discovery_acquisition.get("request_credits") or 0)
         if backend == "firecrawl":
             firecrawl_credits_used += request_credits
         elif backend.startswith("scrape_do"):
             scrape_do_credits_used += request_credits
     firecrawl_requests = sum(
         1 for item in slice_acquisition if item.get("backend") == "firecrawl"
-    ) + sum(
-        1 for item in current_acquisition if item.get("backend") == "firecrawl"
-    )
+    ) + sum(1 for item in current_acquisition if item.get("backend") == "firecrawl")
     if (
         patch_discovery_acquisition
         and patch_discovery_acquisition.get("backend") == "firecrawl"
@@ -1150,12 +1151,9 @@ async def _refresh_hsguru_meta_matrix_unlocked(
         for item in current_acquisition
         if str(item.get("backend") or "").startswith("scrape_do")
     )
-    if (
-        patch_discovery_acquisition
-        and str(patch_discovery_acquisition.get("backend") or "").startswith(
-            "scrape_do"
-        )
-    ):
+    if patch_discovery_acquisition and str(
+        patch_discovery_acquisition.get("backend") or ""
+    ).startswith("scrape_do"):
         scrape_do_requests += 1
     active_backends = {
         str(item.get("backend"))
@@ -1168,16 +1166,14 @@ async def _refresh_hsguru_meta_matrix_unlocked(
     run.heartbeat(phase="finalizing")
     if run.deadline_reached():
         run.mark_timed_out()
-    publishable = (
-        len(slices) == len(specs)
-        and current_complete
-        and not run.timed_out
-    )
+    publishable = len(slices) == len(specs) and current_complete and not run.timed_out
     complete = publishable and cached_slice_count == 0 and not errors
     run_state = (
         SourceState.TIMED_OUT
         if run.timed_out
-        else SourceState.OK if complete else SourceState.PARTIAL
+        else SourceState.OK
+        if complete
+        else SourceState.PARTIAL
     )
     structured = {
         "type": "hsguru_meta_matrix",
@@ -1234,7 +1230,7 @@ async def _refresh_hsguru_meta_matrix_unlocked(
                     "hsguru_deck_catalog_wild_all",
                 ],
                 "sample_rank": "all",
-                "sample_period": "past_30_days",
+                "sample_period": current_period,
             },
         },
     }
@@ -1259,7 +1255,9 @@ async def _refresh_hsguru_meta_matrix_unlocked(
     terminal_phase = (
         str(SourceState.TIMED_OUT)
         if run.timed_out
-        else "complete" if complete else str(SourceState.PARTIAL)
+        else "complete"
+        if complete
+        else str(SourceState.PARTIAL)
     )
     run.finalize(phase=terminal_phase)
     save_status(

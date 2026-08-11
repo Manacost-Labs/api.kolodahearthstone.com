@@ -1,10 +1,12 @@
 [Unit]
 Description=Refresh broad HSGuru deck catalogs through Scrape.do
 Requires=hs-data-api-docker.service
-After=hs-data-api-docker.service network-online.target
+After=hs-data-api-docker.service network-online.target hs-data-api-docker-refresh-hsguru-meta-matrix.service
 
 [Service]
 Type=oneshot
 SuccessExitStatus=10
 WorkingDirectory=/srv/hs-data-api
 ExecStart=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm api python /app/scripts/refresh-hsguru-deck-catalog.py
+TimeoutStartSec=45min
+TimeoutStopSec=30s

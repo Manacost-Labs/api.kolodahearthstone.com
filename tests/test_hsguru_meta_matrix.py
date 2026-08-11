@@ -101,15 +101,17 @@ def test_hsguru_table_parser_maps_statistics_by_header_not_column_position() -> 
     </tr></tbody></table>
     """
 
-    assert parse_meta_rows(reordered) == [{
-        "archetype": "Big Shaman",
-        "winrate": 55.4,
-        "popularity": 1.7,
-        "games": 5321,
-        "turns": 8.2,
-        "duration_minutes": 7.6,
-        "climbing_speed": 2.4,
-    }]
+    assert parse_meta_rows(reordered) == [
+        {
+            "archetype": "Big Shaman",
+            "winrate": 55.4,
+            "popularity": 1.7,
+            "games": 5321,
+            "turns": 8.2,
+            "duration_minutes": 7.6,
+            "climbing_speed": 2.4,
+        }
+    ]
 
 
 def test_hsguru_table_parser_rejects_incomplete_statistics() -> None:
@@ -153,16 +155,18 @@ def test_hsguru_table_parser_merges_same_identity_duplicate_archetypes() -> None
         "climbing_speed": pytest.approx(-1.301904),
     }
     assert parsed.duplicate_rows_merged == 1
-    assert parsed.duplicate_groups == [{
-        "archetype": "Thal'ena DK",
-        "rows": 2,
-        "games": 3523,
-        "class": "deathknight",
-        "source_url": (
-            "https://www.hsguru.com/archetype/Thal%27ena%20DK"
-            "?period=past_week&rank=all"
-        ),
-    }]
+    assert parsed.duplicate_groups == [
+        {
+            "archetype": "Thal'ena DK",
+            "rows": 2,
+            "games": 3523,
+            "class": "deathknight",
+            "source_url": (
+                "https://www.hsguru.com/archetype/Thal%27ena%20DK"
+                "?period=past_week&rank=all"
+            ),
+        }
+    ]
 
 
 def test_hsguru_table_parser_rejects_same_name_with_different_identity() -> None:
@@ -184,7 +188,9 @@ def test_hsguru_table_parser_rejects_same_name_with_different_identity() -> None
     </tbody></table>
     """
 
-    with pytest.raises(HSGuruMetaDataError, match="conflicting identities.*Thal'ena DK"):
+    with pytest.raises(
+        HSGuruMetaDataError, match="conflicting identities.*Thal'ena DK"
+    ):
         parse_meta_rows(ambiguous)
 
 
@@ -206,12 +212,14 @@ def test_hsguru_table_parser_distinguishes_missing_from_empty_table() -> None:
 def test_current_archetypes_reuse_cached_deck_catalog_without_scraping() -> None:
     from app.hsguru_meta_matrix import enrich_current_rows_with_cached_decks
 
-    rows = [{
-        "format": "wild",
-        "archetype": "Thief Priest",
-        "games": 31959,
-        "decks": [],
-    }]
+    rows = [
+        {
+            "format": "wild",
+            "archetype": "Thief Priest",
+            "games": 31959,
+            "decks": [],
+        }
+    ]
     builds = [
         {
             "archetype": "Thief Priest",
@@ -235,13 +243,16 @@ def test_current_archetypes_reuse_cached_deck_catalog_without_scraping() -> None
         "app.hsguru_meta_matrix.cached_hsguru_catalog_decks",
         return_value=builds,
     ):
-        enrich_current_rows_with_cached_decks(rows)
+        enrich_current_rows_with_cached_decks(
+            rows,
+            sample_period="patch_36.2.0",
+        )
 
     assert rows[0]["has_decks"] is True
     assert rows[0]["deck_count"] == 2
     assert [deck["games"] for deck in rows[0]["decks"]] == [900, 250]
     assert all(deck["sample_rank"] == "all" for deck in rows[0]["decks"])
-    assert all(deck["sample_period"] == "past_30_days" for deck in rows[0]["decks"])
+    assert all(deck["sample_period"] == "patch_36.2.0" for deck in rows[0]["decks"])
 
 
 def test_deck_catalog_refresh_can_rejoin_builds_without_refetching_meta() -> None:
@@ -253,18 +264,22 @@ def test_deck_catalog_refresh_can_rejoin_builds_without_refetching_meta() -> Non
             "structured": {
                 "schema_version": 6,
                 "current_catalog": {
-                    "archetypes": [{
-                        "format": "standard",
-                        "archetype": "Face Hunter",
-                        "games": 1000,
-                        "decks": [],
-                    }]
+                    "criteria": {"period": "patch_36.2.0"},
+                    "archetypes": [
+                        {
+                            "format": "standard",
+                            "archetype": "Face Hunter",
+                            "games": 1000,
+                            "decks": [],
+                        }
+                    ],
                 },
             }
         },
     }
 
-    def attach(rows, _cached):
+    def attach(rows, _cached, *, sample_period):
+        assert sample_period == "patch_36.2.0"
         rows[0]["decks"] = [{"deck_code": "AAECAValidDeckCode"}]
         rows[0]["deck_count"] = 1
         rows[0]["has_decks"] = True
@@ -283,6 +298,12 @@ def test_deck_catalog_refresh_can_rejoin_builds_without_refetching_meta() -> Non
     assert result["decks"] == 1
     assert result["coverage"]["standard"]["games"] == 1000
     assert dataset["data"]["structured"]["schema_version"] == 7
+    assert (
+        dataset["data"]["structured"]["current_catalog"]["deck_catalog"][
+            "sample_period"
+        ]
+        == "patch_36.2.0"
+    )
     save_dataset.assert_called_once_with("hsguru_meta_matrix", dataset)
 
 
@@ -386,7 +407,12 @@ def test_refresh_publishes_one_unified_dataset_after_108_firecrawl_pages() -> No
     save_dataset.assert_called_once()
     dataset = save_dataset.call_args.args[1]
     assert dataset["data"]["structured"]["dimensions"]["min_games"] == [
-        100, 250, 500, 1000, 2500, 5000
+        100,
+        250,
+        500,
+        1000,
+        2500,
+        5000,
     ]
     assert dataset["data"]["structured"]["dimensions"]["coins"] == ["any_player"]
     assert dataset["data"]["structured"]["current_catalog"]["criteria"] == {
@@ -590,14 +616,16 @@ def test_refresh_does_not_retry_data_errors_and_counts_failed_parse_request() ->
         )
 
     async def scrape_current(format_name, period):
-        return [{
-            "format": format_name,
-            "archetype": f"Current {format_name}",
-            "games": 100,
-            "period": period,
-            "rank": "all",
-            "decks": [],
-        }], {
+        return [
+            {
+                "format": format_name,
+                "archetype": f"Current {format_name}",
+                "games": 100,
+                "period": period,
+                "rank": "all",
+                "decks": [],
+            }
+        ], {
             "format": format_name,
             "backend": "firecrawl",
             "request_credits": 1,
@@ -1022,21 +1050,25 @@ def test_missing_slice_can_be_carried_forward_from_last_stable_dataset() -> None
         "fetched_at": "2026-07-25T10:00:03+00:00",
         "data": {
             "structured": {
-                "slices": [{
-                    "key": spec.key,
-                    "format": "standard",
-                    "rank": "all",
-                    "period": "past_week",
-                    "coin": "any_player",
-                    "rows": [{"archetype": "Cached Mage", "games": 500}],
-                }]
+                "slices": [
+                    {
+                        "key": spec.key,
+                        "format": "standard",
+                        "rank": "all",
+                        "period": "past_week",
+                        "coin": "any_player",
+                        "rows": [{"archetype": "Cached Mage", "games": 500}],
+                    }
+                ]
             }
         },
     }
-    errors = [{
-        "key": spec.key,
-        "error": "HSGuruMetaDataError: conflicting identities",
-    }]
+    errors = [
+        {
+            "key": spec.key,
+            "error": "HSGuruMetaDataError: conflicting identities",
+        }
+    ]
 
     slices, carried = _carry_forward_missing_slices(
         specs=(spec,),
@@ -1085,13 +1117,15 @@ def test_failed_current_format_uses_same_period_cached_catalog() -> None:
 
     rows, acquisitions, cached_formats = _carry_forward_current_catalog(
         current_period="patch_36.0.3",
-        fresh_rows=[{
-            "format": "standard",
-            "archetype": "Fresh Standard Deck",
-            "games": 999,
-            "period": "patch_36.0.3",
-            "rank": "all",
-        }],
+        fresh_rows=[
+            {
+                "format": "standard",
+                "archetype": "Fresh Standard Deck",
+                "games": 999,
+                "period": "patch_36.0.3",
+                "rank": "all",
+            }
+        ],
         acquisitions=[{"format": "standard", "backend": "scrape_do"}],
         cached_dataset=cached,
     )
@@ -1235,9 +1269,7 @@ def test_v1_hsguru_archetypes_returns_current_patch_catalog() -> None:
     }
 
     with patch("app.routers.hsguru_meta.load_dataset", return_value=dataset):
-        response = client.get(
-            "/v1/hsguru/archetypes?format=wild&min_games=50"
-        )
+        response = client.get("/v1/hsguru/archetypes?format=wild&min_games=50")
 
     assert response.status_code == 200
     body = response.json()
@@ -1304,11 +1336,19 @@ def test_v1_hsguru_meta_accepts_all_ranks_and_any_player() -> None:
     dataset = {
         "source_id": "hsguru_meta_matrix",
         "fetched_at": fetched_at,
-        "data": {"structured": {"slices": [{
-            "key": "standard|all|past_day|any_player",
-            "source_url": "https://www.hsguru.com/meta?format=2&rank=all&period=past_day&min_games=100",
-            "rows": [{"archetype": "Big Shaman", "games": 5321, "winrate": 55.4}],
-        }]}},
+        "data": {
+            "structured": {
+                "slices": [
+                    {
+                        "key": "standard|all|past_day|any_player",
+                        "source_url": "https://www.hsguru.com/meta?format=2&rank=all&period=past_day&min_games=100",
+                        "rows": [
+                            {"archetype": "Big Shaman", "games": 5321, "winrate": 55.4}
+                        ],
+                    }
+                ]
+            }
+        },
     }
 
     with patch("app.routers.hsguru_meta.load_dataset", return_value=dataset):
@@ -1327,14 +1367,22 @@ def test_v1_hsguru_meta_accepts_extended_diamond_ranks(rank: str) -> None:
     dataset = {
         "source_id": "hsguru_meta_matrix",
         "fetched_at": fetched_at,
-        "data": {"structured": {"slices": [{
-            "key": f"standard|{rank}|past_day|any_player",
-            "source_url": (
-                "https://www.hsguru.com/meta?"
-                f"format=2&rank={rank}&period=past_day&min_games=100"
-            ),
-            "rows": [{"archetype": "Big Shaman", "games": 5321, "winrate": 55.4}],
-        }]}},
+        "data": {
+            "structured": {
+                "slices": [
+                    {
+                        "key": f"standard|{rank}|past_day|any_player",
+                        "source_url": (
+                            "https://www.hsguru.com/meta?"
+                            f"format=2&rank={rank}&period=past_day&min_games=100"
+                        ),
+                        "rows": [
+                            {"archetype": "Big Shaman", "games": 5321, "winrate": 55.4}
+                        ],
+                    }
+                ]
+            }
+        },
     }
 
     with patch("app.routers.hsguru_meta.load_dataset", return_value=dataset):
@@ -1353,18 +1401,24 @@ def test_v1_hsguru_meta_accepts_extended_periods(period: str) -> None:
     dataset = {
         "source_id": "hsguru_meta_matrix",
         "fetched_at": fetched_at,
-        "data": {"structured": {
-            "dimensions": {"periods": ["past_day", "patch_36.0.3", "violet_hold"]},
-            "patch_discovery": {"selected_period": "patch_36.0.3"},
-            "slices": [{
-                "key": f"standard|legend|{period}|any_player",
-                "source_url": (
-                    "https://www.hsguru.com/meta?"
-                    f"format=2&rank=legend&period={period}&min_games=100"
-                ),
-                "rows": [{"archetype": "Quest Mage", "games": 742, "winrate": 51.1}],
-            }],
-        }},
+        "data": {
+            "structured": {
+                "dimensions": {"periods": ["past_day", "patch_36.0.3", "violet_hold"]},
+                "patch_discovery": {"selected_period": "patch_36.0.3"},
+                "slices": [
+                    {
+                        "key": f"standard|legend|{period}|any_player",
+                        "source_url": (
+                            "https://www.hsguru.com/meta?"
+                            f"format=2&rank=legend&period={period}&min_games=100"
+                        ),
+                        "rows": [
+                            {"archetype": "Quest Mage", "games": 742, "winrate": 51.1}
+                        ],
+                    }
+                ],
+            }
+        },
     }
 
     with patch("app.routers.hsguru_meta.load_dataset", return_value=dataset):
@@ -1389,10 +1443,12 @@ def test_v1_hsguru_meta_rejects_period_outside_published_dimensions() -> None:
     dataset = {
         "source_id": "hsguru_meta_matrix",
         "fetched_at": fetched_at,
-        "data": {"structured": {
-            "dimensions": {"periods": ["past_day", "patch_36.0.3"]},
-            "slices": [],
-        }},
+        "data": {
+            "structured": {
+                "dimensions": {"periods": ["past_day", "patch_36.0.3"]},
+                "slices": [],
+            }
+        },
     }
 
     with patch("app.routers.hsguru_meta.load_dataset", return_value=dataset):
