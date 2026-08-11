@@ -210,6 +210,49 @@ structured/status diagnostics содержат `upstream_state`. Наприме�
 `issue`, `latest_report_issue`, `latest_report_published_at` и предупреждением;
 пустой или повреждённый граф по-прежнему блокируется contract-gate.
 
+#### `GET /datasets/hearthstone_decks`
+
+Возвращает 20 Standard и 20 Wild Legend-постов. Основной маршрут выполняет
+ровно два прямых WordPress REST GET для категорий `3` и `13`. Поля включают
+`wordpress_post_id`, `published_at`, `modified_at`, `title`, `url`, `format`,
+`archetype`, `rank`, `player`, `score`, `deck_code`, `deck_code_status` и
+provenance. REST-кандидат проходит проверку структуры и декодирование deck
+codes. Для отсутствующего кода разрешены LKG и точечный detail fetch; при
+отказе REST целиком используется валидированный HTML fallback.
+
+Верхнеуровневые поля `data.structured` показывают `fetch_strategy`,
+`wordpress_rest_requests`, `html_list_pages`, `cached_deck_codes_reused`,
+`deck_code_fill_rate`, `standard_count` и `wild_count`. К публикации допускаются
+ровно 40 строк и не менее 95% заполненных deck codes; иначе продолжает
+обслуживаться предыдущий LKG.
+
+#### `GET /datasets/firestone_standard`
+
+Возвращает два массива Firestone Standard Legend за `last-patch`:
+`decks[]` и `archetypes[]`. Парсер параллельно делает два прямых CDN GET к
+ZeroToHeroes и не использует Scrape.do, Firecrawl, Bright Data, Scrapfly или
+residential proxy. Общие поля строки: `archetype_id`, `archetype_name`,
+`player_class`, `games`, `wins`, `winrate`, `core_cards`, `hero_card_ids`;
+колода также содержит `decklist`/`deck_code` и `card_variations`. `winrate` —
+доля в диапазоне `0..1`, не процент `0..100`.
+
+Контракт требует минимум 20 строк суммарно, минимум 10 колод и 10 архетипов,
+оба metadata-блока и прохождение schema, semantic и regression gates. Если
+один CDN-срез невалиден или контракт не выполнен, новый snapshot не
+публикуется и endpoint продолжает отдавать LKG.
+
+```bash
+# Запускайте отдельно внутри штатного production-контейнера.
+docker exec hs-data-api python -m app.cli refresh \
+  --source hearthstone_decks --require-all-ok
+docker exec hs-data-api python -m app.cli refresh \
+  --source firestone_standard --require-all-ok
+```
+
+> `firestone_standard` нельзя включать в публичном или коммерческом production
+> без письменного разрешения Firestone/ZeroToHeroes. См.
+> [Firestone Terms of Service](https://github.com/Zero-to-Heroes/firestone/blob/master/tos.md).
+
 Опциональная сессия Vicious Syndicate хранится отдельно от HSReplay и
 используется только при запросах к домену `vicioussyndicate.com`:
 
@@ -556,9 +599,9 @@ curl -s -X POST \
   "freshness_ok": true,
   "degraded": false,
   "data_dir": "/var/lib/hs-data-api",
-  "sources": 46,
+  "sources": 97,
   "states": {
-    "ok": 46
+    "ok": 97
   },
   "hard_failed_sources": [],
   "semantic_failed_sources": [],
@@ -708,6 +751,7 @@ Query parameters:
 
 ### Firestone
 
+- `firestone_standard`
 - `firestone_battlegrounds_comps`
 - `firestone_battlegrounds_cards`
 - `firestone_battlegrounds_spells`
@@ -743,6 +787,7 @@ Query parameters:
 | `metastats_decks` | `decks[]` with archetype/deck/card details | MetaStats decks |
 | `metastats_matchups` | `matchups[]`, `archetypes[]` | MetaStats matchups |
 | `hearthstone_decks` | `decks[]`, `standard_count`, `wild_count` | Hearthstone-Decks |
+| `firestone_standard` | `decks[]`, `archetypes[]`, metadata/totals; `winrate` is `0..1` | Firestone Standard Legend last-patch |
 | `bg_card_stats` | `tiers` keyed by tavern tier | Firestone BG cards/spells |
 
 Structured datasets created by API-first parsers include:

@@ -360,7 +360,10 @@ SOURCES: tuple[Source, ...] = (
         "https://hearthstone-decks.net/standard-decks/",
         "hearthstone-decks",
         "ranked",
-        description="Top 500 Legend Standard and Wild Decks from hearthstone-decks.net.",
+        description=(
+            "Latest 20 Standard and 20 Wild deck posts from hearthstone-decks.net; "
+            "WordPress REST first with validated HTML fallback."
+        ),
     ),
     Source(
         "vicious_syndicate_radars",

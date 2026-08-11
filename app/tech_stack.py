@@ -315,20 +315,26 @@ def _site_cards() -> list[dict[str, Any]]:
             "firestone",
             "Firestone",
             "https://www.firestoneapp.com/",
-            "Открытые Battlegrounds и Arena статистики как стабильный API fallback.",
+            "Battlegrounds, Arena и Standard-статистика из JSON/CDN источников Firestone.",
             frontend=[
                 "Modern SPA на firestoneapp.com.",
                 "UI фильтры соответствуют query parameters: tavern tiers, turns, arena mode/time filters.",
             ],
             backend=[
-                "Используются открытые JSON/API endpoints приложения Firestone.",
-                "Данные уже агрегированы: cards, comps, arena card stats, BG spells/minions.",
+                "Используются JSON/API endpoints и static.zerotoheroes.com CDN snapshots.",
+                "Данные уже агрегированы: Standard decks/archetypes, cards, comps, Arena и BG.",
             ],
             hosting=[
-                "Публичный HTTPS сайт/API; premium session не требуется.",
-                "В нашем parser tier считается light_api/firestone_api и не должен расходовать residential proxy.",
+                "HTTPS/API не требует premium session; это не заменяет разрешение на использование данных.",
+                "В parser tier это light_api/firestone_api; Standard делает два direct CDN GET без платных scrape-провайдеров и residential proxy.",
             ],
             apis=[
+                {
+                    "name": "Standard meta overviews",
+                    "url_pattern": "https://static.zerotoheroes.com/api/constructed/stats/{decks|archetypes}/standard/legend/last-patch/overview-from-hourly.gz.json",
+                    "type": "gzip/json CDN",
+                    "used_for": "Колоды и архетипы Standard Legend за последний патч; winrate — доля 0..1.",
+                },
                 {
                     "name": "Battlegrounds cards/spells",
                     "url_pattern": "https://www.firestoneapp.com/battlegrounds/cards?time=past-three&tavernTiers=...&turns=10&type={spell?}",
@@ -350,13 +356,15 @@ def _site_cards() -> list[dict[str, Any]]:
             ],
             parser_strategy=[
                 "API-first через firestone_api.",
+                "Standard-набор параллельно загружает два CDN-среза и требует минимум 10 decks + 10 archetypes.",
                 "Нормализация карт через HearthstoneJSON.",
-                "Quality gates проверяют объём карт/групп и наличие tier/score/placement metrics.",
+                "Quality gates проверяют схему, семантику, объём, deck codes и регрессию до публикации; при отказе остаётся LKG.",
             ],
-            auth="Публичный доступ, серверная сессия не требуется.",
+            auth="Серверная сессия не требуется. Публичное/коммерческое включение firestone_standard требует письменного разрешения Firestone/ZeroToHeroes.",
             risks=[
                 "Изменение query parameters или структуры app JSON.",
                 "Семантика period filters может отличаться от HSReplay.",
+                "Firestone Terms of Service: https://github.com/Zero-to-Heroes/firestone/blob/master/tos.md; не включать firestone_standard публично/коммерчески без письменного разрешения.",
             ],
         ),
         site(
@@ -440,30 +448,37 @@ def _site_cards() -> list[dict[str, Any]]:
             "Топ легенда Standard/Wild decklists.",
             frontend=[
                 "WordPress/PHP-like контентный сайт с постами и таблицами decklists.",
-                "Deck codes и ранги находятся в HTML страницах.",
+                "Deck codes и ранги доступны в WordPress content JSON; HTML остаётся fallback.",
             ],
             backend=[
-                "Публичный CMS backend; отдельный официальный API не используется.",
-                "Parser вытаскивает ссылки/посты/коды колод и нормализует metadata.",
+                "Первичный маршрут — WordPress REST API `wp-json/wp/v2/posts`.",
+                "Parser валидирует post ID, URL, category, timestamps, content и декодирует deck code.",
             ],
             hosting=[
-                "Публичный HTTPS сайт, доступен через hearthstone_decks_api/parser.",
+                "Два WordPress REST GET идут напрямую; платные маршруты возможны только для валидированного HTML/detail fallback.",
             ],
             apis=[
                 {
-                    "name": "Top decks pages",
-                    "url_pattern": "https://hearthstone-decks.net/",
+                    "name": "WordPress REST posts",
+                    "url_pattern": "https://hearthstone-decks.net/wp-json/wp/v2/posts?categories={3|13}&per_page=20&page=1&orderby=date&order=desc",
+                    "type": "wordpress/json",
+                    "used_for": "20 Standard + 20 Wild posts, deck codes, player/rank и published/modified timestamps.",
+                },
+                {
+                    "name": "Validated HTML fallback",
+                    "url_pattern": "https://hearthstone-decks.net/{standard-decks|wild-decks}/",
                     "type": "html/cms",
-                    "used_for": "Top Legend Standard/Wild deck codes, player/rank/date.",
-                }
+                    "used_for": "Аварийный список и detail pages, если REST-набор отклонён.",
+                },
             ],
             parser_strategy=[
-                "HTML crawl ограниченного набора страниц.",
-                "Декод deck codes и группировка Standard/Wild.",
+                "Два параллельных REST GET: category 3 Standard и category 13 Wild, по 20 постов.",
+                "Декод deck codes, точечное дополнение из LKG/detail page и группировка Standard/Wild.",
+                "Контракт требует 40 строк и 95% deck codes; иначе остаётся LKG.",
             ],
             auth="Публичный доступ.",
             risks=[
-                "CMS theme/markup changes.",
+                "Изменение WordPress REST category ID, schema или CMS markup fallback.",
                 "Посты могут содержать неполные или устаревшие deck codes.",
             ],
         ),

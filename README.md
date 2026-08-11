@@ -17,7 +17,7 @@ Vicious Syndicate, проверяет их качество и публикуе�
 
 ## Что находится в системе
 
-В текущем реестре **96 источников: 92 scrape + 4 dedicated pipeline**.
+В текущем реестре **97 источников: 93 scrape + 4 dedicated pipeline**.
 Авторитетный список генерируется из `app.sources.SOURCES` и хранится в
 [docs/SOURCES.md](docs/SOURCES.md). Ручной перечень здесь намеренно не
 дублируется: синхронизацию каталога проверяет pytest.
@@ -110,13 +110,34 @@ Scrapfly могут ротировать ключи. Каждый HTTP 2xx-ка�
 
 Для специализированных источников действуют дополнительные узкие правила:
 HSReplay JSON использует cost-first порядок FlareSolverr → Scrape.do →
-residential curl_cffi. Публичные страницы HearthArena, MetaStats и
-Hearthstone-Decks сначала проходят валидированный Scrape.do-first cloud-каскад,
-а IPRoyal остаётся последним аварийным маршрутом. Hearthstone-Decks публикуется
-лишь при полном покрытии `20 Standard + 20 Wild`; Vicious Syndicate после подтверждённого CONNECT
+residential curl_cffi. Hearthstone-Decks сначала делает ровно два
+прямых WordPress REST-запроса: по 20 постов из категорий Standard `3` и
+Wild `13`. ID, URL, категория, timestamps и deck code в `content.rendered`
+проверяются до приёма. Для отсутствующих кодов используется LKG
+и точечная загрузка detail page. Если REST-набор не проходит проверку,
+включается валидированный HTML cloud-каскад, затем residential fallback.
+Публикуется только набор `20 Standard + 20 Wild` с заполнением deck code не
+ниже 95%; иначе API сохраняет предыдущий LKG. HearthArena и MetaStats
+сохраняют валидированный Scrape.do-first cloud-маршрут, а IPRoyal —
+последний аварийный маршрут. Vicious Syndicate после подтверждённого CONNECT
 `402/407` может перейти на прямой HTTPS только для официального домена и только
 после URL-специфичной проверки report/deck/radar содержимого. Во всех случаях
 неполный кандидат отклоняется, а API продолжает отдавать LKG.
+
+`firestone_standard` параллельно загружает два прямых CDN JSON-среза
+ZeroToHeroes: колоды и архетипы Standard, Legend, `last-patch`. Платные
+scrape-провайдеры и residential proxy для него не используются. Кандидат
+должен содержать не менее 20 строк суммарно, не менее 10 колод и 10
+архетипов. `winrate` хранится как доля `0..1`. Оба среза, deck codes,
+выборки и метрики проходят схему, semantic validation, source contract и
+regression gate. При отказе любого среза новый snapshot не публикуется и
+остаётся LKG.
+
+> Важно: эта интеграция не означает, что `firestone_standard` включён в
+> публичном или коммерческом production. [Firestone Terms of Service](https://github.com/Zero-to-Heroes/firestone/blob/master/tos.md)
+> ограничивают копирование, scraping, публичный показ и коммерческое
+> использование. Не включайте этот dataset в таком production без письменного
+> разрешения Firestone/ZeroToHeroes.
 
 ## AI-проверка кандидатов
 
@@ -289,6 +310,14 @@ docker exec hs-data-api python -m app.cli refresh \
   --source hsreplay_cards_legend_1d \
   --require-all-ok
 
+# Прямые constructed-источники; каждую команду запускайте отдельно
+docker exec hs-data-api python -m app.cli refresh \
+  --source hearthstone_decks \
+  --require-all-ok
+docker exec hs-data-api python -m app.cli refresh \
+  --source firestone_standard \
+  --require-all-ok
+
 # Состояние уже сохранённых данных без платного refetch
 docker exec hs-data-api python -m app.cli freshness-check --since-hours 48
 docker exec hs-data-api python -m app.cli quality-check
@@ -372,6 +401,10 @@ Public:
 - `GET /health` — liveness API.
 - `GET /sources`, `GET /sources/{source_id}` — реестр и статусы.
 - `GET /datasets`, `GET /datasets/{source_id}` — cached parser output.
+- `GET /datasets/hearthstone_decks` — 20 Standard + 20 Wild постов
+  Hearthstone-Decks с deck codes и provenance REST/HTML/LKG.
+- `GET /datasets/firestone_standard` — колоды и архетипы Firestone
+  Standard Legend за последний патч; `winrate` — доля `0..1`.
 - `GET /v1/constructed/*`, `/v1/bg/*`, `/v1/arena/*` — типизированные API.
 - `GET /v1/system/sources`, `/v1/system/datasets`, `/v1/system/health` —
   системные read-only представления.

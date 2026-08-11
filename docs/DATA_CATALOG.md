@@ -194,10 +194,37 @@ GET /v1/constructed/archetypes
 | Source ID | Данные |
 | --- | --- |
 | `hsreplay_decks_trending` | `decks[]`: name, winrate, games, duration, deck URL/ID. |
-| `hearthstone_decks` | Standard/Wild Legend posts: player, rank, score, date, deck code и статус его извлечения. |
+| `hearthstone_decks` | 20 Standard + 20 Wild Legend posts: WordPress post ID, player, rank, score, published/modified timestamps, deck code, статус и provenance его извлечения. |
+| `firestone_standard` | Firestone Standard Legend `last-patch`: `decks[]`, `archetypes[]`, выборки, core cards, games, wins и `winrate` как доля `0..1`. |
 | `metastats_decks` | Архетип, класс, winrate, games, cards, deck code. |
 | `hsguru_streamer_decks_legend_1000` | Streamer, peak/latest rank, win-loss, format, last played, links и deck code. |
 | `hsguru_fun_decks` | Off-meta / fun decks: `fun_score`, `max_meta_similarity`, nearest archetype, reasons; derived from streamer candidates vs meta catalogs. |
+
+### Прямые constructed-наборы
+
+`hearthstone_decks` делает два прямых WordPress REST GET: категория `3`
+для Standard и `13` для Wild, по 20 постов. После проверки REST-схемы
+и декодируемости deck code отсутствующий код может быть взят из
+LKG или точечно из detail page. Если REST-набор невалиден, включается
+проверяемый HTML cloud-каскад, затем residential fallback. Кандидат содержит
+ровно 40 строк и не менее 95% deck codes; иначе остаётся предыдущий
+LKG.
+
+`firestone_standard` параллельно делает два прямых CDN GET к ZeroToHeroes:
+обзор колод и обзор архетипов Standard, Legend, `last-patch`. Набор
+не расходует Scrape.do, Firecrawl, Bright Data, Scrapfly или residential proxy.
+Перед публикацией требуются оба среза, минимум 20 строк суммарно,
+минимум 10 колод и 10 архетипов, а также schema, semantic, contract и
+regression gates. Провал любого из них сохраняет LKG.
+
+```http
+GET /datasets/hearthstone_decks
+GET /datasets/firestone_standard
+```
+
+> `firestone_standard` нельзя включать в публичном или коммерческом production
+> без письменного разрешения Firestone/ZeroToHeroes. См.
+> [Firestone Terms of Service](https://github.com/Zero-to-Heroes/firestone/blob/master/tos.md).
 
 ## Matchups и meta
 
@@ -500,7 +527,7 @@ curl -s 'https://api.hs-manacost.ru/v1/constructed/decks?class_name=Mage&limit=5
   | jq '{meta, decks: .data}'
 ```
 
-## Полный список 46 source ID
+## Полный список 97 source ID
 
 Авторитетный актуальный список с site/category/kind/stale policy находится в
 [SOURCES.md](SOURCES.md). Этот файл генерируется из кода и проверяется в CI, то
