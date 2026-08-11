@@ -89,6 +89,15 @@ flowchart TB
 | **API-first** | JSON/XML API, gzip с CDN (zerotoheroes, analytics HSReplay) | Быстро, стабильно, меньше CF | Зависимость от формата API |
 | **Browser** | SPA, paywall, Cloudflare | Полный HTML/перехват XHR | Медленно, тяжёлый Chromium/FS |
 
+Общий cloud scrape для HTML/raw HTML использует фиксированный порядок:
+**Scrape.do → Firecrawl → Bright Data Web Unlocker → Scrapfly**. Bright
+Data остаётся opt-in слоем с точным source allowlist, локальным лимитом и
+circuit breaker; при переданных cookies, Authorization или любых custom headers
+он полностью пропускается. Каждый кандидат, включая HTTP 2xx, проверяется на
+challenge, минимальный размер и принадлежность ожидаемому сайту. Для JSON
+pipeline используется его собственный структурный validator, общий для всех
+провайдеров цепочки.
+
 Маршрутизация задаётся в `fetcher._fetch_hsreplay_api_source()` и списке `api_sources` в `fetcher.py`.
 
 ### 2.4. Publish gate и качество
@@ -247,6 +256,10 @@ venv/bin/python -m app.cli proxy-rotation-check
 | Повторы | `HS_FETCH_MAX_RETRIES=3` |
 | User-Agent | 6 вариантов, привязка к `source.id` |
 | FlareSolverr | `HS_FLARESOLVERR_SESSION_PER_SOURCE=true` — новая сессия на source |
+
+В production FlareSolverr должен работать с `LOG_LEVEL=warning` и
+`LOG_HTML=false`: info-логи могут содержать полное тело запроса вместе с
+аутентификационными cookie. Docker-логи ограничены ротацией `10m × 3`.
 
 ### 4.3. Цепочка бэкендов
 

@@ -49,13 +49,14 @@ flowchart LR
     Start --> Lock["ResourceLockSet для поддерживаемых writers"]
     Lock --> Route{"Маршрут источника"}
     Route --> API["API-first: JSON / curl_cffi / специализированный клиент"]
-    Route --> Cloud["Shared cloud scrape: Scrape.do → Firecrawl → Scrapfly → Bright Data (opt-in)"]
+    Route --> Cloud["Shared cloud scrape: Scrape.do → Firecrawl → Bright Data (opt-in) → Scrapfly"]
     Route --> Browser["Local browser path: FlareSolverr / Scrapling / Patchright"]
     API --> Normalize["Нормализация и схема"]
     Cloud --> Normalize
     Browser --> Normalize
     Normalize --> Gate["Contracts + semantic checks + regression gate"]
-    Gate --> Store["JSON cache + SQLite + last-known-good"]
+    Gate --> AI["Optional Gemma review: observe / quarantine"]
+    AI --> Store["JSON cache + SQLite + last-known-good"]
     Store --> REST["REST API / UI / consumers"]
     Start --> Jobs["Deadline + progress snapshots + job-runs"]
     Jobs --> Lock
@@ -73,6 +74,8 @@ flowchart LR
 | `app/publish_gate.py` | Единая точка проверки кандидата перед публикацией. |
 | `app/source_contracts.py` | Минимальные объёмы, обязательные поля и backend policy. |
 | `app/dataset_regression.py` | Защита от резкого уменьшения или деградации набора. |
+| `app/ai_review.py` | Опциональная семантическая проверка кандидата через OpenRouter со строгой JSON-схемой и безопасным fail-open. |
+| `app/reliability_telemetry.py` | Append-only учёт наблюдаемых fresh/LKG/failure исходов основного refresh и окон 24h/7d/30d. |
 | `app/resource_locks.py` | Неблокирующие межпроцессные lock-файлы по ресурсам. |
 | `app/job_run.py` | Дедлайны, прогресс и атомарные snapshots длительных заданий. |
 | `app/storage.py`, `app/db.py` | JSON snapshots, резервные копии и SQLite/WAL. |
@@ -88,19 +91,40 @@ browser rotator или через общий cloud-scrape каскад. Для �
 1. **Scrape.do** — основной платный провайдер. Временные `429/5xx` получают
    ограниченный retry; Cloudflare challenge может переключить запрос на Super.
 2. **Firecrawl** — первый резерв с ротацией настроенных ключей.
-3. **Scrapfly** — дополнительный резерв с отдельной ротацией ключей.
-4. **Bright Data Web Unlocker** — платный аварийный слой только для явно
+3. **Bright Data Web Unlocker** — платный слой только для явно
    разрешённых public HTTPS-источников. Он выключен по умолчанию и не делает
    запросов, пока одновременно не заданы флаг включения, API key, Web Unlocker
    zone, точный allowlist source ID и месячный лимит больше нуля.
+4. **Scrapfly** — финальный резерв с отдельной ротацией ключей.
 
 Переход к следующему провайдеру происходит после исчерпания ограниченных попыток
 текущего: внутри Scrape.do возможны retry/Super escalation, а Firecrawl и
-Scrapfly могут ротировать ключи. Bright Data не принимает в этом каскаде
-cookies/custom headers, screenshot- и map-запросы. Ключи, cookies и URL с
-токенами очищаются из ошибок и не должны попадать в логи. Детали, ограничения
-и переменные конфигурации:
+Scrapfly могут ротировать ключи. Каждый HTTP 2xx-кандидат проходит общую
+проверку статуса, challenge-маркеров, размера и принадлежности целевому сайту;
+неверная страница не останавливает каскад. Для JSON-source применяется его
+специализированный validator вместо HTML-эвристики. Bright Data не принимает в
+этом каскаде cookies/custom headers, screenshot- и map-запросы. Ключи, cookies
+и URL с токенами очищаются из ошибок и не должны попадать в логи. Детали,
+ограничения и переменные конфигурации:
 [docs/SCRAPE_PROVIDERS.md](docs/SCRAPE_PROVIDERS.md).
+
+## AI-проверка кандидатов
+
+Опциональный слой использует `google/gemma-4-26b-a4b-it` через OpenRouter только
+после успешных детерминированных проверок. Модель не может превратить провал
+contracts/semantic/regression gate в успех. В `observe` её вердикт записывается
+в телеметрию, но не влияет на публикацию; `quarantine` разрешено включать только
+после проверки точности shadow-режима.
+
+Во внешний запрос не передаются сырой HTML, тексты полей, URL, cookies, headers,
+deck codes или токены. Модель получает ограниченные структурные признаки,
+результат локальных проверок и агрегаты качества. Ответ принимается только при
+полной строгой JSON-схеме и `finish_reason=stop`. Ошибка, timeout или отсутствие
+OpenRouter не останавливают парсер; после трёх последовательных ошибок circuit
+breaker отключает AI до следующего refresh. Лимиты источников, параллелизма,
+времени, токенов и запросов задаются переменными `HS_AI_REVIEW_*` из
+`.env.example`. Пустой `HS_AI_REVIEW_SOURCE_IDS` не делает запросов; все
+источники разрешаются только явным значением `*`.
 
 ## Гарантии устойчивости
 
@@ -186,6 +210,7 @@ Canonical Docker хранит runtime на host в `/srv/hs-data-api/data` и м
 | `data/brightdata/` | `/var/lib/hs-data-api/brightdata/` | Локальный счётчик billable reservations/requests и состояние circuit breaker; без API key. |
 | `data/logs/refresh-events.jsonl` | `/var/lib/hs-data-api/logs/refresh-events.jsonl` | Структурированные события. |
 | `data/hs_parses.db` | `/var/lib/hs-data-api/hs_parses.db` | SQLite/WAL индексы. |
+| `data/parser-telemetry.sqlite3` | `/var/lib/hs-data-api/parser-telemetry.sqlite3` | Append-only исходы refresh для честной статистики; без URL и текстов ошибок. |
 
 Canonical Docker читает секреты из игнорируемого Git файла
 `/srv/hs-data-api/.env.docker`. `/etc/hs-data-api.env` относится к legacy host
@@ -332,6 +357,10 @@ Public:
 - `GET /v1/constructed/*`, `/v1/bg/*`, `/v1/arena/*` — типизированные API.
 - `GET /v1/system/sources`, `/v1/system/datasets`, `/v1/system/health` —
   системные read-only представления.
+- `GET /v1/system/parsing-reliability` — fresh success, provisional, LKG и
+  failures основного generic refresh за 24 часа, 7 и 30 дней со статусом
+  `collecting/observed`. Четыре dedicated pipeline пока явно перечислены в
+  `methodology.limitations` и не смешиваются с этим процентом.
 - `GET /system/technologies` — публичное описание parser stack без секретов.
 - `GET /ui`, `/ui/logs`, `/ui/technologies` — встроенный интерфейс.
 
@@ -358,7 +387,8 @@ Scoped orchestration, требует отдельный `X-Orchestrator-Key`:
 - [docs/DATA_CATALOG.md](docs/DATA_CATALOG.md) — выбор endpoint и поля данных.
 - [docs/SOURCES.md](docs/SOURCES.md) — генерируемый реестр всех источников.
 - [docs/API.md](docs/API.md) — полная REST API документация.
-- [docs/SCRAPE_PROVIDERS.md](docs/SCRAPE_PROVIDERS.md) — Scrape.do, Firecrawl, Scrapfly и opt-in Bright Data.
+- [docs/SCRAPE_PROVIDERS.md](docs/SCRAPE_PROVIDERS.md) — Scrape.do, Firecrawl,
+  opt-in Bright Data и Scrapfly.
 - [orchestration/triggerdev/README.md](orchestration/triggerdev/README.md) — безопасный rollout внешнего control plane.
 - [docs/HSREPLAY_ARCHETYPE_DATABASE.md](docs/HSREPLAY_ARCHETYPE_DATABASE.md) — SQL snapshots архетипов.
 - [docs/SECURITY_AND_PARSING.md](docs/SECURITY_AND_PARSING.md) — proxy, cookies, auth и threat model.

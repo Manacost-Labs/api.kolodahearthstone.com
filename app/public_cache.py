@@ -10,11 +10,14 @@ from starlette.requests import Request
 from .sources import SOURCES
 from .storage import load_dataset
 
-
 PUBLIC_CACHE_CONTROL = "public, max-age=300, stale-while-revalidate=600"
 
 
 def _cacheable_path(path: str) -> bool:
+    if path.startswith("/v1/system/parsing-reliability"):
+        # This report has moving time-window boundaries and generated_at even
+        # without a database write. A strong shared ETag would be dishonest.
+        return False
     if path.startswith(("/ops", "/admin", "/ui", "/health")):
         return False
     if path.endswith("/health"):

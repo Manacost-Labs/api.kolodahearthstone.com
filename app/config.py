@@ -340,6 +340,99 @@ def brightdata_circuit_cooldown_seconds() -> int:
     return max(60, configured)
 
 
+def openrouter_api_key() -> str | None:
+    """Return the OpenRouter bearer token without logging or fingerprinting it."""
+    value = os.environ.get("HS_OPENROUTER_API_KEY", "").strip()
+    return value or None
+
+
+def ai_review_enabled() -> bool:
+    return os.environ.get("HS_AI_REVIEW_ENABLED", "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def ai_review_mode() -> str:
+    value = os.environ.get("HS_AI_REVIEW_MODE", "observe").strip().lower()
+    return value if value in {"observe", "quarantine"} else "observe"
+
+
+def ai_review_model() -> str:
+    return (
+        os.environ.get(
+            "HS_AI_REVIEW_MODEL",
+            "google/gemma-4-26b-a4b-it",
+        ).strip()
+        or "google/gemma-4-26b-a4b-it"
+    )
+
+
+def ai_review_source_ids() -> set[str]:
+    raw = os.environ.get("HS_AI_REVIEW_SOURCE_IDS", "")
+    return {item.strip() for item in raw.split(",") if item.strip()}
+
+
+def ai_review_timeout_seconds() -> float:
+    try:
+        value = float(os.environ.get("HS_AI_REVIEW_TIMEOUT_SECONDS", "45"))
+    except ValueError:
+        value = 45.0
+    return min(120.0, max(5.0, value))
+
+
+def ai_review_max_tokens() -> int:
+    try:
+        value = int(os.environ.get("HS_AI_REVIEW_MAX_TOKENS", "320"))
+    except ValueError:
+        value = 320
+    return min(800, max(64, value))
+
+
+def ai_review_max_prompt_chars() -> int:
+    try:
+        value = int(os.environ.get("HS_AI_REVIEW_MAX_PROMPT_CHARS", "12000"))
+    except ValueError:
+        value = 12000
+    return min(20000, max(2000, value))
+
+
+def ai_review_confidence_threshold() -> float:
+    try:
+        value = float(
+            os.environ.get("HS_AI_REVIEW_CONFIDENCE_THRESHOLD", "0.90")
+        )
+    except ValueError:
+        value = 0.90
+    return min(1.0, max(0.5, value))
+
+
+def ai_review_max_concurrency() -> int:
+    try:
+        value = int(os.environ.get("HS_AI_REVIEW_MAX_CONCURRENCY", "2"))
+    except ValueError:
+        value = 2
+    return min(8, max(1, value))
+
+
+def ai_review_max_per_refresh() -> int:
+    try:
+        value = int(os.environ.get("HS_AI_REVIEW_MAX_PER_REFRESH", "120"))
+    except ValueError:
+        value = 120
+    return min(1000, max(1, value))
+
+
+def ai_review_circuit_failure_threshold() -> int:
+    try:
+        value = int(os.environ.get("HS_AI_REVIEW_CIRCUIT_FAILURE_THRESHOLD", "3"))
+    except ValueError:
+        value = 3
+    return min(20, max(1, value))
+
+
 def hsguru_current_patch_period() -> str | None:
     value = os.environ.get("HS_HSGURU_PATCH_PERIOD", "").strip()
     if not value or value.lower() == "auto":

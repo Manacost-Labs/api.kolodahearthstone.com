@@ -61,7 +61,8 @@ class FirecrawlPerSourceCapTest(unittest.TestCase):
 
         calls: list[str] = []
 
-        async def fake_scrape(source):  # noqa: ANN001
+        async def fake_scrape(source, **_options):
+            assert callable(_options.get("accept_result"))
             calls.append(source.id)
             raise RuntimeError("stop after budget accounting")
 

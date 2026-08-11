@@ -7,7 +7,10 @@ services:
     container_name: hs-data-api
     restart: unless-stopped
     env_file:
-      - ./.env.docker
+      - path: ${HS_RUNTIME_ENV_FILE:-./.env.docker}
+        required: true
+      - path: ${HS_OPENROUTER_ENV_FILE:-/home/debian/server/secrets/hs-data-api/openrouter.env}
+        required: false
     environment:
       HS_API_BIND_HOST: "0.0.0.0"
       HS_API_PORT: "8000"
@@ -35,9 +38,17 @@ services:
     container_name: hs-flaresolverr-docker
     restart: unless-stopped
     environment:
-      LOG_LEVEL: info
+      # Info-level FlareSolverr logs may include complete request bodies and
+      # authentication cookies. Production-safe logging must stay at warning.
+      LOG_LEVEL: warning
+      LOG_HTML: "false"
       CAPTCHA_SOLVER: none
       TZ: Europe/Warsaw
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     shm_size: "4gb"
     mem_limit: "6g"
     cpus: 4

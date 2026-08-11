@@ -14,7 +14,7 @@ flowchart TB
         Preflight{Route-aware preflight}
         Route{Тип источника}
         APIpath[API-first: Firestone / HSReplay JSON / MetaStats]
-        Cloud[Cloud: Scrape.do → Firecrawl → Scrapfly → Bright Data opt-in]
+        Cloud[Cloud: Scrape.do → Firecrawl → Bright Data opt-in → Scrapfly]
         Browser[Browser path: rotator + patchright / FlareSolverr]
         Quality[publish_gate + contracts + semantic validators]
         Store[app/storage.py]
@@ -46,7 +46,7 @@ flowchart TB
 |------|----------|------|
 | Обязательный прокси | `HS_FETCH_REQUIRE_PROXY=true` — origin не видит IP сервера | `proxy.py`, `config.py` |
 | Route-aware preflight | Proxy/FlareSolverr блокируют только selection без независимого полезного маршрута | `fetch_routes.py`, `preflight.py` |
-| Cloud fallback | Scrape.do → Firecrawl → Scrapfly → Bright Data (последний выключен по умолчанию) | `firecrawl_backend.py`, `brightdata_backend.py` |
+| Cloud fallback | Scrape.do → Firecrawl → Bright Data opt-in → Scrapfly | `firecrawl_backend.py`, `brightdata_backend.py` |
 | Ротация бэкендов | HSGuru: FS → scrapling → patchright → curl; cap `HS_FETCH_BACKEND_MAX_SECONDS` | `rotator.py` |
 | Stale Telegram | После `refresh --all`: `stale_ok` если status ok, но данные старше `HS_STALE_HOURS` | `stale_monitor.py` |
 | Jitter между **браузерными** источниками | 8с × random(0.75–1.25) (`HS_REFRESH_DELAY_BROWSER_ONLY=true`) | `fetcher.py` |

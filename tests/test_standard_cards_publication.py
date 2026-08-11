@@ -1071,6 +1071,155 @@ class DatasetPublicationStoreTest(unittest.TestCase):
 
 
 class StandardCardsFetcherPublicationTest(unittest.IsolatedAsyncioTestCase):
+    async def test_ai_pass_promotes_standard_cards_candidate_exactly_once(self) -> None:
+        from app.ai_review import AIPageVerdict, AIReviewResult
+        from app.dataset_publication_store import (
+            validate_and_publish_standard_cards_candidate,
+        )
+        from app.fetcher import fetch_source
+
+        with TemporaryDirectory() as directory, patch.dict(
+            os.environ,
+            {
+                "HS_API_DATA_DIR": directory,
+                "HS_FETCH_REQUIRE_PROXY": "false",
+                "HS_STANDARD_CARDS_MAX_STALE_HOURS": "36",
+                "HS_AI_REVIEW_MODE": "quarantine",
+            },
+            clear=False,
+        ):
+            valid = _parsed_payload(count=600)
+            valid["_backend"] = "hsreplay_cards_api"
+            reviewer_result = AIReviewResult(
+                state="ok",
+                model="test-model",
+                verdict=AIPageVerdict(
+                    verdict="pass",
+                    target_page=True,
+                    challenge_detected=False,
+                    content_complete=True,
+                    parse_compatible=True,
+                    confidence=0.99,
+                    reason_codes=["none"],
+                    summary="Candidate matches the Standard cards contract.",
+                ),
+            )
+            with (
+                patch(
+                    "app.fetcher._fetch_hsreplay_api_source",
+                    new_callable=AsyncMock,
+                    return_value=valid,
+                ),
+                patch(
+                    "app.ai_review.review_candidate",
+                    new_callable=AsyncMock,
+                    return_value=reviewer_result,
+                ) as reviewer,
+                patch(
+                    "app.dataset_publication_store.validate_and_publish_standard_cards_candidate",
+                    wraps=validate_and_publish_standard_cards_candidate,
+                ) as promote,
+                patch("app.fetcher.log_action"),
+            ):
+                result = await fetch_source(
+                    None,
+                    SOURCE_BY_ID[STANDARD_CARDS_SOURCE_ID],
+                )
+
+            reviewer.assert_awaited_once()
+            promote.assert_called_once()
+            self.assertEqual(result["state"], "ok")
+            self.assertFalse(result.get("serving_cached_dataset", False))
+            self.assertEqual(result["ai_review"]["verdict"], "pass")
+            published = DatasetPublicationStore(
+                Path(directory)
+            ).read_published_unbounded(STANDARD_CARDS_SOURCE_ID)
+            self.assertIsNotNone(published)
+            assert published is not None
+            self.assertEqual(len(published["data"]["structured"]["cards"]), 600)
+
+    async def test_ai_quarantine_skips_promotion_and_serves_existing_lkg(self) -> None:
+        from app.ai_review import AIPageVerdict, AIReviewResult
+        from app.dataset_publication_store import (
+            validate_and_publish_standard_cards_candidate,
+        )
+        from app.fetcher import fetch_source
+        from app.reliability_telemetry import classify_terminal_status
+
+        with TemporaryDirectory() as directory, patch.dict(
+            os.environ,
+            {
+                "HS_API_DATA_DIR": directory,
+                "HS_FETCH_REQUIRE_PROXY": "false",
+                "HS_STANDARD_CARDS_MAX_STALE_HOURS": "36",
+                "HS_AI_REVIEW_MODE": "quarantine",
+                "HS_AI_REVIEW_CONFIDENCE_THRESHOLD": "0.90",
+            },
+            clear=False,
+        ):
+            source = SOURCE_BY_ID[STANDARD_CARDS_SOURCE_ID]
+            store = DatasetPublicationStore(Path(directory))
+            seeded = validate_and_publish_standard_cards_candidate(
+                source,
+                _dataset(count=600, backend="seeded-lkg"),
+                store=store,
+            )
+            self.assertTrue(seeded.accepted)
+            original_version = store.pointer_dataset_version(source.id)
+            original_manifest = store.published_path(source.id).read_bytes()
+            original_candidate = store.candidate_path(source.id).read_bytes()
+
+            candidate = _parsed_payload(count=700)
+            candidate["_backend"] = "hsreplay_cards_api"
+            reviewer_result = AIReviewResult(
+                state="ok",
+                model="test-model",
+                verdict=AIPageVerdict(
+                    verdict="fail",
+                    target_page=False,
+                    challenge_detected=False,
+                    content_complete=False,
+                    parse_compatible=False,
+                    confidence=0.99,
+                    reason_codes=["identity_mismatch", "schema_mismatch"],
+                    summary="Candidate does not match the expected page.",
+                ),
+            )
+            with (
+                patch(
+                    "app.fetcher._fetch_hsreplay_api_source",
+                    new_callable=AsyncMock,
+                    return_value=candidate,
+                ),
+                patch(
+                    "app.ai_review.review_candidate",
+                    new_callable=AsyncMock,
+                    return_value=reviewer_result,
+                ) as reviewer,
+                patch(
+                    "app.dataset_publication_store.validate_and_publish_standard_cards_candidate",
+                    wraps=validate_and_publish_standard_cards_candidate,
+                ) as promote,
+                patch("app.fetcher.log_action"),
+            ):
+                result = await fetch_source(None, source)
+
+            reviewer.assert_awaited_once()
+            promote.assert_not_called()
+            self.assertEqual(store.pointer_dataset_version(source.id), original_version)
+            self.assertEqual(store.published_path(source.id).read_bytes(), original_manifest)
+            self.assertEqual(store.candidate_path(source.id).read_bytes(), original_candidate)
+            self.assertEqual(store.list_quarantine(source.id), [])
+            published = store.read_published_unbounded(source.id)
+            self.assertIsNotNone(published)
+            assert published is not None
+            self.assertEqual(len(published["data"]["structured"]["cards"]), 600)
+            self.assertEqual(result["state"], "ok")
+            self.assertTrue(result["serving_cached_dataset"])
+            self.assertEqual(result["last_refresh_state"], "quality_error")
+            self.assertTrue(result["ai_review"]["quarantine"])
+            self.assertEqual(classify_terminal_status(result), "lkg_served")
+
     async def test_fetcher_promotes_valid_candidate_and_quarantines_cascade(
         self,
     ) -> None:

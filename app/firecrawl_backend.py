@@ -1,18 +1,25 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import json
 import random
 import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 from bs4 import BeautifulSoup, NavigableString
 
-from .brightdata_backend import brightdata_configured_for_source
+from .brightdata_backend import (
+    BrightDataPolicyError,
+    _assert_public_https_target,
+    brightdata_configured_for_source,
+)
 from .brightdata_backend import scrape_url_sync as brightdata_scrape_url_sync
 from .config import (
     firecrawl_hsguru_matchups_timeout_ms,
@@ -35,12 +42,18 @@ from .scrape_do_backend import (
     scrape_url_sync,
 )
 from .scrapers.http_resilience import is_session_blocked
-from .scrapers.quality import looks_like_real_page
 from .scrapfly_backend import scrape_url_sync as scrapfly_scrape_url_sync
 from .scrapfly_backend import scrapfly_configured
 from .sources import Source
 
 FIRECRAWL_SCRAPE_URL = "https://api.firecrawl.dev/v2/scrape"
+_PROVIDER_POLICY = "scrape_do_firecrawl_brightdata_scrapfly"
+_SCREENSHOT_MIN_BYTES = 1_024
+_SCREENSHOT_MAX_BYTES = 25 * 1024 * 1024
+_HTML_SITE_MIN_BYTES = 256
+
+
+ProviderResultValidator = Callable[["FirecrawlScrape"], bool]
 
 
 @dataclass(frozen=True)
@@ -115,6 +128,134 @@ class FirecrawlScrape:
         )
 
 
+class _ScreenshotNoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(  # pyright: ignore[reportImplicitOverride]
+        self,
+        req: urllib.request.Request,
+        fp: object,
+        code: int,
+        msg: str,
+        headers: object,
+        newurl: str,
+    ) -> None:
+        del req, fp, code, msg, headers, newurl
+
+
+def _image_mime(raw: bytes) -> str | None:
+    if not _SCREENSHOT_MIN_BYTES <= len(raw) <= _SCREENSHOT_MAX_BYTES:
+        return None
+    if raw.startswith(b"\x89PNG\r\n\x1a\n"):
+        if len(raw) < 33 or raw[12:16] != b"IHDR" or b"IEND" not in raw[-32:]:
+            return None
+        width = int.from_bytes(raw[16:20], "big")
+        height = int.from_bytes(raw[20:24], "big")
+        if not 64 <= width <= 20_000 or not 64 <= height <= 20_000:
+            return None
+        return "image/png"
+    if raw.startswith(b"\xff\xd8\xff") and raw.rstrip().endswith(b"\xff\xd9"):
+        return "image/jpeg"
+    if (
+        raw.startswith(b"RIFF")
+        and raw[8:12] == b"WEBP"
+        and raw[12:16] in {b"VP8 ", b"VP8L", b"VP8X"}
+    ):
+        declared_size = int.from_bytes(raw[4:8], "little") + 8
+        if declared_size != len(raw):
+            return None
+        return "image/webp"
+    return None
+
+
+def _decode_inline_screenshot(value: str) -> tuple[str, bytes] | None:
+    header, separator, encoded = value.partition(",")
+    if not separator:
+        return None
+    declared_mime = {
+        "data:image/png;base64": "image/png",
+        "data:image/jpeg;base64": "image/jpeg",
+        "data:image/jpg;base64": "image/jpeg",
+        "data:image/webp;base64": "image/webp",
+    }.get(header.casefold())
+    if declared_mime is None or not encoded:
+        return None
+    maximum_encoded_size = ((_SCREENSHOT_MAX_BYTES + 2) // 3) * 4
+    if len(encoded) > maximum_encoded_size:
+        return None
+    try:
+        raw = base64.b64decode(encoded, validate=True)
+    except (binascii.Error, ValueError):
+        return None
+    detected_mime = _image_mime(raw)
+    if detected_mime is None or detected_mime != declared_mime:
+        return None
+    return detected_mime, raw
+
+
+def _normalize_public_https_url(value: str) -> str:
+    parsed = urlsplit(value)
+    normalized = urlunsplit(
+        (parsed.scheme.lower(), parsed.netloc, parsed.path or "/", parsed.query, "")
+    )
+    _assert_public_https_target(normalized)
+    return normalized
+
+
+def _download_https_screenshot(value: str) -> bytes:
+    normalized = _normalize_public_https_url(value)
+    request = urllib.request.Request(
+        normalized,
+        headers={
+            "Accept": "image/png,image/jpeg,image/webp",
+            "User-Agent": "HSDataAPI/0.1 screenshot validator",
+        },
+    )
+    opener = urllib.request.build_opener(
+        urllib.request.ProxyHandler({}),
+        _ScreenshotNoRedirectHandler(),
+    )
+    try:
+        with opener.open(request, timeout=30.0) as response:
+            status_code = int(getattr(response, "status", 0) or 0)
+            if not 200 <= status_code <= 299:
+                raise ValueError("screenshot response was not successful")
+            raw = response.read(_SCREENSHOT_MAX_BYTES + 1)
+    except (OSError, ValueError):
+        raise ValueError("screenshot download failed") from None
+    if len(raw) > _SCREENSHOT_MAX_BYTES:
+        raise ValueError("screenshot response was too large")
+    return raw
+
+
+def _normalize_screenshot(value: str | None) -> str | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    decoded = _decode_inline_screenshot(text)
+    if decoded is not None:
+        mime, raw = decoded
+    elif text.casefold().startswith("https://"):
+        try:
+            raw = _download_https_screenshot(text)
+        except (BrightDataPolicyError, OSError, ValueError):
+            return None
+        mime = _image_mime(raw)
+        if mime is None:
+            return None
+    else:
+        return None
+    return f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
+
+
+def _normalize_requested_screenshot(
+    scraped: FirecrawlScrape,
+    formats: list[Any] | None,
+) -> FirecrawlScrape:
+    screenshot_requested, _full_page = _screenshot_options(formats)
+    if not screenshot_requested:
+        return scraped
+    return replace(scraped, screenshot=_normalize_screenshot(scraped.screenshot))
+
+
 def _html_to_markdown(html: str) -> str:
     if not html.strip():
         return ""
@@ -153,6 +294,8 @@ def _html_to_markdown(html: str) -> str:
 
 def _screenshot_options(formats: list[Any] | None) -> tuple[bool, bool]:
     for item in formats or []:
+        if isinstance(item, str) and item.casefold() == "screenshot":
+            return True, False
         if isinstance(item, dict) and item.get("type") == "screenshot":
             return True, bool(item.get("fullPage"))
     return False, False
@@ -208,7 +351,7 @@ def _scrape_via_scrapfly(
             "scrapflyKeyLabel": scraped.key_label,
             "scrapflyKeyFingerprint": scraped.key_fingerprint,
             "scrapflyKeyRotation": scraped.key_rotation,
-            "providerPolicy": "scrape_do_firecrawl_scrapfly_brightdata",
+            "providerPolicy": _PROVIDER_POLICY,
             "firecrawlFallbackReason": reason[:500],
         },
         status_code=scraped.status_code,
@@ -311,7 +454,7 @@ def _scrape_via_scrape_do(
             "scrapeDoCreditsUsed": scraped.request_cost,
             "scrapeDoRemainingCredits": scraped.credits_remaining,
             "scrapeDoAttempts": attempts,
-            "providerPolicy": "scrape_do_firecrawl_scrapfly_brightdata",
+            "providerPolicy": _PROVIDER_POLICY,
             "providerChainReason": reason[:500],
             "firecrawlFallbackReason": reason[:500],
         },
@@ -332,7 +475,7 @@ def _scrape_once(
     timeout_ms: int | None = None,
 ) -> FirecrawlScrape:
     effective_timeout_ms = firecrawl_timeout_ms() if timeout_ms is None else timeout_ms
-    payload = {
+    payload: dict[str, Any] = {
         "url": source.url,
         "formats": formats or ["html", "markdown"],
         "onlyMainContent": only_main_content,
@@ -427,7 +570,7 @@ def _scrape_via_firecrawl(
         metadata["firecrawl_key_label"] = lease.key.label
         metadata["firecrawl_key_fingerprint"] = lease.key.fingerprint
         metadata["firecrawl_key_rotation"] = rotation
-        metadata["providerPolicy"] = "scrape_do_firecrawl_scrapfly_brightdata"
+        metadata["providerPolicy"] = _PROVIDER_POLICY
         return FirecrawlScrape(
             html=scraped.html,
             markdown=scraped.markdown,
@@ -439,6 +582,147 @@ def _scrape_via_firecrawl(
 
     detail = "; ".join(errors) if errors else "no available keys"
     raise RuntimeError(f"Firecrawl scrape failed after key rotation attempts: {detail}")
+
+
+def _accepted_provider_content(
+    content: str,
+    source: Source,
+    *,
+    accept_html: Callable[[str], bool] | None,
+) -> bool:
+    if is_session_blocked(None, content):
+        return False
+    if accept_html is None:
+        normalized = content.strip()
+        content_size = len(normalized.encode("utf-8", errors="replace"))
+        minimum_size = (
+            _HTML_SITE_MIN_BYTES if source.site in {"hsreplay", "hsguru"} else 80
+        )
+        if content_size < minimum_size:
+            return False
+        lowered = normalized.casefold()
+        if source.site == "hsreplay":
+            if any(
+                marker in lowered
+                for marker in (
+                    "log in to hsreplay",
+                    "sign in to hsreplay",
+                    "sign in to continue",
+                    "accounts/login",
+                    "login required",
+                    "premium required",
+                )
+            ):
+                return False
+            return any(
+                marker in lowered
+                for marker in (
+                    "userdata",
+                    "__next_data__",
+                    "react-root",
+                    "battlegrounds",
+                    "arena",
+                    "card-list",
+                    "deck-list",
+                )
+            )
+        if source.site == "hsguru":
+            return any(
+                marker in lowered
+                for marker in (
+                    "deck_stats_viewport",
+                    "decklist-info",
+                    "archetype",
+                    "matchup",
+                    "streamer",
+                    "winrate",
+                    "popularity",
+                    "__next_data__",
+                )
+            )
+        return True
+    try:
+        return bool(accept_html(content))
+    except Exception:  # noqa: BLE001 - validation must fail closed
+        return False
+
+
+def _final_url_matches_source(source: Source, final_url: str) -> bool:
+    source_host = (urlsplit(source.fetch_url).hostname or "").casefold()
+    final_host = (urlsplit(final_url).hostname or "").casefold()
+    if not source_host or not final_host:
+        return False
+    source_host = source_host.removeprefix("www.")
+    final_host = final_host.removeprefix("www.")
+    return (
+        source_host == final_host
+        or source_host.endswith(f".{final_host}")
+        or final_host.endswith(f".{source_host}")
+    )
+
+
+def _accepted_provider_result(
+    scraped: FirecrawlScrape,
+    source: Source,
+    *,
+    formats: list[Any] | None,
+    accept_html: Callable[[str], bool] | None,
+    accept_result: ProviderResultValidator | None,
+) -> bool:
+    if not 200 <= scraped.status_code <= 299:
+        return False
+    if not _final_url_matches_source(source, scraped.final_url):
+        return False
+    content = scraped.html or scraped.markdown
+    if content and is_session_blocked(scraped.status_code, content):
+        return False
+    screenshot_requested, _full_page = _screenshot_options(formats)
+    if screenshot_requested:
+        content_accepted = bool(
+            scraped.screenshot
+            and _decode_inline_screenshot(scraped.screenshot) is not None
+        )
+    elif accept_html is not None:
+        content_accepted = bool(content) and _accepted_provider_content(
+            content,
+            source,
+            accept_html=accept_html,
+        )
+    else:
+        content_accepted = bool(content) and _accepted_provider_content(
+            content,
+            source,
+            accept_html=None,
+        )
+    if not content_accepted:
+        return False
+    if accept_result is None:
+        return True
+    try:
+        return bool(accept_result(scraped))
+    except Exception:  # noqa: BLE001 - source validator must fail closed
+        return False
+
+
+def _require_accepted_provider_result(
+    provider: str,
+    scraped: FirecrawlScrape,
+    source: Source,
+    *,
+    formats: list[Any] | None,
+    accept_html: Callable[[str], bool] | None,
+    accept_result: ProviderResultValidator | None,
+) -> FirecrawlScrape:
+    scraped = _normalize_requested_screenshot(scraped, formats)
+    if not _accepted_provider_result(
+        scraped,
+        source,
+        formats=formats,
+        accept_html=accept_html,
+        accept_result=accept_result,
+    ):
+        raise RuntimeError(f"{provider} response failed content validation")
+    return scraped
 
 
 def _scrape_sync(
@@ -453,70 +737,59 @@ def _scrape_sync(
     skip_providers: frozenset[str] | set[str] | None = None,
     brightdata_accept_html: Callable[[str], bool] | None = None,
     brightdata_render: bool = True,
+    accept_result: ProviderResultValidator | None = None,
 ) -> FirecrawlScrape:
-    """Fetch through Scrape.do → Firecrawl → Scrapfly → Bright Data."""
+    """Fetch through Scrape.do → Firecrawl → Bright Data → Scrapfly."""
     errors: list[str] = []
     skip = frozenset(skip_providers or ())
 
     if "scrape_do" not in skip and scrape_do_token():
         try:
-            return _scrape_via_scrape_do(
+            return _require_accepted_provider_result(
+                "Scrape.do",
+                _scrape_via_scrape_do(
+                    source,
+                    formats=formats,
+                    headers=headers,
+                    wait_ms=wait_ms,
+                    timeout_ms=timeout_ms,
+                    reason="primary",
+                ),
                 source,
                 formats=formats,
-                headers=headers,
-                wait_ms=wait_ms,
-                timeout_ms=timeout_ms,
-                reason="primary",
+                accept_html=brightdata_accept_html,
+                accept_result=accept_result,
             )
         except Exception as exc:  # noqa: BLE001 - provider boundary
             errors.append(f"scrape_do: {type(exc).__name__}: {str(exc)[:300]}")
 
     if "firecrawl" not in skip:
         try:
-            return _scrape_via_firecrawl(
+            return _require_accepted_provider_result(
+                "Firecrawl",
+                _scrape_via_firecrawl(
+                    source,
+                    formats=formats,
+                    only_main_content=only_main_content,
+                    headers=headers,
+                    max_age_ms=max_age_ms,
+                    wait_ms=wait_ms,
+                    timeout_ms=timeout_ms,
+                ),
                 source,
                 formats=formats,
-                only_main_content=only_main_content,
-                headers=headers,
-                max_age_ms=max_age_ms,
-                wait_ms=wait_ms,
-                timeout_ms=timeout_ms,
+                accept_html=brightdata_accept_html,
+                accept_result=accept_result,
             )
         except Exception as exc:  # noqa: BLE001 - provider boundary
             errors.append(f"firecrawl: {type(exc).__name__}: {str(exc)[:300]}")
 
-    scrapfly_available = False
-    if "scrapfly" not in skip:
-        try:
-            scrapfly_available = scrapfly_configured()
-        except Exception as exc:  # noqa: BLE001 - isolate provider configuration
-            errors.append(
-                f"scrapfly: {type(exc).__name__}: configuration unavailable"
-            )
-    if scrapfly_available:
-        try:
-            return _scrape_via_scrapfly(
-                source,
-                formats=formats,
-                headers=headers,
-                wait_ms=wait_ms,
-                timeout_ms=timeout_ms,
-                reason="; ".join(errors) or "upstream providers failed",
-            )
-        except Exception as exc:  # noqa: BLE001 - provider boundary
-            errors.append(f"scrapfly: {type(exc).__name__}: {str(exc)[:300]}")
-
     brightdata_formats_allowed = all(
-        isinstance(item, str)
-        and item.lower() in {"html", "rawhtml", "markdown"}
+        isinstance(item, str) and item.lower() in {"html", "rawhtml", "markdown"}
         for item in (formats or ["html", "markdown"])
     )
     brightdata_available = False
-    if (
-        "brightdata" not in skip
-        and headers is None
-        and brightdata_formats_allowed
-    ):
+    if "brightdata" not in skip and headers is None and brightdata_formats_allowed:
         try:
             brightdata_available = brightdata_configured_for_source(source.id)
         except Exception as exc:  # noqa: BLE001 - isolate provider configuration
@@ -529,14 +802,15 @@ def _scrape_sync(
                 source.url,
                 source_id=source.id,
                 timeout_ms=timeout_ms,
-                accept_html=(
-                    brightdata_accept_html
-                    or (lambda html: looks_like_real_page(html, source))
+                accept_html=lambda html: _accepted_provider_content(
+                    html,
+                    source,
+                    accept_html=brightdata_accept_html,
                 ),
                 render=brightdata_render,
             )
             requested = formats or ["html", "markdown"]
-            return FirecrawlScrape(
+            result = FirecrawlScrape(
                 html=scraped.html,
                 markdown=(
                     _html_to_markdown(scraped.html)
@@ -555,28 +829,68 @@ def _scrape_sync(
                     "brightDataRequestId": scraped.request_id,
                     "brightDataRendered": scraped.rendered,
                     "brightDataBudgetRemaining": scraped.budget_remaining,
-                    "providerPolicy": (
-                        "scrape_do_firecrawl_scrapfly_brightdata"
-                    ),
+                    "providerPolicy": _PROVIDER_POLICY,
                 },
                 status_code=scraped.status_code,
                 final_url=scraped.final_url,
             )
+            return _require_accepted_provider_result(
+                "Bright Data",
+                result,
+                source,
+                formats=formats,
+                accept_html=brightdata_accept_html,
+                accept_result=accept_result,
+            )
         except Exception as exc:  # noqa: BLE001 - provider boundary
             errors.append(f"brightdata: {type(exc).__name__}: {str(exc)[:300]}")
+
+    scrapfly_available = False
+    if "scrapfly" not in skip:
+        try:
+            scrapfly_available = scrapfly_configured()
+        except Exception as exc:  # noqa: BLE001 - isolate provider configuration
+            errors.append(f"scrapfly: {type(exc).__name__}: configuration unavailable")
+    if scrapfly_available:
+        try:
+            return _require_accepted_provider_result(
+                "Scrapfly",
+                _scrape_via_scrapfly(
+                    source,
+                    formats=formats,
+                    headers=headers,
+                    wait_ms=wait_ms,
+                    timeout_ms=timeout_ms,
+                    reason="; ".join(errors) or "upstream providers failed",
+                ),
+                source,
+                formats=formats,
+                accept_html=brightdata_accept_html,
+                accept_result=accept_result,
+            )
+        except Exception as exc:  # noqa: BLE001 - provider boundary
+            errors.append(f"scrapfly: {type(exc).__name__}: {str(exc)[:300]}")
 
     detail = "; ".join(errors) if errors else "no scrape providers configured"
     raise RuntimeError(f"All scrape providers failed: {detail}")
 
 
-async def scrape_source(source: Source) -> FirecrawlScrape:
+async def scrape_source(
+    source: Source,
+    *,
+    accept_result: ProviderResultValidator | None = None,
+) -> FirecrawlScrape:
+    options: dict[str, Any] = {}
+    if accept_result is not None:
+        options["accept_result"] = accept_result
     if source.site == "hsguru" and source.category == "matchups":
         return await asyncio.to_thread(
             _scrape_sync,
             source,
             timeout_ms=firecrawl_hsguru_matchups_timeout_ms(),
+            **options,
         )
-    return await asyncio.to_thread(_scrape_sync, source)
+    return await asyncio.to_thread(_scrape_sync, source, **options)
 
 
 async def scrape_source_with_options(
@@ -591,6 +905,7 @@ async def scrape_source_with_options(
     skip_providers: frozenset[str] | set[str] | None = None,
     brightdata_accept_html: Callable[[str], bool] | None = None,
     brightdata_render: bool = True,
+    accept_result: ProviderResultValidator | None = None,
 ) -> FirecrawlScrape:
     return await asyncio.to_thread(
         _scrape_sync,
@@ -604,4 +919,5 @@ async def scrape_source_with_options(
         skip_providers=skip_providers,
         brightdata_accept_html=brightdata_accept_html,
         brightdata_render=brightdata_render,
+        accept_result=accept_result,
     )

@@ -5,6 +5,7 @@ import html
 import logging
 import random
 import time
+import uuid
 from collections import Counter
 from contextlib import ExitStack
 from contextvars import ContextVar
@@ -111,6 +112,83 @@ def _best_effort_log_action(action: str, **kwargs: Any) -> None:
             action,
             exc,
         )
+
+
+async def _review_candidate_with_ai(
+    source: Source,
+    parsed: dict[str, Any],
+    *,
+    backend: str | None,
+    deterministic_reason: str,
+    deterministic_extra: dict[str, Any] | None,
+    quality: dict[str, Any] | None,
+) -> tuple[dict[str, Any] | None, bool, str | None]:
+    """Run the optional passive reviewer without making parsing depend on it."""
+
+    try:
+        from .ai_review import review_candidate
+
+        result = await review_candidate(
+            source,
+            parsed,
+            backend=backend,
+            deterministic_ok=True,
+            deterministic_reason=deterministic_reason,
+            deterministic_extra=deterministic_extra,
+            quality=quality,
+        )
+        telemetry = result.telemetry()
+        if result.state == "disabled":
+            return None, False, None
+        if result.should_quarantine:
+            action = "ai.review.quarantine"
+            level = "warn"
+        elif result.state == "ok" and result.verdict is not None:
+            action = f"ai.review.{result.verdict.verdict}"
+            level = "warn" if result.verdict.verdict != "pass" else "info"
+        else:
+            action = f"ai.review.{result.state}"
+            level = "warn" if result.state == "error" else "info"
+        _best_effort_log_action(
+            action,
+            source_id=source.id,
+            backend=backend,
+            level=level,
+            state=(SourceState.QUALITY_ERROR if result.should_quarantine else None),
+            extra={"ai_review": telemetry},
+        )
+        if not result.should_quarantine:
+            return telemetry, False, None
+        reason_codes = telemetry.get("reason_codes")
+        safe_codes = ",".join(reason_codes) if isinstance(reason_codes, list) else "unknown"
+        return (
+            telemetry,
+            True,
+            f"AI semantic review quarantined candidate ({safe_codes})",
+        )
+    except Exception as exc:  # noqa: BLE001 - optional reviewer must fail open
+        telemetry = {
+            "state": "error",
+            "model": "configured",
+            "error_type": f"internal_{type(exc).__name__}",
+            "quarantine": False,
+        }
+        _best_effort_log_action(
+            "ai.review.error",
+            source_id=source.id,
+            backend=backend,
+            level="warn",
+            extra={"ai_review": telemetry},
+        )
+        return telemetry, False, None
+
+
+def _attach_ai_review_status(
+    status: dict[str, Any], telemetry: dict[str, Any] | None
+) -> dict[str, Any]:
+    if telemetry:
+        status["ai_review"] = telemetry
+    return status
 
 
 PROVISIONAL_STATUS_KEYS = (
@@ -298,6 +376,8 @@ def _preserve_cached_ok_status(source: Source, failed_status: dict[str, Any]) ->
     status["last_refresh_error"] = (
         failed_status.get("detail") or failed_status.get("error") or "live refresh failed"
     )
+    if isinstance(failed_status.get("ai_review"), dict):
+        status["latest_ai_review"] = failed_status["ai_review"]
     if failed_status.get("failure_class"):
         status["last_refresh_failure_class"] = failed_status["failure_class"]
     try:
@@ -943,6 +1023,47 @@ async def _try_firecrawl_html(
     try:
         from .firecrawl_backend import scrape_source
 
+        accepted_candidate: dict[str, Any] = {}
+
+        def _parse_provider_candidate(scraped: Any) -> dict[str, Any]:
+            snapshot = None
+            if scraped.markdown:
+                snapshot = {
+                    "lines": [
+                        line.strip()
+                        for line in scraped.markdown.splitlines()
+                        if line.strip()
+                    ]
+                }
+            candidate = parse_html(source, scraped.html, snapshot=snapshot)
+            if not candidate.get("title"):
+                candidate["title"] = source.description or source.id
+            if source.id == "hsguru_streamer_decks_legend_1000":
+                candidate = _dedupe_streamer_decks_parsed(candidate)
+            candidate = _enrich_firecrawl_trinkets_from_cache(source, candidate)
+            return _enrich_firecrawl_bg_heroes_from_cache(source, candidate)
+
+        def _accept_provider_candidate(scraped: Any) -> bool:
+            try:
+                candidate = _parse_provider_candidate(scraped)
+                candidate_gate = validate_candidate_for_publish(
+                    source,
+                    candidate,
+                    backend=scraped.backend,
+                )
+            except Exception:  # noqa: BLE001 - provider acceptance fails closed
+                return False
+            if not candidate_gate.ok:
+                return False
+            accepted_candidate.update(
+                {
+                    "scraped": scraped,
+                    "parsed": candidate,
+                    "gate": candidate_gate,
+                }
+            )
+            return True
+
         log_action(
             "firecrawl.fetch.begin",
             source_id=source.id,
@@ -950,27 +1071,32 @@ async def _try_firecrawl_html(
             level="warn" if reason != "primary" else "info",
             detail=reason,
         )
-        scraped = await scrape_source(source)
+        scraped = await scrape_source(
+            source,
+            accept_result=_accept_provider_candidate,
+        )
         backend = scraped.backend
-        snapshot = None
-        if scraped.markdown:
-            snapshot = {
-                "lines": [
-                    line.strip()
-                    for line in scraped.markdown.splitlines()
-                    if line.strip()
-                ]
-            }
-        parsed = parse_html(source, scraped.html, snapshot=snapshot)
-        if not parsed.get("title"):
-            parsed["title"] = source.description or source.id
-        if source.id == "hsguru_streamer_decks_legend_1000":
-            parsed = _dedupe_streamer_decks_parsed(parsed)
-        parsed = _enrich_firecrawl_trinkets_from_cache(source, parsed)
-        parsed = _enrich_firecrawl_bg_heroes_from_cache(source, parsed)
-        gate = validate_candidate_for_publish(source, parsed, backend=backend)
+        if accepted_candidate.get("scraped") is scraped:
+            parsed = accepted_candidate["parsed"]
+            gate = accepted_candidate["gate"]
+        else:
+            parsed = _parse_provider_candidate(scraped)
+            gate = validate_candidate_for_publish(source, parsed, backend=backend)
         ok, validation_reason = gate.ok, gate.reason
         qmetrics = quality_metrics(source, parsed)
+        ai_telemetry: dict[str, Any] | None = None
+        if ok:
+            ai_telemetry, ai_quarantine, ai_reason = await _review_candidate_with_ai(
+                source,
+                parsed,
+                backend=backend,
+                deterministic_reason=validation_reason,
+                deterministic_extra=gate.extra,
+                quality=qmetrics,
+            )
+            if ai_quarantine:
+                ok = False
+                validation_reason = ai_reason or "AI semantic review quarantined candidate"
         if not ok:
             log_action(
                 "firecrawl.validate.fail",
@@ -979,7 +1105,11 @@ async def _try_firecrawl_html(
                 state=SourceState.QUALITY_ERROR,
                 level="warn",
                 detail=validation_reason,
-                extra={"quality_metrics": qmetrics, "publish_gate": gate.extra},
+                extra={
+                    "quality_metrics": qmetrics,
+                    "publish_gate": gate.extra,
+                    "ai_review": ai_telemetry,
+                },
             )
             return None
 
@@ -1024,6 +1154,7 @@ async def _try_firecrawl_html(
             "brightDataRendered"
         )
         status["firecrawl_cache_state"] = scraped.metadata.get("cacheState")
+        _attach_ai_review_status(status, ai_telemetry)
         _attach_provisional_status(status, provisional_metadata)
         if reg:
             status = _save_failure_status(source, status)
@@ -1259,9 +1390,36 @@ async def _fetch_source_with_active_lifecycle(
                     STANDARD_CARDS_SOURCE_ID,
                     DatasetPublicationStore,
                     validate_and_publish_standard_cards_candidate,
+                    validate_standard_cards_snapshot,
                 )
 
                 if source.id == STANDARD_CARDS_SOURCE_ID:
+                    prepublication = validate_standard_cards_snapshot(source, dataset)
+                    ok = prepublication.accepted
+                    reason = prepublication.reason
+                    gate_extra = prepublication.diagnostics
+                else:
+                    gate = validate_candidate_for_publish(source, parsed, backend=backend)
+                    ok, reason = gate.ok, gate.reason
+                    gate_extra = gate.extra
+                qmetrics = quality_metrics(source, parsed)
+                ai_telemetry: dict[str, Any] | None = None
+                ai_quarantine = False
+                if ok:
+                    ai_telemetry, ai_quarantine, ai_reason = (
+                        await _review_candidate_with_ai(
+                            source,
+                            parsed,
+                            backend=backend,
+                            deterministic_reason=reason,
+                            deterministic_extra=gate_extra,
+                            quality=qmetrics,
+                        )
+                    )
+                    if ai_quarantine:
+                        ok = False
+                        reason = ai_reason or "AI semantic review quarantined candidate"
+                if source.id == STANDARD_CARDS_SOURCE_ID and not ai_quarantine:
                     publication_decision = validate_and_publish_standard_cards_candidate(
                         source,
                         dataset,
@@ -1270,17 +1428,15 @@ async def _fetch_source_with_active_lifecycle(
                     ok = publication_decision.accepted
                     reason = publication_decision.reason
                     gate_extra = publication_decision.diagnostics
-                else:
-                    gate = validate_candidate_for_publish(source, parsed, backend=backend)
-                    ok, reason = gate.ok, gate.reason
-                    gate_extra = gate.extra
-                qmetrics = quality_metrics(source, parsed)
                 if ok:
                     validation_log = {
                         "source_id": source.id,
                         "backend": backend,
                         "bytes_out": content_length,
-                        "extra": {"quality_metrics": qmetrics},
+                        "extra": {
+                            "quality_metrics": qmetrics,
+                            "ai_review": ai_telemetry,
+                        },
                     }
                     if publication_decision is not None:
                         _best_effort_log_action("api.validate.ok", **validation_log)
@@ -1305,6 +1461,7 @@ async def _fetch_source_with_active_lifecycle(
                         used_residential_proxy=_source_uses_residential_proxy(source, backend),
                         quality=qmetrics,
                     )
+                    _attach_ai_review_status(status, ai_telemetry)
                     _attach_provisional_status(status, provisional_metadata)
                     if reg:
                         status = _save_failure_status(source, status)
@@ -1429,6 +1586,7 @@ async def _fetch_source_with_active_lifecycle(
                     used_residential_proxy=_source_uses_residential_proxy(source, backend),
                     quality=qmetrics,
                 )
+                _attach_ai_review_status(status, ai_telemetry)
                 if publication_decision is not None:
                     try:
                         reconciliation = DatasetPublicationStore().reconcile_current_publication(
@@ -1488,7 +1646,11 @@ async def _fetch_source_with_active_lifecycle(
                     detail=reason,
                     tier=source_tier,
                     level="warn",
-                    extra={"quality_metrics": qmetrics, "publish_gate": gate_extra},
+                    extra={
+                        "quality_metrics": qmetrics,
+                        "publish_gate": gate_extra,
+                        "ai_review": ai_telemetry,
+                    },
                 )
                 if status.get("state") != SourceState.OK:
                     await send_telegram_alert(source.id, rejected_state, status["detail"], source.url)
@@ -1707,6 +1869,19 @@ async def _fetch_source_with_active_lifecycle(
     gate = validate_candidate_for_publish(source, parsed, backend=backend)
     ok, reason = gate.ok, gate.reason
     qmetrics = quality_metrics(source, parsed)
+    ai_telemetry: dict[str, Any] | None = None
+    if ok:
+        ai_telemetry, ai_quarantine, ai_reason = await _review_candidate_with_ai(
+            source,
+            parsed,
+            backend=backend,
+            deterministic_reason=reason,
+            deterministic_extra=gate.extra,
+            quality=qmetrics,
+        )
+        if ai_quarantine:
+            ok = False
+            reason = ai_reason or "AI semantic review quarantined candidate"
     if not ok:
         log_action(
             "quality.validate.fail",
@@ -1715,7 +1890,11 @@ async def _fetch_source_with_active_lifecycle(
             backend=backend,
             detail=reason,
             level="warn",
-            extra={"quality_metrics": qmetrics, "publish_gate": gate.extra},
+            extra={
+                "quality_metrics": qmetrics,
+                "publish_gate": gate.extra,
+                "ai_review": ai_telemetry,
+            },
         )
         is_auth_error = source.site == "hsreplay" and any(
             k in reason.lower() for k in ("session not authenticated", "premium data", "login required")
@@ -1763,6 +1942,7 @@ async def _fetch_source_with_active_lifecycle(
             backend=backend,
             used_residential_proxy=_source_uses_residential_proxy(source, backend),
         )
+        _attach_ai_review_status(status, ai_telemetry)
         status = _save_failure_status(source, status)
         if status.get("state") != SourceState.OK:
             await send_telegram_alert(source.id, SourceState.QUALITY_ERROR, reason, source.url)
@@ -1785,7 +1965,11 @@ async def _fetch_source_with_active_lifecycle(
         "quality.validate.ok",
         source_id=source.id,
         backend=backend,
-        extra={"quality_metrics": qmetrics, **provisional_metadata},
+        extra={
+            "quality_metrics": qmetrics,
+            "ai_review": ai_telemetry,
+            **provisional_metadata,
+        },
     )
     state = SourceState.PARTIAL if reg else SourceState.OK
     status = _status_payload(
@@ -1800,6 +1984,7 @@ async def _fetch_source_with_active_lifecycle(
         used_residential_proxy=_source_uses_residential_proxy(source, backend),
         quality=qmetrics,
     )
+    _attach_ai_review_status(status, ai_telemetry)
     _attach_provisional_status(status, provisional_metadata)
     if reg:
         status = _save_failure_status(source, status)
@@ -1987,6 +2172,26 @@ def _refresh_traffic_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _record_reliability_results_best_effort(
+    run_id: str,
+    results: list[dict[str, Any]],
+) -> None:
+    """Persist aggregate telemetry without changing a parser outcome."""
+
+    if not results:
+        return
+    try:
+        from .reliability_telemetry import record_terminal_results
+
+        record_terminal_results(run_id, results)
+    except Exception as exc:  # noqa: BLE001 - telemetry cannot invert parser outcomes
+        logger.warning(
+            "Reliability telemetry write failed for run %s: %s",
+            run_id,
+            type(exc).__name__,
+        )
+
+
 async def _browser_inter_source_delay() -> None:
     delay_seconds = request_delay_seconds()
     await asyncio.sleep(delay_seconds * random.uniform(0.75, 1.25))
@@ -2009,9 +2214,10 @@ async def _run_tier_after_cooldown(coro):
 
 
 def _fetch_error_status(source: Source, exc: BaseException) -> dict[str, Any]:
+    state = SourceState.TIMED_OUT if isinstance(exc, TimeoutError) else SourceState.FETCH_ERROR
     status = _status_payload(
         source,
-        SourceState.FETCH_ERROR,
+        state,
         fetched_at=now_iso(),
         error=type(exc).__name__,
         detail=str(exc)[:2000],
@@ -2124,22 +2330,36 @@ async def _run_tier_serial_browser(
     fs_session: FlareSolverrSession | None = None
     try:
         for source in sources:
-            if use_flaresolverr and not fetch_direct_enabled():
-                if flaresolverr_session_per_source() or fs_session is None:
-                    if fs_session is not None:
-                        set_active_flaresolverr_session(None)
-                        await fs_session.__aexit__(None, None, None)
-                    fs_session = FlareSolverrSession()
-                    await fs_session.__aenter__()
-                    set_active_flaresolverr_session(fs_session)
-            status = await fetch_source(client, source)
+            try:
+                if use_flaresolverr and not fetch_direct_enabled():
+                    if flaresolverr_session_per_source() or fs_session is None:
+                        if fs_session is not None:
+                            previous_session = fs_session
+                            fs_session = None
+                            set_active_flaresolverr_session(None)
+                            await previous_session.__aexit__(None, None, None)
+                        candidate_session = FlareSolverrSession()
+                        await candidate_session.__aenter__()
+                        fs_session = candidate_session
+                        set_active_flaresolverr_session(fs_session)
+                status = await fetch_source(client, source)
+            except Exception as exc:
+                logger.exception("Serial browser fetch failed for %s", source.id)
+                status = _save_failure_status(source, _fetch_error_status(source, exc))
             results.append(_attach_proxy_egress(status, proxy_info))
             if apply_delay:
                 await _browser_inter_source_delay()
     finally:
         if fs_session is not None:
             set_active_flaresolverr_session(None)
-            await fs_session.__aexit__(None, None, None)
+            try:
+                await fs_session.__aexit__(None, None, None)
+            except Exception as exc:
+                logger.warning(
+                    "FlareSolverr session cleanup failed after %s: %s",
+                    phase,
+                    type(exc).__name__,
+                )
 
     ok_count = sum(1 for s in results if s.get("state") == SourceState.OK)
     logger.info(
@@ -2162,10 +2382,12 @@ async def _refresh_sources_unlocked(
     _firecrawl_fallback_attempts = 0
     _firecrawl_fallback_attempts_by_source.clear()
     validate_tier_registry()
+    from .ai_review import reset_ai_review_budget
     from .refresh_context import begin_refresh_run, end_refresh_run
     from .scrapers.rotator import reset_backend_circuits
 
     begin_refresh_run()
+    reset_ai_review_budget()
     reset_backend_circuits()
     run_id = new_run_id()
     log_action(
@@ -2241,6 +2463,18 @@ async def _refresh_sources_unlocked(
             ),
         )
     except Exception as exc:
+        terminal_state = (
+            SourceState.TIMED_OUT
+            if isinstance(exc, TimeoutError)
+            else SourceState.FETCH_ERROR
+        )
+        _record_reliability_results_best_effort(
+            run_id,
+            [
+                {"source_id": source.id, "state": terminal_state}
+                for source in selected
+            ],
+        )
         try:
             log_action(
                 "refresh.end",
@@ -2262,7 +2496,38 @@ async def _refresh_sources_unlocked(
     if tier_filter is None and parts_preview.light_api:
         from .cards_index import prefetch_hearthstonejson_async
 
-        await prefetch_hearthstonejson_async()
+        try:
+            await prefetch_hearthstonejson_async()
+        except Exception as exc:
+            terminal_state = (
+                SourceState.TIMED_OUT
+                if isinstance(exc, TimeoutError)
+                else SourceState.FETCH_ERROR
+            )
+            _record_reliability_results_best_effort(
+                run_id,
+                [
+                    {"source_id": source.id, "state": terminal_state}
+                    for source in selected
+                ],
+            )
+            try:
+                log_action(
+                    "refresh.end",
+                    state=terminal_state,
+                    level="error",
+                    error_type=type(exc).__name__,
+                    detail=str(exc)[:500],
+                    extra={
+                        "ok": 0,
+                        "fail": len(selected),
+                        "run_id": run_id,
+                        "phase": "prefetch_hearthstonejson",
+                    },
+                )
+            finally:
+                end_refresh_run()
+            raise
 
     client: httpx.AsyncClient | None = None
     if fetch_direct_enabled():
@@ -2296,6 +2561,7 @@ async def _refresh_sources_unlocked(
     browser_delay = refresh_delay_browser_only()
 
     results: list[dict[str, Any]] = []
+    phase_error: BaseException | None = None
     try:
         phase_plan = (
             (
@@ -2367,7 +2633,30 @@ async def _refresh_sources_unlocked(
                     "fail": len(phase_results) - ok_count,
                 },
             )
+    except BaseException as exc:
+        phase_error = exc
+        raise
     finally:
+        completed_source_ids = {
+            str(result.get("source_id") or "") for result in results
+        }
+        missing_state = (
+            SourceState.TIMED_OUT
+            if isinstance(phase_error, TimeoutError)
+            else SourceState.FETCH_ERROR
+        )
+        terminal_results = [
+            *results,
+            *(
+                {
+                    "source_id": source.id,
+                    "state": missing_state,
+                }
+                for source in selected
+                if source.id not in completed_source_ids
+            ),
+        ]
+        _record_reliability_results_best_effort(run_id, terminal_results)
         if use_patchright or use_flaresolverr:
             await PatchrightPool.shutdown()
         if use_cloakbrowser:
@@ -2377,15 +2666,18 @@ async def _refresh_sources_unlocked(
         if client is not None:
             await client.aclose()
         end_refresh_run()
-        ok_total = sum(1 for s in results if s.get("state") == SourceState.OK)
-        traffic = _refresh_traffic_summary(results)
+        ok_total = sum(
+            1 for status in terminal_results if status.get("state") == SourceState.OK
+        )
+        fail_total = len(terminal_results) - ok_total
+        traffic = _refresh_traffic_summary(terminal_results)
         log_action(
             "refresh.end",
-            state=SourceState.OK if ok_total == len(results) else SourceState.PARTIAL,
-            level="info" if ok_total == len(results) else "warn",
+            state=SourceState.OK if fail_total == 0 else SourceState.PARTIAL,
+            level="info" if fail_total == 0 else "warn",
             extra={
                 "ok": ok_total,
-                "fail": len(results) - ok_total,
+                "fail": fail_total,
                 "run_id": run_id,
                 "traffic": traffic,
             },
@@ -2425,6 +2717,12 @@ async def refresh_sources(
                 locked_outcomes.append({"source_id": source_id, **exc.as_outcome()})
             else:
                 available_source_ids.append(source_id)
+
+        if locked_outcomes:
+            _record_reliability_results_best_effort(
+                f"locked-{uuid.uuid4().hex}",
+                locked_outcomes,
+            )
 
         if not available_source_ids:
             return locked_outcomes
