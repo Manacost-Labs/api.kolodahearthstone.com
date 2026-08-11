@@ -12,6 +12,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import httpx
+from bs4 import BeautifulSoup
 
 from .config import (
     api_json_attempts_per_channel,
@@ -230,6 +231,27 @@ def extract_json_payload(body: str) -> dict[str, Any] | list[Any] | None:
     marker = "Markdown Content:\n"
     if marker in text:
         text = text.split(marker, 1)[1].strip()
+
+    # Django REST Framework returns a syntax-highlighted browsable API when a
+    # browser transport cannot set Accept: application/json. The actual JSON
+    # remains losslessly available in the longest <pre> response block. Parse
+    # that before the raw HTML so an unrelated early JS object cannot win.
+    if text.startswith("<") and "<pre" in text.lower():
+        soup = BeautifulSoup(text, "html.parser")
+        candidates = sorted(
+            (pre.get_text("", strip=False) for pre in soup.find_all("pre")),
+            key=len,
+            reverse=True,
+        )
+        for candidate in candidates:
+            payload = _decode_json_payload(candidate.strip())
+            if payload is not None:
+                return payload
+
+    return _decode_json_payload(text)
+
+
+def _decode_json_payload(text: str) -> dict[str, Any] | list[Any] | None:
     object_start = text.find("{")
     array_start = text.find("[")
     starts = [pos for pos in (object_start, array_start) if pos >= 0]
@@ -534,7 +556,7 @@ async def _fetch_text_via_scrape_do(url: str, *, source_id: str) -> str:
     """Fetch exact HSReplay JSON through cheap non-rendered Scrape.do."""
 
     _assert_exact_hsreplay_https_url(url)
-    headers: dict[str, str] = {}
+    headers: dict[str, str] = {"Accept": "application/json"}
     cookie_header = _hsreplay_cookie_header()
     if cookie_header:
         # scrape_url prefixes this as Sd-Cookie. The provider receives no
@@ -551,7 +573,7 @@ async def _fetch_text_via_scrape_do(url: str, *, source_id: str) -> str:
                     url,
                     render=False,
                     super_proxy=False,
-                    headers=headers or None,
+                    headers=headers,
                     forward_headers=False,
                 )
             _assert_exact_hsreplay_https_url(result.final_url)

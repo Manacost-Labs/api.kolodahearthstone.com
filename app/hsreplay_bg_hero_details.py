@@ -9,6 +9,7 @@ from urllib.parse import urlencode
 from .cards_index import card_label, cards_by_dbfid
 from .hsreplay_bg_stats import BG_COMPOSITION_NAMES_API, _composition_names_from_text
 from .hsreplay_client import fetch_hsreplay_json, fetch_text_via_flaresolverr
+from .proxy_errors import ProxyPaymentRequiredError
 from .resource_locks import ResourceLocked, ResourceLockSet
 from .source_state import SourceState
 from .storage import load_dataset, save_dataset, save_status
@@ -26,10 +27,15 @@ DETAIL_ENDPOINTS = {
     "hero_power": "battlegrounds_hero_power_stats_by_hero_and_tier",
     "combat_winrate": "battlegrounds_combat_winrate_by_hero",
     "composition_stats": "battlegrounds_comp_stats_by_hero",
-    "composition_affinity": "battlegrounds_composition_affinity_by_hero",
     "best_final_form": "battlegrounds_best_final_form_comps",
     "canonical_compositions": "battlegrounds_canonical_compositions_by_hero",
 }
+CORE_DETAIL_SECTIONS = (
+    "tavern_up",
+    "hero_power",
+    "combat_winrate",
+    "compositions",
+)
 
 
 def _pct(value: Any) -> str | None:
@@ -68,12 +74,12 @@ def _hero_name(dbf_id: int) -> str:
 
 
 def _query_url(endpoint: str, params: dict[str, Any]) -> str:
-    return f"{ANALYTICS_BASE}/{endpoint}/?{urlencode(params)}"
+    return f"{ANALYTICS_BASE}/{endpoint}/?{urlencode({**params, 'format': 'json'})}"
 
 
 def _heroes_url(*, duos: bool, mmr: str, time_range: str) -> str:
     base = DUOS_HEROES_API if duos else HEROES_API
-    return f"{base}?{urlencode({'BattlegroundsMMRPercentile': mmr, 'BattlegroundsTimeRange': time_range})}"
+    return f"{base}?{urlencode({'BattlegroundsMMRPercentile': mmr, 'BattlegroundsTimeRange': time_range, 'format': 'json'})}"
 
 
 def _rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -329,7 +335,7 @@ async def fetch_hero_detail(
     mmr: str = BG_MMR,
     time_range: str = BG_TIME_RANGE,
 ) -> dict[str, Any]:
-    names = composition_names or await _composition_names()
+    names = composition_names if composition_names is not None else await _composition_names()
     params = {"hero_dbf_id": int(dbf_id), "BattlegroundsMMRPercentile": mmr, "BattlegroundsTimeRange": time_range}
     payloads: dict[str, dict[str, Any]] = {}
     for key, endpoint in DETAIL_ENDPOINTS.items():
@@ -382,9 +388,33 @@ async def _refresh_bg_hero_details_unlocked(
     concurrency: int = 3,
 ) -> dict[str, Any]:
     fetched_at = datetime.now(UTC).isoformat()
-    names = await _composition_names()
-    solo_index = await fetch_hero_index(duos=False, mmr=mmr, time_range=time_range)
-    duos_index = await fetch_hero_index(duos=True, mmr=mmr, time_range=time_range)
+    errors: list[dict[str, Any]] = []
+    try:
+        names = await _composition_names()
+    except Exception as exc:  # noqa: BLE001 - optional labels must not block statistics
+        names = {}
+        errors.append(
+            {
+                "stage": "composition_names",
+                "error": f"{type(exc).__name__}: {str(exc)[:240]}",
+            }
+        )
+    try:
+        solo_index = await fetch_hero_index(
+            duos=False,
+            mmr=mmr,
+            time_range=time_range,
+        )
+        duos_index = await fetch_hero_index(
+            duos=True,
+            mmr=mmr,
+            time_range=time_range,
+        )
+    except Exception as exc:  # noqa: BLE001 - bootstrap boundary preserves LKG
+        return _preserve_bg_hero_details_after_failure(
+            exc,
+            refreshed_at=fetched_at,
+        )
     index_rows = solo_index["heroes"][: limit or None]
     source_rows = {
         int(row["dbfId"]): {
@@ -402,7 +432,6 @@ async def _refresh_bg_hero_details_unlocked(
         for row in index_rows
     }
     sem = asyncio.Semaphore(max(1, concurrency))
-    errors: list[dict[str, Any]] = []
 
     async def _one(dbf_id: int) -> dict[str, Any] | None:
         async with sem:
@@ -454,6 +483,10 @@ async def _refresh_bg_hero_details_unlocked(
     duos_count = len(duos_index.get("heroes") or [])
     requested_details = len(index_rows)
     detail_coverage = len(details) / max(requested_details, 1)
+    core_section_counts = {
+        section: sum(bool(item.get(section)) for item in details)
+        for section in CORE_DETAIL_SECTIONS
+    }
     quality_errors: list[str] = []
     if limit is not None:
         quality_errors.append("limited refresh is diagnostic and cannot replace the production snapshot")
@@ -466,6 +499,11 @@ async def _refresh_bg_hero_details_unlocked(
         quality_errors.append(
             f"hero detail coverage too low ({len(details)}/{requested_details}; minimum {minimum_details})"
         )
+    for section, count in core_section_counts.items():
+        if count < minimum_details:
+            quality_errors.append(
+                f"{section} coverage too low ({count}/{requested_details}; minimum {minimum_details})"
+            )
     quality_ok = not quality_errors
     dataset = {
         "state": SourceState.OK,
@@ -476,7 +514,7 @@ async def _refresh_bg_hero_details_unlocked(
         "backend": "hsreplay_json_api",
         "data": {"structured": payload},
     }
-    cached_dataset = load_dataset(SOURCE_ID)
+    cached_snapshot = _load_valid_bg_hero_details_snapshot()
     if quality_ok:
         save_dataset(SOURCE_ID, dataset)
         heroes_dataset = {
@@ -523,35 +561,61 @@ async def _refresh_bg_hero_details_unlocked(
                 "last_refresh_at": fetched_at,
             },
         )
+    serving_cached = cached_snapshot is not None and not quality_ok
+    cached_dataset, cached_structured = cached_snapshot or ({}, {})
+    status_fetched_at = (
+        str(cached_dataset["fetched_at"])
+        if serving_cached
+        else fetched_at
+    )
+    status_rows = (
+        len(cached_structured.get("details") or {})
+        if serving_cached
+        else len(details)
+    )
+    status: dict[str, Any] = {
+        "source_id": SOURCE_ID,
+        "site": "hsreplay",
+        "category": "battlegrounds",
+        "url": HEROES_API,
+        "state": (
+            SourceState.OK
+            if quality_ok or serving_cached
+            else SourceState.PARTIAL
+        ),
+        "fetched_at": status_fetched_at,
+        "http_status": 200,
+        "backend": (
+            str(cached_dataset.get("backend") or "hsreplay_json_api")
+            if serving_cached
+            else "hsreplay_json_api"
+        ),
+        "rows_total": status_rows,
+        "detail": (
+            f"BG hero details: {len(details)}/{requested_details} requested, "
+            f"{solo_count} solo heroes, {duos_count} duos heroes."
+            + (f" Quality gate: {'; '.join(quality_errors)}" if quality_errors else "")
+        ),
+        "errors": errors[:10],
+        "quality_errors": quality_errors,
+        "detail_coverage": round(detail_coverage, 4),
+        "core_section_counts": core_section_counts,
+        "serving_cached_dataset": serving_cached,
+        "last_refresh_state": SourceState.OK if quality_ok else SourceState.PARTIAL,
+        "last_refresh_at": fetched_at,
+    }
+    if not quality_ok:
+        status["last_refresh_failure_class"] = "quality_rejected"
+        status["last_refresh_error"] = "; ".join(quality_errors)[:700]
     save_status(
         SOURCE_ID,
-        {
-            "source_id": SOURCE_ID,
-            "site": "hsreplay",
-            "category": "battlegrounds",
-            "url": HEROES_API,
-            "state": SourceState.OK if quality_ok else SourceState.PARTIAL,
-            "fetched_at": fetched_at,
-            "http_status": 200,
-            "backend": "hsreplay_json_api",
-            "rows_total": len(details),
-            "detail": (
-                f"BG hero details: {len(details)}/{requested_details} requested, "
-                f"{solo_count} solo heroes, {duos_count} duos heroes."
-                + (f" Quality gate: {'; '.join(quality_errors)}" if quality_errors else "")
-            ),
-            "errors": errors[:10],
-            "quality_errors": quality_errors,
-            "detail_coverage": round(detail_coverage, 4),
-            "serving_cached_dataset": bool(cached_dataset) and not quality_ok,
-            "last_refresh_state": SourceState.OK if quality_ok else SourceState.PARTIAL,
-            "last_refresh_at": fetched_at,
-        },
+        status,
     )
     return {
         "ok": quality_ok,
+        "state": SourceState.OK if quality_ok else SourceState.PARTIAL,
         "published": quality_ok,
-        "serving_cached_dataset": bool(cached_dataset) and not quality_ok,
+        "serving_cached_dataset": serving_cached,
         "source_id": SOURCE_ID,
         "fetched_at": fetched_at,
         "heroes": len(heroes),
@@ -560,6 +624,7 @@ async def _refresh_bg_hero_details_unlocked(
         "errors": errors,
         "quality_errors": quality_errors,
         "detail_coverage": round(detail_coverage, 4),
+        "core_section_counts": core_section_counts,
     }
 
 
@@ -597,6 +662,132 @@ async def refresh_bg_hero_details(
         )
     finally:
         locks.release()
+
+
+def _load_valid_bg_hero_details_snapshot(
+) -> tuple[dict[str, Any], dict[str, Any]] | None:
+    try:
+        cached_dataset = load_dataset(SOURCE_ID) or {}
+    except (OSError, UnicodeError, ValueError):
+        return None
+    if not isinstance(cached_dataset, dict):
+        return None
+    if cached_dataset.get("state") != SourceState.OK:
+        return None
+    published_at = cached_dataset.get("fetched_at")
+    if not isinstance(published_at, str) or not published_at.strip():
+        return None
+    try:
+        parsed_published_at = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed_published_at.tzinfo is None or parsed_published_at.utcoffset() is None:
+        return None
+    cached_data = cached_dataset.get("data")
+    if not isinstance(cached_data, dict):
+        return None
+    cached_structured = cached_data.get("structured") or {}
+    if not isinstance(cached_structured, dict):
+        return None
+    cached_heroes = cached_structured.get("heroes")
+    cached_details = cached_structured.get("details")
+    cached_duos = cached_structured.get("duos")
+    cached_duos_heroes = cached_duos.get("heroes") if isinstance(cached_duos, dict) else None
+    minimum_details = (
+        max(20, math.ceil(len(cached_heroes) * 0.70))
+        if isinstance(cached_heroes, list)
+        else 20
+    )
+    if not (
+        cached_structured.get("type") == "bg_hero_details"
+        and isinstance(cached_heroes, list)
+        and len(cached_heroes) >= 30
+        and isinstance(cached_details, dict)
+        and len(cached_details) >= minimum_details
+        and isinstance(cached_duos_heroes, list)
+        and len(cached_duos_heroes) >= 20
+    ):
+        return None
+    valid_details = [
+        detail for detail in cached_details.values() if isinstance(detail, dict)
+    ]
+    if any(
+        sum(bool(detail.get(section)) for detail in valid_details) < minimum_details
+        for section in CORE_DETAIL_SECTIONS
+    ):
+        return None
+    return cached_dataset, cached_structured
+
+
+def _preserve_bg_hero_details_after_failure(
+    exc: Exception,
+    *,
+    refreshed_at: str,
+) -> dict[str, Any]:
+    """Record a failed refresh without replacing a valid published snapshot."""
+
+    cached_snapshot = _load_valid_bg_hero_details_snapshot()
+    cached_dataset, cached_structured = cached_snapshot or ({}, {})
+    cached_heroes = cached_structured.get("heroes")
+    cached_details = cached_structured.get("details")
+    serving_cached = cached_snapshot is not None
+    failure_class = (
+        f"proxy_{exc.status_code}"
+        if isinstance(exc, ProxyPaymentRequiredError)
+        else type(exc).__name__
+    )
+    published_at = (
+        str(cached_dataset["fetched_at"])
+        if serving_cached
+        else refreshed_at
+    )
+    rows_total = len(cached_details) if serving_cached else 0
+    safe_error = f"{type(exc).__name__}: {str(exc)[:700]}"
+    save_status(
+        SOURCE_ID,
+        {
+            "source_id": SOURCE_ID,
+            "site": "hsreplay",
+            "category": "battlegrounds",
+            "url": HEROES_API,
+            "state": SourceState.OK if serving_cached else SourceState.FETCH_ERROR,
+            "fetched_at": published_at,
+            "backend": (
+                str(cached_dataset.get("backend") or "hsreplay_json_api")
+                if serving_cached
+                else "hsreplay_json_api"
+            ),
+            "rows_total": rows_total,
+            "detail": (
+                f"BG hero detail refresh failed; serving {rows_total} cached details."
+                if serving_cached
+                else "BG hero detail refresh failed and no valid cached snapshot exists."
+            ),
+            "serving_cached_dataset": serving_cached,
+            "last_refresh_state": SourceState.FETCH_ERROR,
+            "last_refresh_at": refreshed_at,
+            "last_refresh_failure_class": failure_class,
+            "last_refresh_error": safe_error,
+        },
+    )
+    return {
+        "ok": False,
+        "state": SourceState.FETCH_ERROR,
+        "published": False,
+        "serving_cached_dataset": serving_cached,
+        "source_id": SOURCE_ID,
+        "fetched_at": refreshed_at,
+        "heroes": len(cached_heroes) if serving_cached else 0,
+        "details": rows_total,
+        "duos_heroes": (
+            len((cached_structured.get("duos") or {}).get("heroes") or [])
+            if serving_cached
+            else 0
+        ),
+        "errors": [{"error": safe_error}],
+        "quality_errors": ["refresh failed before the publication quality gate"],
+        "detail_coverage": None,
+    }
 
 
 def _fallback_heroes_dataset() -> dict[str, Any] | None:

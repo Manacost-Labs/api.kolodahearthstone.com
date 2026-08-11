@@ -35,6 +35,30 @@ class BattlegroundsHeroDetailsTest(unittest.TestCase):
             ],
         }
 
+    @staticmethod
+    def _cached_snapshot() -> dict:
+        return {
+            "state": "ok",
+            "fetched_at": "2026-08-10T02:35:00+00:00",
+            "backend": "hsreplay_json_api",
+            "data": {
+                "structured": {
+                    "type": "bg_hero_details",
+                    "heroes": [{"dbfId": 50_000 + idx} for idx in range(30)],
+                    "details": {
+                        str(50_000 + idx): {
+                            "tavern_up": [{}],
+                            "hero_power": [{}],
+                            "combat_winrate": [{}],
+                            "compositions": [{}],
+                        }
+                        for idx in range(30)
+                    },
+                    "duos": {"heroes": [{"dbfId": idx} for idx in range(20)]},
+                }
+            },
+        }
+
     def test_tavern_up_recommendations_choose_most_common_tier_per_turn(self) -> None:
         payload = {
             "series": {
@@ -168,27 +192,180 @@ class BattlegroundsHeroDetailsTest(unittest.TestCase):
                 new=AsyncMock(side_effect=[solo, duos]),
             ),
             patch("app.hsreplay_bg_hero_details.fetch_hero_detail", side_effect=detail),
-            patch("app.hsreplay_bg_hero_details.load_dataset", return_value={"fetched_at": "old"}),
+            patch(
+                "app.hsreplay_bg_hero_details.load_dataset",
+                return_value=self._cached_snapshot(),
+            ),
             patch("app.hsreplay_bg_hero_details.save_dataset") as save_dataset,
             patch("app.hsreplay_bg_hero_details.save_status") as save_status,
         ):
             result = asyncio.run(refresh_bg_hero_details())
 
         self.assertFalse(result["ok"])
+        self.assertEqual(result["state"], "partial")
         self.assertFalse(result["published"])
         self.assertTrue(result["serving_cached_dataset"])
         self.assertIn("hero detail coverage too low", result["quality_errors"][0])
         save_dataset.assert_not_called()
         status = save_status.call_args.args[1]
-        self.assertEqual(status["state"], "partial")
+        self.assertEqual(status["state"], "ok")
         self.assertTrue(status["serving_cached_dataset"])
+        self.assertEqual(status["fetched_at"], "2026-08-10T02:35:00+00:00")
+        self.assertEqual(status["last_refresh_state"], "partial")
+        self.assertEqual(status["last_refresh_failure_class"], "quality_rejected")
+
+    def test_initial_fetch_failure_preserves_last_known_good_snapshot(self) -> None:
+        cached = self._cached_snapshot()
+
+        with (
+            patch(
+                "app.hsreplay_bg_hero_details._composition_names",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
+                "app.hsreplay_bg_hero_details.fetch_hero_index",
+                new=AsyncMock(side_effect=RuntimeError("upstream index unavailable")),
+            ),
+            patch("app.hsreplay_bg_hero_details.load_dataset", return_value=cached),
+            patch("app.hsreplay_bg_hero_details.save_status") as save_status,
+        ):
+            result = asyncio.run(refresh_bg_hero_details())
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["state"], "fetch_error")
+        self.assertFalse(result["published"])
+        self.assertTrue(result["serving_cached_dataset"])
+        self.assertEqual(result["details"], 30)
+        status = save_status.call_args.args[1]
+        self.assertEqual(status["state"], "ok")
+        self.assertEqual(status["fetched_at"], cached["fetched_at"])
+        self.assertEqual(status["last_refresh_state"], "fetch_error")
+        self.assertEqual(status["last_refresh_failure_class"], "RuntimeError")
+        self.assertTrue(status["serving_cached_dataset"])
+
+    def test_initial_fetch_failure_without_cache_is_a_cold_failure(self) -> None:
+        with (
+            patch(
+                "app.hsreplay_bg_hero_details._composition_names",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
+                "app.hsreplay_bg_hero_details.fetch_hero_index",
+                new=AsyncMock(side_effect=RuntimeError("upstream index unavailable")),
+            ),
+            patch("app.hsreplay_bg_hero_details.load_dataset", return_value=None),
+            patch("app.hsreplay_bg_hero_details.save_status") as save_status,
+        ):
+            result = asyncio.run(refresh_bg_hero_details())
+
+        self.assertFalse(result["ok"])
+        self.assertFalse(result["published"])
+        self.assertFalse(result["serving_cached_dataset"])
+        self.assertEqual(result["state"], "fetch_error")
+        status = save_status.call_args.args[1]
+        self.assertEqual(status["state"], "fetch_error")
+        self.assertEqual(status["last_refresh_state"], "fetch_error")
+        self.assertFalse(status["serving_cached_dataset"])
+
+    def test_corrupt_json_cache_does_not_break_initial_failure_handling(self) -> None:
+        with (
+            patch(
+                "app.hsreplay_bg_hero_details._composition_names",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
+                "app.hsreplay_bg_hero_details.fetch_hero_index",
+                new=AsyncMock(side_effect=RuntimeError("upstream index unavailable")),
+            ),
+            patch(
+                "app.hsreplay_bg_hero_details.load_dataset",
+                return_value={
+                    "state": "ok",
+                    "fetched_at": "2026-08-10T02:35:00+00:00",
+                    "data": "corrupt",
+                },
+            ),
+            patch("app.hsreplay_bg_hero_details.save_status") as save_status,
+        ):
+            result = asyncio.run(refresh_bg_hero_details())
+
+        self.assertFalse(result["ok"])
+        self.assertFalse(result["serving_cached_dataset"])
+        self.assertEqual(result["state"], "fetch_error")
+        status = save_status.call_args.args[1]
+        self.assertEqual(status["state"], "fetch_error")
+
+    def test_empty_detail_sections_are_not_accepted_as_last_known_good(self) -> None:
+        weak_cache = self._cached_snapshot()
+        weak_cache["data"]["structured"]["details"] = {
+            str(50_000 + idx): {} for idx in range(30)
+        }
+        with (
+            patch(
+                "app.hsreplay_bg_hero_details._composition_names",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
+                "app.hsreplay_bg_hero_details.fetch_hero_index",
+                new=AsyncMock(side_effect=RuntimeError("upstream index unavailable")),
+            ),
+            patch("app.hsreplay_bg_hero_details.load_dataset", return_value=weak_cache),
+            patch("app.hsreplay_bg_hero_details.save_status") as save_status,
+        ):
+            result = asyncio.run(refresh_bg_hero_details())
+
+        self.assertFalse(result["serving_cached_dataset"])
+        self.assertEqual(result["state"], "fetch_error")
+        self.assertEqual(save_status.call_args.args[1]["state"], "fetch_error")
+
+    def test_composition_labels_failure_does_not_block_complete_refresh(self) -> None:
+        solo = self._hero_index(30, mode="solo")
+        duos = self._hero_index(20, mode="duos")
+
+        async def detail(dbf_id: int, **_kwargs: object) -> dict:
+            return {
+                "hero": {"dbfId": dbf_id},
+                "best_composition": None,
+                "tavern_up": [{}],
+                "hero_power": [{}],
+                "combat_winrate": [{}],
+                "compositions": [{}],
+            }
+
+        with (
+            patch(
+                "app.hsreplay_bg_hero_details._composition_names",
+                new=AsyncMock(side_effect=RuntimeError("optional labels unavailable")),
+            ),
+            patch(
+                "app.hsreplay_bg_hero_details.fetch_hero_index",
+                new=AsyncMock(side_effect=[solo, duos]),
+            ),
+            patch("app.hsreplay_bg_hero_details.fetch_hero_detail", side_effect=detail) as fetch_detail,
+            patch("app.hsreplay_bg_hero_details.load_dataset", return_value=None),
+            patch("app.hsreplay_bg_hero_details.save_dataset"),
+            patch("app.hsreplay_bg_hero_details.save_status"),
+        ):
+            result = asyncio.run(refresh_bg_hero_details())
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["state"], "ok")
+        self.assertEqual(result["errors"][0]["stage"], "composition_names")
+        self.assertTrue(all(call.kwargs["composition_names"] == {} for call in fetch_detail.call_args_list))
 
     def test_complete_refresh_is_published_atomically(self) -> None:
         solo = self._hero_index(30, mode="solo")
         duos = self._hero_index(20, mode="duos")
 
         async def detail(dbf_id: int, **_kwargs: object) -> dict:
-            return {"hero": {"dbfId": dbf_id}, "best_composition": None}
+            return {
+                "hero": {"dbfId": dbf_id},
+                "best_composition": None,
+                "tavern_up": [{}],
+                "hero_power": [{}],
+                "combat_winrate": [{}],
+                "compositions": [{}],
+            }
 
         with (
             patch("app.hsreplay_bg_hero_details._composition_names", new=AsyncMock(return_value={})),
@@ -206,6 +383,15 @@ class BattlegroundsHeroDetailsTest(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertTrue(result["published"])
         self.assertEqual(result["detail_coverage"], 1.0)
+        self.assertEqual(
+            result["core_section_counts"],
+            {
+                "tavern_up": 30,
+                "hero_power": 30,
+                "combat_winrate": 30,
+                "compositions": 30,
+            },
+        )
         self.assertEqual(save_dataset.call_count, 2)
         mirror_call = save_dataset.call_args_list[1]
         self.assertEqual(mirror_call.args[0], "hsreplay_battlegrounds_heroes")

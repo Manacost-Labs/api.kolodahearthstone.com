@@ -15,6 +15,7 @@ from app.hsreplay_client import (
     _fetch_text_via_curl_cffi_sync,
     _fetch_text_via_scrape_do,
     consume_hsreplay_json_transport_backend,
+    extract_json_payload,
     fetch_hsreplay_json,
     fetch_text_via_curl_cffi,
     hsreplay_proxy_circuit_is_open,
@@ -49,6 +50,59 @@ def test_only_actual_proxy_connect_failures_are_typed(status: int) -> None:
     assert (
         proxy_tunnel_error(RuntimeError(f"origin returned {status}"), proxy_used=True)
         is None
+    )
+
+
+def test_extract_json_payload_reads_drf_browsable_api_pre_block() -> None:
+    body = """
+    <html><head><title>Example – Django REST framework</title></head><body>
+      <script>window.unrelated = {};</script>
+      <pre>GET /api/example/</pre>
+      <pre class="prettyprint">[
+        {<span class="str">"hero_dbf_id"</span>: 42,
+         <span class="str">"tier_v2"</span>: 1}
+      ]</pre>
+    </body></html>
+    """
+
+    assert extract_json_payload(body) == [{"hero_dbf_id": 42, "tier_v2": 1}]
+
+
+def test_hsreplay_json_accepts_drf_browsable_api_response() -> None:
+    body = """
+    <html><body><pre class="prettyprint">{
+      <span class="str">"data"</span>: [
+        {<span class="str">"hero_dbf_id"</span>: 42}
+      ]
+    }</pre></body></html>
+    """
+    with (
+        patch(
+            "app.hsreplay_client._channel_urls",
+            return_value=[("flaresolverr", "https://hsreplay.net/api/test")],
+        ),
+        patch(
+            "app.hsreplay_client._channel_uses_residential_proxy",
+            return_value=False,
+        ),
+        patch(
+            "app.hsreplay_client._fetch_body_for_channel",
+            new=AsyncMock(return_value=body),
+        ),
+        patch("app.hsreplay_client.get_cached_hsreplay_json", return_value=None),
+        patch("app.hsreplay_client.set_cached_hsreplay_json"),
+    ):
+        result = asyncio.run(
+            fetch_hsreplay_json(
+                "https://hsreplay.net/api/test",
+                source_id="drf-test",
+            )
+        )
+
+    assert result == {"data": [{"hero_dbf_id": 42}]}
+    assert (
+        consume_hsreplay_json_transport_backend("drf-test")
+        == "proxyless_flaresolverr"
     )
 
 
@@ -765,7 +819,10 @@ def test_scrape_do_json_is_non_rendered_and_forwards_only_scoped_cookie() -> Non
     assert kwargs["render"] is False
     assert kwargs["super_proxy"] is False
     assert kwargs["forward_headers"] is False
-    assert kwargs["headers"] == {"Cookie": "sessionid=private-value"}
+    assert kwargs["headers"] == {
+        "Accept": "application/json",
+        "Cookie": "sessionid=private-value",
+    }
 
 
 @pytest.mark.parametrize(
