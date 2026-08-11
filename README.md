@@ -130,8 +130,10 @@ scrape-провайдеры и residential proxy для него не испол
 должен содержать не менее 20 строк суммарно, не менее 10 колод и 10
 архетипов. `winrate` хранится как доля `0..1`. Оба среза, deck codes,
 выборки и метрики проходят схему, semantic validation, source contract и
-regression gate. При отказе любого среза новый snapshot не публикуется и
-остаётся LKG.
+regression gate. Upstream `last_updated` обязан быть timezone-aware ISO и не
+старше 36 часов; сдвиг более чем на 6 часов в будущее также блокируется.
+Регрессия проверяется отдельно для `decks` и `archetypes`. При отказе любого
+среза новый snapshot не публикуется и остаётся LKG.
 
 > Важно: эта интеграция не означает, что `firestone_standard` включён в
 > публичном или коммерческом production. [Firestone Terms of Service](https://github.com/Zero-to-Heroes/firestone/blob/master/tos.md)

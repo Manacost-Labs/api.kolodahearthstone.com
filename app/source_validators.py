@@ -36,6 +36,9 @@ ARENA_PERCENT_FIELDS = (
     "kept_rate",
 )
 
+FIRESTONE_STANDARD_MAX_UPSTREAM_AGE_HOURS = 36.0
+FIRESTONE_STANDARD_MAX_FUTURE_SKEW_HOURS = 6.0
+
 
 def _parse_arena_percent(value: Any) -> float | None:
     # parse_percent delegates to a legacy helper that treats numeric zero as empty.
@@ -83,6 +86,22 @@ class ValidationReport:
 
 def _valid_name(value: Any) -> bool:
     return str(value or "").strip() not in {"", "-", "—", "Unknown"}
+
+
+def _validation_now_utc() -> datetime:
+    return datetime.now(UTC)
+
+
+def _parse_aware_iso_timestamp(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return None
+    return parsed.astimezone(UTC)
 
 
 def _validate_bg_heroes(_source_id: str, structured: dict[str, Any]) -> ValidationReport:
@@ -1537,23 +1556,84 @@ def _validate_firestone_standard(
         if deck_code and decode_deck_code(deck_code).get("ok"):
             decodable_decks += 1
 
+    invalid_deck_scope = sum(
+        1
+        for row in decks
+        if row.get("format") != "standard"
+        or row.get("rank_bracket") != "legend"
+        or row.get("time_period") != "last-patch"
+    )
+    invalid_archetype_scope = sum(
+        1 for row in archetypes if row.get("format") != "standard"
+    )
+
     metadata = structured.get("metadata")
     valid_metadata = 0
+    metadata_age_hours: dict[str, float | None] = {}
+    now = _validation_now_utc()
     if isinstance(metadata, dict):
         for collection in ("decks", "archetypes"):
             item = metadata.get(collection)
             if not isinstance(item, dict):
+                metadata_age_hours[collection] = None
                 continue
             data_points = parse_decimal(item.get("data_points"))
+            last_updated = _parse_aware_iso_timestamp(item.get("last_updated"))
+            age_hours = (
+                (now - last_updated).total_seconds() / 3600.0
+                if last_updated is not None
+                else None
+            )
+            metadata_age_hours[collection] = (
+                round(age_hours, 3) if age_hours is not None else None
+            )
+            timestamp_fresh = bool(
+                age_hours is not None
+                and -FIRESTONE_STANDARD_MAX_FUTURE_SKEW_HOURS
+                <= age_hours
+                <= FIRESTONE_STANDARD_MAX_UPSTREAM_AGE_HOURS
+            )
             if (
                 data_points is not None
                 and data_points > 0
-                and item.get("last_updated")
+                and timestamp_fresh
                 and item.get("format") == "standard"
                 and item.get("rank_bracket") == "legend"
                 and item.get("time_period") == "last-patch"
             ):
                 valid_metadata += 1
+            if last_updated is None:
+                report.add_issue(
+                    "firestone_standard.invalid_upstream_timestamp",
+                    f"Firestone Standard {collection} last_updated is not an aware ISO timestamp",
+                    field=f"metadata.{collection}.last_updated",
+                )
+            elif (
+                age_hours is not None
+                and age_hours > FIRESTONE_STANDARD_MAX_UPSTREAM_AGE_HOURS
+            ):
+                report.add_issue(
+                    "firestone_standard.stale_upstream_snapshot",
+                    (
+                        f"Firestone Standard {collection} snapshot is stale "
+                        f"({age_hours:.1f}h > "
+                        f"{FIRESTONE_STANDARD_MAX_UPSTREAM_AGE_HOURS:g}h)"
+                    ),
+                    field=f"metadata.{collection}.last_updated",
+                )
+            elif (
+                age_hours is not None
+                and age_hours < -FIRESTONE_STANDARD_MAX_FUTURE_SKEW_HOURS
+            ):
+                report.add_issue(
+                    "firestone_standard.future_upstream_timestamp",
+                    (
+                        f"Firestone Standard {collection} snapshot is too far in the future "
+                        f"({-age_hours:.1f}h > "
+                        f"{FIRESTONE_STANDARD_MAX_FUTURE_SKEW_HOURS:g}h)"
+                    ),
+                    field=f"metadata.{collection}.last_updated",
+                )
 
     report.metrics.update(
         {
@@ -1565,6 +1645,9 @@ def _validate_firestone_standard(
             "unique_archetype_ids": unique_archetype_ids,
             "decodable_decks": decodable_decks,
             "valid_metadata_collections": valid_metadata,
+            "metadata_age_hours": metadata_age_hours,
+            "invalid_deck_scope_rows": invalid_deck_scope,
+            "invalid_archetype_scope_rows": invalid_archetype_scope,
         }
     )
     if len(decks) < 10:
@@ -1629,6 +1712,21 @@ def _validate_firestone_standard(
             "firestone_standard.invalid_metadata",
             f"Firestone Standard valid metadata collections too few ({valid_metadata} < 2)",
             field="metadata",
+        )
+    if invalid_deck_scope:
+        report.add_issue(
+            "firestone_standard.invalid_deck_scope",
+            f"Firestone Standard decks outside requested scope ({invalid_deck_scope})",
+            field="decks.format,decks.rank_bracket,decks.time_period",
+        )
+    if invalid_archetype_scope:
+        report.add_issue(
+            "firestone_standard.invalid_archetype_scope",
+            (
+                "Firestone Standard archetypes outside requested format "
+                f"({invalid_archetype_scope})"
+            ),
+            field="archetypes.format",
         )
 
     report.score = round(

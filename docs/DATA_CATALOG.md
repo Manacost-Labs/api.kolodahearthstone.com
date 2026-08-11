@@ -215,7 +215,9 @@ LKG.
 не расходует Scrape.do, Firecrawl, Bright Data, Scrapfly или residential proxy.
 Перед публикацией требуются оба среза, минимум 20 строк суммарно,
 минимум 10 колод и 10 архетипов, а также schema, semantic, contract и
-regression gates. Провал любого из них сохраняет LKG.
+regression gates. Проверка свежести отклоняет upstream timestamp старше 36
+часов или более чем на 6 часов в будущем; сокращение `decks` и `archetypes`
+контролируется раздельно. Провал любого gate сохраняет LKG.
 
 ```http
 GET /datasets/hearthstone_decks

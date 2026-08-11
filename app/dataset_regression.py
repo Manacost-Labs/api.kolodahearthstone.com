@@ -209,6 +209,39 @@ def check_dataset_regression(
         return False, None, extra
 
     ratio = float(extra["drop_ratio"])
+    previous_structured = (
+        previous_data.get("structured")
+        or previous_data.get("hsreplay_extracted")
+        or {}
+    )
+    new_structured = (
+        new_data.get("structured") or new_data.get("hsreplay_extracted") or {}
+    )
+    if (
+        previous_structured.get("type") == "firestone_standard"
+        and new_structured.get("type") == "firestone_standard"
+    ):
+        collection_counts: dict[str, dict[str, int]] = {}
+        for collection in ("decks", "archetypes"):
+            before = len(previous_structured.get(collection) or [])
+            after = len(new_structured.get(collection) or [])
+            collection_threshold = int(before * (1.0 - ratio))
+            collection_counts[collection] = {
+                "before": before,
+                "after": after,
+                "threshold": collection_threshold,
+            }
+            if before >= 10 and after < collection_threshold:
+                extra["collections"] = collection_counts
+                pct = round(100.0 * (before - after) / before, 1)
+                msg = (
+                    "Dataset regression: Firestone Standard "
+                    f"{collection} count dropped {before} -> {after} "
+                    f"({pct}% decrease, threshold {int(ratio * 100)}%)"
+                )
+                return True, msg, extra
+        extra["collections"] = collection_counts
+
     threshold = int(prev_count * (1.0 - ratio))
     if new_count < threshold:
         pct = round(100.0 * (prev_count - new_count) / prev_count, 1)

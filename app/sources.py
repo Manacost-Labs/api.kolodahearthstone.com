@@ -291,6 +291,7 @@ SOURCES: tuple[Source, ...] = (
             "Firestone Standard meta decks and archetypes, Legend, last patch; "
             "two direct ZeroToHeroes CDN snapshots."
         ),
+        stale_hours=36,
     ),
     Source(
         "firestone_battlegrounds_cards",

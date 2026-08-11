@@ -15,7 +15,7 @@ Sites: `firestone` (8), `heartharena` (1), `hearthstone-decks` (1), `hsguru` (14
 | `firestone_battlegrounds_cards` | firestone | battlegrounds | scrape | global | Firestone Battlegrounds minion/card statistics by tavern tier. |
 | `firestone_battlegrounds_comps` | firestone | battlegrounds | scrape | global | Firestone Battlegrounds compositions. |
 | `firestone_battlegrounds_spells` | firestone | battlegrounds | scrape | global | Firestone Battlegrounds spell statistics by tavern tier. |
-| `firestone_standard` | firestone | ranked | scrape | global | Firestone Standard meta decks and archetypes, Legend, last patch; two direct ZeroToHeroes CDN snapshots. |
+| `firestone_standard` | firestone | ranked | scrape | 36 | Firestone Standard meta decks and archetypes, Legend, last patch; two direct ZeroToHeroes CDN snapshots. |
 | `heartharena_tierlist` | heartharena | arena | scrape | global | HearthArena card tier-list. |
 | `hearthstone_decks` | hearthstone-decks | ranked | scrape | global | Latest 20 Standard and 20 Wild deck posts from hearthstone-decks.net; WordPress REST first with validated HTML fallback. |
 | `hsguru_fun_decks` | hsguru | fun_decks | pipeline | 36 | Off-meta / fun decks derived from streamer-deck candidates by low overlap with HSGuru meta catalogs and niche archetype popularity. Refreshed after streamer Firecrawl runs, plus a dedicated Standard-focused refresh every 2 hours (refresh-fun-decks --format standard). |

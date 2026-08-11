@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 from urllib.parse import urlparse
 
@@ -27,6 +28,16 @@ def _is_unit_rate(value: Any) -> bool:
         and not isinstance(value, bool)
         and 0.0 <= float(value) <= 1.0
     )
+
+
+def _is_aware_iso_timestamp(value: Any) -> bool:
+    if not isinstance(value, str) or not value.strip():
+        return False
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return parsed.tzinfo is not None
 
 
 def _validate_card_stats(data: dict[str, Any]) -> None:
@@ -210,8 +221,11 @@ def _validate_firestone_standard(data: dict[str, Any]) -> None:
             f"firestone_standard.metadata.{collection}.data_points must be a non-negative integer",
         )
         _require(
-            _is_non_empty_string(item.get("last_updated")),
-            f"firestone_standard.metadata.{collection}.last_updated is required",
+            _is_aware_iso_timestamp(item.get("last_updated")),
+            (
+                f"firestone_standard.metadata.{collection}.last_updated "
+                "must be an ISO timestamp with timezone"
+            ),
         )
         _require(item.get("format") == "standard", f"metadata.{collection}.format must be standard")
         _require(item.get("rank_bracket") == "legend", f"metadata.{collection}.rank_bracket must be legend")
@@ -243,6 +257,16 @@ def _validate_firestone_standard(data: dict[str, Any]) -> None:
                 all(_is_non_empty_string(card_id) for card_id in row["core_cards"]),
                 f"{path}.core_cards must contain card ids",
             )
+            _require(row.get("format") == "standard", f"{path}.format must be standard")
+            if collection == "decks":
+                _require(
+                    row.get("rank_bracket") == "legend",
+                    f"{path}.rank_bracket must be legend",
+                )
+                _require(
+                    row.get("time_period") == "last-patch",
+                    f"{path}.time_period must be last-patch",
+                )
 
     for idx, deck in enumerate(decks):
         path = f"firestone_standard.decks[{idx}]"

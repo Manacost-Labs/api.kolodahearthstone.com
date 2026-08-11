@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 import unittest
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -38,6 +39,7 @@ def _fixture(name: str) -> dict:
 
 
 def _normalized_payload(*, deck_count: int = 20, archetype_count: int = 20) -> dict:
+    last_updated = datetime.now(UTC).isoformat()
     decks = [
         {
             "decklist": f"deck-code-{idx}",
@@ -54,7 +56,7 @@ def _normalized_payload(*, deck_count: int = 20, archetype_count: int = 20) -> d
             "format": "standard",
             "rank_bracket": "legend",
             "time_period": "last-patch",
-            "last_updated": "2026-08-11T14:58:56.000Z",
+            "last_updated": last_updated,
         }
         for idx in range(deck_count)
     ]
@@ -74,7 +76,7 @@ def _normalized_payload(*, deck_count: int = 20, archetype_count: int = 20) -> d
     ]
     metadata = {
         "data_points": 50_000,
-        "last_updated": "2026-08-11T14:58:56.000Z",
+        "last_updated": last_updated,
         "rank_bracket": "legend",
         "time_period": "last-patch",
         "format": "standard",
@@ -227,6 +229,51 @@ class FirestoneStandardIntegrationTest(unittest.TestCase):
         ):
             validate_structured_schema(structured)
 
+    def test_schema_and_semantics_reject_wrong_scope(self) -> None:
+        structured = _normalized_payload()
+        structured["decks"][0]["format"] = "wild"
+        structured["decks"][0]["rank_bracket"] = "gold"
+        structured["decks"][0]["time_period"] = "all-time"
+        structured["archetypes"][0]["format"] = "wild"
+
+        with self.assertRaisesRegex(StructuredSchemaError, r"format must be standard"):
+            validate_structured_schema(structured)
+
+        report = validate_structured(SOURCE.id, structured)
+        self.assertFalse(report.ok)
+        issue_codes = {issue.code for issue in report.issues}
+        self.assertIn("firestone_standard.invalid_deck_scope", issue_codes)
+        self.assertIn("firestone_standard.invalid_archetype_scope", issue_codes)
+
+    def test_schema_and_semantics_reject_invalid_or_stale_upstream_time(self) -> None:
+        now = datetime(2026, 8, 11, 21, tzinfo=UTC)
+        structured = _normalized_payload()
+        structured["metadata"]["decks"]["last_updated"] = "not-a-timestamp"
+        structured["metadata"]["archetypes"]["last_updated"] = (
+            now - timedelta(hours=37)
+        ).isoformat()
+
+        with self.assertRaisesRegex(StructuredSchemaError, r"ISO timestamp"):
+            validate_structured_schema(structured)
+
+        with patch("app.source_validators._validation_now_utc", return_value=now):
+            report = validate_structured(SOURCE.id, structured)
+
+        self.assertFalse(report.ok)
+        issue_codes = {issue.code for issue in report.issues}
+        self.assertIn("firestone_standard.invalid_upstream_timestamp", issue_codes)
+        self.assertIn("firestone_standard.stale_upstream_snapshot", issue_codes)
+
+        future = _normalized_payload()
+        for metadata in future["metadata"].values():
+            metadata["last_updated"] = (now + timedelta(hours=7)).isoformat()
+        with patch("app.source_validators._validation_now_utc", return_value=now):
+            future_report = validate_structured(SOURCE.id, future)
+        self.assertIn(
+            "firestone_standard.future_upstream_timestamp",
+            {issue.code for issue in future_report.issues},
+        )
+
     def test_regression_counts_both_collections_and_complete_metrics(self) -> None:
         structured = _normalized_payload(deck_count=12, archetype_count=11)
         dataset = {"structured": structured}
@@ -255,3 +302,23 @@ class FirestoneStandardIntegrationTest(unittest.TestCase):
         self.assertFalse(regressed)
         self.assertIsNone(message)
         self.assertTrue(extra["post_patch_regression_bypass"])
+
+    def test_regression_blocks_loss_of_one_collection_even_if_total_stays_large(
+        self,
+    ) -> None:
+        previous = {
+            "structured": _normalized_payload(deck_count=157, archetype_count=41)
+        }
+        current = {
+            "structured": _normalized_payload(deck_count=157, archetype_count=10)
+        }
+
+        regressed, message, extra = check_dataset_regression(
+            SOURCE,
+            previous_data=previous,
+            new_data=current,
+        )
+
+        self.assertTrue(regressed)
+        self.assertIn("archetypes count dropped 41 -> 10", message or "")
+        self.assertEqual(extra["collections"]["archetypes"]["threshold"], 20)
