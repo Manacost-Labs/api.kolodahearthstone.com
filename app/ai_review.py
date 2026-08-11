@@ -57,32 +57,62 @@ class AIPageVerdict(BaseModel):
     parse_compatible: bool
     confidence: float = Field(ge=0.0, le=1.0)
     reason_codes: list[AIReasonCode] = Field(min_length=1, max_length=8)
-    summary: str = Field(min_length=1, max_length=240)
+
+    @model_validator(mode="before")
+    @classmethod
+    def discard_legacy_summary(cls, value: Any) -> Any:
+        if isinstance(value, Mapping) and "summary" in value:
+            without_summary = dict(value)
+            without_summary.pop("summary", None)
+            return without_summary
+        return value
 
     @model_validator(mode="after")
-    def validate_semantic_consistency(self) -> AIPageVerdict:
-        if "none" in self.reason_codes and self.reason_codes != ["none"]:
-            raise ValueError("none cannot be combined with failure reasons")
-        if self.verdict == "pass":
-            if self.reason_codes != ["none"]:
-                raise ValueError("pass verdict requires reason_codes=['none']")
-            if not (
-                self.target_page
-                and not self.challenge_detected
-                and self.content_complete
-                and self.parse_compatible
-            ):
-                raise ValueError("pass verdict conflicts with boolean checks")
-        if self.verdict == "fail":
-            if "none" in self.reason_codes:
-                raise ValueError("fail verdict requires a concrete reason")
-            if (
-                self.target_page
-                and not self.challenge_detected
-                and self.content_complete
-                and self.parse_compatible
-            ):
-                raise ValueError("fail verdict requires at least one failed check")
+    def normalize_semantic_consistency(self) -> AIPageVerdict:
+        declared_verdict = self.verdict
+        reason_codes: list[AIReasonCode] = list(dict.fromkeys(self.reason_codes))
+        reason_conflict = "none" in reason_codes and len(reason_codes) > 1
+        concrete_reasons: list[AIReasonCode] = [
+            reason for reason in reason_codes if reason != "none"
+        ]
+        all_checks_pass = (
+            self.target_page
+            and not self.challenge_detected
+            and self.content_complete
+            and self.parse_compatible
+        )
+
+        signal_verdict: Literal["pass", "fail", "uncertain"]
+        if all_checks_pass and not concrete_reasons and not reason_conflict:
+            signal_verdict = "pass"
+        elif not all_checks_pass and concrete_reasons and not reason_conflict:
+            signal_verdict = "fail"
+        else:
+            signal_verdict = "uncertain"
+
+        # Only an internally aligned pass/fail may become an actionable verdict.
+        # Any disagreement is valid telemetry, not a remote-service failure, and
+        # must never quarantine a successfully parsed page.
+        effective_verdict: Literal["pass", "fail", "uncertain"]
+        if declared_verdict in {"pass", "fail"} and declared_verdict == signal_verdict:
+            effective_verdict = declared_verdict
+        else:
+            effective_verdict = "uncertain"
+
+        if effective_verdict == "pass":
+            normalized_reasons: list[AIReasonCode] = ["none"]
+        elif effective_verdict == "fail":
+            normalized_reasons = concrete_reasons
+        else:
+            normalized_reasons = concrete_reasons
+            declared_conflict = declared_verdict in {"pass", "fail"}
+            if reason_conflict or declared_conflict or not normalized_reasons:
+                normalized_reasons = normalized_reasons[:7]
+                if "deterministic_conflict" not in normalized_reasons:
+                    normalized_reasons.append("deterministic_conflict")
+
+        self.verdict = effective_verdict
+        self.reason_codes = normalized_reasons
         return self
 
 
@@ -94,6 +124,7 @@ class AIReviewResult:
     error_type: str | None = None
     latency_ms: float | None = None
     provider: str | None = None
+    finish_reason: str | None = None
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
@@ -115,6 +146,7 @@ class AIReviewResult:
             "model": self.model,
             "latency_ms": self.latency_ms,
             "provider": self.provider,
+            "finish_reason": self.finish_reason,
             "prompt_tokens": self.prompt_tokens,
             "completion_tokens": self.completion_tokens,
             "total_tokens": self.total_tokens,
@@ -146,7 +178,7 @@ sample can be valid when the deterministic evidence marks it provisional. Return
 only the required JSON object. A pass verdict must set all positive checks, set
 challenge_detected=false, and use reason_codes=["none"]. A fail verdict must use
 a concrete reason code and at least one failed boolean check. Never include
-copied page text in the summary."""
+copied page text in the response."""
 
 _SENSITIVE_KEY_PARTS = (
     "authorization",
@@ -170,6 +202,25 @@ _WHITESPACE_PATTERN = re.compile(r"\s+")
 _CHALLENGE_MARKERS = ("cloudflare", "captcha", "access denied", "just a moment")
 _LOGIN_MARKERS = ("log in", "login", "sign in", "unauthorized", "premium required")
 _MAX_RESPONSE_BYTES = 128 * 1024
+_MAX_USAGE_TOKENS = 100_000_000
+_SAFE_METADATA_LABEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._:/+()-]*")
+_SAFE_FINISH_REASONS = frozenset(
+    {"stop", "length", "content_filter", "tool_calls", "error"}
+)
+_KNOWN_OPENROUTER_PROVIDERS = {
+    name.casefold(): name
+    for name in (
+        "Chutes",
+        "Cloudflare",
+        "DeepInfra",
+        "Fireworks",
+        "Google",
+        "Google AI Studio",
+        "Lambda",
+        "Novita",
+        "Together",
+    )
+}
 
 
 @dataclass
@@ -364,6 +415,8 @@ def _request_payload(evidence: Mapping[str, Any]) -> dict[str, Any]:
         ],
         "stream": False,
         "temperature": 0,
+        "reasoning": {"effort": "none", "exclude": True},
+        "plugins": [{"id": "response-healing"}],
         # The exact Gemma model metadata currently advertises max_tokens.
         "max_tokens": ai_review_max_tokens(),
         "provider": {
@@ -385,8 +438,8 @@ def _request_payload(evidence: Mapping[str, Any]) -> dict[str, Any]:
 
 def _bounded_int(value: Any) -> int:
     try:
-        return max(0, int(value))
-    except (TypeError, ValueError):
+        return min(_MAX_USAGE_TOKENS, max(0, int(value)))
+    except (OverflowError, TypeError, ValueError):
         return 0
 
 
@@ -398,25 +451,34 @@ def _bounded_cost(value: Any) -> float | None:
     return parsed if 0.0 <= parsed <= 1000.0 else None
 
 
-def _parse_response(payload: Mapping[str, Any]) -> tuple[AIPageVerdict, dict[str, Any]]:
-    if payload.get("error"):
-        raise ValueError("openrouter_error_payload")
+def _safe_metadata_label(value: Any, *, limit: int) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = _WHITESPACE_PATTERN.sub(" ", value).strip()
+    if not normalized or len(normalized) > limit:
+        return None
+    if _URL_PATTERN.search(normalized) or _TOKEN_PATTERN.search(normalized):
+        return None
+    if _SAFE_METADATA_LABEL.fullmatch(normalized) is None:
+        return None
+    return normalized
+
+
+def _safe_finish_reason(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().casefold()
+    return normalized if normalized in _SAFE_FINISH_REASONS else None
+
+
+def _response_metadata(payload: Mapping[str, Any]) -> dict[str, Any]:
     choices = payload.get("choices")
-    if not isinstance(choices, list) or not choices or not isinstance(choices[0], Mapping):
-        raise ValueError("openrouter_choices_missing")
-    choice = choices[0]
-    if choice.get("finish_reason") != "stop":
-        raise ValueError("openrouter_incomplete_completion")
-    message = choice.get("message")
-    if not isinstance(message, Mapping):
-        raise TypeError("openrouter_message_missing")
-    content = message.get("content")
-    if not isinstance(content, str) or not content.strip():
-        raise ValueError("openrouter_content_missing")
-    try:
-        verdict = AIPageVerdict.model_validate_json(content)
-    except ValidationError as exc:
-        raise ValueError("openrouter_schema_invalid") from exc
+    choice: Mapping[str, Any] = (
+        cast(Mapping[str, Any], choices[0])
+        if isinstance(choices, list) and choices and isinstance(choices[0], Mapping)
+        else {}
+    )
+    finish_reason = _safe_finish_reason(choice.get("finish_reason"))
     raw_usage = payload.get("usage")
     usage: Mapping[str, object] = (
         cast(Mapping[str, object], raw_usage)
@@ -429,15 +491,57 @@ def _parse_response(payload: Mapping[str, Any]) -> tuple[AIPageVerdict, dict[str
         if isinstance(raw_metadata, Mapping)
         else {}
     )
-    provider = metadata.get("provider") or payload.get("provider")
-    return verdict, {
-        "model": _safe_text(payload.get("model") or ai_review_model(), limit=120),
-        "provider": _safe_text(provider, limit=80) if provider else None,
+    provider_label = _safe_metadata_label(
+        metadata.get("provider") or payload.get("provider"),
+        limit=80,
+    )
+    provider = (
+        _KNOWN_OPENROUTER_PROVIDERS.get(provider_label.casefold())
+        if provider_label
+        else None
+    )
+    configured_model = ai_review_model()
+    response_model = _safe_metadata_label(payload.get("model"), limit=120)
+    return {
+        "model": response_model if response_model == configured_model else configured_model,
+        "provider": provider,
+        "finish_reason": finish_reason,
         "prompt_tokens": _bounded_int(usage.get("prompt_tokens")),
         "completion_tokens": _bounded_int(usage.get("completion_tokens")),
         "total_tokens": _bounded_int(usage.get("total_tokens")),
         "cost_usd": _bounded_cost(usage.get("cost")),
     }
+
+
+def _parse_response(
+    payload: Mapping[str, Any],
+) -> tuple[AIPageVerdict | None, dict[str, Any], str | None]:
+    metadata = _response_metadata(payload)
+    if "error" in payload and payload.get("error") is not None:
+        return None, metadata, "invalid_response_error_payload"
+    choices = payload.get("choices")
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], Mapping):
+        return None, metadata, "invalid_response_choices_missing"
+    choice = choices[0]
+    if choice.get("finish_reason") != "stop":
+        return None, metadata, "invalid_response_finish_reason"
+    message = choice.get("message")
+    if not isinstance(message, Mapping):
+        return None, metadata, "invalid_response_message_missing"
+    content = message.get("content")
+    if not isinstance(content, str) or not content.strip():
+        return None, metadata, "invalid_response_content_missing"
+    try:
+        content_payload = json.loads(content)
+    except (json.JSONDecodeError, RecursionError, TypeError, UnicodeDecodeError):
+        return None, metadata, "invalid_response_content_json"
+    if not isinstance(content_payload, Mapping):
+        return None, metadata, "invalid_response_content_not_object"
+    try:
+        verdict = AIPageVerdict.model_validate(content_payload)
+    except (RecursionError, TypeError, ValidationError):
+        return None, metadata, "invalid_response_schema"
+    return verdict, metadata, None
 
 
 async def review_candidate(
@@ -533,16 +637,30 @@ async def review_candidate(
             )
         try:
             response_payload = response.json()
-            if not isinstance(response_payload, Mapping):
-                raise TypeError("openrouter_response_not_object")
-            verdict, metadata = _parse_response(response_payload)
-        except (json.JSONDecodeError, TypeError, ValueError):
+        except (json.JSONDecodeError, RecursionError, UnicodeDecodeError):
             _record_review_failure()
             return AIReviewResult(
                 state="error",
                 model=model,
-                error_type="invalid_response",
+                error_type="invalid_response_json",
                 latency_ms=latency_ms,
+            )
+        if not isinstance(response_payload, Mapping):
+            _record_review_failure()
+            return AIReviewResult(
+                state="error",
+                model=model,
+                error_type="invalid_response_not_object",
+                latency_ms=latency_ms,
+            )
+        verdict, metadata, parse_error = _parse_response(response_payload)
+        if parse_error is not None or verdict is None:
+            _record_review_failure()
+            return AIReviewResult(
+                state="error",
+                error_type=parse_error or "invalid_response_schema",
+                latency_ms=latency_ms,
+                **metadata,
             )
         _record_review_success()
         return AIReviewResult(

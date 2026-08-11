@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-import json
 from typing import Any
 from urllib.parse import parse_qs
 
-from bs4 import BeautifulSoup
-
-from .hsreplay_client import fetch_hsreplay_json, fetch_text_via_flaresolverr
 from .firecrawl_backend import scrape_source
+from .hsreplay_client import fetch_hsreplay_json
 from .sources import Source
 
 HSREPLAY_ANALYTICS_BASE = "https://hsreplay.net/analytics/query"
@@ -58,16 +55,13 @@ def _meta_archetypes_url(source: Source) -> str:
     )
 
 
-def _json_from_pre_wrapped_text(text: str) -> Any:
-    soup = BeautifulSoup(text, "html.parser")
-    pre = soup.find("pre")
-    raw = pre.get_text() if pre else text
-    return json.loads(raw)
-
-
 async def _archetype_name_map(source_id: str) -> dict[int, dict[str, Any]]:
-    text = await fetch_text_via_flaresolverr(ARCHETYPE_DICT_URL, source_id=source_id)
-    raw = _json_from_pre_wrapped_text(text)
+    payload = await fetch_hsreplay_json(
+        ARCHETYPE_DICT_URL,
+        source_id=source_id,
+        cache_key="hsreplay:archetype-dictionary:ru",
+    )
+    raw = payload.get("data")
     if not isinstance(raw, list):
         return {}
     out: dict[int, dict[str, Any]] = {}

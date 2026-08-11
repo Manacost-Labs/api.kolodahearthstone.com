@@ -6,9 +6,10 @@ import random
 import time
 from collections import Counter
 from collections.abc import Awaitable, Callable
+from contextvars import ContextVar
 
 from ..config import fetch_backend_max_seconds, fetch_max_retries
-from ..proxy_errors import ProxyPaymentRequiredError
+from ..proxy_errors import ProxyPaymentRequiredError, proxy_tunnel_error
 from ..publish_gate import validate_candidate_for_publish
 from ..refresh_log import log_action
 from ..source_state import SourceState
@@ -17,6 +18,7 @@ from .base import FetchResult
 from .http_resilience import DEFAULT_BACKOFF_SECONDS, backoff_delay_seconds
 from .proxy import (
     assert_proxy_configured,
+    browser_backend_uses_residential_proxy,
     burn_proxy_session,
     source_can_use_flaresolverr_without_proxy,
 )
@@ -25,18 +27,52 @@ from .quality import looks_like_real_page, quality_metrics
 logger = logging.getLogger(__name__)
 
 BackendFn = Callable[[Source], Awaitable[FetchResult]]
-_backend_failures: Counter[tuple[str, str, str]] = Counter()
 _CIRCUIT_THRESHOLD = 2
+
+_backend_failures_state: ContextVar[
+    Counter[tuple[str, str, str]] | None
+] = ContextVar("backend_failures", default=None)
+
+
+class _ResidentialProxyCircuit:
+    def __init__(self) -> None:
+        self.error: ProxyPaymentRequiredError | None = None
+
+
+_residential_proxy_circuit: ContextVar[_ResidentialProxyCircuit | None] = ContextVar(
+    "residential_proxy_circuit",
+    default=None,
+)
+
+
+def _current_residential_proxy_circuit() -> _ResidentialProxyCircuit:
+    state = _residential_proxy_circuit.get()
+    if state is None:
+        state = _ResidentialProxyCircuit()
+        _residential_proxy_circuit.set(state)
+    return state
+
+
+def _current_backend_failures() -> Counter[tuple[str, str, str]]:
+    """Return backend failure counters shared only within one refresh context."""
+
+    failures = _backend_failures_state.get()
+    if failures is None:
+        failures = Counter()
+        _backend_failures_state.set(failures)
+    return failures
 
 
 def classify_backend_error(exc_type: str, detail: str) -> str:
     text = f"{exc_type} {detail}".lower()
+    if exc_type == "ProxyPaymentRequiredError":
+        # Keep the historical telemetry label so existing dashboards remain
+        # continuous. The exact 402/407 status is emitted separately.
+        return "proxy_407"
     if "timeout" in text:
         return "timeout"
     if "err_name_not_resolved" in text or "name or service" in text or "dns" in text:
         return "dns_error"
-    if "407" in text:
-        return "proxy_407"
     if "403" in text or "cloudflare" in text or "captcha" in text or "challenge" in text:
         return "blocked_403"
     if "tls" in text or "ssl" in text or "certificate" in text:
@@ -65,21 +101,38 @@ def _circuit_key(source: Source, backend: str, classification: str) -> tuple[str
 
 
 def _open_circuit(source: Source, backend: str) -> tuple[str, int] | None:
-    for (scope, name, classification), count in _backend_failures.items():
+    for (scope, name, classification), count in _current_backend_failures().items():
         if scope == _circuit_scope(source, classification) and name == backend and count >= _CIRCUIT_THRESHOLD:
             return classification, count
     return None
 
 
 def _record_backend_success(source: Source, backend: str) -> None:
-    for key in list(_backend_failures):
+    failures = _current_backend_failures()
+    for key in list(failures):
         scope, name, classification = key
         if name == backend and scope == _circuit_scope(source, classification):
-            del _backend_failures[key]
+            del failures[key]
 
 
 def reset_backend_circuits() -> None:
-    _backend_failures.clear()
+    # Assign new mutable state rather than clearing an inherited object: tasks
+    # in one refresh intentionally share their Counter, while disjoint refresh
+    # tasks must never erase or consume each other's circuit history.
+    _backend_failures_state.set(Counter())
+    _residential_proxy_circuit.set(_ResidentialProxyCircuit())
+
+
+def record_residential_proxy_failure(exc: ProxyPaymentRequiredError) -> None:
+    """Open the refresh-wide paid-proxy circuit without affecting cloud routes."""
+
+    state = _current_residential_proxy_circuit()
+    if state.error is None:
+        state.error = exc
+
+
+def residential_proxy_circuit_error() -> ProxyPaymentRequiredError | None:
+    return _current_residential_proxy_circuit().error
 
 
 def _site_backend_order(source: Source) -> list[str]:
@@ -192,8 +245,9 @@ async def fetch_html(
     )
 
     errors: list[str] = []
-    proxy_407_error: ProxyPaymentRequiredError | None = None
+    proxy_error = residential_proxy_circuit_error()
     for attempt in range(1, fetch_max_retries() + 1):
+        proxyless_retry_candidate = False
         log_action(
             "browser.round.begin",
             source_id=source.id,
@@ -201,11 +255,12 @@ async def fetch_html(
             extra={"backends": backend_names},
         )
         for name, fetch_fn, is_available in backends:
-            if proxy_407_error is not None and not (
-                name == "flaresolverr"
-                and source_can_use_flaresolverr_without_proxy(source)
-            ):
-                detail = f"{name}: skipped after residential proxy 407"
+            route_uses_proxy = browser_backend_uses_residential_proxy(source, name)
+            if proxy_error is not None and route_uses_proxy:
+                detail = (
+                    f"{name}: skipped after residential proxy CONNECT "
+                    f"{proxy_error.status_code}"
+                )
                 errors.append(detail)
                 log_action(
                     "browser.backend.skip",
@@ -214,7 +269,10 @@ async def fetch_html(
                     attempt=attempt,
                     detail=detail,
                     level="warn",
-                    extra={"classification": "proxy_407"},
+                    extra={
+                        "classification": "proxy_407",
+                        "proxy_status": proxy_error.status_code,
+                    },
                 )
                 continue
             open_state = _open_circuit(source, name)
@@ -304,10 +362,13 @@ async def fetch_html(
                 _record_backend_success(source, name)
                 return result
             except TimeoutError:
+                if not route_uses_proxy:
+                    proxyless_retry_candidate = True
                 max_s = fetch_backend_max_seconds()
                 msg = f"{name}[{attempt}]: TimeoutError: exceeded {max_s}s backend cap"
                 classification = "timeout"
-                _backend_failures[_circuit_key(source, name, classification)] += 1
+                failures = _current_backend_failures()
+                failures[_circuit_key(source, name, classification)] += 1
                 errors.append(msg)
                 logger.warning("Backend failed for %s — %s", source.id, msg)
                 log_action(
@@ -321,15 +382,35 @@ async def fetch_html(
                     level="error",
                     extra={
                         "classification": classification,
-                        "failure_count": _backend_failures[_circuit_key(source, name, classification)],
+                        "failure_count": failures[
+                            _circuit_key(source, name, classification)
+                        ],
                         "circuit_scope": _circuit_scope(source, classification),
                     },
                 )
                 continue
             except Exception as exc:
-                msg = f"{name}[{attempt}]: {type(exc).__name__}: {exc}"
-                classification = classify_backend_error(type(exc).__name__, str(exc))
-                _backend_failures[_circuit_key(source, name, classification)] += 1
+                typed_proxy_error = (
+                    exc
+                    if isinstance(exc, ProxyPaymentRequiredError)
+                    else proxy_tunnel_error(exc, proxy_used=route_uses_proxy)
+                )
+                reported_exc = typed_proxy_error or exc
+                if typed_proxy_error is not None:
+                    record_residential_proxy_failure(typed_proxy_error)
+                    proxy_error = typed_proxy_error
+                elif not route_uses_proxy:
+                    proxyless_retry_candidate = True
+                msg = (
+                    f"{name}[{attempt}]: {type(reported_exc).__name__}: "
+                    f"{reported_exc}"
+                )
+                classification = classify_backend_error(
+                    type(reported_exc).__name__,
+                    str(reported_exc),
+                )
+                failures = _current_backend_failures()
+                failures[_circuit_key(source, name, classification)] += 1
                 if source.site == "hsguru" and classification == "blocked_403":
                     burn_proxy_session(
                         source.id,
@@ -351,28 +432,25 @@ async def fetch_html(
                     "browser.backend.fail",
                     source_id=source.id,
                     backend=name,
-                    error_type=type(exc).__name__,
-                    detail=str(exc)[:1000],
+                    error_type=type(reported_exc).__name__,
+                    detail=str(reported_exc)[:1000],
                     attempt=attempt,
                     duration_ms=(time.monotonic() - started) * 1000,
                     level="error",
                     extra={
                         "classification": classification,
-                        "failure_count": _backend_failures[_circuit_key(source, name, classification)],
+                        "failure_count": failures[
+                            _circuit_key(source, name, classification)
+                        ],
                         "circuit_scope": _circuit_scope(source, classification),
+                        **(
+                            {"proxy_status": typed_proxy_error.status_code}
+                            if typed_proxy_error is not None
+                            else {}
+                        ),
                     },
                 )
-                if classification == "proxy_407":
-                    # Do not repeat paid-proxy routes. A configured proxyless
-                    # FlareSolverr route may still recover this source.
-                    proxy_407_error = ProxyPaymentRequiredError(
-                        "Residential proxy payment required (407)"
-                    )
-        if proxy_407_error is not None and not any(
-            name == "flaresolverr"
-            and source_can_use_flaresolverr_without_proxy(source)
-            for name, _fetch_fn, _available in backends
-        ):
+        if proxy_error is not None and not proxyless_retry_candidate:
             break
         if attempt < fetch_max_retries():
             # FIX: exponential backoff with jitter (5s → 15s → 45s), not fixed 3*attempt
@@ -393,6 +471,6 @@ async def fetch_html(
         detail=detail,
         level="error",
     )
-    if proxy_407_error is not None:
-        raise proxy_407_error
+    if proxy_error is not None:
+        raise proxy_error
     raise RuntimeError(detail)

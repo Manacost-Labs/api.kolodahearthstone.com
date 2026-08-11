@@ -123,6 +123,10 @@ docker exec hs-data-api python -m app.cli brightdata-init-usage --billed-request
 | --- | --- |
 | `HS_SCRAPE_DO_TOKEN` | API token основного провайдера. |
 | `HS_SCRAPE_DO_TIMEOUT_SECONDS` | Wall timeout Scrape.do, `120`. |
+| `HS_HSREPLAY_JSON_CHANNELS` | Каскад HSReplay JSON; default `curl_cffi,flaresolverr,scrape_do`. Предпочтения контракта идут первыми, затем добавляются настроенные каналы без дублей. |
+| `HS_HSREPLAY_SCRAPE_DO_MAX_REQUESTS` | Атомарный лимит зарезервированных HSReplay JSON-вызовов Scrape.do на refresh, default `120`. Этого достаточно для текущего полного набора архетипов с запасом. |
+| `HS_HSREPLAY_SCRAPE_DO_MAX_CREDITS` | Атомарный credit ceiling HSReplay JSON на refresh, default `160`. Ошибочные и отклонённые вызовы не возвращают резерв. |
+| `HS_HSREPLAY_SCRAPE_DO_MAX_CONCURRENCY` | Параллельные HSReplay JSON-вызовы Scrape.do, default `2`. |
 | `HS_FIRECRAWL_API_KEYS` | Ротируемый пул Firecrawl. |
 | `HS_FIRECRAWL_KEY_ROTATION_CREDITS` | Локальный credit ceiling на ключ. |
 | `HS_SCRAPFLY_API_KEYS` | Ротируемый пул Scrapfly. |
@@ -151,3 +155,9 @@ HS_BRIGHTDATA_MONTHLY_BILLABLE_LIMIT=0
 коммитить или логировать. После изменения provider configuration начинайте с
 одной выделенной zone, одного дешёвого source ID и малого лимита, а production
 allowlist расширяйте только по результатам quality/freshness наблюдения.
+
+Для HSReplay JSON канал `scrape_do` использует только standard non-rendered
+request (`render=false`, без Bright Data). Перед вызовом проверяются HTTPS и
+точный host `hsreplay.net`; только cookies этого домена передаются как
+`Sd-Cookie`. CONNECT `402/407` открывает контур до следующего refresh: следующие
+proxy-backed каналы пропускаются, но независимый Scrape.do продолжает каскад.

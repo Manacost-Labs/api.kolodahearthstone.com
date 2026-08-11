@@ -34,6 +34,7 @@ from .config import (
 )
 from .deck_decode import decode_deck_code
 from .parser_control import load_resolved_public_dataset
+from .resource_locks import ResourceLocked, ResourceLockSet
 from .source_state import SourceState
 from .sources import SOURCE_BY_ID, Source
 from .storage import load_dataset, save_dataset, save_status
@@ -1039,7 +1040,7 @@ def _balance_and_dedupe(rows: list[dict[str, Any]], *, per_format_keep: int = 22
     return balanced
 
 
-def refresh_fun_decks(
+def _refresh_fun_decks_unlocked(
     *,
     scheduled: bool = False,
     format_focus: str | None = None,
@@ -1228,3 +1229,34 @@ def refresh_fun_decks(
         "published_by_format": dict(published_fmt),
         "fetched_at": seen_at,
     }
+
+
+def refresh_fun_decks(
+    *,
+    scheduled: bool = False,
+    format_focus: str | None = None,
+) -> dict[str, Any]:
+    """Rebuild the derived dataset unless another process owns the source."""
+    locks = ResourceLockSet(
+        [SOURCE_ID],
+        metadata={"operation": "refresh_fun_decks"},
+    )
+    try:
+        locks.acquire()
+    except ResourceLocked as exc:
+        return {
+            "ok": True,
+            "published": False,
+            "source_id": SOURCE_ID,
+            **exc.as_outcome(),
+        }
+
+    try:
+        result = _refresh_fun_decks_unlocked(
+            scheduled=scheduled,
+            format_focus=format_focus,
+        )
+        result["published"] = True
+        return result
+    finally:
+        locks.release()

@@ -15,6 +15,7 @@ from .firecrawl_map import load_hsreplay_index
 from .hsreplay_client import fetch_hsreplay_json
 from .hsreplay_meta_api import CLASS_RU_NAMES, _archetype_name_map
 from .refresh_log import log_action
+from .resource_locks import ResourceLocked, ResourceLockSet
 
 HSREPLAY_ANALYTICS_BASE = "https://hsreplay.net/analytics/query"
 SOURCE = "hsreplay_archetypes"
@@ -215,7 +216,14 @@ def _begin_run(
         conn.close()
 
 
-def _finish_run(run_id: int, *, state: str, archetypes_ok: int, error: str | None = None) -> None:
+def _finish_run(
+    run_id: int,
+    *,
+    state: str,
+    archetypes_ok: int,
+    error: str | None = None,
+    write_source_status: bool = True,
+) -> None:
     conn = get_db_connection()
     try:
         with conn:
@@ -229,7 +237,29 @@ def _finish_run(run_id: int, *, state: str, archetypes_ok: int, error: str | Non
             )
     finally:
         conn.close()
-    _save_source_status(run_id, run_state=state, archetypes_ok=archetypes_ok, error=error)
+    if write_source_status:
+        _save_source_status(
+            run_id,
+            run_state=state,
+            archetypes_ok=archetypes_ok,
+            error=error,
+        )
+
+
+def _cached_source_dataset() -> dict[str, Any] | None:
+    from .storage import load_dataset
+
+    try:
+        dataset = load_dataset(SOURCE)
+    except Exception as exc:  # cached-read telemetry must not invert a refresh result
+        log_action(
+            "hsreplay.archetype_db.cached_read.fail",
+            source_id=SOURCE,
+            level="warn",
+            detail=type(exc).__name__,
+        )
+        return None
+    return dataset if isinstance(dataset, dict) and dataset else None
 
 
 def _save_source_status(run_id: int, *, run_state: str, archetypes_ok: int, error: str | None) -> None:
@@ -249,19 +279,38 @@ def _save_source_status(run_id: int, *, run_state: str, archetypes_ok: int, erro
     detail = f"Archetype DB run {run_id}: state={run_state}, archetypes_ok={archetypes_ok}."
     if error:
         detail += f" error={error[:800]}"
+    refreshed_at = datetime.now(UTC).isoformat()
+    cached_dataset = _cached_source_dataset() if run_state != "ok" else None
+    serving_cached = cached_dataset is not None
+    published_at = (
+        str(cached_dataset.get("fetched_at") or refreshed_at)
+        if serving_cached
+        else refreshed_at
+    )
+    status_state = SourceState.OK if serving_cached else state
+    status: dict[str, Any] = {
+        "source_id": SOURCE,
+        "site": "hsreplay",
+        "category": "meta",
+        "url": "https://hsreplay.net/meta/",
+        "state": status_state,
+        "fetched_at": published_at,
+        "backend": (
+            str(cached_dataset.get("backend") or "hsreplay_api")
+            if serving_cached
+            else "hsreplay_api"
+        ),
+        "detail": detail,
+        "serving_cached_dataset": serving_cached,
+        "last_refresh_state": state,
+        "last_refresh_at": refreshed_at,
+    }
+    if error:
+        status["last_refresh_error"] = error[:800]
     try:
         save_status(
             SOURCE,
-            {
-                "source_id": SOURCE,
-                "site": "hsreplay",
-                "category": "meta",
-                "url": "https://hsreplay.net/meta/",
-                "state": state,
-                "fetched_at": datetime.now(UTC).isoformat(),
-                "backend": "hsreplay_api",
-                "detail": detail,
-            },
+            status,
         )
     except Exception as exc:  # status write must not fail the SQLite run
         log_action(
@@ -727,7 +776,7 @@ def _build_snapshot(
     }
 
 
-async def refresh_hsreplay_archetype_database(
+async def _refresh_hsreplay_archetype_database_unlocked(
     *,
     rank_range: str = "LEGEND",
     game_type: str = "RANKED_STANDARD",
@@ -737,17 +786,47 @@ async def refresh_hsreplay_archetype_database(
     mulligan_time_range: str = "LAST_30_DAYS",
     limit: int | None = None,
 ) -> dict[str, Any]:
+    if limit is not None and limit < 1:
+        raise ValueError("limit must be at least 1")
+    diagnostic = limit is not None
     archetypes = _archetypes_from_index()
-    if limit is not None:
+    if diagnostic:
         archetypes = archetypes[:limit]
-    run_id = _begin_run(
-        game_type=game_type,
-        rank_range=rank_range,
-        region=region,
-        summary_time_range=summary_time_range,
-        deck_time_range=deck_time_range,
-        archetypes_total=len(archetypes),
+    run_id = (
+        None
+        if diagnostic
+        else _begin_run(
+            game_type=game_type,
+            rank_range=rank_range,
+            region=region,
+            summary_time_range=summary_time_range,
+            deck_time_range=deck_time_range,
+            archetypes_total=len(archetypes),
+        )
     )
+    if not archetypes:
+        message = "HSReplay archetype index is empty; refusing to publish"
+        if run_id is not None:
+            _finish_run(
+                run_id,
+                state="failed",
+                archetypes_ok=0,
+                error=message,
+            )
+        return {
+            "ok": False,
+            "state": "diagnostic_failed" if diagnostic else "failed",
+            "run_id": run_id,
+            "archetypes_total": 0,
+            "archetypes_ok": 0,
+            "errors": [{"error": message}],
+            "snapshots": [],
+            "diagnostic": diagnostic,
+            "published": False,
+            "serving_cached_dataset": (
+                _cached_source_dataset() is not None and not diagnostic
+            ),
+        }
     ok = 0
     errors: list[dict[str, Any]] = []
     snapshots: list[dict[str, Any]] = []
@@ -786,7 +865,15 @@ async def refresh_hsreplay_archetype_database(
                     deck_time_range=deck_time_range,
                     mulligan_time_range=mulligan_time_range,
                 )
-                snapshot_id = store_archetype_snapshot(run_id=run_id, archetype=archetype, snapshot=snapshot)
+                snapshot_id = (
+                    store_archetype_snapshot(
+                        run_id=run_id,
+                        archetype=archetype,
+                        snapshot=snapshot,
+                    )
+                    if run_id is not None
+                    else None
+                )
                 ok += 1
                 snapshots.append(
                     {
@@ -811,13 +898,120 @@ async def refresh_hsreplay_archetype_database(
                     detail=str(exc)[:1000],
                     extra={"run_id": run_id, "archetype_id": archetype_id},
                 )
-        # NOTE: SQLite run-state domain ("ok"/"partial"/"failed"/"running"), not app.source_state.SourceState.
-        state = "ok" if not errors else ("partial" if ok else "failed")
-        _finish_run(run_id, state=state, archetypes_ok=ok, error=json.dumps(errors, ensure_ascii=False) if errors else None)
-        return {"ok": state in {"ok", "partial"}, "state": state, "run_id": run_id, "archetypes_total": len(archetypes), "archetypes_ok": ok, "errors": errors, "snapshots": snapshots}
+        if diagnostic:
+            state = "diagnostic" if not errors else "diagnostic_failed"
+        else:
+            # NOTE: SQLite run-state domain ("ok"/"partial"/"failed"/"running"),
+            # not app.source_state.SourceState.
+            state = "ok" if not errors else ("partial" if ok else "failed")
+            assert run_id is not None
+            _finish_run(
+                run_id,
+                state=state,
+                archetypes_ok=ok,
+                error=json.dumps(errors, ensure_ascii=False) if errors else None,
+                write_source_status=state != "ok",
+            )
+        serving_cached_dataset = False
+        if not diagnostic and state != "ok":
+            serving_cached_dataset = _cached_source_dataset() is not None
+        return {
+            "ok": not errors if diagnostic else state == "ok",
+            "state": state,
+            "run_id": run_id,
+            "archetypes_total": len(archetypes),
+            "archetypes_ok": ok,
+            "errors": errors,
+            "snapshots": snapshots,
+            "diagnostic": diagnostic,
+            "published": not diagnostic and state == "ok",
+            "serving_cached_dataset": serving_cached_dataset,
+        }
     except Exception as exc:
-        _finish_run(run_id, state="failed", archetypes_ok=ok, error=str(exc)[:1000])
+        if run_id is not None:
+            _finish_run(run_id, state="failed", archetypes_ok=ok, error=str(exc)[:1000])
         raise
+
+
+async def refresh_hsreplay_archetype_database(
+    *,
+    rank_range: str = "LEGEND",
+    game_type: str = "RANKED_STANDARD",
+    region: str = "REGION_EU",
+    summary_time_range: str = "LAST_7_DAYS",
+    deck_time_range: str = "LAST_30_DAYS",
+    mulligan_time_range: str = "LAST_30_DAYS",
+    limit: int | None = None,
+) -> dict[str, Any]:
+    """Refresh and publish one complete snapshot under a process-wide source lock.
+
+    A limited run remains useful for diagnostics, but never writes a refresh run,
+    snapshots, status, compatibility export, or canonical production dataset.
+    """
+    locks = ResourceLockSet(
+        [SOURCE],
+        metadata={"operation": "refresh_hsreplay_archetype_database"},
+    )
+    try:
+        locks.acquire()
+    except ResourceLocked as exc:
+        return {
+            "ok": True,
+            "published": False,
+            "source_id": SOURCE,
+            **exc.as_outcome(),
+        }
+
+    try:
+        from .hsreplay_client import reset_hsreplay_refresh_state
+
+        reset_hsreplay_refresh_state()
+        result = await _refresh_hsreplay_archetype_database_unlocked(
+            rank_range=rank_range,
+            game_type=game_type,
+            region=region,
+            summary_time_range=summary_time_range,
+            deck_time_range=deck_time_range,
+            mulligan_time_range=mulligan_time_range,
+            limit=limit,
+        )
+        if result.get("published"):
+            try:
+                result["export_path"] = str(export_latest_archetypes_json())
+            except Exception as exc:  # publication failure must preserve the LKG
+                run_id = result.get("run_id")
+                archetypes_ok = int(result.get("archetypes_ok") or 0)
+                error = f"publication failed: {type(exc).__name__}"
+                if isinstance(run_id, int):
+                    _finish_run(
+                        run_id,
+                        state="failed",
+                        archetypes_ok=archetypes_ok,
+                        error=error,
+                    )
+                result.update(
+                    {
+                        "ok": False,
+                        "state": "failed",
+                        "published": False,
+                        "serving_cached_dataset": (
+                            _cached_source_dataset() is not None
+                        ),
+                        "errors": [*result.get("errors", []), {"error": error}],
+                    }
+                )
+            else:
+                run_id = result.get("run_id")
+                if isinstance(run_id, int):
+                    _save_source_status(
+                        run_id,
+                        run_state="ok",
+                        archetypes_ok=int(result.get("archetypes_ok") or 0),
+                        error=None,
+                    )
+        return result
+    finally:
+        locks.release()
 
 
 def _row_dict(row: Any) -> dict[str, Any]:
@@ -1038,12 +1232,10 @@ def export_latest_archetypes_json(path: Path | None = None) -> Path:
         **page,
     }
 
-    # Pipeline sources participate in the same canonical dataset contract as
-    # scraper-backed sources.  Publishing only the legacy ``*_db_latest``
-    # export left ``stale_monitor`` reading an older
-    # ``datasets/hsreplay_archetypes.json`` forever, even after a successful
-    # SQLite refresh.  Keep the compatibility export, but atomically advance
-    # the registered source snapshot as part of the same publication step.
+    # The canonical dataset is the authoritative publication boundary. The
+    # legacy ``*_db_latest`` file is compatibility-only and must never turn a
+    # successful canonical publish into a false LKG/failure if its secondary
+    # write fails.
     from .storage import save_dataset, write_json
 
     save_dataset(
@@ -1059,5 +1251,13 @@ def export_latest_archetypes_json(path: Path | None = None) -> Path:
             "data": {"structured": structured},
         },
     )
-    write_json(path, payload)
+    try:
+        write_json(path, payload)
+    except Exception as exc:  # canonical publication already succeeded
+        log_action(
+            "hsreplay.archetype_db.legacy_export.fail",
+            source_id=SOURCE,
+            level="warn",
+            detail=type(exc).__name__,
+        )
     return path

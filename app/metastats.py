@@ -4,13 +4,18 @@ import asyncio
 import html
 import logging
 import re
+from collections.abc import Callable
+from dataclasses import replace
 from typing import Any
 
 import httpx
 from bs4 import BeautifulSoup
 
 from .cards_index import card_from_id
+from .firecrawl_backend import scrape_source_with_options
+from .proxy_errors import ProxyPaymentRequiredError, proxy_tunnel_error
 from .scrapers.proxy import httpx_client_kwargs
+from .source_contracts import contract_quality_ok
 from .sources import Source
 
 logger = logging.getLogger(__name__)
@@ -28,6 +33,19 @@ CLASSES = [
     "Warlock",
     "Warrior",
 ]
+
+_MAX_CLASS_FETCH_CONCURRENCY = 2
+_HTML_HEADERS = {
+    "accept": (
+        "text/html,application/xhtml+xml,application/xml;q=0.9,"
+        "image/webp,image/apng,*/*;q=0.8"
+    ),
+    "user-agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/120.0.0.0 Safari/537.36"
+    ),
+}
 
 
 def parse_decklist_div(dl, archetype_id: str, archetype_name: str, class_name: str) -> dict[str, Any] | None:
@@ -60,7 +78,7 @@ def parse_decklist_div(dl, archetype_id: str, archetype_name: str, class_name: s
         except ValueError:
             pass
 
-    wr_match = re.search(r"#Win\s*Rate:\s*([\d.]+\s*%)", text, re.I)
+    wr_match = re.search(r"#Win\s*Rate:\s*([\d.]+\s*%)", text, re.IGNORECASE)
     if wr_match:
         win_rate = wr_match.group(1).strip()
 
@@ -169,43 +187,161 @@ def parse_metastats_class_page(html_content: str, class_name: str) -> list[dict[
     return decks
 
 
-async def fetch_metastats_decks(source: Source) -> dict[str, Any]:
-    all_decks = []
-    classes_parsed = []
+async def _fetch_residential_html(source_id: str, url: str) -> str:
+    options = httpx_client_kwargs(source_id, page_url=url)
+    try:
+        async with httpx.AsyncClient(**options) as client:
+            response = await client.get(url, headers=_HTML_HEADERS)
+            response.raise_for_status()
+            return response.text
+    except Exception as exc:
+        typed_proxy_error = proxy_tunnel_error(
+            exc,
+            proxy_used=bool(options.get("proxy")),
+        )
+        if typed_proxy_error is not None:
+            raise typed_proxy_error from exc
+        raise
 
-    async with httpx.AsyncClient(**httpx_client_kwargs(source.id)) as client:
-        tasks = []
-        for cls_name in CLASSES:
-            url = f"https://metastats.net/hearthstone/class/decks/{cls_name}/"
-            headers = {
-                "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
-                "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            }
-            tasks.append(client.get(url, headers=headers))
 
-        responses = await asyncio.gather(*tasks, return_exceptions=True)
+async def _fetch_cloud_html(
+    source: Source,
+    *,
+    accept_html: Callable[[str], bool],
+) -> tuple[str, str]:
+    # Deliberately pass no request headers or cookies: this keeps Bright Data
+    # eligible while preventing authentication material from entering its path.
+    scraped = await scrape_source_with_options(
+        source,
+        formats=["html"],
+        only_main_content=False,
+        max_age_ms=0,
+        brightdata_accept_html=accept_html,
+    )
+    html_content = scraped.html or scraped.markdown
+    if not accept_html(html_content):
+        raise RuntimeError("MetaStats cloud response failed source validation")
+    return html_content, scraped.backend
 
-        for cls_name, resp in zip(CLASSES, responses):
-            if isinstance(resp, Exception):
-                logger.error(f"Error fetching class {cls_name}: {resp}")
-                continue
-            if resp.status_code != 200:
-                logger.error(f"Non-200 response for class {cls_name}: {resp.status_code}")
-                continue
 
+def _metastats_class_html_is_usable(html_content: str, class_name: str) -> bool:
+    try:
+        return bool(parse_metastats_class_page(html_content, class_name))
+    except Exception:  # noqa: BLE001 - provider candidate validation fails closed
+        return False
+
+
+def _metastats_contract_is_usable(
+    source_id: str,
+    structured: dict[str, Any],
+) -> bool:
+    try:
+        ok, _reason, _report = contract_quality_ok(source_id, structured)
+        return ok
+    except Exception:  # noqa: BLE001 - source contract validation fails closed
+        return False
+
+
+async def _fetch_metastats_class(
+    source: Source,
+    class_name: str,
+    *,
+    semaphore: asyncio.Semaphore,
+    proxy_unavailable: asyncio.Event,
+) -> tuple[str, list[dict[str, Any]], str]:
+    url = f"https://metastats.net/hearthstone/class/decks/{class_name}/"
+    class_source = replace(source, url=url)
+
+    async with semaphore:
+        html_content = ""
+        backend = ""
+        if not proxy_unavailable.is_set():
             try:
-                decks = parse_metastats_class_page(resp.text, cls_name)
-                all_decks.extend(decks)
-                classes_parsed.append(cls_name)
-            except Exception as e:
-                logger.error(f"Error parsing class {cls_name}: {e}")
+                html_content = await _fetch_residential_html(source.id, url)
+                backend = "residential_httpx"
+            except ProxyPaymentRequiredError as exc:
+                from .scrapers.rotator import record_residential_proxy_failure
 
-    return {
+                record_residential_proxy_failure(exc)
+                proxy_unavailable.set()
+            except Exception as exc:  # noqa: BLE001 - cloud is an independent route
+                logger.warning(
+                    "MetaStats residential class fetch failed class=%s error=%s",
+                    class_name,
+                    type(exc).__name__,
+                )
+
+        if not _metastats_class_html_is_usable(html_content, class_name):
+            html_content, backend = await _fetch_cloud_html(
+                class_source,
+                accept_html=lambda candidate: _metastats_class_html_is_usable(
+                    candidate,
+                    class_name,
+                ),
+            )
+
+        decks = parse_metastats_class_page(html_content, class_name)
+        if not decks:
+            raise RuntimeError(f"MetaStats class {class_name} returned no decks")
+        return class_name, decks, backend
+
+
+async def fetch_metastats_decks(source: Source) -> dict[str, Any]:
+    """Fetch all class pages with bounded concurrency and all-or-nothing output."""
+
+    semaphore = asyncio.Semaphore(_MAX_CLASS_FETCH_CONCURRENCY)
+    proxy_unavailable = asyncio.Event()
+    results = await asyncio.gather(
+        *(
+            _fetch_metastats_class(
+                source,
+                class_name,
+                semaphore=semaphore,
+                proxy_unavailable=proxy_unavailable,
+            )
+            for class_name in CLASSES
+        ),
+        return_exceptions=True,
+    )
+
+    failures: list[str] = []
+    by_class: dict[str, list[dict[str, Any]]] = {}
+    class_backends: dict[str, str] = {}
+    for class_name, result in zip(CLASSES, results, strict=True):
+        if isinstance(result, BaseException):
+            logger.warning(
+                "MetaStats class unavailable class=%s error=%s",
+                class_name,
+                type(result).__name__,
+            )
+            failures.append(class_name)
+            continue
+        parsed_class, decks, backend = result
+        by_class[parsed_class] = decks
+        class_backends[parsed_class] = backend
+
+    if failures or set(by_class) != set(CLASSES):
+        raise RuntimeError(
+            "MetaStats class coverage incomplete "
+            f"({len(by_class)}/{len(CLASSES)}; failed={','.join(failures)})"
+        )
+
+    all_decks = [deck for class_name in CLASSES for deck in by_class[class_name]]
+    backends = sorted(set(class_backends.values()))
+    fetch_backend = (
+        backends[0] if len(backends) == 1 else f"mixed[{','.join(backends)}]"
+    )
+    structured = {
         "type": "metastats_decks",
         "decks": all_decks,
-        "classes_parsed": classes_parsed,
+        "classes_parsed": list(CLASSES),
         "total_decks": len(all_decks),
+        "_fetch_backend": fetch_backend,
     }
+    ok, reason, _report = contract_quality_ok(source.id, structured)
+    if not ok:
+        raise RuntimeError(f"MetaStats decks failed source contract: {reason}")
+    return structured
 
 
 def parse_metastats_matchups(html_content: str) -> dict[str, Any]:
@@ -250,7 +386,15 @@ def parse_metastats_matchups(html_content: str) -> dict[str, Any]:
             if games_match:
                 games = int(games_match.group(1))
 
-            lines = [l.strip() for l in re.split(r"<br/?>|\n", title_text, flags=re.I) if l.strip()]
+            lines = [
+                line.strip()
+                for line in re.split(
+                    r"<br/?>|\n",
+                    title_text,
+                    flags=re.IGNORECASE,
+                )
+                if line.strip()
+            ]
             for line in lines:
                 if ":" in line:
                     parts = line.split(":", 1)
@@ -285,15 +429,33 @@ def parse_metastats_matchups(html_content: str) -> dict[str, Any]:
 
 
 async def fetch_metastats_matchups(source: Source) -> dict[str, Any]:
-    headers = {
-        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
-        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    }
+    html_content = ""
+    backend = "residential_httpx"
+    try:
+        html_content = await _fetch_residential_html(source.id, source.url)
+    except ProxyPaymentRequiredError as exc:
+        from .scrapers.rotator import record_residential_proxy_failure
 
-    async with httpx.AsyncClient(**httpx_client_kwargs(source.id)) as client:
-        resp = await client.get(source.url, headers=headers)
-        resp.raise_for_status()
-        html_content = resp.text
+        record_residential_proxy_failure(exc)
+        backend = ""
+    except Exception as exc:  # noqa: BLE001 - cloud is an independent route
+        logger.warning(
+            "MetaStats residential matchup fetch failed error=%s",
+            type(exc).__name__,
+        )
 
+    direct_candidate = parse_metastats_matchups(html_content)
+    if not _metastats_contract_is_usable(source.id, direct_candidate):
+        html_content, backend = await _fetch_cloud_html(
+            source,
+            accept_html=lambda candidate: _metastats_contract_is_usable(
+                source.id,
+                parse_metastats_matchups(candidate),
+            ),
+        )
     structured = parse_metastats_matchups(html_content)
+    ok, reason, _report = contract_quality_ok(source.id, structured)
+    if not ok:
+        raise RuntimeError(f"MetaStats matchups failed source contract: {reason}")
+    structured["_fetch_backend"] = backend
     return structured

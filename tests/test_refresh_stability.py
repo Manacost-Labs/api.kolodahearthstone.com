@@ -13,6 +13,7 @@ from app.fetch_routes import source_can_run_without_residential_proxy
 from app.fetcher import (
     _attach_proxy_egress,
     _preserve_cached_ok_status,
+    _refresh_outcome_counts,
     _refresh_sources_unlocked,
     _refresh_traffic_summary,
     _run_tier_parallel,
@@ -43,7 +44,7 @@ from app.refresh_log import runtime_version_info
 from app.scrapers.proxy import source_can_use_flaresolverr_without_proxy
 from app.scrapers.quality import validate_parsed_data
 from app.scrapers.rotator import (
-    _backend_failures,
+    _current_backend_failures,
     _open_circuit,
     _ordered_backends,
     classify_backend_error,
@@ -58,6 +59,43 @@ from app.vicious_syndicate import find_radar_url, looks_like_vicious_deck_librar
 
 
 class RefreshStabilityTest(unittest.TestCase):
+    def test_refresh_outcome_counts_do_not_report_lkg_as_live_success(self) -> None:
+        counts = _refresh_outcome_counts(
+            [
+                {"source_id": "fresh", "state": "ok"},
+                {
+                    "source_id": "candidate",
+                    "state": "ok",
+                    "provisional": True,
+                },
+                {
+                    "source_id": "cached",
+                    "state": "ok",
+                    "serving_cached_dataset": True,
+                },
+                {
+                    "source_id": "locked",
+                    "state": "locked",
+                    "skipped": True,
+                },
+                {"source_id": "failed", "state": "fetch_error"},
+            ]
+        )
+
+        self.assertEqual(
+            counts,
+            {
+                "fresh_ok": 1,
+                "provisional": 1,
+                "cached_lkg": 1,
+                "skipped": 1,
+                "fail": 1,
+                "ok": 2,
+                "available": 3,
+                "total": 5,
+            },
+        )
+
     def test_rotator_preserves_typed_proxy_407_for_tier_circuit(self) -> None:
         source = Source(
             id="proxy_407_integration",
@@ -963,13 +1001,14 @@ class RefreshStabilityTest(unittest.TestCase):
             category="meta",
             url="https://www.hsguru.com/meta",
         )
-        _backend_failures.clear()
+        failures = _current_backend_failures()
+        failures.clear()
         try:
-            _backend_failures[(f"site:{source.site}", "patchright", "dns_error")] = 2
+            failures[(f"site:{source.site}", "patchright", "dns_error")] = 2
             self.assertEqual(_open_circuit(source, "patchright"), ("dns_error", 2))
             self.assertIsNone(_open_circuit(source, "flaresolverr"))
         finally:
-            _backend_failures.clear()
+            failures.clear()
 
     def test_quality_circuit_is_source_scoped(self) -> None:
         source = Source(
@@ -984,19 +1023,49 @@ class RefreshStabilityTest(unittest.TestCase):
             category="ranked",
             url="https://hsreplay.net/cards/",
         )
-        _backend_failures.clear()
+        failures = _current_backend_failures()
+        failures.clear()
         try:
-            _backend_failures[(f"source:{source.id}", "flaresolverr", "quality_empty")] = 2
+            failures[
+                (f"source:{source.id}", "flaresolverr", "quality_empty")
+            ] = 2
             self.assertEqual(_open_circuit(source, "flaresolverr"), ("quality_empty", 2))
             self.assertIsNone(_open_circuit(other, "flaresolverr"))
         finally:
-            _backend_failures.clear()
+            failures.clear()
 
     def test_backend_circuit_reset_clears_failures(self) -> None:
-        _backend_failures[(("hsreplay", "patchright", "dns_error"))] = 2
+        _current_backend_failures()[("hsreplay", "patchright", "dns_error")] = 2
         reset_backend_circuits()
 
-        self.assertEqual(_backend_failures, {})
+        self.assertEqual(_current_backend_failures(), {})
+
+    def test_backend_circuit_isolated_between_concurrent_refresh_contexts(self) -> None:
+        async def run() -> tuple[bool, bool]:
+            first_ready = asyncio.Event()
+            second_done = asyncio.Event()
+
+            async def first_refresh() -> bool:
+                reset_backend_circuits()
+                first_failures = _current_backend_failures()
+                first_failures[("site:first", "curl_cffi", "timeout")] = 2
+                first_ready.set()
+                await second_done.wait()
+                return bool(first_failures)
+
+            async def second_refresh() -> bool:
+                await first_ready.wait()
+                reset_backend_circuits()
+                isolated = not _current_backend_failures()
+                second_done.set()
+                return isolated
+
+            return await asyncio.gather(first_refresh(), second_refresh())
+
+        first_preserved, second_isolated = asyncio.run(run())
+
+        self.assertTrue(first_preserved)
+        self.assertTrue(second_isolated)
 
     def test_hsguru_and_hsreplay_flaresolverr_can_skip_proxy_requirement(self) -> None:
         self.assertTrue(

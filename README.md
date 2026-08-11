@@ -405,6 +405,9 @@ Scoped orchestration, требует отдельный `X-Orchestrator-Key`:
 - Bright Data оставляйте выключенным до настройки точного source allowlist,
   выделенной Web Unlocker zone, ненулевого месячного лимита и однократной
   инициализации usage ledger по текущему значению из provider dashboard.
+- HSReplay JSON через Scrape.do работает только как non-rendered fallback для
+  точного `https://hsreplay.net`; refresh-scoped request/credit/concurrency
+  ceilings обязательны, а CONNECT `402/407` не повторяется через тот же proxy.
 - Перед публикацией изменений запускайте tests, Docker build и secret scan.
 
 ## License

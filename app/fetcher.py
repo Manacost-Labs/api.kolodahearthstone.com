@@ -97,6 +97,45 @@ _standard_publication_attempt: ContextVar[Any | None] = ContextVar(
 )
 
 
+class _RefreshProxyCircuit:
+    """Refresh-scoped state shared by parallel and serial source phases."""
+
+    def __init__(self) -> None:
+        self.error: ProxyPaymentRequiredError | None = None
+
+    @property
+    def is_open(self) -> bool:
+        return self.error is not None
+
+    def open(self, error: ProxyPaymentRequiredError) -> None:
+        if self.error is None:
+            self.error = error
+
+    def open_from_status(self, status: dict[str, Any]) -> None:
+        if not _status_reports_proxy_407(status):
+            return
+        raw_status = status.get("proxy_status") or status.get(
+            "last_refresh_proxy_status"
+        )
+        if isinstance(raw_status, int):
+            proxy_status = raw_status
+        elif isinstance(raw_status, str):
+            try:
+                proxy_status = int(raw_status)
+            except ValueError:
+                proxy_status = 407
+        else:
+            proxy_status = 407
+        if proxy_status not in {402, 407}:
+            proxy_status = 407
+        self.open(
+            ProxyPaymentRequiredError(
+                f"Residential proxy CONNECT tunnel is unavailable (HTTP {proxy_status})",
+                status_code=proxy_status,
+            )
+        )
+
+
 def now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
@@ -279,7 +318,10 @@ def _attach_failure_class(
     exc: BaseException,
 ) -> dict[str, Any]:
     if isinstance(exc, ProxyPaymentRequiredError):
+        # Preserve the historical label consumed by dashboards while exposing
+        # the exact CONNECT rejection for new telemetry.
         status["failure_class"] = "proxy_407"
+        status["proxy_status"] = exc.status_code
     return status
 
 
@@ -291,6 +333,16 @@ def _source_uses_residential_proxy(source: Source, backend: str | None) -> bool:
 
         return not source_can_use_flaresolverr_without_proxy(source)
     if backend == "hsreplay_premium_flaresolverr":
+        return False
+    if backend == "residential_httpx" or "residential_httpx" in backend:
+        return True
+    if backend in {
+        "brightdata_web_unlocker",
+        "firecrawl",
+        "scrape_do",
+        "scrape_do_super",
+        "scrapfly",
+    }:
         return False
     if backend in {"direct", "patchright", "scrapling", "curl_cffi", "cloudscraper", "cloakbrowser"}:
         return True
@@ -380,6 +432,8 @@ def _preserve_cached_ok_status(source: Source, failed_status: dict[str, Any]) ->
         status["latest_ai_review"] = failed_status["ai_review"]
     if failed_status.get("failure_class"):
         status["last_refresh_failure_class"] = failed_status["failure_class"]
+    if failed_status.get("proxy_status") in {402, 407}:
+        status["last_refresh_proxy_status"] = failed_status["proxy_status"]
     try:
         cached_dt = datetime.fromisoformat(cached_at.replace("Z", "+00:00"))
         if cached_dt.tzinfo is None:
@@ -743,8 +797,15 @@ def _dataset_from_structured(source: Source, structured: dict[str, Any], *, back
 
     from .structured_schema import validate_structured_schema
 
-    schema_validation = validate_structured_schema(structured)
-    body = json_mod.dumps(structured, ensure_ascii=False)
+    public_structured = dict(structured)
+    candidate_backend = public_structured.pop("_fetch_backend", None)
+    effective_backend = (
+        candidate_backend.strip()
+        if isinstance(candidate_backend, str) and candidate_backend.strip()
+        else backend
+    )
+    schema_validation = validate_structured_schema(public_structured)
+    body = json_mod.dumps(public_structured, ensure_ascii=False)
     return {
         "source_id": source.id,
         "site": source.site,
@@ -756,8 +817,8 @@ def _dataset_from_structured(source: Source, structured: dict[str, Any], *, back
         "tables": [],
         "json_scripts": [],
         "hsreplay_bootstrap": None,
-        "structured": structured,
-        "hsreplay_extracted": structured,
+        "structured": public_structured,
+        "hsreplay_extracted": public_structured,
         "schema_validation": schema_validation,
         "deck_codes": [],
         "links": [],
@@ -770,7 +831,7 @@ def _dataset_from_structured(source: Source, structured: dict[str, Any], *, back
             "text_lines": 0,
             "api_bytes": len(body.encode("utf-8")),
         },
-        "_backend": backend,
+        "_backend": effective_backend,
     }
 
 
@@ -2094,6 +2155,42 @@ def _attach_proxy_egress(status: dict[str, Any], proxy_info: dict[str, str]) -> 
     return status
 
 
+def _refresh_outcome_counts(
+    results: list[dict[str, Any]],
+) -> dict[str, int]:
+    """Classify live publication separately from LKG availability.
+
+    A cached dataset keeps the API serviceable, but it is not a successful
+    parsing attempt. Keeping the buckets mutually exclusive makes both logs
+    and dashboards report the live success percentage honestly.
+    """
+
+    counts = {
+        "fresh_ok": 0,
+        "provisional": 0,
+        "cached_lkg": 0,
+        "skipped": 0,
+        "fail": 0,
+    }
+    for status in results:
+        state = str(status.get("state") or "").strip().lower()
+        if status.get("skipped") is True or state in {"locked", "skipped"}:
+            counts["skipped"] += 1
+        elif status.get("serving_cached_dataset") is True:
+            counts["cached_lkg"] += 1
+        elif state == SourceState.OK and status.get("provisional") is True:
+            counts["provisional"] += 1
+        elif state == SourceState.OK:
+            counts["fresh_ok"] += 1
+        else:
+            counts["fail"] += 1
+
+    counts["ok"] = counts["fresh_ok"] + counts["provisional"]
+    counts["available"] = counts["ok"] + counts["cached_lkg"]
+    counts["total"] = len(results)
+    return counts
+
+
 def _refresh_traffic_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
     """Best-effort refresh traffic lower bound from final source statuses.
 
@@ -2239,6 +2336,7 @@ async def _run_tier_parallel(
     concurrency: int,
     client: httpx.AsyncClient | None,
     proxy_info: dict[str, str],
+    proxy_circuit: _RefreshProxyCircuit | None = None,
 ) -> list[dict[str, Any]]:
     if not sources:
         return []
@@ -2246,21 +2344,21 @@ async def _run_tier_parallel(
     logger = logging.getLogger(__name__)
     started = time.monotonic()
     semaphore = asyncio.Semaphore(concurrency)
-    proxy_unavailable = asyncio.Event()
+    circuit = proxy_circuit or _RefreshProxyCircuit()
+    sync_rotator_circuit = proxy_circuit is not None
 
     async def fetch_one(source: Source) -> dict[str, Any]:
         async with semaphore:
             await _parallel_stagger_delay()
             set_refresh_context(phase=phase)
             if (
-                proxy_unavailable.is_set()
+                circuit.is_open
                 and not source_can_run_without_residential_proxy(source)
             ):
+                assert circuit.error is not None
                 status = _fetch_error_status(
                     source,
-                    ProxyPaymentRequiredError(
-                        f"{phase} source skipped after residential proxy 407"
-                    ),
+                    circuit.error,
                 )
                 status = _save_failure_status(source, status)
                 log_action(
@@ -2268,27 +2366,45 @@ async def _run_tier_parallel(
                     level="warn",
                     source_id=source.id,
                     detail="source has no configured proxyless route",
-                    extra={"phase": phase, "failure_class": "proxy_407"},
+                    extra={
+                        "phase": phase,
+                        "failure_class": "proxy_407",
+                        "proxy_status": circuit.error.status_code,
+                    },
                 )
                 return _attach_proxy_egress(status, proxy_info)
             try:
                 status = await fetch_source(client, source)
             except ProxyPaymentRequiredError as exc:
-                proxy_unavailable.set()
-                logger.error("Proxy 407 for %s; independent sources continue: %s", source.id, exc)
+                circuit.open(exc)
+                logger.error(
+                    "Proxy CONNECT %s for %s; independent sources continue: %s",
+                    exc.status_code,
+                    source.id,
+                    exc,
+                )
                 log_action(
                     "proxy.health.fail",
                     level="error",
                     detail=str(exc)[:500],
                     source_id=source.id,
-                    extra={"phase": phase, "phase_abort": False},
+                    extra={
+                        "phase": phase,
+                        "phase_abort": False,
+                        "proxy_status": exc.status_code,
+                    },
                 )
                 status = _save_failure_status(source, _fetch_error_status(source, exc))
             except Exception as exc:
                 logger.exception("Parallel fetch failed for %s", source.id)
                 status = _fetch_error_status(source, exc)
-            if _status_reports_proxy_407(status):
-                proxy_unavailable.set()
+            circuit.open_from_status(status)
+            if sync_rotator_circuit:
+                from .scrapers.rotator import residential_proxy_circuit_error
+
+                rotator_error = residential_proxy_circuit_error()
+                if rotator_error is not None:
+                    circuit.open(rotator_error)
             return _attach_proxy_egress(status, proxy_info)
 
     raw = await asyncio.gather(*(fetch_one(source) for source in sources), return_exceptions=True)
@@ -2300,13 +2416,16 @@ async def _run_tier_parallel(
         else:
             results.append(item)
 
-    ok_count = sum(1 for s in results if s.get("state") == SourceState.OK)
+    outcome_counts = _refresh_outcome_counts(results)
     logger.info(
-        "refresh phase=%s duration=%.1fs ok=%d fail=%d concurrency=%d",
+        "refresh phase=%s duration=%.1fs fresh=%d provisional=%d cached=%d fail=%d skipped=%d concurrency=%d",
         phase,
         time.monotonic() - started,
-        ok_count,
-        len(results) - ok_count,
+        outcome_counts["fresh_ok"],
+        outcome_counts["provisional"],
+        outcome_counts["cached_lkg"],
+        outcome_counts["fail"],
+        outcome_counts["skipped"],
         concurrency,
     )
     return results
@@ -2320,6 +2439,7 @@ async def _run_tier_serial_browser(
     proxy_info: dict[str, str],
     use_flaresolverr: bool,
     apply_delay: bool,
+    proxy_circuit: _RefreshProxyCircuit | None = None,
 ) -> list[dict[str, Any]]:
     if not sources:
         return []
@@ -2327,10 +2447,36 @@ async def _run_tier_serial_browser(
     logger = logging.getLogger(__name__)
     started = time.monotonic()
     results: list[dict[str, Any]] = []
+    circuit = proxy_circuit or _RefreshProxyCircuit()
+    sync_rotator_circuit = proxy_circuit is not None
     fs_session: FlareSolverrSession | None = None
     try:
         for source in sources:
             try:
+                if (
+                    circuit.is_open
+                    and not source_can_run_without_residential_proxy(source)
+                ):
+                    assert circuit.error is not None
+                    status = _save_failure_status(
+                        source,
+                        _fetch_error_status(source, circuit.error),
+                    )
+                    log_action(
+                        "proxy.source.skip",
+                        level="warn",
+                        source_id=source.id,
+                        detail="source has no configured proxyless route",
+                        extra={
+                            "phase": phase,
+                            "failure_class": "proxy_407",
+                            "proxy_status": circuit.error.status_code,
+                        },
+                    )
+                    results.append(_attach_proxy_egress(status, proxy_info))
+                    if apply_delay:
+                        await _browser_inter_source_delay()
+                    continue
                 if use_flaresolverr and not fetch_direct_enabled():
                     if flaresolverr_session_per_source() or fs_session is None:
                         if fs_session is not None:
@@ -2343,9 +2489,28 @@ async def _run_tier_serial_browser(
                         fs_session = candidate_session
                         set_active_flaresolverr_session(fs_session)
                 status = await fetch_source(client, source)
+            except ProxyPaymentRequiredError as exc:
+                circuit.open(exc)
+                logger.error(
+                    "Proxy CONNECT %s for %s; independent sources continue: %s",
+                    exc.status_code,
+                    source.id,
+                    exc,
+                )
+                status = _save_failure_status(
+                    source,
+                    _fetch_error_status(source, exc),
+                )
             except Exception as exc:
                 logger.exception("Serial browser fetch failed for %s", source.id)
                 status = _save_failure_status(source, _fetch_error_status(source, exc))
+            circuit.open_from_status(status)
+            if sync_rotator_circuit:
+                from .scrapers.rotator import residential_proxy_circuit_error
+
+                rotator_error = residential_proxy_circuit_error()
+                if rotator_error is not None:
+                    circuit.open(rotator_error)
             results.append(_attach_proxy_egress(status, proxy_info))
             if apply_delay:
                 await _browser_inter_source_delay()
@@ -2361,13 +2526,16 @@ async def _run_tier_serial_browser(
                     type(exc).__name__,
                 )
 
-    ok_count = sum(1 for s in results if s.get("state") == SourceState.OK)
+    outcome_counts = _refresh_outcome_counts(results)
     logger.info(
-        "refresh phase=%s duration=%.1fs ok=%d fail=%d concurrency=1",
+        "refresh phase=%s duration=%.1fs fresh=%d provisional=%d cached=%d fail=%d skipped=%d concurrency=1",
         phase,
         time.monotonic() - started,
-        ok_count,
-        len(results) - ok_count,
+        outcome_counts["fresh_ok"],
+        outcome_counts["provisional"],
+        outcome_counts["cached_lkg"],
+        outcome_counts["fail"],
+        outcome_counts["skipped"],
     )
     return results
 
@@ -2383,11 +2551,13 @@ async def _refresh_sources_unlocked(
     _firecrawl_fallback_attempts_by_source.clear()
     validate_tier_registry()
     from .ai_review import reset_ai_review_budget
+    from .hsreplay_client import reset_hsreplay_refresh_state
     from .refresh_context import begin_refresh_run, end_refresh_run
     from .scrapers.rotator import reset_backend_circuits
 
     begin_refresh_run()
     reset_ai_review_budget()
+    reset_hsreplay_refresh_state()
     reset_backend_circuits()
     run_id = new_run_id()
     log_action(
@@ -2559,6 +2729,7 @@ async def _refresh_sources_unlocked(
         "flaresolverr" in backends_lower
     )
     browser_delay = refresh_delay_browser_only()
+    proxy_circuit = _RefreshProxyCircuit()
 
     results: list[dict[str, Any]] = []
     phase_error: BaseException | None = None
@@ -2572,6 +2743,7 @@ async def _refresh_sources_unlocked(
                     concurrency=refresh_parallel_light(),
                     client=client,
                     proxy_info=proxy_info,
+                    proxy_circuit=proxy_circuit,
                 ),
             ),
             (
@@ -2583,6 +2755,7 @@ async def _refresh_sources_unlocked(
                         concurrency=refresh_parallel_medium(),
                         client=client,
                         proxy_info=proxy_info,
+                        proxy_circuit=proxy_circuit,
                     )
                 ),
             ),
@@ -2597,6 +2770,7 @@ async def _refresh_sources_unlocked(
                         use_flaresolverr=False,
                         apply_delay=browser_delay,
                         use_patchright=use_patchright,
+                        proxy_circuit=proxy_circuit,
                     )
                 ),
             ),
@@ -2610,6 +2784,7 @@ async def _refresh_sources_unlocked(
                     use_flaresolverr=use_flaresolverr,
                     apply_delay=browser_delay,
                     use_patchright=use_patchright,
+                    proxy_circuit=proxy_circuit,
                 ),
             ),
         )
@@ -2621,16 +2796,20 @@ async def _refresh_sources_unlocked(
             log_action("phase.begin", extra={"phase": phase_name})
             phase_results = await phase_factory()
             results.extend(phase_results)
-            ok_count = sum(1 for s in phase_results if s.get("state") == SourceState.OK)
+            outcome_counts = _refresh_outcome_counts(phase_results)
+            phase_degraded = bool(
+                outcome_counts["cached_lkg"]
+                or outcome_counts["skipped"]
+                or outcome_counts["fail"]
+            )
             log_action(
                 "phase.end",
-                state=SourceState.OK if ok_count == len(phase_results) else SourceState.PARTIAL,
+                state=SourceState.PARTIAL if phase_degraded else SourceState.OK,
                 duration_ms=(time.monotonic() - phase_started) * 1000,
-                level="info" if ok_count == len(phase_results) else "warn",
+                level="warn" if phase_degraded else "info",
                 extra={
                     "phase": phase_name,
-                    "ok": ok_count,
-                    "fail": len(phase_results) - ok_count,
+                    **outcome_counts,
                 },
             )
     except BaseException as exc:
@@ -2666,18 +2845,19 @@ async def _refresh_sources_unlocked(
         if client is not None:
             await client.aclose()
         end_refresh_run()
-        ok_total = sum(
-            1 for status in terminal_results if status.get("state") == SourceState.OK
+        outcome_counts = _refresh_outcome_counts(terminal_results)
+        refresh_degraded = bool(
+            outcome_counts["cached_lkg"]
+            or outcome_counts["skipped"]
+            or outcome_counts["fail"]
         )
-        fail_total = len(terminal_results) - ok_total
         traffic = _refresh_traffic_summary(terminal_results)
         log_action(
             "refresh.end",
-            state=SourceState.OK if fail_total == 0 else SourceState.PARTIAL,
-            level="info" if fail_total == 0 else "warn",
+            state=SourceState.PARTIAL if refresh_degraded else SourceState.OK,
+            level="warn" if refresh_degraded else "info",
             extra={
-                "ok": ok_total,
-                "fail": fail_total,
+                **outcome_counts,
                 "run_id": run_id,
                 "traffic": traffic,
             },
@@ -2761,6 +2941,7 @@ async def _run_browser_phase(
     use_flaresolverr: bool,
     apply_delay: bool,
     use_patchright: bool,
+    proxy_circuit: _RefreshProxyCircuit | None = None,
 ) -> list[dict[str, Any]]:
     if use_patchright:
         await PatchrightPool.get()
@@ -2771,4 +2952,5 @@ async def _run_browser_phase(
         proxy_info=proxy_info,
         use_flaresolverr=use_flaresolverr,
         apply_delay=apply_delay,
+        proxy_circuit=proxy_circuit,
     )

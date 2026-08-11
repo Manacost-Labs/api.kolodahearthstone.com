@@ -130,3 +130,20 @@ def test_docker_bg_hero_details_accepts_degraded_exit_code() -> None:
 
     assert "refresh-bg-hero-details --scheduled" in service_text
     assert "SuccessExitStatus=10" in service_text
+
+
+def test_docker_partial_safe_pipelines_accept_degraded_exit_code() -> None:
+    for service_name, command in (
+        (
+            "hs-data-api-docker-refresh-hsreplay-archetypes.service",
+            "refresh-hsreplay-archetypes --scheduled",
+        ),
+        (
+            "hs-data-api-docker-refresh-fun-decks-standard.service",
+            "refresh-fun-decks --scheduled --format standard",
+        ),
+    ):
+        service_text = (ROOT / "systemd" / service_name).read_text(encoding="utf-8")
+
+        assert command in service_text
+        assert "SuccessExitStatus=10" in service_text

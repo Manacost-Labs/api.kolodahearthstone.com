@@ -58,11 +58,14 @@ snapshot, а старые снимки остаются для будущих т
 python -m app.cli refresh-hsreplay-archetypes
 ```
 
-Debug-прогон первых N архетипов:
+Диагностический прогон первых N архетипов:
 
 ```bash
 python -m app.cli refresh-hsreplay-archetypes --limit 3
 ```
+
+`--limit` работает строго в read-only режиме: проверяет получение и разбор
+данных, но не создаёт run/snapshot, не меняет status и не публикует JSON.
 
 Параметры:
 
@@ -76,7 +79,8 @@ python -m app.cli refresh-hsreplay-archetypes \
   --mulligan-time-range LAST_30_DAYS
 ```
 
-После обновления также экспортируется компактный JSON:
+Только после полного успешного обновления без `--limit` экспортируется
+компактный JSON:
 
 ```text
 /var/lib/hs-data-api/datasets/hsreplay_archetypes_db_latest.json

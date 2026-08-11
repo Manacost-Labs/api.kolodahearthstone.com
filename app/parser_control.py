@@ -1562,17 +1562,17 @@ async def _run_pipeline_source(source_id: str) -> dict[str, Any]:
 
         result = await refresh_hsguru_meta_matrix()
     elif source_id == "hsreplay_archetypes":
-        from .hsreplay_archetypes_db import (
-            export_latest_archetypes_json,
-            refresh_hsreplay_archetype_database,
-        )
+        from .hsreplay_archetypes_db import refresh_hsreplay_archetype_database
 
         result = await refresh_hsreplay_archetype_database()
-        result["export_path"] = str(export_latest_archetypes_json())
     elif source_id == "hsreplay_battlegrounds_hero_details":
         from .hsreplay_bg_hero_details import refresh_bg_hero_details
 
         result = await refresh_bg_hero_details()
+    elif source_id == "hsguru_fun_decks":
+        from .fun_decks import refresh_fun_decks
+
+        result = await asyncio.to_thread(refresh_fun_decks)
     elif source_id == "hsreplay_battlegrounds_minions":
         from .hsreplay_bg_minions_db import refresh_bg_minion_database_sync
 
@@ -1612,6 +1612,7 @@ async def _run_pipeline_source(source_id: str) -> dict[str, Any]:
             "hsguru_meta_matrix": ("logical_slices",),
             "hsreplay_archetypes": ("archetypes_ok",),
             "hsreplay_battlegrounds_hero_details": ("heroes",),
+            "hsguru_fun_decks": ("fun_retained",),
             "hsreplay_battlegrounds_minions": ("minions_ok", "minions_total"),
         }
         rows_total = next(

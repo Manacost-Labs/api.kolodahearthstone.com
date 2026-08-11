@@ -6,8 +6,8 @@ import re
 import time
 from urllib.parse import urlparse
 
-from ..config import http_retry_attempts, proxy_check_url, request_timeout_seconds
-from ..proxy_errors import ProxyPaymentRequiredError
+from ..config import http_retry_attempts, request_timeout_seconds
+from ..proxy_errors import ProxyPaymentRequiredError, proxy_tunnel_error
 from ..sources import Source
 from .base import FetchResult
 from .http_resilience import (
@@ -51,9 +51,6 @@ def _fetch_sync(source: Source) -> FetchResult:
             last_status = response.status_code
             last_body = response.text or ""
 
-            if response.status_code == 407:
-                raise ProxyPaymentRequiredError(f"Proxy 407 for {url[:120]}")
-
             if is_session_blocked(response.status_code, last_body):
                 log_http_error(
                     url=url,
@@ -84,6 +81,12 @@ def _fetch_sync(source: Source) -> FetchResult:
         except ProxyPaymentRequiredError:
             raise
         except Exception as exc:
+            typed_proxy_error = proxy_tunnel_error(
+                exc,
+                proxy_used=bool(proxy_url),
+            )
+            if typed_proxy_error is not None:
+                raise typed_proxy_error from exc
             log_http_error(
                 url=url,
                 status_code=last_status or None,

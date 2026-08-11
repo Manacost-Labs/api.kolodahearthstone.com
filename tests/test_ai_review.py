@@ -9,7 +9,12 @@ from unittest.mock import patch
 
 import httpx
 
-from app.ai_review import reset_ai_review_budget, review_candidate
+from app.ai_review import (
+    AIPageVerdict,
+    AIReviewResult,
+    reset_ai_review_budget,
+    review_candidate,
+)
 from app.sources import Source
 
 TEST_SOURCE = Source(
@@ -63,7 +68,7 @@ def _openrouter_response(
     return {
         "id": "generation-test",
         "model": TEST_MODEL,
-        "provider": "test-provider",
+        "provider": "DeepInfra",
         "choices": [
             {
                 "finish_reason": "stop",
@@ -188,7 +193,8 @@ class AIReviewTest(unittest.TestCase):
         self.assertIsNotNone(result.verdict)
         self.assertEqual(result.verdict.verdict, "pass")  # type: ignore[union-attr]
         self.assertEqual(result.model, TEST_MODEL)
-        self.assertEqual(result.provider, "test-provider")
+        self.assertEqual(result.provider, "DeepInfra")
+        self.assertEqual(result.finish_reason, "stop")
         self.assertEqual(result.prompt_tokens, 101)
         self.assertEqual(result.completion_tokens, 29)
         self.assertEqual(result.total_tokens, 130)
@@ -204,11 +210,21 @@ class AIReviewTest(unittest.TestCase):
         payload = json.loads(request.content)
         self.assertFalse(payload["stream"])
         self.assertEqual(payload["temperature"], 0)
+        self.assertEqual(
+            payload["reasoning"],
+            {"effort": "none", "exclude": True},
+        )
+        self.assertEqual(payload["plugins"], [{"id": "response-healing"}])
         self.assertTrue(payload["response_format"]["json_schema"]["strict"])
         self.assertFalse(payload["response_format"]["json_schema"]["schema"]["additionalProperties"])
+        self.assertNotIn(
+            "summary",
+            payload["response_format"]["json_schema"]["schema"]["properties"],
+        )
         self.assertEqual(payload["provider"]["data_collection"], "deny")
         self.assertTrue(payload["provider"]["zdr"])
         self.assertTrue(payload["provider"]["require_parameters"])
+        self.assertTrue(payload["provider"]["allow_fallbacks"])
 
     def test_request_evidence_excludes_sensitive_page_material(self) -> None:
         secret_values = {
@@ -268,55 +284,51 @@ class AIReviewTest(unittest.TestCase):
             with self.subTest(sensitive_key=sensitive_key):
                 self.assertNotIn(f'"{sensitive_key}"', evidence_text)
 
-    def test_malformed_incomplete_and_error_responses_fail_closed_without_body_leak(self) -> None:
+    def test_malformed_incomplete_and_error_responses_use_safe_error_subtypes(
+        self,
+    ) -> None:
         remote_secret = "REMOTE-BODY-SECRET-MUST-NOT-LEAK"
         responses = {
-            "http_error": httpx.Response(
-                502,
-                text=f"provider failure: {remote_secret}",
+            "http_error": (
+                httpx.Response(502, text=f"provider failure: {remote_secret}"),
+                "http_502",
             ),
-            "malformed_json": httpx.Response(
-                200,
-                text=f"not-json {remote_secret}",
+            "malformed_json": (
+                httpx.Response(200, text=f"not-json {remote_secret}"),
+                "invalid_response_json",
             ),
-            "incomplete": httpx.Response(
-                200,
-                json={
-                    **_openrouter_response(),
-                    "choices": [
-                        {
-                            "finish_reason": "length",
-                            "message": {"content": remote_secret},
-                        }
-                    ],
-                },
+            "incomplete": (
+                httpx.Response(
+                    200,
+                    json={
+                        **_openrouter_response(),
+                        "choices": [
+                            {
+                                "finish_reason": "length",
+                                "message": {"content": remote_secret},
+                            }
+                        ],
+                    },
+                ),
+                "invalid_response_finish_reason",
             ),
-            "error_payload": httpx.Response(
-                200,
-                json={"error": {"message": remote_secret}},
+            "error_payload": (
+                httpx.Response(
+                    200,
+                    json={"error": {"message": remote_secret}},
+                ),
+                "invalid_response_error_payload",
             ),
-            "contradictory_verdict": httpx.Response(
-                200,
-                json={
-                    **_openrouter_response(),
-                    "choices": [
-                        {
-                            "finish_reason": "stop",
-                            "message": {
-                                "content": json.dumps(
-                                    {
-                                        **_verdict_content(verdict="pass"),
-                                        "reason_codes": ["schema_mismatch"],
-                                    }
-                                )
-                            },
-                        }
-                    ],
-                },
+            "choices_missing": (
+                httpx.Response(
+                    200,
+                    json={"model": TEST_MODEL, "choices": []},
+                ),
+                "invalid_response_choices_missing",
             ),
         }
 
-        for case, response in responses.items():
+        for case, (response, expected_error_type) in responses.items():
             with self.subTest(case=case):
                 reset_ai_review_budget()
 
@@ -328,12 +340,165 @@ class AIReviewTest(unittest.TestCase):
 
                 self.assertEqual(result.state, "error")
                 self.assertIsNone(result.verdict)
-                self.assertIn(
-                    result.error_type,
-                    {"http_502", "invalid_response"},
-                )
+                self.assertEqual(result.error_type, expected_error_type)
                 serialized = repr(result) + json.dumps(result.telemetry(), sort_keys=True)
                 self.assertNotIn(remote_secret, serialized)
+
+    def test_invalid_content_preserves_only_safe_response_metadata(self) -> None:
+        remote_secret = "REMOTE-VALIDATION-TEXT-MUST-NOT-LEAK"
+        invalid_content = {
+            **_verdict_content(),
+            "confidence": "not-a-number",
+            "raw_validation_text": remote_secret,
+        }
+        response_payload = {
+            **_openrouter_response(),
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {"content": json.dumps(invalid_content)},
+                }
+            ],
+        }
+        request_count = 0
+
+        def handler(_request: httpx.Request) -> httpx.Response:
+            nonlocal request_count
+            request_count += 1
+            return httpx.Response(200, json=response_payload)
+
+        with patch.dict(os.environ, _environment(), clear=False):
+            result = asyncio.run(_review_with_transport(handler))
+
+        self.assertEqual(result.state, "error")
+        self.assertEqual(result.error_type, "invalid_response_schema")
+        self.assertEqual(result.model, TEST_MODEL)
+        self.assertEqual(result.provider, "DeepInfra")
+        self.assertEqual(result.finish_reason, "stop")
+        self.assertEqual(result.prompt_tokens, 101)
+        self.assertEqual(result.completion_tokens, 29)
+        self.assertEqual(result.total_tokens, 130)
+        self.assertEqual(result.cost_usd, 0.00042)
+        self.assertEqual(request_count, 1)
+        serialized = repr(result) + json.dumps(result.telemetry(), sort_keys=True)
+        self.assertNotIn(remote_secret, serialized)
+
+    def test_unknown_remote_model_and_provider_labels_are_not_retained(self) -> None:
+        remote_secret = "synthetic-untrusted-provider-label-xyz987654"
+        response_payload = {
+            **_openrouter_response(),
+            "model": remote_secret,
+            "provider": remote_secret,
+        }
+
+        def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json=response_payload)
+
+        with patch.dict(os.environ, _environment(), clear=False):
+            result = asyncio.run(_review_with_transport(handler))
+
+        self.assertEqual(result.state, "ok")
+        self.assertEqual(result.model, TEST_MODEL)
+        self.assertIsNone(result.provider)
+        serialized = repr(result) + json.dumps(result.telemetry(), sort_keys=True)
+        self.assertNotIn(remote_secret, serialized)
+
+    def test_contradictory_verdict_normalizes_to_uncertain_without_opening_circuit(
+        self,
+    ) -> None:
+        request_count = 0
+        remote_summary = "REMOTE-SUMMARY-MUST-NOT-BE-RETAINED"
+
+        def handler(_request: httpx.Request) -> httpx.Response:
+            nonlocal request_count
+            request_count += 1
+            if request_count == 1:
+                contradictory = {
+                    **_verdict_content(verdict="pass", confidence=0.99),
+                    "reason_codes": ["schema_mismatch"],
+                    "summary": remote_summary,
+                }
+                return httpx.Response(
+                    200,
+                    json={
+                        **_openrouter_response(),
+                        "choices": [
+                            {
+                                "finish_reason": "stop",
+                                "message": {"content": json.dumps(contradictory)},
+                            }
+                        ],
+                    },
+                )
+            return httpx.Response(200, json=_openrouter_response())
+
+        async def scenario() -> tuple[AIReviewResult, AIReviewResult]:
+            transport = httpx.MockTransport(handler)
+            async with httpx.AsyncClient(transport=transport) as client:
+                first = await review_candidate(
+                    TEST_SOURCE,
+                    {"structured": {"rows": 41}},
+                    backend="test-backend",
+                    deterministic_ok=True,
+                    deterministic_reason="ok",
+                    client=client,
+                )
+                second = await review_candidate(
+                    TEST_SOURCE,
+                    {"structured": {"rows": 42}},
+                    backend="test-backend",
+                    deterministic_ok=True,
+                    deterministic_reason="ok",
+                    client=client,
+                )
+            return first, second
+
+        with patch.dict(
+            os.environ,
+            _environment(
+                HS_AI_REVIEW_MODE="quarantine",
+                HS_AI_REVIEW_CIRCUIT_FAILURE_THRESHOLD="1",
+            ),
+            clear=False,
+        ):
+            first, second = asyncio.run(scenario())
+
+        self.assertEqual(first.state, "ok")
+        self.assertEqual(first.verdict.verdict, "uncertain")  # type: ignore[union-attr]
+        self.assertIn(  # type: ignore[union-attr]
+            "deterministic_conflict",
+            first.verdict.reason_codes,
+        )
+        self.assertFalse(first.should_quarantine)
+        serialized = repr(first) + json.dumps(first.telemetry(), sort_keys=True)
+        self.assertNotIn(remote_summary, serialized)
+        self.assertEqual(second.state, "ok")
+        self.assertEqual(request_count, 2)
+
+    def test_all_cross_field_contradictions_are_non_actionable(self) -> None:
+        cases = {
+            "declared_pass_with_failed_check": {
+                **_verdict_content(verdict="pass"),
+                "target_page": False,
+                "reason_codes": ["identity_mismatch"],
+            },
+            "declared_fail_with_positive_checks": {
+                **_verdict_content(verdict="fail"),
+                "content_complete": True,
+                "parse_compatible": True,
+                "reason_codes": ["schema_mismatch"],
+            },
+            "none_mixed_with_failure_reason": {
+                **_verdict_content(verdict="pass"),
+                "reason_codes": ["none", "schema_mismatch"],
+            },
+        }
+
+        for case, payload in cases.items():
+            with self.subTest(case=case):
+                verdict = AIPageVerdict.model_validate(payload)
+                self.assertEqual(verdict.verdict, "uncertain")
+                self.assertIn("deterministic_conflict", verdict.reason_codes)
 
     def test_high_confidence_failure_quarantines_only_in_quarantine_mode(self) -> None:
         def handler(_request: httpx.Request) -> httpx.Response:
@@ -455,6 +620,64 @@ class AIReviewTest(unittest.TestCase):
         self.assertEqual(circuit_open.state, "skipped")
         self.assertEqual(circuit_open.error_type, "circuit_open")
         self.assertEqual(request_count, 2)
+
+    def test_deep_nested_content_opens_circuit_without_escaping_parser(self) -> None:
+        request_count = 0
+        deeply_nested = "{}"
+        for _ in range(1500):
+            deeply_nested = '{"nested":' + deeply_nested + "}"
+
+        def handler(_request: httpx.Request) -> httpx.Response:
+            nonlocal request_count
+            request_count += 1
+            payload = {
+                **_openrouter_response(),
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {"content": deeply_nested},
+                    }
+                ],
+            }
+            return httpx.Response(200, json=payload)
+
+        async def scenario() -> tuple[AIReviewResult, AIReviewResult]:
+            transport = httpx.MockTransport(handler)
+            async with httpx.AsyncClient(transport=transport) as client:
+                first = await review_candidate(
+                    TEST_SOURCE,
+                    {"structured": {"rows": 41}},
+                    backend="test-backend",
+                    deterministic_ok=True,
+                    deterministic_reason="ok",
+                    client=client,
+                )
+                second = await review_candidate(
+                    TEST_SOURCE,
+                    {"structured": {"rows": 42}},
+                    backend="test-backend",
+                    deterministic_ok=True,
+                    deterministic_reason="ok",
+                    client=client,
+                )
+            return first, second
+
+        with patch.dict(
+            os.environ,
+            _environment(HS_AI_REVIEW_CIRCUIT_FAILURE_THRESHOLD="1"),
+            clear=False,
+        ):
+            reset_ai_review_budget()
+            first, second = asyncio.run(scenario())
+
+        self.assertEqual(first.state, "error")
+        self.assertIn(
+            first.error_type,
+            {"invalid_response_content_json", "invalid_response_schema"},
+        )
+        self.assertEqual(second.state, "skipped")
+        self.assertEqual(second.error_type, "circuit_open")
+        self.assertEqual(request_count, 1)
 
     def test_circuit_stops_candidates_already_waiting_for_concurrency(self) -> None:
         request_started = asyncio.Event()

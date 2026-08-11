@@ -1297,10 +1297,7 @@ async def refresh_hsreplay_archetypes(
     game_type: str = Query("RANKED_STANDARD", min_length=1, max_length=80),
     region: str = Query("REGION_EU", min_length=1, max_length=80),
 ) -> dict:
-    from .hsreplay_archetypes_db import (
-        export_latest_archetypes_json,
-        refresh_hsreplay_archetype_database,
-    )
+    from .hsreplay_archetypes_db import refresh_hsreplay_archetype_database
 
     result = await refresh_hsreplay_archetype_database(
         rank_range=rank_range,
@@ -1308,7 +1305,6 @@ async def refresh_hsreplay_archetypes(
         region=region,
         limit=limit,
     )
-    result["export_path"] = str(export_latest_archetypes_json())
     return result
 
 

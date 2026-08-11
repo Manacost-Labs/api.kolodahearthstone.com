@@ -9,7 +9,7 @@ DEFAULT_DATA_DIR = "/var/lib/hs-data-api"
 DEFAULT_BACKENDS = "flaresolverr,scrapling,patchright,curl_cffi,cloudscraper"
 DEFAULT_HSGURU_BACKENDS = "flaresolverr,scrapling,curl_cffi,cloudscraper,patchright"
 DEFAULT_BACKENDS_LAB = "cloakbrowser,flaresolverr,scrapling,patchright,curl_cffi,cloudscraper"
-DEFAULT_HSREPLAY_JSON_CHANNELS = "curl_cffi,flaresolverr"
+DEFAULT_HSREPLAY_JSON_CHANNELS = "curl_cffi,flaresolverr,scrape_do"
 DEFAULT_HSREPLAY_MARKDOWN_CHANNELS = "flaresolverr,curl_cffi"
 
 
@@ -249,6 +249,21 @@ def scrape_do_token() -> str | None:
 
 def scrape_do_timeout_seconds() -> float:
     return max(15.0, float(os.environ.get("HS_SCRAPE_DO_TIMEOUT_SECONDS", "120")))
+
+
+def hsreplay_scrape_do_max_requests() -> int:
+    """Maximum reserved Scrape.do JSON calls in one parser refresh."""
+    return max(0, int(os.environ.get("HS_HSREPLAY_SCRAPE_DO_MAX_REQUESTS", "120")))
+
+
+def hsreplay_scrape_do_max_credits() -> int:
+    """Maximum reserved Scrape.do credits for HSReplay JSON per refresh."""
+    return max(0, int(os.environ.get("HS_HSREPLAY_SCRAPE_DO_MAX_CREDITS", "160")))
+
+
+def hsreplay_scrape_do_max_concurrency() -> int:
+    """Concurrent non-rendered Scrape.do HSReplay JSON requests."""
+    return max(1, int(os.environ.get("HS_HSREPLAY_SCRAPE_DO_MAX_CONCURRENCY", "2")))
 
 
 def scrapfly_api_key() -> str | None:

@@ -226,7 +226,15 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     archetypes.add_argument("--summary-time-range", default="LAST_7_DAYS")
     archetypes.add_argument("--deck-time-range", default="LAST_30_DAYS")
     archetypes.add_argument("--mulligan-time-range", default="LAST_30_DAYS")
-    archetypes.add_argument("--limit", type=int, default=None, help="Debug: refresh only first N archetypes from the index.")
+    archetypes.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help=(
+            "Read-only diagnostic: fetch only the first N archetypes without "
+            "publishing or writing snapshots."
+        ),
+    )
     archetypes.add_argument(
         "--scheduled",
         action="store_true",
@@ -610,10 +618,7 @@ def main(argv: list[str] | None = None) -> int:
                     "source_id": "hsreplay_archetypes",
                 }, ensure_ascii=False, indent=2))
                 return 0
-        from .hsreplay_archetypes_db import (
-            export_latest_archetypes_json,
-            refresh_hsreplay_archetype_database,
-        )
+        from .hsreplay_archetypes_db import refresh_hsreplay_archetype_database
 
         result = asyncio.run(
             refresh_hsreplay_archetype_database(
@@ -626,8 +631,11 @@ def main(argv: list[str] | None = None) -> int:
                 limit=args.limit,
             )
         )
-        result["export_path"] = str(export_latest_archetypes_json())
         print(json.dumps(result, ensure_ascii=False, indent=2))
+        if args.scheduled and result.get("state") == "locked":
+            return int(ExitCode.DEGRADED)
+        if args.scheduled and result.get("serving_cached_dataset"):
+            return int(ExitCode.DEGRADED)
         return 0 if result.get("ok") else 1
     if args.command == "refresh-bg-minions-db":
         if args.scheduled:
@@ -669,6 +677,8 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
         print(json.dumps(result, ensure_ascii=False, indent=2))
+        if args.scheduled and result.get("state") == "locked":
+            return int(ExitCode.DEGRADED)
         if args.scheduled and result.get("serving_cached_dataset"):
             return int(ExitCode.DEGRADED)
         if result.get("ok") and result.get("published"):
@@ -720,6 +730,8 @@ def main(argv: list[str] | None = None) -> int:
         focus = None if getattr(args, "format", "all") in (None, "all") else str(args.format)
         result = refresh_fun_decks(scheduled=bool(args.scheduled), format_focus=focus)
         print(json.dumps(result, ensure_ascii=False, indent=2))
+        if args.scheduled and result.get("state") == "locked":
+            return int(ExitCode.DEGRADED)
         return 0 if result.get("ok") else 1
     if args.command == "refresh-hsguru-archetype-analysis":
         from .hsguru_archetype_analysis import refresh_hsguru_archetype_analysis

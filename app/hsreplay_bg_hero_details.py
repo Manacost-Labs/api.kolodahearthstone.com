@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
 import math
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlencode
 
 from .cards_index import card_label, cards_by_dbfid
 from .hsreplay_bg_stats import BG_COMPOSITION_NAMES_API, _composition_names_from_text
 from .hsreplay_client import fetch_hsreplay_json, fetch_text_via_flaresolverr
+from .resource_locks import ResourceLocked, ResourceLockSet
 from .source_state import SourceState
 from .storage import load_dataset, save_dataset, save_status
 
@@ -373,7 +374,7 @@ async def fetch_hero_detail(
     }
 
 
-async def refresh_bg_hero_details(
+async def _refresh_bg_hero_details_unlocked(
     *,
     limit: int | None = None,
     mmr: str = BG_MMR,
@@ -560,6 +561,42 @@ async def refresh_bg_hero_details(
         "quality_errors": quality_errors,
         "detail_coverage": round(detail_coverage, 4),
     }
+
+
+async def refresh_bg_hero_details(
+    *,
+    limit: int | None = None,
+    mmr: str = BG_MMR,
+    time_range: str = BG_TIME_RANGE,
+    concurrency: int = 3,
+) -> dict[str, Any]:
+    """Refresh hero details unless another process owns this source."""
+    locks = ResourceLockSet(
+        [SOURCE_ID, HEROES_SOURCE_ID],
+        metadata={"operation": "refresh_bg_hero_details"},
+    )
+    try:
+        locks.acquire()
+    except ResourceLocked as exc:
+        return {
+            "ok": True,
+            "published": False,
+            "source_id": SOURCE_ID,
+            **exc.as_outcome(),
+        }
+
+    try:
+        from .hsreplay_client import reset_hsreplay_refresh_state
+
+        reset_hsreplay_refresh_state()
+        return await _refresh_bg_hero_details_unlocked(
+            limit=limit,
+            mmr=mmr,
+            time_range=time_range,
+            concurrency=concurrency,
+        )
+    finally:
+        locks.release()
 
 
 def _fallback_heroes_dataset() -> dict[str, Any] | None:

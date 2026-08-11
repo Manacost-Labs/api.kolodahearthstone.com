@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from ..proxy_errors import ProxyPaymentRequiredError
+from ..proxy_errors import ProxyPaymentRequiredError, proxy_tunnel_error
 
 logger = logging.getLogger(__name__)
 
@@ -172,17 +172,14 @@ async def resilient_http_get(
     last_body = ""
 
     for attempt in range(1, max_attempts + 1):
+        current_proxy_url = client_kwargs.get("proxy") or proxy_url
+        proxy_used = bool(current_proxy_url)
         try:
             async with httpx.AsyncClient(headers=req_headers, **client_kwargs) as client:
                 response = await client.get(url)
                 last_status = response.status_code
                 last_body = response.text
                 final_url = str(response.url)
-
-                if response.status_code == 407:
-                    raise ProxyPaymentRequiredError(
-                        f"Proxy payment required (407) for {url[:120]}"
-                    )
 
                 blocked = is_session_blocked(response.status_code, last_body)
                 quality_bad = validate_body is not None and not validate_body(
@@ -224,9 +221,10 @@ async def resilient_http_get(
             if is_session_blocked(last_status, last_body) and on_session_burn:
                 on_session_burn()
         except Exception as exc:
+            typed_proxy_error = proxy_tunnel_error(exc, proxy_used=proxy_used)
+            if typed_proxy_error is not None:
+                raise typed_proxy_error from exc
             last_exc = exc
-            if "407" in str(exc):
-                raise ProxyPaymentRequiredError(str(exc)) from exc
 
         current_proxy_url = client_kwargs.get("proxy") or proxy_url
         ip = await resolve_proxy_egress_ip(current_proxy_url, check_url=proxy_check_url)

@@ -3,8 +3,13 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
+import threading
 import time
+from contextvars import ContextVar
+from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -14,15 +19,19 @@ from .config import (
     flaresolverr_url,
     hsreplay_json_channels,
     hsreplay_markdown_channels,
+    hsreplay_scrape_do_max_concurrency,
+    hsreplay_scrape_do_max_credits,
+    hsreplay_scrape_do_max_requests,
     http_retry_attempts,
     proxy_check_url,
     request_timeout_seconds,
     user_agent,
 )
 from .hsreplay_auth import hsreplay_cookies_for_fetch
+from .proxy_errors import ProxyPaymentRequiredError, proxy_tunnel_error
 from .refresh_context import get_cached_hsreplay_json, set_cached_hsreplay_json
 from .refresh_log import log_action
-from .proxy_errors import ProxyPaymentRequiredError
+from .scrape_do_backend import scrape_url
 from .scrapers.http_resilience import (
     DEFAULT_BACKOFF_SECONDS,
     build_fetch_headers,
@@ -40,6 +49,114 @@ from .scrapers.proxy import (
 logger = logging.getLogger(__name__)
 
 JINA_PREFIX = "https://r.jina.ai/"
+_COOKIE_NAME = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
+_SCRAPE_DO_STANDARD_CREDIT_RESERVATION = 1
+
+
+class HsReplayScrapeDoBudgetError(RuntimeError):
+    """The refresh-scoped Scrape.do HSReplay JSON budget is exhausted."""
+
+
+@dataclass
+class _HsReplayTransportState:
+    """Mutable transport guards shared only by tasks in one refresh context."""
+
+    lock: threading.Lock = field(default_factory=threading.Lock)
+    proxy_circuit_error: ProxyPaymentRequiredError | None = None
+    scrape_do_requests_reserved: int = 0
+    scrape_do_credits_reserved: int = 0
+    scrape_do_semaphore: asyncio.Semaphore = field(
+        default_factory=lambda: asyncio.Semaphore(
+            hsreplay_scrape_do_max_concurrency()
+        )
+    )
+
+
+_transport_state: ContextVar[_HsReplayTransportState | None] = ContextVar(
+    "hsreplay_transport_state",
+    default=None,
+)
+
+
+def _current_transport_state() -> _HsReplayTransportState:
+    state = _transport_state.get()
+    if state is None:
+        state = _HsReplayTransportState()
+        _transport_state.set(state)
+    return state
+
+
+def reset_hsreplay_refresh_state() -> None:
+    """Start isolated proxy and provider guards for the current refresh task."""
+
+    _transport_state.set(_HsReplayTransportState())
+
+
+def record_hsreplay_proxy_failure(exc: ProxyPaymentRequiredError) -> None:
+    """Open the HSReplay and refresh-wide proxy circuits."""
+
+    state = _current_transport_state()
+    with state.lock:
+        if state.proxy_circuit_error is None:
+            state.proxy_circuit_error = exc
+
+    # Import lazily to keep the transport modules independent at import time.
+    # A recovered HSReplay request (for example through Scrape.do) must still
+    # stop later sources in the same refresh from retrying a paid proxy that
+    # has already rejected CONNECT with 402/407.
+    from .scrapers.rotator import record_residential_proxy_failure
+
+    record_residential_proxy_failure(exc)
+
+
+def hsreplay_proxy_circuit_is_open() -> bool:
+    state = _current_transport_state()
+    with state.lock:
+        return state.proxy_circuit_error is not None
+
+
+def _current_proxy_circuit_error() -> ProxyPaymentRequiredError | None:
+    state = _current_transport_state()
+    with state.lock:
+        return state.proxy_circuit_error
+
+
+def _scrape_do_gate() -> asyncio.Semaphore:
+    return _current_transport_state().scrape_do_semaphore
+
+
+def _reserve_scrape_do_request() -> None:
+    state = _current_transport_state()
+    with state.lock:
+        if state.scrape_do_requests_reserved >= hsreplay_scrape_do_max_requests():
+            raise HsReplayScrapeDoBudgetError(
+                "HSReplay Scrape.do request budget exhausted for this refresh"
+            )
+        if (
+            state.scrape_do_credits_reserved
+            + _SCRAPE_DO_STANDARD_CREDIT_RESERVATION
+            > hsreplay_scrape_do_max_credits()
+        ):
+            raise HsReplayScrapeDoBudgetError(
+                "HSReplay Scrape.do credit budget exhausted for this refresh"
+            )
+        # Reservations are intentionally never refunded. Failed/rejected calls
+        # can still be billed and must consume the local safety budget.
+        state.scrape_do_requests_reserved += 1
+        state.scrape_do_credits_reserved += _SCRAPE_DO_STANDARD_CREDIT_RESERVATION
+
+
+def _account_scrape_do_actual_cost(actual_cost: int) -> None:
+    extra = max(0, int(actual_cost) - _SCRAPE_DO_STANDARD_CREDIT_RESERVATION)
+    if not extra:
+        return
+    state = _current_transport_state()
+    with state.lock:
+        state.scrape_do_credits_reserved += extra
+        if state.scrape_do_credits_reserved > hsreplay_scrape_do_max_credits():
+            raise HsReplayScrapeDoBudgetError(
+                "HSReplay Scrape.do response exceeded the refresh credit budget"
+            )
 
 
 def jina_url(url: str) -> str:
@@ -64,12 +181,6 @@ def extract_json_payload(body: str) -> dict[str, Any] | list[Any] | None:
         return None
 
 
-def _http_error_is_407(exc: Exception) -> bool:
-    if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 407:
-        return True
-    return "407" in str(exc)
-
-
 async def download_text(url: str, source_id: str | None = None) -> str:
     # FIX: resilient GET — sticky session burn, exponential backoff, detailed [ERROR] logs
     headers = build_fetch_headers(
@@ -77,12 +188,23 @@ async def download_text(url: str, source_id: str | None = None) -> str:
         accept="application/json,text/plain,*/*",
         extra={"User-Agent": user_agent()},
     )
+
     def _client_kwargs() -> dict[str, Any]:
-        return httpx_client_kwargs(source_id, timeout=request_timeout_seconds(), page_url=url)
+        return httpx_client_kwargs(
+            source_id, timeout=request_timeout_seconds(), page_url=url
+        )
 
     kwargs = _client_kwargs()
     proxy_url = proxy_url_for_source(source_id, page_url=url)
-    attempts = max(api_json_attempts_per_channel(), http_retry_attempts())
+    proxy_used = bool(kwargs.get("proxy") or proxy_url)
+    circuit_error = _current_proxy_circuit_error()
+    if proxy_used and circuit_error is not None:
+        raise circuit_error
+    # CONNECT payment/auth failures must never be multiplied by the inner HTTP
+    # retry loop. The channel cascade provides the safer retry boundary.
+    attempts = (
+        1 if proxy_used else max(api_json_attempts_per_channel(), http_retry_attempts())
+    )
 
     log_action(
         "http.request.begin",
@@ -94,11 +216,12 @@ async def download_text(url: str, source_id: str | None = None) -> str:
     started = time.monotonic()
 
     def _burn() -> None:
-        nonlocal proxy_url
+        nonlocal proxy_url, proxy_used
         burn_proxy_session(source_id, page_url=url, reason="download_text_blocked")
         kwargs.clear()
         kwargs.update(_client_kwargs())
         proxy_url = proxy_url_for_source(source_id, page_url=url)
+        proxy_used = bool(kwargs.get("proxy") or proxy_url)
 
     try:
         text, status, final_url = await resilient_http_get(
@@ -123,11 +246,16 @@ async def download_text(url: str, source_id: str | None = None) -> str:
             attempt=attempts,
         )
         return text
-    except ProxyPaymentRequiredError:
-        raise
+    except ProxyPaymentRequiredError as exc:
+        if proxy_used:
+            record_hsreplay_proxy_failure(exc)
+            raise
+        raise RuntimeError("Origin returned HTTP 407 without a proxy path") from exc
     except Exception as exc:
-        if _http_error_is_407(exc):
-            raise ProxyPaymentRequiredError(str(exc)) from exc
+        typed_proxy_error = proxy_tunnel_error(exc, proxy_used=proxy_used)
+        if typed_proxy_error is not None:
+            record_hsreplay_proxy_failure(typed_proxy_error)
+            raise typed_proxy_error from exc
         log_action(
             "http.request.fail",
             source_id=source_id,
@@ -169,6 +297,9 @@ def _fetch_text_via_curl_cffi_sync(url: str, source_id: str | None) -> str:
     for attempt in range(1, max_attempts + 1):
         proxy_url = proxy_url_for_source(source_id, page_url=url)
         proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
+        circuit_error = _current_proxy_circuit_error()
+        if proxies and circuit_error is not None:
+            raise circuit_error
         try:
             response = curl_requests.get(
                 url,
@@ -179,24 +310,40 @@ def _fetch_text_via_curl_cffi_sync(url: str, source_id: str | None) -> str:
                 headers=headers,
                 cookies=cookies or None,
             )
-            if response.status_code == 407:
-                raise ProxyPaymentRequiredError(f"Proxy payment required (407) for {url[:120]}")
+            if response.status_code == 407 and proxies:
+                error = ProxyPaymentRequiredError(
+                    "Residential proxy rejected the CONNECT request (HTTP 407)",
+                    status_code=407,
+                )
+                record_hsreplay_proxy_failure(error)
+                raise error
             if is_session_blocked(response.status_code, response.text):
-                burn_proxy_session(source_id, page_url=url, reason="curl_cffi_json_blocked")
+                burn_proxy_session(
+                    source_id, page_url=url, reason="curl_cffi_json_blocked"
+                )
                 if attempt < max_attempts:
                     time.sleep(5 * attempt)
                     continue
-                raise RuntimeError(f"curl_cffi JSON blocked (status={response.status_code})")
+                raise RuntimeError(
+                    f"curl_cffi JSON blocked (status={response.status_code})"
+                )
             if response.status_code >= 400:
                 response.raise_for_status()
             return response.text
-        except ProxyPaymentRequiredError:
+        except ProxyPaymentRequiredError as exc:
+            if proxies:
+                record_hsreplay_proxy_failure(exc)
             raise
         except Exception as exc:
+            typed_proxy_error = proxy_tunnel_error(exc, proxy_used=bool(proxies))
+            if typed_proxy_error is not None:
+                record_hsreplay_proxy_failure(typed_proxy_error)
+                raise typed_proxy_error from exc
             last_exc = exc
             log_http_error(
                 url=url,
-                status_code=getattr(exc, "response", None) and getattr(exc.response, "status_code", None),
+                status_code=getattr(exc, "response", None)
+                and getattr(exc.response, "status_code", None),
                 proxy_ip=None,
                 body=None,
                 error=str(exc),
@@ -211,7 +358,14 @@ def _fetch_text_via_curl_cffi_sync(url: str, source_id: str | None) -> str:
 
 
 async def fetch_text_via_curl_cffi(url: str, *, source_id: str | None = None) -> str:
-    return await asyncio.to_thread(_fetch_text_via_curl_cffi_sync, url, source_id)
+    try:
+        return await asyncio.to_thread(_fetch_text_via_curl_cffi_sync, url, source_id)
+    except ProxyPaymentRequiredError as exc:
+        # ContextVar assignments made inside ``to_thread`` do not flow back to
+        # the awaiting task. Record the typed failure again in the parent
+        # context so every later source in this refresh sees the open circuit.
+        record_hsreplay_proxy_failure(exc)
+        raise
 
 
 async def fetch_text_via_flaresolverr(url: str, *, source_id: str | None = None) -> str:
@@ -223,6 +377,9 @@ async def fetch_text_via_flaresolverr(url: str, *, source_id: str | None = None)
         "maxTimeout": int(request_timeout_seconds() * 1000),
     }
     proxy = proxy_dict_for_flaresolverr(source_id, page_url=url)
+    circuit_error = _current_proxy_circuit_error()
+    if proxy and circuit_error is not None:
+        raise circuit_error
     if proxy:
         payload["proxy"] = proxy
     cookies = hsreplay_cookies_for_fetch()
@@ -244,13 +401,27 @@ async def fetch_text_via_flaresolverr(url: str, *, source_id: str | None = None)
 
     if body.get("status") != "ok":
         message = body.get("message") or str(body)
+        typed_proxy_error = proxy_tunnel_error(
+            RuntimeError(str(message)),
+            proxy_used=bool(proxy),
+        )
+        if typed_proxy_error is not None:
+            record_hsreplay_proxy_failure(typed_proxy_error)
+            raise typed_proxy_error
         raise RuntimeError(f"FlareSolverr error: {message}")
 
     solution = body.get("solution") or {}
     text = solution.get("response") or ""
     status = int(solution.get("status") or 0)
-    if status == 407:
-        raise ProxyPaymentRequiredError(f"FlareSolverr proxy 407 for {url[:120]}")
+    if status == 407 and proxy:
+        error = ProxyPaymentRequiredError(
+            "FlareSolverr residential proxy rejected the request (HTTP 407)",
+            status_code=407,
+        )
+        record_hsreplay_proxy_failure(error)
+        raise error
+    if status >= 400:
+        raise RuntimeError(f"FlareSolverr origin returned HTTP {status}")
     if not text.strip():
         raise RuntimeError("FlareSolverr returned empty response")
     log_action(
@@ -265,6 +436,85 @@ async def fetch_text_via_flaresolverr(url: str, *, source_id: str | None = None)
     return text
 
 
+def _assert_exact_hsreplay_https_url(url: str) -> None:
+    parsed = urlsplit(url)
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError(
+            "Scrape.do JSON target must be an exact HSReplay HTTPS URL"
+        ) from exc
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname != "hsreplay.net"
+        or parsed.username is not None
+        or parsed.password is not None
+        or port not in {None, 443}
+    ):
+        raise ValueError("Scrape.do JSON target must be an exact HSReplay HTTPS URL")
+
+
+def _hsreplay_cookie_header() -> str | None:
+    pairs: list[str] = []
+    for cookie in hsreplay_cookies_for_fetch() or []:
+        domain = str(cookie.get("domain") or "hsreplay.net").lstrip(".").lower()
+        name = str(cookie.get("name") or "")
+        value = str(cookie.get("value") or "")
+        if domain != "hsreplay.net" or not _COOKIE_NAME.fullmatch(name):
+            continue
+        if not value or any(char in value for char in ("\r", "\n", ";")):
+            continue
+        pairs.append(f"{name}={value}")
+    return "; ".join(pairs) or None
+
+
+async def _fetch_text_via_scrape_do(url: str, *, source_id: str) -> str:
+    """Fetch exact HSReplay JSON through cheap non-rendered Scrape.do."""
+
+    _assert_exact_hsreplay_https_url(url)
+    headers: dict[str, str] = {}
+    cookie_header = _hsreplay_cookie_header()
+    if cookie_header:
+        # scrape_url prefixes this as Sd-Cookie. The provider receives no
+        # unrelated browser/request headers and the value is never logged.
+        headers["Cookie"] = cookie_header
+
+    async with _scrape_do_gate():
+        _reserve_scrape_do_request()
+        result = await scrape_url(
+            url,
+            render=False,
+            super_proxy=False,
+            headers=headers or None,
+            forward_headers=False,
+        )
+        _assert_exact_hsreplay_https_url(result.final_url)
+        _account_scrape_do_actual_cost(result.request_cost)
+        log_action(
+            "provider.scrape_do.hsreplay_json.ok",
+            source_id=source_id,
+            backend="scrape_do",
+            http_status=result.status_code,
+            bytes_out=result.content_length,
+            extra={"render": False, "request_cost": result.request_cost},
+        )
+        return result.html
+
+
+def _channel_uses_residential_proxy(
+    label: str,
+    fetch_url: str,
+    source_id: str,
+) -> bool:
+    if label == "scrape_do":
+        return False
+    if label == "flaresolverr":
+        from .scrapers.proxy import proxy_dict_for_flaresolverr
+
+        return bool(proxy_dict_for_flaresolverr(source_id, page_url=fetch_url))
+    return bool(proxy_url_for_source(source_id, page_url=fetch_url))
+
+
 def _channel_urls_for_labels(api_url: str, labels: list[str]) -> list[tuple[str, str]]:
     out: list[tuple[str, str]] = []
     for label in labels:
@@ -276,13 +526,24 @@ def _channel_urls_for_labels(api_url: str, labels: list[str]) -> list[tuple[str,
             out.append(("flaresolverr", api_url))
         elif label == "curl_cffi":
             out.append(("curl_cffi", api_url))
+        elif label == "scrape_do":
+            out.append(("scrape_do", api_url))
     return out
 
 
-def _channel_urls(api_url: str, *, source_id: str | None = None) -> list[tuple[str, str]]:
+def _channel_urls(
+    api_url: str, *, source_id: str | None = None
+) -> list[tuple[str, str]]:
     from .source_contracts import preferred_channels_for_source
 
-    labels = list(preferred_channels_for_source(source_id)) or hsreplay_json_channels()
+    labels: list[str] = []
+    for label in (
+        *preferred_channels_for_source(source_id),
+        *hsreplay_json_channels(),
+    ):
+        normalized = str(label).strip().lower()
+        if normalized and normalized not in labels:
+            labels.append(normalized)
     out = _channel_urls_for_labels(api_url, labels)
     if not out:
         out = _channel_urls_for_labels(api_url, ["flaresolverr", "curl_cffi"])
@@ -309,6 +570,8 @@ async def _fetch_body_for_channel(
             return await fetch_text_via_curl_cffi(fetch_url, source_id=source_id)
         except ImportError as exc:
             raise RuntimeError("curl_cffi not installed") from exc
+    if label == "scrape_do":
+        return await _fetch_text_via_scrape_do(fetch_url, source_id=source_id)
     return await download_text(fetch_url, source_id=source_id)
 
 
@@ -338,8 +601,29 @@ async def fetch_hsreplay_json(
 
     errors: list[str] = []
     channels = _channel_urls(api_url, source_id=source_id)
+    first_proxy_error: ProxyPaymentRequiredError | None = None
+    independent_channel_attempted = False
 
     for label, fetch_url in channels:
+        proxy_backed = _channel_uses_residential_proxy(
+            label,
+            fetch_url,
+            source_id,
+        )
+        circuit_error = _current_proxy_circuit_error()
+        if proxy_backed and circuit_error is not None:
+            first_proxy_error = first_proxy_error or circuit_error
+            errors.append(f"{label}: skipped after proxy CONNECT failure")
+            log_action(
+                "routing.channel.skip",
+                source_id=source_id,
+                level="warn",
+                detail="proxy-backed HSReplay JSON channel skipped after CONNECT failure",
+                extra={"channel": label, "proxy_status": circuit_error.status_code},
+            )
+            continue
+        if not proxy_backed:
+            independent_channel_attempted = True
         try:
             body = await _fetch_body_for_channel(label, fetch_url, source_id=source_id)
             payload = extract_json_payload(body)
@@ -370,30 +654,51 @@ async def fetch_hsreplay_json(
                 level="warn",
                 extra={"channel": label},
             )
-        except ProxyPaymentRequiredError:
-            raise
-        except Exception as exc:
-            errors.append(f"{label}: {exc}")
-            logger.warning("HSReplay JSON fetch %s failed for %s: %s", label, api_url, exc)
+        except ProxyPaymentRequiredError as exc:
+            record_hsreplay_proxy_failure(exc)
+            first_proxy_error = first_proxy_error or exc
+            errors.append(f"{label}: proxy CONNECT HTTP {exc.status_code}")
             log_action(
                 "routing.channel.fail",
                 source_id=source_id,
-                detail=f"{label}: {exc}",
+                detail=f"{label}: proxy CONNECT HTTP {exc.status_code}",
                 level="warn",
-                extra={"channel": label, "api_url": api_url},
+                extra={"channel": label, "proxy_status": exc.status_code},
+            )
+            continue
+        except Exception as exc:
+            # Provider/transport errors may contain reflected request data.
+            # Keep operational logs typed and bounded; never include raw body,
+            # cookie headers, or token-bearing provider URLs.
+            error_name = type(exc).__name__
+            errors.append(f"{label}: {error_name}")
+            logger.warning(
+                "HSReplay JSON channel %s failed for source %s (%s)",
+                label,
+                source_id,
+                error_name,
+            )
+            log_action(
+                "routing.channel.fail",
+                source_id=source_id,
+                detail=f"{label}: {error_name}",
+                level="warn",
+                extra={"channel": label},
             )
         await asyncio.sleep(api_json_retry_delay_seconds())
 
     detail = "Could not fetch HSReplay JSON: " + "; ".join(errors)
     log_action("api.route.fail", source_id=source_id, detail=detail, level="error")
+    if first_proxy_error is not None and not independent_channel_attempted:
+        raise first_proxy_error
     raise RuntimeError(detail)
 
 
 def _is_bg_comps_listing_url(page_url: str) -> bool:
     normalized = page_url.rstrip("/")
-    return normalized.endswith("hsreplay.net/battlegrounds/comps") or normalized.endswith(
-        "/battlegrounds/comps"
-    )
+    return normalized.endswith(
+        "hsreplay.net/battlegrounds/comps"
+    ) or normalized.endswith("/battlegrounds/comps")
 
 
 def _markdown_body_usable(body: str, page_url: str) -> bool:

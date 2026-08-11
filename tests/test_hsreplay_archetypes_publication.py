@@ -83,6 +83,32 @@ class HsreplayArchetypesPublicationTest(unittest.TestCase):
             )
             self.assertEqual(stale, [])
 
+    def test_legacy_export_failure_does_not_undo_canonical_publication(self) -> None:
+        page = {"total": 0, "limit": 500, "offset": 0, "archetypes": []}
+        latest = {"id": 16, "state": "ok", "archetypes_total": 0}
+        with (
+            patch("app.hsreplay_archetypes_db.latest_run", return_value=latest),
+            patch(
+                "app.hsreplay_archetypes_db.list_archetype_snapshots",
+                return_value=page,
+            ),
+            patch("app.hsreplay_archetypes_db.data_dir", return_value=Path("/tmp")),
+            patch("app.storage.save_dataset") as save_canonical,
+            patch("app.storage.write_json", side_effect=OSError("legacy disk error")),
+            patch("app.hsreplay_archetypes_db.log_action") as log_action,
+        ):
+            path = export_latest_archetypes_json()
+
+        self.assertEqual(path, Path("/tmp/datasets/hsreplay_archetypes_db_latest.json"))
+        save_canonical.assert_called_once()
+        self.assertTrue(
+            any(
+                call.args
+                and call.args[0] == "hsreplay.archetype_db.legacy_export.fail"
+                for call in log_action.call_args_list
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

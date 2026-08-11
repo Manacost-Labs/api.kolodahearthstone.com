@@ -19,7 +19,7 @@ from ..config import (
     proxy_check_url,
     proxy_sticky_mode,
 )
-from ..proxy_errors import ProxyPaymentRequiredError
+from ..proxy_errors import proxy_tunnel_error
 from ..refresh_log import log_action
 
 logger = logging.getLogger(__name__)
@@ -216,6 +216,32 @@ def source_can_use_flaresolverr_without_proxy(source: object) -> bool:
     return flaresolverr_skip_proxy(source_id, page_url=page_url)
 
 
+def browser_backend_uses_residential_proxy(source: object, backend: str) -> bool:
+    """Return whether this exact local browser route receives the paid proxy.
+
+    This is deliberately narrower than asking whether a proxy is configured:
+    HSReplay/HSGuru FlareSolverr and Patchright routes are explicitly direct in
+    the current transport policy, while the other local backends receive the
+    residential proxy URL.
+    """
+
+    if not fetch_proxy_url():
+        return False
+    normalized = backend.strip().lower()
+    source_id = getattr(source, "id", None)
+    page_url = getattr(source, "fetch_url", None) or getattr(source, "url", None)
+    if normalized in {"flaresolverr", "patchright", "playwright"}:
+        return not flaresolverr_skip_proxy(source_id, page_url=page_url)
+    return normalized in {
+        "camoufox",
+        "cloakbrowser",
+        "cloudflare_scrape",
+        "cloudscraper",
+        "curl_cffi",
+        "scrapling",
+    }
+
+
 def proxy_dict_for_flaresolverr(
     source_id: str | None = None,
     *,
@@ -320,6 +346,11 @@ async def check_proxy_rotation(samples: int = 5) -> dict[str, object]:
                 response.raise_for_status()
                 ips.append(response.text.strip())
         except Exception as exc:
+            typed_proxy_error = proxy_tunnel_error(exc, proxy_used=True)
+            if typed_proxy_error is not None:
+                if typed_proxy_error is exc:
+                    raise
+                raise typed_proxy_error from exc
             errors.append(f"sample_{i}: {exc}")
     unique = sorted(set(ips))
     return {
@@ -348,10 +379,6 @@ async def check_proxy_health() -> dict[str, str]:
                 limits=httpx.Limits(max_keepalive_connections=0),
             ) as client:
                 response = await client.get(proxy_check_url())
-                if response.status_code == 407:
-                    raise ProxyPaymentRequiredError(
-                        "Proxy returned HTTP 407 (payment required / invalid credentials)"
-                    )
                 response.raise_for_status()
                 ip = response.text.strip()
                 log_action(
@@ -362,6 +389,19 @@ async def check_proxy_health() -> dict[str, str]:
                 )
                 break
         except Exception as exc:
+            typed_proxy_error = proxy_tunnel_error(exc, proxy_used=True)
+            if typed_proxy_error is not None:
+                log_action(
+                    "proxy.health.fail",
+                    attempt=attempt + 1,
+                    error_type=type(typed_proxy_error).__name__,
+                    detail=str(typed_proxy_error)[:500],
+                    level="error",
+                    extra={"proxy_status": typed_proxy_error.status_code},
+                )
+                if typed_proxy_error is exc:
+                    raise
+                raise typed_proxy_error from exc
             last_err = exc
             logger.warning("Proxy healthcheck attempt %d/5 failed: %s. Retrying...", attempt + 1, exc)
             log_action(
