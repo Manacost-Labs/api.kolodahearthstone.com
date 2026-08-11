@@ -1,213 +1,279 @@
 # Hearthstone Parses & Data API
 
-Кэширующий парсер и REST API для Hearthstone-источников: HSReplay, HSGuru, Firestone, MetaStats, Hearthstone-Decks, HearthArena и Vicious Syndicate.
+[![tests](https://github.com/Zulut30/hearthstone-parses/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/Zulut30/hearthstone-parses/actions/workflows/tests.yml)
 
-Production API:
+Кэширующий парсер и REST API для статистики Hearthstone. Сервис собирает данные
+из HSReplay, HSGuru, Firestone, MetaStats, Hearthstone-Decks, HearthArena и
+Vicious Syndicate, проверяет их качество и публикует нормализованные JSON-срезы.
 
-```text
-https://api.hs-manacost.ru
-```
+- Production API: <https://api.hs-manacost.ru>
+- Репозиторий: <https://github.com/Zulut30/hearthstone-parses>
+- Каталог данных: [docs/DATA_CATALOG.md](docs/DATA_CATALOG.md)
+- Полная документация API: [docs/API.md](docs/API.md)
 
-Репозиторий:
+> `GET /health` проверяет только доступность API. Он не гарантирует, что все
+> парсеры успешно обновились и данные свежие. Для полной проверки используйте
+> `freshness-check`, `quality-check` и `/ops/summary`.
 
-```text
-https://github.com/Zulut30/hearthstone-parses
-```
+## Что находится в системе
 
-## Что собирает
+В текущем реестре **96 источников: 92 scrape + 4 dedicated pipeline**.
+Авторитетный список генерируется из `app.sources.SOURCES` и хранится в
+[docs/SOURCES.md](docs/SOURCES.md). Ручной перечень здесь намеренно не
+дублируется: синхронизацию каталога проверяет pytest.
 
-- **HSReplay**: ranked card stats, Wild/Standard Legend 1 day, Arena cards, Battlegrounds heroes/minions/compositions/trinkets, meta archetypes grouped by class.
-- **HSReplay Archetype DB**: локальная SQLite база Standard Legend архетипов: summary, mulligan guide, matchups, popular decks, cards and history snapshots.
-- **Vicious Syndicate**: Data Reaper Live class/deck distribution and power tier list, radar graphs.
-- **HSGuru**: meta, matchups, streamer decks.
-- **Firestone**: Battlegrounds cards/spells/compositions and Arena card stats.
-- **MetaStats**: archetypes, decks, matchups.
-- **Hearthstone-Decks**: Standard/Wild Legend deck posts with deck codes.
-- **HearthArena**: Arena tier list.
+Основные группы данных:
 
-## Подробный каталог источников
+- Constructed: карты, колоды, архетипы, мета, матчапы и история срезов.
+- Battlegrounds: герои, существа, составы, аксессуары и детальная статистика.
+- Arena: карты, классы, легендарные группы, winning decks и tier lists.
+- Vicious Syndicate: Data Reaper Live и radar-графы.
+- Производные наборы: fun/off-meta decks, SQL-индексы и patch-aware snapshots.
 
-В реестре **47 источников: 44 scrape + 3 dedicated pipeline**. Авторитетная таблица генерируется напрямую из `app.sources.SOURCES`: [docs/SOURCES.md](docs/SOURCES.md). Проверка синхронизации входит в pytest; обновление после изменения реестра:
-
-Пользовательский каталог «какие данные можно получить, какие поля возвращаются
-и какой endpoint выбрать»: **[docs/DATA_CATALOG.md](docs/DATA_CATALOG.md)**.
-
-```bash
-python scripts/generate-source-catalog.py
-```
-
-Каждый dataset доступен через:
+Каждый зарегистрированный набор доступен через:
 
 ```text
 GET /datasets/{source_id}
 ```
 
-Основные данные лежат в `data.structured`; рядом сохраняются технические поля: `fetched_at`, `backend`, `content_length`, `quality`, `rows_total`, `quality_score`, а при аварийном сохранении прошлого успешного результата - `serving_cached_dataset=true` и `effective_state=ok_cached`.
+Для новых интеграций предпочтительны типизированные `/v1/*` endpoints и поле
+`data.structured`. Практический выбор endpoint и описание полей находятся в
+[каталоге данных](docs/DATA_CATALOG.md).
 
-### HSReplay
+## Архитектура
 
-HSReplay - главный источник premium/ranked/Battlegrounds/Arena статистики. Для стабильности parser предпочитает API-first каналы (`curl_cffi`, `flaresolverr`) и не сохраняет HTML fallback там, где нужны точные числовые метрики. Premium-страницы используют локальную серверную сессию `HSREPLAY_STORAGE_PATH`; cookie и session values никогда не возвращаются в public API.
+```mermaid
+flowchart LR
+    Start["systemd timer / CLI / admin API"] --> Lock["ResourceLockSet для поддерживаемых writers"]
+    Lock --> Route{"Маршрут источника"}
+    Route --> API["API-first: JSON / curl_cffi / специализированный клиент"]
+    Route --> Cloud["Shared cloud scrape: Scrape.do → Firecrawl → Scrapfly"]
+    Route --> Browser["Local browser path: FlareSolverr / Scrapling / Patchright"]
+    API --> Normalize["Нормализация и схема"]
+    Cloud --> Normalize
+    Browser --> Normalize
+    Normalize --> Gate["Contracts + semantic checks + regression gate"]
+    Gate --> Store["JSON cache + SQLite + last-known-good"]
+    Store --> REST["REST API / UI / consumers"]
+    Start --> Jobs["Deadline + progress snapshots + job-runs"]
+    Jobs --> Lock
+```
 
-| Source ID | Что парсим | Какие данные отдаёт |
-|-----------|------------|---------------------|
-| `hsreplay_cards_legend_1d` | Standard cards, Legend, last 1 day | `type=card_stats`, список `cards`: `id`, `dbfId`, `name`, `deck_popularity`, `avg_copies`, `deck_winrate`, `times_played`, `winrate_when_drawn`, `winrate_when_played`, `keep_percentage`, `opening_hand_winrate`, `avg_turns_in_hand`, `avg_turn_played_on`, card metadata. |
-| `hsreplay_cards_wild_legend_1d` | Wild cards, Legend, last 1 day | Та же структура `card_stats`, но для Wild: популярность в колодах, winrate, hidden columns, played/drawn/keep/turn metrics. |
-| `hsreplay_cards_legend_included_winrate` | Ranked cards, Gold, last 14 days, сортировка по included winrate | `card_stats` с card metrics; используется как более широкий ranked baseline по winrate. |
-| `hsreplay_cards_legend_included_popularity` | Ranked cards, Gold, last 14 days, сортировка по included popularity | `card_stats` с card metrics; используется как baseline по популярности. |
-| `hsreplay_meta_archetypes_legend_eu_1d` | Meta archetypes, Legend EU, last 1 day | `type=hsreplay_meta_archetypes`, классы и архетипы внутри классов: `class`, `archetype`, `winrate`, `popularity`, `games`, rank/time/region filters. |
-| `hsreplay_meta_top_1000_legend_1d_firecrawl` | Meta archetypes, Top 1000 Legend, last 1 day | `type=hsreplay_meta_archetypes`; Firecrawl открывает страницу `/meta/#rankRange=TOP_1000_LEGEND&timeFrame=LAST_1_DAY`, structured-метрики берутся из HSReplay API. Обновляется ежедневно. |
-| `hsreplay_meta_legend_1d_firecrawl` | Meta archetypes, Legend, last 1 day | То же для `rankRange=LEGEND`; daily Firecrawl + HSReplay API refresh. |
-| `hsreplay_meta_diamond_4to1_1d_firecrawl` | Meta archetypes, Diamond 4-1, last 1 day | То же для `rankRange=DIAMOND_FOUR_THROUGH_DIAMOND_ONE`; daily Firecrawl + HSReplay API refresh. |
-| `hsreplay_arena_cards_advanced` | Arena cards, Arenasmith/advanced view | `type=arena_card_tiers`, список `cards`: `name`, `id`, `dbfId`, `arena_class`, `tier`, `deck_winrate`, `win_rate`, `pick_rate`, `offer_rate`, `in_runs`, `avg_copies`, `times_played`, `winrate_when_drawn`, `winrate_when_played`, `score`. Если live API временно недоступен, сохраняется последний полный dataset как `ok_cached`. |
-| `hsreplay_arena_class_pages_firecrawl` | Arena class pages for all classes | `type=arena_class_pages`, `classes[]`: class slug/name, `win_rate`, `pct_7_plus`, `pick_rate`, `num_drafts`, Firecrawl status for each class page. Обновляется раз в два дня. |
-| `hsreplay_arena_winning_decks` | Arena winning decks | `type=arena_winning_decks`, winning deck runs: class, wins/losses, hero, final deck/cards, deck code/details when available. |
-| `hsreplay_arena_legendaries` | Arena legendary groups | `type=arena_legendary_groups`, группы легендарок, key card, related cards, stats/labels для оценки выбора. |
-| `hsreplay_arena` | Arena overview | Overview HTML/structured extraction: общие блоки арены, ссылки, tables/json snippets; используется как обзорный источник. |
-| `hsreplay_battlegrounds_heroes` | Premium Battlegrounds heroes tier list | `type=bg_heroes`, `heroes`: hero name, `dbfId`, `pick_rate`, `best_comp`, `best_composition_id`, `avg_placement`, `tier`, `placement_distribution`. |
-| `hsreplay_battlegrounds_minions` | Premium Battlegrounds minions advanced stats for the current BG patch | `type=bg_minions`, `minions`: minion/card id, name, impact, `win_share`, popularity, tier/card metadata. The query is patch-scoped so a rolling seven-day window cannot mix old and new pools. |
-| `hsreplay_battlegrounds_compositions` | Premium Battlegrounds compositions stats | `type=bg_compositions`, comps/tribes: name/type, `first_place`, `avg_placement`, popularity, `placement_distribution`, main/additional cards when available. |
-| `hsreplay_battlegrounds_comps` | Battlegrounds comps listing/detail pages | `type=bg_comps`, compositions with `main_cards`, `additional_cards`, minions, source URLs; detail pages are cached to reduce protected-page failures. |
-| `hsreplay_battlegrounds_trinkets_lesser` | Battlegrounds lesser trinkets | `type=bg_trinkets`, trinket rows: name, id/card metadata, pick rate and page-derived stats. |
-| `hsreplay_battlegrounds_trinkets_greater` | Battlegrounds greater trinkets | Same `bg_trinkets` structure for greater trinkets. |
-| `hsreplay_decks_trending` | Trending decks page | `type=trending_decks` or page-structured output: deck links, archetype/title, class, deck cards/code when exposed by page. |
+Ключевые компоненты:
 
-### HSGuru
+| Компонент | Назначение |
+| --- | --- |
+| `app/sources.py` | Реестр источников, тип и допустимая свежесть. |
+| `app/fetcher.py` | Оркестрация refresh, маршрутизация, сохранение последнего хорошего результата. |
+| `app/firecrawl_backend.py` | Общая политика protected-page провайдеров. |
+| `app/publish_gate.py` | Единая точка проверки кандидата перед публикацией. |
+| `app/source_contracts.py` | Минимальные объёмы, обязательные поля и backend policy. |
+| `app/dataset_regression.py` | Защита от резкого уменьшения или деградации набора. |
+| `app/resource_locks.py` | Неблокирующие межпроцессные lock-файлы по ресурсам. |
+| `app/job_run.py` | Дедлайны, прогресс и атомарные snapshots длительных заданий. |
+| `app/storage.py`, `app/db.py` | JSON snapshots, резервные копии и SQLite/WAL. |
+| `app/main.py` | REST API, admin/ops endpoints и web UI. |
 
-HSGuru отдаёт meta, matchup matrix и streamer decks. Источник часто защищён Cloudflare, поэтому parser работает через `browser_protected` tier: FlareSolverr primary, browser fallbacks, quality gate по строкам таблиц.
+## Политика провайдеров
 
-| Source ID | Что парсим | Какие данные отдаёт |
-|-----------|------------|---------------------|
-| `hsguru_meta_standard_legend` | Standard meta, Legend | Archetype table: class, archetype/deck name, winrate, popularity, games, rank/format filters. |
-| `hsguru_meta_standard_diamond_4to1` | Standard meta, Diamond 4-1 | То же для Diamond 4-1. |
-| `hsguru_meta_standard_top_5k` | Standard meta, Top 5K Legend | То же для Top 5K. |
-| `hsguru_meta_standard_top_legend` | Standard meta, Top Legend | То же для Top Legend. |
-| `hsguru_meta_wild_legend` | Wild meta, Legend | Wild archetypes: winrate, popularity, games. |
-| `hsguru_meta_wild_diamond_4to1` | Wild meta, Diamond 4-1 | Wild Diamond 4-1 archetype stats. |
-| `hsguru_meta_wild_top_legend` | Wild meta, Top Legend | Wild Top Legend archetype stats. |
-| `hsguru_meta_wild_top_5k` | Wild meta, Top 5K | Wild Top 5K archetype stats. |
-| `hsguru_matchups_legend` | Matchup matrix, Legend | Matrix/cells by archetype: opponent archetype, matchup winrate, games/sample when available. |
-| `hsguru_matchups_diamond_4to1` | Matchup matrix, Diamond 4-1 | Same matchup matrix for Diamond 4-1. |
-| `hsguru_streamer_decks_legend_1000` | Streamer decks filtered to top legend | Deck rows: streamer/player, class, archetype, rank, score/date when available, deck link and deck code fill tracking. |
+Специализированные API-first маршруты используются там, где источник отдаёт
+структурированные данные. Защищённые страницы могут идти через локальный
+browser rotator или через общий cloud-scrape каскад. Для общего cloud-маршрута
+порядок фиксирован:
 
-### Firestone
+1. **Scrape.do** — основной платный провайдер. Временные `429/5xx` получают
+   ограниченный retry; Cloudflare challenge может переключить запрос на Super.
+2. **Firecrawl** — первый резерв с ротацией настроенных ключей.
+3. **Scrapfly** — последний резерв с отдельной ротацией ключей.
 
-Firestone - public API fallback для Battlegrounds и Arena. Обычно не требует premium auth и даёт агрегированные JSON-like данные.
+Переход к следующему провайдеру происходит после исчерпания ограниченных попыток
+текущего: внутри Scrape.do возможны retry/Super escalation, а Firecrawl и
+Scrapfly могут ротировать ключи. Ключи, cookies и URL с токенами очищаются из
+ошибок и не должны попадать в логи. Детали и переменные конфигурации:
+[docs/SCRAPE_PROVIDERS.md](docs/SCRAPE_PROVIDERS.md).
 
-| Source ID | Что парсим | Какие данные отдаёт |
-|-----------|------------|---------------------|
-| `firestone_battlegrounds_comps` | Battlegrounds compositions | `type=bg_comps`, comp name/type, core cards/minions, placement/popularity stats when available. |
-| `firestone_battlegrounds_cards` | Battlegrounds minions/cards by tavern tier | BG card rows: name, id, tavern tier, impact/placement/popularity metrics, card metadata. |
-| `firestone_battlegrounds_spells` | Battlegrounds spells | Spell rows with tier/type and Battlegrounds performance metrics. |
-| `firestone_arena_cards_normal` | Regular Arena card stats | `type=arena_card_tiers`, cards with class, tier/score, winrate/popularity-style metrics. |
-| `firestone_arena_cards_underground` | Underground Arena card stats | Same arena card structure for Underground mode. |
-| `firestone_arena_legendaries_normal` | Regular Arena legendary cards | Legendary-only arena cards, tier/score and stats. |
-| `firestone_arena_legendaries_underground` | Underground Arena legendary cards | Legendary-only Underground arena cards. |
+## Гарантии устойчивости
 
-### Vicious Syndicate
+- Generic refresh и HSGuru matrix используют lock по конкретным ресурсам,
+  поэтому занятый источник не должен блокировать независимые источники.
+- Кандидат проходит структурную схему, source contract, semantic validation и
+  regression gate до записи.
+- При временном отказе upstream валидный предыдущий snapshot остаётся доступен
+  как `effective_state=ok_cached`; причина последнего сбоя остаётся видимой.
+- Последовательная JSON-запись использует временный файл и atomic replace;
+  предыдущие datasets и statuses сохраняются в ограниченной ротации backups.
+- HSGuru meta matrix имеет кооперативный дедлайн 60 минут, throttled snapshots
+  прогресса и единый lock для matrix refresh и присоединения deck catalog.
+- Ошибка best-effort telemetry не прерывает сам парсер.
+- Состояния источника типизированы: `ok`, `partial`, `fetch_error`,
+  `http_error`, `blocked_by_protection`, `proxy_required`, `quality_error`,
+  `timed_out`, `never_fetched`.
 
-Vicious Syndicate используется для Data Reaper Live и radar graphs. Live Beta берётся из Firebase/embedded app data, radars - из deck-library/radar pages.
+Наличие last-known-good означает, что API продолжает обслуживать потребителей,
+но не превращает неудачный refresh в успех. Именно поэтому liveness, freshness
+и quality проверяются раздельно.
 
-После крупных обновлений Hearthstone Vicious может временно отдавать только
-агрегаты `Other <Class>` или radar предыдущего Data Reaper issue. Live-заглушки
-`upstream_unclassified` не публикуются. Последний доступный полноценный radar
-публикуется с `upstream_stale` и номерами активного/последнего report issue,
-пока на сайте не появится новый radar. Если radar-страницы требуют сессию,
-cookies можно импортировать командой
-`python -m app.cli vicious-import-storage /path/to/cookies.json`; принимаются
-Playwright `storage_state` и экспорт Cookie-Editor.
+### Известные ограничения
 
-Docker timer `hs-data-api-docker-refresh-vicious-syndicate.timer` проверяет оба
-источника каждые два часа и автоматически заменит issue 349, когда Vicious
-опубликует более новый полноценный radar.
+- Дедлайн HSGuru проверяется между сетевыми операциями и пока не прерывает
+  реально зависшую coroutine; heartbeat не работает отдельным фоновым циклом.
+- Не все dedicated pipeline writers ещё используют `ResourceLockSet`.
+- Общий `storage.write_json()` использует одинаковое имя `.tmp` и не рассчитан
+  на две одновременные записи одного source без внешнего lock.
+- Docker healthcheck проверяет liveness процесса, а не свежесть parser data.
+- Strict preflight пока проверяет настроенный residential proxy как глобальную
+  зависимость; его отказ может остановить API-first или cloud-provider job,
+  которому этот proxy непосредственно не нужен.
+- System-wide list endpoints пока вычисляют ETag через полный проход по JSON
+  snapshots, поэтому их нельзя считать дешёвыми high-QPS endpoints.
 
-| Source ID | Что парсим | Какие данные отдаёт |
-|-----------|------------|---------------------|
-| `vicious_syndicate_live_beta` | Data Reaper Live Beta | `type=vicious_live`, class distribution/pie chart, deck distribution, tier list, winrate/power/rank buckets, time ranges, total games when available. |
-| `vicious_syndicate_radars` | Data Reaper radar graphs | `type=vicious_syndicate_radars`, radar graph nodes/edges, deck/archetype names, card relationships and source URLs. |
+Эти ограничения учитываются в operational gate ниже и являются следующими
+приоритетами усиления системы.
 
-### MetaStats
+## Хранение данных
 
-MetaStats - альтернативный public источник ranked колод и matchup матрицы.
+Canonical Docker хранит runtime на host в `/srv/hs-data-api/data` и монтирует
+его в контейнер как `/var/lib/hs-data-api`:
 
-| Source ID | Что парсим | Какие данные отдаёт |
-|-----------|------------|---------------------|
-| `metastats_decks` | Archetypes and decks for all classes | Deck/archetype rows: class, archetype, winrate, games, popularity, deck code/list when available. |
-| `metastats_matchups` | Archetype matchups | Matchup matrix: archetype vs archetype, winrate, games/sample counts. |
+| Host path | Container path | Содержимое |
+| --- | --- | --- |
+| `data/datasets/` | `/var/lib/hs-data-api/datasets/` | Опубликованные JSON snapshots. |
+| `data/statuses/` | `/var/lib/hs-data-api/statuses/` | Последнее состояние refresh. |
+| `data/.locks/` | `/var/lib/hs-data-api/.locks/` | Lock-файлы; активное владение определяется `flock`. |
+| `data/job-runs/` | `/var/lib/hs-data-api/job-runs/` | Прогресс длительных jobs. |
+| `data/backups/` | `/var/lib/hs-data-api/backups/` | Предыдущие datasets/statuses. |
+| `data/baselines/` | `/var/lib/hs-data-api/baselines/` | Regression baselines. |
+| `data/publications/` | `/var/lib/hs-data-api/publications/` | Versioned candidate/published/quarantine records. |
+| `data/control/` | `/var/lib/hs-data-api/control/` | Parser-control state и lock. |
+| `data/firecrawl/`, `data/scrapfly/` | Одноимённые каталоги | Состояние ротации provider keys без самих ключей. |
+| `data/logs/refresh-events.jsonl` | `/var/lib/hs-data-api/logs/refresh-events.jsonl` | Структурированные события. |
+| `data/hs_parses.db` | `/var/lib/hs-data-api/hs_parses.db` | SQLite/WAL индексы. |
 
-### Hearthstone-Decks
+Canonical Docker читает секреты из игнорируемого Git файла
+`/srv/hs-data-api/.env.docker`. `/etc/hs-data-api.env` относится к legacy host
+units/CLI; browser sessions хранятся в закрытых файлах data directory.
 
-| Source ID | Что парсим | Какие данные отдаёт |
-|-----------|------------|---------------------|
-| `hearthstone_decks` | Standard/Wild Legend deck posts | `type=hearthstone_decks`, deck posts: title, class, format, rank/legend placement, score, URL, date, deck code, `deck_code_status`, `missing_deck_code_count`, `deck_code_fill_rate`. Detail pages are retried because deck code may live inside buttons/scripts/text. |
+## Быстрый старт через Docker
 
-### HearthArena
-
-| Source ID | Что парсим | Какие данные отдаёт |
-|-----------|------------|---------------------|
-| `heartharena_tierlist` | Arena tier list | `type=heartharena_tierlist`, classes with card rows: card name/id, tier id/label, score/rating and class grouping. |
-
-### Общие гарантии качества данных
-
-- Каждый source получает state из `SourceState`: `ok`, `partial`, `fetch_error`, `http_error`, `blocked_by_protection`, `proxy_required`, `quality_error`, `timed_out`, `never_fetched`. `ok_cached` используется только как вычисляемый `effective_state`, не как сохранённый source state.
-- `source_contracts.py` задаёт минимальные строки, обязательные поля, допустимый fallback и regression thresholds для критичных источников.
-- `dataset_regression.py` не даёт перезаписать хороший dataset резко уменьшившимся или неполным payload.
-- Для premium/anti-bot источников parser сохраняет последний хороший dataset, если live refresh временно упал.
-- `/ops/summary` показывает weak sources, DB write failures, cached/preserved datasets, traffic estimate and recent failures.
-
-## Документация
-
-- [REST API](docs/API.md) — endpoints, auth, source IDs, response schemas and examples.
-- [HSReplay Archetype Database](docs/HSREPLAY_ARCHETYPE_DATABASE.md) — SQLite schema, refresh CLI, systemd schedule and endpoints.
-- [Deploy](DEPLOY.md) — установка, перенос, systemd и runtime checks.
-- [Security and Parsing](docs/SECURITY_AND_PARSING.md) — секреты, proxy, premium auth, reliability.
-- [Parser Improvement Plan](docs/PARSER_IMPROVEMENT_PLAN.md) — roadmap улучшения стабильности.
-
-## Быстрый старт
+Требуются Docker и Docker Compose:
 
 ```bash
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-patchright install chromium
+git clone https://github.com/Zulut30/hearthstone-parses.git
+cd hearthstone-parses
 
-cp .env.example /etc/hs-data-api.env
-# Заполните HS_API_KEY, HS_FETCH_PROXY_URL и другие нужные параметры.
+cp .env.example .env.docker
+chmod 600 .env.docker
+# Заполните .env.docker своими ключами и настройками proxy.
 
-python -m app.cli proxy-check
-python -m app.cli refresh --all
-python -m app.cli refresh-hsreplay-archetypes
+docker compose up --build -d
+curl -fsS http://127.0.0.1:18081/health
+```
+
+API может стартовать без запуска полного парсинга. Не выполняйте
+`refresh --all`, пока не настроены proxy, provider keys и необходимые browser
+sessions.
+
+## Локальная разработка
+
+Основное приложение работает на Python 3.12. Host-side exporter таймеров имеет
+отдельный smoke-test на Python 3.11.
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements-dev.txt
+python -m patchright install chromium
+
+python -m pytest -q
+python scripts/generate-source-catalog.py --check
+```
+
+Запуск API с локальным data directory:
+
+```bash
+HS_API_DATA_DIR="$PWD/data" \
+HS_API_BIND_HOST="127.0.0.1" \
 python -m app.server
 ```
 
-На production-сервере используйте `scripts/install.sh` и systemd units из `systemd/`.
+## Команды оператора
 
-## Тесты
-
-Dev/test зависимости отделены от production image:
+На canonical Docker production выполняйте CLI внутри активного контейнера.
+Raw `python -m app.cli` на host всегда пытается загрузить
+`/etc/hs-data-api.env` и может неожиданно обратиться к production data.
+Команды `proxy-check`, `preflight`, `canary`, `refresh` и dedicated refresh
+обращаются к upstream и при fallback могут расходовать лимиты платных
+провайдеров.
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements-dev.txt
-python -m pytest -q
+# Безопасность маршрута до источников и обязательные зависимости
+docker exec hs-data-api python -m app.cli proxy-check
+docker exec hs-data-api python -m app.cli preflight --strict
+docker exec hs-data-api python -m app.cli canary --strict
+
+# Один источник; non-zero, если свежий набор не опубликован
+docker exec hs-data-api python -m app.cli refresh \
+  --source hsreplay_cards_legend_1d \
+  --require-all-ok
+
+# Состояние уже сохранённых данных без платного refetch
+docker exec hs-data-api python -m app.cli freshness-check --since-hours 48
+docker exec hs-data-api python -m app.cli quality-check
+
+# Длительный HSGuru pipeline
+docker exec hs-data-api python -m app.cli refresh-hsguru-meta-matrix --concurrency 2
 ```
 
-`httpx2` используется только TestClient-тестами в соответствии с актуальным
-Starlette API; runtime HTTP-клиенты продолжают использовать `httpx`.
+На production команды запускаются внутри штатного venv/container и через
+systemd units из `systemd/`. Полная установка и расписание описаны в
+[DEPLOY.md](DEPLOY.md).
 
-## Основные API endpoints
+## Как проверять стабильность
+
+Минимальный production gate состоит из четырёх независимых проверок:
+
+```bash
+# 1. API отвечает
+curl -fsS http://127.0.0.1:18081/health | jq .
+
+# 2. Нет stale и cached-after-failure источников
+docker exec hs-data-api python -m app.cli freshness-check --since-hours 48
+
+# 3. Все cached datasets проходят contracts и quality threshold
+docker exec hs-data-api python -m app.cli quality-check
+
+# 4. Фоновые задания не завершились ошибкой
+! systemctl --failed --no-pager --no-legend | grep -q hs-data-api
+```
+
+Для подробной диагностики с `X-API-Key`:
+
+```bash
+curl -fsS -H "X-API-Key: ${HS_API_KEY}" \
+  http://127.0.0.1:18081/ops/health | jq .
+
+curl -fsS -H "X-API-Key: ${HS_API_KEY}" \
+  http://127.0.0.1:18081/ops/summary | jq .
+```
+
+Зелёный `/health` при non-zero `freshness-check` означает: API доступен, но
+часть данных устарела. Это деградация parser layer, а не исправное состояние
+всей системы.
+
+## Основные endpoints
 
 Public:
 
-- `GET /health` — лёгкий liveness.
-- `GET /sources` and `GET /sources/{source_id}` — source registry and statuses.
-- `GET /datasets` and `GET /datasets/{source_id}` — cached parser output.
-- `GET /demo/overview`, `GET /demo/view/{source_id}` — prepared UI payloads.
-- `GET /system/technologies` — public parser/source technology overview.
-- `GET /api/db/archetypes` and `/api/db/archetypes/{id}` — SQL-backed HSReplay archetype snapshots.
-- `GET /ui`, `/ui/logs`, `/ui/technologies` — web UI pages.
+- `GET /health` — liveness API.
+- `GET /sources`, `GET /sources/{source_id}` — реестр и статусы.
+- `GET /datasets`, `GET /datasets/{source_id}` — cached parser output.
+- `GET /v1/constructed/*`, `/v1/bg/*`, `/v1/arena/*` — типизированные API.
+- `GET /v1/system/sources`, `/v1/system/datasets`, `/v1/system/health` —
+  системные read-only представления.
+- `GET /system/technologies` — публичное описание parser stack без секретов.
+- `GET /ui`, `/ui/logs`, `/ui/technologies` — встроенный интерфейс.
 
-Admin/ops, requires `X-API-Key`:
+Admin/ops, требует `X-API-Key`:
 
 - `POST /admin/refresh`
 - `PUT /admin/datasets/{source_id}`
@@ -218,56 +284,23 @@ Admin/ops, requires `X-API-Key`:
 - `GET /ops/run/{run_id}`
 - `GET /health/premium`
 
-Подробнее: [docs/API.md](docs/API.md).
+## Документация
 
-## Примеры
+- [docs/DATA_CATALOG.md](docs/DATA_CATALOG.md) — выбор endpoint и поля данных.
+- [docs/SOURCES.md](docs/SOURCES.md) — генерируемый реестр всех источников.
+- [docs/API.md](docs/API.md) — полная REST API документация.
+- [docs/SCRAPE_PROVIDERS.md](docs/SCRAPE_PROVIDERS.md) — Scrape.do, Firecrawl и Scrapfly.
+- [docs/HSREPLAY_ARCHETYPE_DATABASE.md](docs/HSREPLAY_ARCHETYPE_DATABASE.md) — SQL snapshots архетипов.
+- [docs/SECURITY_AND_PARSING.md](docs/SECURITY_AND_PARSING.md) — proxy, cookies, auth и threat model.
+- [DEPLOY.md](DEPLOY.md) — установка, systemd timers, обновление и recovery.
 
-```bash
-curl -s "https://api.hs-manacost.ru/health" | jq .
+## Безопасность
 
-curl -s "https://api.hs-manacost.ru/sources?site=hsreplay" | jq .
-
-curl -s "https://api.hs-manacost.ru/datasets/hsreplay_meta_archetypes_legend_eu_1d" \
-  | jq '.data.structured.classes[0]'
-
-curl -s -H "X-API-Key: ${HS_API_KEY}" \
-  "https://api.hs-manacost.ru/ops/health" | jq .
-```
-
-## Надёжность
-
-Парсер использует:
-
-- tiered refresh orchestration: `light_api`, `medium_api`, `browser_patchright`, `browser_protected`;
-- API-first parsers там, где возможно;
-- residential proxy and backend rotation;
-- quality gates and dataset regression checks;
-- structured schema validation for typed API-first datasets;
-- contract fixtures for real upstream payload shapes;
-- stale cache preservation when live refresh fails;
-- admin-only ops logs, premium auth health and refresh timelines.
-
-## CLI
-
-```bash
-python -m app.cli proxy-check
-python -m app.cli preflight
-python -m app.cli refresh --all
-python -m app.cli refresh --source hsreplay_cards_legend_1d
-python -m app.cli hsreplay-login
-```
-
-## Production Checks
-
-```bash
-curl -s "http://127.0.0.1:8000/health" | jq .
-
-curl -s -H "X-API-Key: ${HS_API_KEY}" \
-  "http://127.0.0.1:8000/ops/health" | jq .
-
-curl -s -H "X-API-Key: ${HS_API_KEY}" \
-  "http://127.0.0.1:8000/health/premium?live=true" | jq .
-```
+- Не коммитьте `.env*`, cookies, storage state, токены и production datasets.
+- Не передавайте секреты через query string или публичные endpoints.
+- Используйте `HS_FETCH_REQUIRE_PROXY=true` для защищённых production-источников.
+- Public API read-only; refresh и ops закрыты `X-API-Key`.
+- Перед публикацией изменений запускайте tests, Docker build и secret scan.
 
 ## License
 
