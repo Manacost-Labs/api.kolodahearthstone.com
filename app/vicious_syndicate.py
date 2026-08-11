@@ -6,6 +6,7 @@ import random
 import re
 from datetime import datetime
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 from bs4 import BeautifulSoup
@@ -30,6 +31,7 @@ class _ViciousProxyCircuit:
 
     def __init__(self) -> None:
         self.error: ProxyPaymentRequiredError | None = None
+        self.successful_transports: set[str] = set()
 
     def open(self, error: ProxyPaymentRequiredError) -> None:
         if self.error is None:
@@ -38,6 +40,20 @@ class _ViciousProxyCircuit:
     def raise_if_open(self) -> None:
         if self.error is not None:
             raise self.error
+
+    def record_success(self, *, proxy_used: bool) -> None:
+        self.successful_transports.add(
+            "residential_httpx" if proxy_used else "proxyless_direct"
+        )
+
+    @property
+    def transport_backend(self) -> str | None:
+        if not self.successful_transports:
+            return None
+        transports = sorted(self.successful_transports)
+        if len(transports) == 1:
+            return transports[0]
+        return f"mixed[{','.join(transports)}]"
 
 
 CLASSES = [
@@ -211,6 +227,47 @@ def find_radar_url(html: str, *, base_url: str) -> str | None:
     return None
 
 
+def _is_official_vicious_url(url: str) -> bool:
+    parsed_url = urlparse(url)
+    return parsed_url.scheme == "https" and (parsed_url.hostname or "").lower() in {
+        "vicioussyndicate.com",
+        "www.vicioussyndicate.com",
+    }
+
+
+def _valid_vicious_response(url: str, html: str) -> bool:
+    """Validate known public Vicious pages before they enter the parser.
+
+    The site's normal HTML currently contains a ``cf_clearance`` reference, so
+    the generic WAF marker check alone produces false positives.  These
+    URL-specific checks accept only the structures consumed by this pipeline.
+    """
+
+    if not _is_official_vicious_url(url):
+        return False
+
+    parsed_url = urlparse(url)
+    path = parsed_url.path.lower()
+    if path.rstrip("/") == "/tag/data-reaper-report":
+        try:
+            parse_latest_report_metadata(html)
+        except (RuntimeError, TypeError, ValueError):
+            return False
+        return True
+
+    if "/datareaper/radars/" in path:
+        radar = parse_radar_js(html)
+        return bool(radar.get("nodes") and radar.get("edges"))
+
+    if "/deck-library/" in path:
+        return looks_like_vicious_deck_library(html)
+
+    if "/decks/" in path:
+        return re.search(r"AAE[A-Za-z0-9+/=]+", html) is not None
+
+    return False
+
+
 async def fetch_with_retry(
     _client: httpx.AsyncClient,
     url: str,
@@ -229,6 +286,15 @@ async def fetch_with_retry(
     later. Treat those as optional misses so systemd logs do not look like a
     source failure when the final radar dataset still passes contracts.
     """
+    if not _is_official_vicious_url(url):
+        logger.warning(
+            "Vicious fetch rejected non-official host context=%s",
+            optional_context,
+        )
+        if optional:
+            return None
+        raise RuntimeError("Vicious fetch rejected non-official host")
+
     headers = build_fetch_headers(
         url,
         accept="text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
@@ -239,26 +305,50 @@ async def fetch_with_retry(
     )
     effective_max_retries = min(max_retries, 2) if optional else max_retries
     async with semaphore:
-        for attempt in range(1, effective_max_retries + 1):
-            if proxy_circuit is not None:
-                proxy_circuit.raise_if_open()
+        attempt = 0
+        attempt_budget = effective_max_retries
+        proxy_error = proxy_circuit.error if proxy_circuit is not None else None
+        while attempt < attempt_budget:
+            attempt += 1
             await asyncio.sleep(random.uniform(0.2, 0.5))
-            if proxy_circuit is not None:
-                proxy_circuit.raise_if_open()
+            if proxy_circuit is not None and proxy_circuit.error is not None:
+                proxy_error = proxy_circuit.error
             client_kwargs = httpx_client_kwargs(source_id, page_url=url)
+            # Every pipeline URL is canonical and validated. Automatic redirects
+            # could leak hostless WordPress cookies to an external Location.
+            client_kwargs["follow_redirects"] = False
+            proxyless_recovery = proxy_error is not None
+            if proxyless_recovery:
+                # This fallback is deliberately local to the public Vicious
+                # pipeline.  It never changes global proxy routing.
+                client_kwargs.pop("proxy", None)
+                client_kwargs["trust_env"] = False
             proxy_used = bool(client_kwargs.get("proxy"))
             try:
                 # Recreate the client per attempt so a burned sticky proxy session
                 # is reflected on the very next retry.
                 cookies = vicious_syndicate_cookies_for_fetch()
-                if cookies:
+                if cookies and not proxyless_recovery:
                     client_kwargs["cookies"] = cookies
                 async with httpx.AsyncClient(**client_kwargs) as attempt_client:
                     resp = await attempt_client.get(url, headers=headers)
                 blocked = is_session_blocked(resp.status_code, resp.text)
-                if resp.status_code == 200 and (not blocked or looks_like_vicious_deck_library(resp.text)):
+                response_url = str(resp.url)
+                valid = (
+                    resp.status_code == 200
+                    and _is_official_vicious_url(response_url)
+                    and _valid_vicious_response(response_url, resp.text)
+                )
+                if valid:
+                    if proxy_circuit is not None:
+                        proxy_circuit.record_success(proxy_used=proxy_used)
+                    if proxyless_recovery:
+                        logger.info(
+                            "Vicious public fetch recovered without residential proxy context=%s",
+                            optional_context,
+                        )
                     return resp
-                if blocked:
+                if blocked and proxy_used:
                     burn_proxy_session(source_id, page_url=url, reason="vicious_syndicate_blocked")
                 if optional:
                     logger.warning(
@@ -275,23 +365,33 @@ async def fetch_with_retry(
                         body=resp.text,
                         source_id=source_id,
                     )
-                if attempt < effective_max_retries:
+                if attempt < attempt_budget:
                     await asyncio.sleep(
                         backoff_delay_seconds(attempt, schedule=DEFAULT_BACKOFF_SECONDS)
                     )
                     continue
             except ProxyPaymentRequiredError as exc:
+                already_recovering = proxy_error is not None
                 if proxy_circuit is not None:
                     proxy_circuit.open(exc)
-                raise
-            except Exception as exc:
+                if proxy_error is None:
+                    proxy_error = exc
+                # Even a caller configured for one attempt gets one bounded
+                # public/direct recovery after a verified CONNECT rejection.
+                if not already_recovering and attempt >= attempt_budget:
+                    attempt_budget += 1
+                continue
+            except Exception as exc:  # noqa: BLE001 - classify provider/tunnel failures
                 typed_proxy_error = proxy_tunnel_error(exc, proxy_used=proxy_used)
                 if typed_proxy_error is not None:
+                    already_recovering = proxy_error is not None
                     if proxy_circuit is not None:
                         proxy_circuit.open(typed_proxy_error)
-                    if typed_proxy_error is exc:
-                        raise
-                    raise typed_proxy_error from exc
+                    if proxy_error is None:
+                        proxy_error = typed_proxy_error
+                    if not already_recovering and attempt >= attempt_budget:
+                        attempt_budget += 1
+                    continue
                 if optional:
                     logger.warning(
                         "Optional Vicious fetch failed context=%s error=%s url=%s",
@@ -308,7 +408,7 @@ async def fetch_with_retry(
                         error=str(exc),
                         source_id=source_id,
                     )
-                if attempt < effective_max_retries:
+                if attempt < attempt_budget:
                     await asyncio.sleep(
                         backoff_delay_seconds(attempt, schedule=DEFAULT_BACKOFF_SECONDS)
                     )
@@ -323,6 +423,8 @@ async def fetch_with_retry(
             )
         else:
             logger.error("Failed to fetch %s after %d attempts.", url, effective_max_retries)
+        if proxy_error is not None and not optional:
+            raise proxy_error
         return None
 
 
@@ -649,6 +751,7 @@ async def fetch_vicious_syndicate_radars(source: Source) -> dict[str, Any]:
 
     return {
         "type": "vicious_syndicate_radars",
+        "_fetch_backend": proxy_circuit.transport_backend,
         "issue": issue,
         **latest_report,
         "upstream_state": radar_upstream_state(issue, latest_report["latest_report_issue"]),

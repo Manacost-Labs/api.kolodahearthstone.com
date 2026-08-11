@@ -26,6 +26,7 @@ _PROXYLESS_API_SOURCE_IDS: frozenset[str] = frozenset(
         "firestone_arena_legendaries_underground",
         "firestone_arena_legendaries_normal",
         "vicious_syndicate_live_beta",
+        "vicious_syndicate_radars",
     }
 )
 
@@ -35,6 +36,7 @@ _PROXYLESS_API_SOURCE_IDS: frozenset[str] = frozenset(
 _BUILTIN_CLOUD_PROVIDER_SOURCE_IDS: frozenset[str] = frozenset(
     {
         "heartharena_tierlist",
+        "hearthstone_decks",
         "metastats_decks",
         "metastats_matchups",
     }

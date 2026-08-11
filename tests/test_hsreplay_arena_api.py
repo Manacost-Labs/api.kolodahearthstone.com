@@ -13,6 +13,15 @@ from app.hsreplay_arena_api import (
 
 
 class HsreplayArenaApiTest(unittest.TestCase):
+    def test_arena_cards_endpoint_forces_json_for_the_recent_sample(self) -> None:
+        self.assertEqual(
+            ARENA_CARD_STATS_API_URL,
+            (
+                "https://hsreplay.net/api/v1/arena/card_stats/"
+                "?ArenaTimestampRangeFilter=LAST_4_DAYS&format=json"
+            ),
+        )
+
     def test_arena_cards_keep_primary_endpoint_after_first_channel_failure(
         self,
     ) -> None:

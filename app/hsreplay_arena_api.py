@@ -24,7 +24,10 @@ CLASSES_STATS_API_URL = "https://hsreplay.net/api/v1/arena/classes_stats/"
 
 ARENA_CARDS_PAGE_URL = "https://hsreplay.net/arena/cards/#view=advanced"
 # HSReplay exposes card tiers via card_stats (cards/ often 404 behind CF).
-ARENA_CARD_STATS_API_URL = "https://hsreplay.net/api/v1/arena/card_stats/"
+ARENA_CARD_STATS_API_URL = (
+    "https://hsreplay.net/api/v1/arena/card_stats/"
+    "?ArenaTimestampRangeFilter=LAST_4_DAYS&format=json"
+)
 
 REGION_NAMES = {
     1: "US",

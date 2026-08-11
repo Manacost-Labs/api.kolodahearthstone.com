@@ -570,12 +570,12 @@ def test_refresh_circuit_crosses_phases_but_keeps_hsreplay_scrape_do() -> None:
     assert first[0]["proxy_status"] == 402
     assert second[0]["state"] == "ok"
     assert second[1]["state"] == "ok"
-    assert third[0]["failure_class"] == "proxy_402"
-    assert third[0]["proxy_status"] == 402
+    assert third[0]["state"] == "ok"
     assert [call.args[1].id for call in fetch_mock.call_args_list] == [
         failing.id,
         hsreplay_json.id,
         metastats_cloud.id,
+        dependent.id,
     ]
 
 

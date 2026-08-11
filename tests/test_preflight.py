@@ -107,6 +107,18 @@ class PreflightTest(unittest.IsolatedAsyncioTestCase):
 
     @patch("app.preflight.fetch_require_proxy", return_value=True)
     @patch("app.preflight.fetch_direct_enabled", return_value=False)
+    def test_vicious_radars_alone_does_not_require_residential_proxy(
+        self, _direct: object, _required: object
+    ) -> None:
+        self.assertFalse(
+            selection_needs_proxy_preflight(
+                [SOURCE_BY_ID["vicious_syndicate_radars"]],
+                configured_backends=["patchright"],
+            )
+        )
+
+    @patch("app.preflight.fetch_require_proxy", return_value=True)
+    @patch("app.preflight.fetch_direct_enabled", return_value=False)
     def test_local_browser_selection_requires_proxy_without_safe_backend(
         self, _direct: object, _required: object
     ) -> None:

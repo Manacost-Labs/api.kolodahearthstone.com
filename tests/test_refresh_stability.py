@@ -160,6 +160,9 @@ class RefreshStabilityTest(unittest.TestCase):
         api_source = next(
             item for item in SOURCES if item.id == "firestone_battlegrounds_comps"
         )
+        vicious_source = next(
+            item for item in SOURCES if item.id == "vicious_syndicate_radars"
+        )
         cloud_source = next(
             item for item in SOURCES if item.id == "heartharena_tierlist"
         )
@@ -186,6 +189,12 @@ class RefreshStabilityTest(unittest.TestCase):
             )
             self.assertTrue(
                 source_can_run_without_residential_proxy(
+                    vicious_source,
+                    default_backends=["patchright"],
+                )
+            )
+            self.assertTrue(
+                source_can_run_without_residential_proxy(
                     cloud_source,
                     default_backends=["patchright"],
                 )
@@ -202,6 +211,9 @@ class RefreshStabilityTest(unittest.TestCase):
         )
         api_source = next(
             item for item in SOURCES if item.id == "firestone_battlegrounds_comps"
+        )
+        vicious_source = next(
+            item for item in SOURCES if item.id == "vicious_syndicate_radars"
         )
 
         async def fetch(_client, source):
@@ -240,6 +252,7 @@ class RefreshStabilityTest(unittest.TestCase):
                         cold_source,
                         cloud_source,
                         api_source,
+                        vicious_source,
                     ],
                     phase="light_api",
                     concurrency=1,
@@ -251,7 +264,7 @@ class RefreshStabilityTest(unittest.TestCase):
         called_ids = [call.args[1].id for call in fetch_mock.call_args_list]
         self.assertEqual(
             called_ids,
-            [failing_source.id, cloud_source.id, api_source.id],
+            [failing_source.id, cloud_source.id, api_source.id, vicious_source.id],
         )
         self.assertEqual(results[0]["state"], "fetch_error")
         self.assertEqual(results[0]["failure_class"], "proxy_407")
@@ -262,6 +275,7 @@ class RefreshStabilityTest(unittest.TestCase):
         self.assertEqual(results[2]["failure_class"], "proxy_407")
         self.assertEqual(results[3]["state"], "ok")
         self.assertEqual(results[4]["state"], "ok")
+        self.assertEqual(results[5]["state"], "ok")
 
     def test_returned_proxy_407_status_opens_tier_circuit(self) -> None:
         failing_source = next(item for item in SOURCES if item.id == "metastats_decks")
