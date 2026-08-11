@@ -58,12 +58,22 @@ class HsReplayScrapeDoBudgetError(RuntimeError):
     """The refresh-scoped Scrape.do HSReplay JSON budget is exhausted."""
 
 
+class _HsReplayProxyCircuitOpen(RuntimeError):
+    """A proxy-backed channel was skipped after another task opened the circuit."""
+
+    def __init__(self, proxy_error: ProxyPaymentRequiredError) -> None:
+        super().__init__("HSReplay residential proxy circuit is open")
+        self.proxy_error: ProxyPaymentRequiredError = proxy_error
+
+
 @dataclass
 class _HsReplayTransportState:
     """Mutable transport guards shared only by tasks in one refresh context."""
 
     lock: threading.Lock = field(default_factory=threading.Lock)
     proxy_circuit_error: ProxyPaymentRequiredError | None = None
+    proxy_probe_completed: bool = False
+    proxy_probe_task: asyncio.Task[str] | None = None
     scrape_do_requests_reserved: int = 0
     scrape_do_credits_reserved: int = 0
     json_cache_transports: dict[str, str] = field(default_factory=dict)
@@ -669,6 +679,123 @@ async def _fetch_body_for_channel(
     return await download_text(fetch_url, source_id=source_id)
 
 
+async def _fetch_body_with_proxy_probe_gate(
+    label: str,
+    fetch_url: str,
+    *,
+    source_id: str,
+    proxy_backed: bool,
+) -> str:
+    """Single-flight the first residential request in one refresh.
+
+    Parallel HSReplay slices use different cache keys, so their per-key gates
+    cannot prevent several simultaneous CONNECT failures. All callers share a
+    state-owned initial probe task. A typed 402/407 opens the circuit before
+    its waiters resume, while any other terminal result restores parallelism.
+    """
+
+    if not proxy_backed:
+        return await _fetch_body_for_channel(label, fetch_url, source_id=source_id)
+
+    state = _current_transport_state()
+    is_probe_owner = False
+    with state.lock:
+        circuit_error = state.proxy_circuit_error
+        probe_completed = state.proxy_probe_completed
+        probe_task = state.proxy_probe_task
+        if (
+            circuit_error is None
+            and not probe_completed
+            and probe_task is None
+        ):
+            probe_task = asyncio.create_task(
+                _run_initial_proxy_probe(
+                    label,
+                    fetch_url,
+                    source_id=source_id,
+                    state=state,
+                )
+            )
+            probe_task.add_done_callback(_consume_proxy_probe_exception)
+            state.proxy_probe_task = probe_task
+            is_probe_owner = True
+
+    if circuit_error is not None:
+        raise _HsReplayProxyCircuitOpen(circuit_error)
+    if probe_completed:
+        return await _fetch_body_for_channel(label, fetch_url, source_id=source_id)
+
+    assert probe_task is not None
+    # Cancelling this individual caller only cancels the shield Future. The
+    # state-owned physical CONNECT continues and publishes its terminal state.
+    probe_result = (
+        await asyncio.gather(
+            asyncio.shield(probe_task),
+            return_exceptions=True,
+        )
+    )[0]
+    if isinstance(probe_result, ProxyPaymentRequiredError):
+        if is_probe_owner:
+            raise probe_result
+        raise _HsReplayProxyCircuitOpen(probe_result) from probe_result
+    if isinstance(probe_result, BaseException):
+        if is_probe_owner:
+            raise probe_result
+        # An inconclusive transport/origin error completes only the initial
+        # gate. Waiters resume normal parallel channel attempts.
+        return await _fetch_body_for_channel(label, fetch_url, source_id=source_id)
+
+    if is_probe_owner:
+        return probe_result
+    return await _fetch_body_for_channel(label, fetch_url, source_id=source_id)
+
+
+async def _run_initial_proxy_probe(
+    label: str,
+    fetch_url: str,
+    *,
+    source_id: str,
+    state: _HsReplayTransportState,
+) -> str:
+    """Run and publish the refresh-owned initial residential probe."""
+
+    try:
+        return await _fetch_body_for_channel(
+            label,
+            fetch_url,
+            source_id=source_id,
+        )
+    except ProxyPaymentRequiredError as exc:
+        # Publish the typed circuit before waking any shared-task waiters.
+        record_hsreplay_proxy_failure(exc)
+        try:
+            log_action(
+                "routing.proxy_probe.fail",
+                source_id=source_id,
+                backend=_json_transport_label(label, proxy_backed=True),
+                level="warn",
+                error_type=type(exc).__name__,
+                extra={"channel": label, "proxy_status": exc.status_code},
+            )
+        except OSError as log_exc:
+            logger.debug(
+                "Could not persist HSReplay proxy probe telemetry: %s",
+                log_exc,
+            )
+        raise
+    finally:
+        with state.lock:
+            state.proxy_probe_completed = True
+            state.proxy_probe_task = None
+
+
+def _consume_proxy_probe_exception(task: asyncio.Task[str]) -> None:
+    """Retrieve abandoned probe exceptions without changing task semantics."""
+
+    if not task.cancelled():
+        _ = task.exception()
+
+
 def _payload_to_dict(payload: dict[str, Any] | list[Any]) -> dict[str, Any]:
     if isinstance(payload, list):
         return {"data": payload}
@@ -724,7 +851,12 @@ async def _fetch_hsreplay_json_serialized(
         if not proxy_backed:
             independent_channel_attempted = True
         try:
-            body = await _fetch_body_for_channel(label, fetch_url, source_id=source_id)
+            body = await _fetch_body_with_proxy_probe_gate(
+                label,
+                fetch_url,
+                source_id=source_id,
+                proxy_backed=proxy_backed,
+            )
             payload = extract_json_payload(body)
             if isinstance(payload, (dict, list)):
                 result = _payload_to_dict(payload)
@@ -761,6 +893,20 @@ async def _fetch_hsreplay_json_serialized(
                 level="warn",
                 extra={"channel": label},
             )
+        except _HsReplayProxyCircuitOpen as exc:
+            first_proxy_error = first_proxy_error or exc.proxy_error
+            errors.append(f"{label}: skipped after proxy CONNECT failure")
+            log_action(
+                "routing.channel.skip",
+                source_id=source_id,
+                level="warn",
+                detail="proxy-backed HSReplay JSON channel skipped after CONNECT failure",
+                extra={
+                    "channel": label,
+                    "proxy_status": exc.proxy_error.status_code,
+                },
+            )
+            continue
         except ProxyPaymentRequiredError as exc:
             record_hsreplay_proxy_failure(exc)
             first_proxy_error = first_proxy_error or exc

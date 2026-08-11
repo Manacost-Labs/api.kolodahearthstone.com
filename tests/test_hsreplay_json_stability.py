@@ -383,6 +383,272 @@ def test_hsreplay_json_single_flights_concurrent_shared_cache_key() -> None:
     assert consume_hsreplay_json_transport_backend("trinkets-greater") == "scrape_do"
 
 
+def test_concurrent_cache_keys_single_flight_initial_proxy_failure() -> None:
+    calls: list[tuple[str, str]] = []
+
+    async def fetch(label: str, _url: str, *, source_id: str) -> str:
+        calls.append((label, source_id))
+        if label == "curl_cffi":
+            # Keep the first probe in flight long enough for every task to
+            # queue behind the refresh-scoped gate.
+            await asyncio.sleep(0.01)
+            raise ProxyPaymentRequiredError(
+                "Residential proxy CONNECT rejected the request",
+                status_code=402,
+            )
+        if label == "scrape_do":
+            return '{"data": [{"id": 1}]}'
+        raise AssertionError(f"unexpected channel: {label}")
+
+    async def run() -> list[dict[str, object]]:
+        return list(
+            await asyncio.gather(
+                *(
+                    fetch_hsreplay_json(
+                        f"https://hsreplay.net/api/test/{index}",
+                        source_id=f"source-{index}",
+                        cache_key=f"cache-key-{index}",
+                    )
+                    for index in range(4)
+                )
+            )
+        )
+
+    with (
+        patch(
+            "app.hsreplay_client._channel_urls",
+            side_effect=lambda url, **_: [
+                ("curl_cffi", url),
+                ("scrape_do", url),
+            ],
+        ),
+        patch("app.hsreplay_client._fetch_body_for_channel", side_effect=fetch),
+        patch(
+            "app.hsreplay_client._channel_uses_residential_proxy",
+            side_effect=lambda label, *_: label == "curl_cffi",
+        ),
+        patch("app.hsreplay_client.get_cached_hsreplay_json", return_value=None),
+        patch("app.hsreplay_client.set_cached_hsreplay_json"),
+        patch("app.hsreplay_client.api_json_retry_delay_seconds", return_value=0),
+        patch("app.hsreplay_client.log_action") as log_action,
+    ):
+        results = asyncio.run(run())
+
+    assert results == [{"data": [{"id": 1}]}] * 4
+    assert sum(label == "curl_cffi" for label, _ in calls) == 1
+    assert sum(label == "scrape_do" for label, _ in calls) == 4
+    assert hsreplay_proxy_circuit_is_open()
+    proxy_failures = [
+        call
+        for call in log_action.call_args_list
+        if call.args[0] == "routing.channel.fail"
+        and call.kwargs.get("extra", {}).get("proxy_status") == 402
+    ]
+    proxy_skips = [
+        call
+        for call in log_action.call_args_list
+        if call.args[0] == "routing.channel.skip"
+        and call.kwargs.get("extra", {}).get("proxy_status") == 402
+    ]
+    physical_proxy_failures = [
+        call
+        for call in log_action.call_args_list
+        if call.args[0] == "routing.proxy_probe.fail"
+        and call.kwargs.get("extra", {}).get("proxy_status") == 402
+    ]
+    assert len(proxy_failures) == 1
+    assert len(proxy_skips) == 3
+    assert len(physical_proxy_failures) == 1
+
+
+def test_successful_initial_proxy_probe_restores_parallel_fetches() -> None:
+    calls = 0
+    active_after_probe = 0
+    maximum_active_after_probe = 0
+
+    async def fetch(_label: str, _url: str, *, source_id: str) -> str:
+        del source_id
+        nonlocal calls, active_after_probe, maximum_active_after_probe
+        calls += 1
+        if calls == 1:
+            await asyncio.sleep(0.01)
+            return '{"data": [{"id": 1}]}'
+
+        active_after_probe += 1
+        maximum_active_after_probe = max(
+            maximum_active_after_probe,
+            active_after_probe,
+        )
+        await asyncio.sleep(0.02)
+        active_after_probe -= 1
+        return '{"data": [{"id": 1}]}'
+
+    async def run() -> list[dict[str, object]]:
+        return list(
+            await asyncio.gather(
+                *(
+                    fetch_hsreplay_json(
+                        f"https://hsreplay.net/api/healthy/{index}",
+                        source_id=f"healthy-source-{index}",
+                        cache_key=f"healthy-cache-key-{index}",
+                    )
+                    for index in range(4)
+                )
+            )
+        )
+
+    with (
+        patch(
+            "app.hsreplay_client._channel_urls",
+            side_effect=lambda url, **_: [("curl_cffi", url)],
+        ),
+        patch("app.hsreplay_client._fetch_body_for_channel", side_effect=fetch),
+        patch(
+            "app.hsreplay_client._channel_uses_residential_proxy",
+            return_value=True,
+        ),
+        patch("app.hsreplay_client.get_cached_hsreplay_json", return_value=None),
+        patch("app.hsreplay_client.set_cached_hsreplay_json"),
+    ):
+        results = asyncio.run(run())
+
+    assert results == [{"data": [{"id": 1}]}] * 4
+    assert calls == 4
+    assert maximum_active_after_probe == 3
+
+
+def test_inconclusive_initial_proxy_error_does_not_serialize_waiters() -> None:
+    proxy_calls = 0
+    active_after_probe = 0
+    maximum_active_after_probe = 0
+
+    async def fetch(label: str, _url: str, *, source_id: str) -> str:
+        del source_id
+        nonlocal proxy_calls, active_after_probe, maximum_active_after_probe
+        if label == "scrape_do":
+            return '{"data": [{"id": 1}]}'
+
+        proxy_calls += 1
+        if proxy_calls == 1:
+            await asyncio.sleep(0.01)
+            raise RuntimeError("initial proxy route timed out")
+
+        active_after_probe += 1
+        maximum_active_after_probe = max(
+            maximum_active_after_probe,
+            active_after_probe,
+        )
+        await asyncio.sleep(0.02)
+        active_after_probe -= 1
+        return '{"data": [{"id": 1}]}'
+
+    async def run() -> list[dict[str, object]]:
+        return list(
+            await asyncio.gather(
+                *(
+                    fetch_hsreplay_json(
+                        f"https://hsreplay.net/api/inconclusive/{index}",
+                        source_id=f"inconclusive-source-{index}",
+                        cache_key=f"inconclusive-cache-key-{index}",
+                    )
+                    for index in range(4)
+                )
+            )
+        )
+
+    with (
+        patch(
+            "app.hsreplay_client._channel_urls",
+            side_effect=lambda url, **_: [
+                ("curl_cffi", url),
+                ("scrape_do", url),
+            ],
+        ),
+        patch("app.hsreplay_client._fetch_body_for_channel", side_effect=fetch),
+        patch(
+            "app.hsreplay_client._channel_uses_residential_proxy",
+            side_effect=lambda label, *_: label == "curl_cffi",
+        ),
+        patch("app.hsreplay_client.get_cached_hsreplay_json", return_value=None),
+        patch("app.hsreplay_client.set_cached_hsreplay_json"),
+        patch("app.hsreplay_client.api_json_retry_delay_seconds", return_value=0),
+    ):
+        results = asyncio.run(run())
+
+    assert results == [{"data": [{"id": 1}]}] * 4
+    assert proxy_calls == 4
+    assert maximum_active_after_probe == 3
+
+
+def test_cancelled_proxy_probe_holds_gate_until_connect_finishes() -> None:
+    proxy_calls = 0
+
+    async def run() -> dict[str, object]:
+        probe_started = asyncio.Event()
+        release_probe = asyncio.Event()
+
+        async def fetch(label: str, _url: str, *, source_id: str) -> str:
+            del source_id
+            nonlocal proxy_calls
+            if label == "curl_cffi":
+                proxy_calls += 1
+                probe_started.set()
+                await release_probe.wait()
+                raise ProxyPaymentRequiredError(
+                    "Residential proxy CONNECT rejected the request",
+                    status_code=402,
+                )
+            return '{"data": [{"id": 1}]}'
+
+        with (
+            patch(
+                "app.hsreplay_client._channel_urls",
+                side_effect=lambda url, **_: [
+                    ("curl_cffi", url),
+                    ("scrape_do", url),
+                ],
+            ),
+            patch("app.hsreplay_client._fetch_body_for_channel", side_effect=fetch),
+            patch(
+                "app.hsreplay_client._channel_uses_residential_proxy",
+                side_effect=lambda label, *_: label == "curl_cffi",
+            ),
+            patch("app.hsreplay_client.get_cached_hsreplay_json", return_value=None),
+            patch("app.hsreplay_client.set_cached_hsreplay_json"),
+            patch("app.hsreplay_client.api_json_retry_delay_seconds", return_value=0),
+        ):
+            leader = asyncio.create_task(
+                fetch_hsreplay_json(
+                    "https://hsreplay.net/api/cancelled-leader",
+                    source_id="cancelled-leader",
+                    cache_key="cancelled-leader",
+                )
+            )
+            await probe_started.wait()
+            leader.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                async with asyncio.timeout(0.1):
+                    await leader
+            waiter = asyncio.create_task(
+                fetch_hsreplay_json(
+                    "https://hsreplay.net/api/waiter",
+                    source_id="waiter",
+                    cache_key="waiter",
+                )
+            )
+            await asyncio.sleep(0)
+            assert proxy_calls == 1
+
+            release_probe.set()
+            return await waiter
+
+    result = asyncio.run(run())
+
+    assert result == {"data": [{"id": 1}]}
+    assert proxy_calls == 1
+    assert hsreplay_proxy_circuit_is_open()
+
+
 def test_scrape_do_does_not_retry_account_failure() -> None:
     scrape = AsyncMock(
         side_effect=ScrapeDoRequestError("account rejected", status_code=401)
