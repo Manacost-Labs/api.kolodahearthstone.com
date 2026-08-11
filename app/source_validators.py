@@ -1097,15 +1097,16 @@ def _validate_card_stats(source_id: str, structured: dict[str, Any]) -> Validati
                 if raw_value is None or raw_value == "":
                     continue
                 parsed_value = _parse_arena_percent(raw_value)
-                if parsed_value is None or not 0.0 <= parsed_value <= 100.0:
-                    if len(invalid_percentages) < 20:
-                        invalid_percentages.append(
-                            {
-                                "index": index,
-                                "field": field_name,
-                                "value": str(raw_value)[:80],
-                            }
-                        )
+                if (
+                    parsed_value is None or not 0.0 <= parsed_value <= 100.0
+                ) and len(invalid_percentages) < 20:
+                    invalid_percentages.append(
+                        {
+                            "index": index,
+                            "field": field_name,
+                            "value": str(raw_value)[:80],
+                        }
+                    )
             popularity = _parse_arena_percent(row.get("deck_popularity"))
             if popularity is not None and popularity >= 80.0:
                 popularity_cascade += 1

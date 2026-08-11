@@ -5,9 +5,10 @@ import json
 import re
 import urllib.parse
 import urllib.request
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from .cards_index import cards_by_id
 from .config import data_dir
