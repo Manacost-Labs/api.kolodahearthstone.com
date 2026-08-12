@@ -19,6 +19,7 @@ from app.hsreplay_bg_screenshots import (
     _write_screenshot,
     capture_compositions_screenshot,
     latest_compositions_screenshot,
+    public_compositions_screenshot,
 )
 from app.resource_locks import ResourceLocked
 
@@ -119,6 +120,28 @@ def test_public_capture_metadata_never_exposes_provider_response_values() -> Non
     }
 
 
+def test_public_screenshot_never_exposes_paths_or_legacy_provider_data() -> None:
+    payload = {
+        "ok": True,
+        "captured_at": "2026-08-04T02:10:00+00:00",
+        "image_path": "/private/runtime/capture.png",
+        "metadata_path": "/private/runtime/capture.json",
+        "firecrawl_screenshot_url": "https://signed.example/?token=private",
+        "metadata": {
+            "backend": "firecrawl",
+            "firecrawl_key_label": "private-key-label",
+        },
+    }
+
+    assert public_compositions_screenshot(payload) == {
+        "ok": True,
+        "captured_at": "2026-08-04T02:10:00+00:00",
+        "url": "https://hsreplay.net/battlegrounds/compositions/",
+        "final_url": "https://hsreplay.net/battlegrounds/compositions/",
+        "metadata": {"backend": "firecrawl"},
+    }
+
+
 def test_capture_failure_preserves_last_known_good_latest(tmp_path: Path) -> None:
     old_image = tmp_path / "last-good.png"
     old_image.write_bytes(_valid_png_bytes())
@@ -158,7 +181,10 @@ def test_capture_failure_preserves_last_known_good_latest(tmp_path: Path) -> Non
     assert list(tmp_path.glob("*.txt")) == []
 
     with patch("app.hsreplay_bg_screenshots._screenshot_dir", return_value=tmp_path):
-        assert latest_compositions_screenshot() == old_payload
+        loaded = latest_compositions_screenshot()
+    assert loaded is not None
+    assert loaded["image_path"] == old_payload["image_path"]
+    assert loaded["captured_at"] == old_payload["captured_at"]
 
 
 def test_capture_returns_honest_skip_when_source_is_locked() -> None:
@@ -271,7 +297,10 @@ def test_latest_falls_back_to_newest_valid_historical_image(tmp_path: Path) -> N
     )
 
     with patch("app.hsreplay_bg_screenshots._screenshot_dir", return_value=tmp_path):
-        assert latest_compositions_screenshot() == old_payload
+        loaded = latest_compositions_screenshot()
+    assert loaded is not None
+    assert loaded["image_path"] == old_payload["image_path"]
+    assert loaded["captured_at"] == old_payload["captured_at"]
 
 
 def test_latest_falls_back_when_newest_image_is_a_blank_page_shell(
@@ -305,4 +334,7 @@ def test_latest_falls_back_when_newest_image_is_a_blank_page_shell(
     )
 
     with patch("app.hsreplay_bg_screenshots._screenshot_dir", return_value=tmp_path):
-        assert latest_compositions_screenshot() == old_payload
+        loaded = latest_compositions_screenshot()
+    assert loaded is not None
+    assert loaded["image_path"] == old_payload["image_path"]
+    assert loaded["captured_at"] == old_payload["captured_at"]

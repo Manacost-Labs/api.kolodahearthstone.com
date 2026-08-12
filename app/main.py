@@ -2098,12 +2098,15 @@ def api_patch_detail(
 
 @app.get("/api/bg/compositions/screenshot/latest")
 def bg_compositions_latest_screenshot() -> dict:
-    from .hsreplay_bg_screenshots import latest_compositions_screenshot
+    from .hsreplay_bg_screenshots import (
+        latest_compositions_screenshot,
+        public_compositions_screenshot,
+    )
 
     payload = latest_compositions_screenshot()
     if payload is None:
         raise HTTPException(status_code=404, detail="No Battlegrounds compositions screenshot captured yet")
-    return payload
+    return public_compositions_screenshot(payload)
 
 
 @app.get("/api/bg/compositions/screenshot/latest/image")

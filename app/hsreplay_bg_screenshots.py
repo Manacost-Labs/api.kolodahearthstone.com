@@ -50,6 +50,20 @@ _EDGE_VALUE_THRESHOLD = 17
 _PUBLIC_CAPTURE_BACKENDS = frozenset(
     {"firecrawl", "scrape_do", "scrape_do_super", "scrapfly"}
 )
+_PUBLIC_SCREENSHOT_FIELDS = frozenset(
+    {
+        "ok",
+        "source_id",
+        "url",
+        "captured_at",
+        "final_url",
+        "status_code",
+        "markdown_length",
+        "metadata",
+        "image_bytes",
+        "image_mime",
+    }
+)
 
 
 def _now() -> str:
@@ -145,6 +159,20 @@ def _public_capture_metadata(metadata: dict[str, Any]) -> dict[str, str]:
     return {
         "backend": backend if backend in _PUBLIC_CAPTURE_BACKENDS else "unknown"
     }
+
+
+def public_compositions_screenshot(payload: dict[str, Any]) -> dict[str, Any]:
+    """Return only stable public fields; never expose paths or provider artifacts."""
+    public = {
+        key: value for key, value in payload.items() if key in _PUBLIC_SCREENSHOT_FIELDS
+    }
+    public["url"] = COMPOSITIONS_URL
+    public["final_url"] = COMPOSITIONS_URL
+    metadata = payload.get("metadata")
+    public["metadata"] = _public_capture_metadata(
+        metadata if isinstance(metadata, dict) else {}
+    )
+    return public
 
 
 def _redact_account_area(image_path: Path) -> None:
@@ -363,7 +391,28 @@ def _load_valid_screenshot_metadata(
         if image_path.suffix.casefold() != _IMAGE_SUFFIXES[mime]:
             return None
         _validate_compositions_content(image_path)
-        return payload
+        normalized = {
+            key: value
+            for key, value in payload.items()
+            if key in _PUBLIC_SCREENSHOT_FIELDS
+        }
+        normalized.update(
+            {
+                "ok": True,
+                "source_id": SCREENSHOT_SOURCE_ID,
+                "url": COMPOSITIONS_URL,
+                "final_url": COMPOSITIONS_URL,
+                "metadata": _public_capture_metadata(
+                    payload.get("metadata")
+                    if isinstance(payload.get("metadata"), dict)
+                    else {}
+                ),
+                "image_path": str(image_path),
+                "image_bytes": image_path.stat().st_size,
+                "image_mime": mime,
+            }
+        )
+        return normalized
     except (OSError, TypeError, ValueError, json.JSONDecodeError):
         return None
 
