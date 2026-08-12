@@ -14,6 +14,9 @@
   checkpointed Scrape.do refresh can finish all rank/format targets.
 - Restricted HSGuru archetype-analysis acquisition to Scrape.do; it no longer
   spends or probes Firecrawl, Bright Data or Scrapfly fallbacks.
+- Made checkpoint retries combine independently successful matchup and card
+  statistics components instead of requiring both requests to succeed in the
+  same attempt.
 - Accepted title-less structured API snapshots during last-known-good
   validation, so a temporary HSReplay premium-session failure no longer turns
   a valid Battlegrounds hero dataset into a hard parser error.

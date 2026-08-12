@@ -484,6 +484,36 @@ def _retry_is_pending(entry: dict[str, Any] | None, now: datetime) -> bool:
     return retry_after > now
 
 
+def _component_was_refreshed_in_checkpoint(
+    entry: dict[str, Any],
+    *,
+    kind: str,
+    started_at: str,
+) -> bool:
+    timestamp_field = (
+        "matchups_updated_at" if kind == "matchups" else "card_stats_updated_at"
+    )
+    rows_field = "class_matchups" if kind == "matchups" else "card_stats"
+    state_field = "matchups_state" if kind == "matchups" else "card_stats_state"
+    try:
+        refreshed_at = datetime.fromisoformat(str(entry.get(timestamp_field) or ""))
+        refresh_started_at = datetime.fromisoformat(started_at)
+    except ValueError:
+        return False
+    if refreshed_at.tzinfo is None:
+        refreshed_at = refreshed_at.replace(tzinfo=UTC)
+    if refresh_started_at.tzinfo is None:
+        refresh_started_at = refresh_started_at.replace(tzinfo=UTC)
+    if refreshed_at < refresh_started_at:
+        return False
+    if entry.get(rows_field):
+        return True
+    accepted_empty_states = {"source_no_data"}
+    if kind == "card_stats":
+        accepted_empty_states.add("upstream_card_tallies_missing")
+    return str(entry.get(state_field) or "") in accepted_empty_states
+
+
 def _negative_cache_entry(
     *,
     format_name: str,
@@ -920,16 +950,21 @@ async def _refresh_hsguru_archetype_analysis_unlocked(
                 reusable = False
                 entry[f"{kind}_state"] = "provider_circuit_open"
             except Exception as exc:  # noqa: BLE001 - isolate each remote page
-                reusable = False
-                entry[f"{kind}_state"] = "transport_error"
-                errors.append(
-                    {
-                        "format": format_name,
-                        "archetype": archetype,
-                        "kind": kind,
-                        "error": f"{type(exc).__name__}: {str(exc)[:400]}",
-                    }
-                )
+                if not _component_was_refreshed_in_checkpoint(
+                    entry,
+                    kind=kind,
+                    started_at=started_at,
+                ):
+                    reusable = False
+                    entry[f"{kind}_state"] = "transport_error"
+                    errors.append(
+                        {
+                            "format": format_name,
+                            "archetype": archetype,
+                            "kind": kind,
+                            "error": f"{type(exc).__name__}: {str(exc)[:400]}",
+                        }
+                    )
         matchups_state = str(entry.get("matchups_state") or "missing")
         card_stats_state = str(entry.get("card_stats_state") or "missing")
         entry["state"] = (

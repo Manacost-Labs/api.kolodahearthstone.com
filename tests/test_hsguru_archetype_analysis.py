@@ -843,6 +843,62 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
         self.assertEqual(second_calls, 8)
         save_dataset.assert_called_once()
 
+    def test_checkpoint_combines_components_succeeded_on_separate_attempts(
+        self,
+    ) -> None:
+        targets = [{"format": "wild", "archetype": "Split Success Priest"}]
+
+        async def first_fetch(url: str):
+            if "/archetype/" in url:
+                raise RuntimeError("matchups temporarily unavailable")
+            return CARD_STATS_HTML, {
+                "backend": "scrape_do_super",
+                "request_credits": 25,
+            }
+
+        async def second_fetch(url: str):
+            if "/card-stats" in url:
+                raise RuntimeError("card stats temporarily unavailable")
+            return MATCHUPS_HTML, {
+                "backend": "scrape_do_super",
+                "request_credits": 25,
+            }
+
+        with (
+            patch(
+                "app.hsguru_archetype_analysis._active_archetypes",
+                return_value=targets,
+            ),
+            patch(
+                "app.hsguru_archetype_analysis._previous_analysis",
+                return_value={},
+            ),
+            patch(
+                "app.hsguru_archetype_analysis._previous_negative_cache",
+                return_value={},
+            ),
+            patch("app.hsguru_archetype_analysis.save_dataset") as save_dataset,
+            patch("app.hsguru_archetype_analysis.save_status"),
+        ):
+            first = asyncio.run(
+                refresh_hsguru_archetype_analysis(
+                    concurrency=1,
+                    fetch_html=first_fetch,
+                )
+            )
+            second = asyncio.run(
+                refresh_hsguru_archetype_analysis(
+                    concurrency=1,
+                    fetch_html=second_fetch,
+                )
+            )
+
+        self.assertFalse(first["published"])
+        self.assertEqual(first["targets_completed"], 0)
+        self.assertTrue(second["published"])
+        self.assertEqual(second["targets_completed"], 1)
+        save_dataset.assert_called_once()
+
     def test_checkpoint_recovery_skips_when_no_incomplete_checkpoint_exists(
         self,
     ) -> None:
