@@ -1,7 +1,7 @@
 PYTHON := .venv/bin/python
 AI_QUALITY_BIN := /home/debian/server/tools/ai-quality/bin
 
-.PHONY: setup check test panel-check platform-check provider-check lint-report security
+.PHONY: setup check test panel-check platform-check provider-check docs-check lint-report security
 
 setup:
 	uv venv --python 3.12 .venv
@@ -13,6 +13,7 @@ check:
 	$(PYTHON) -m pytest -q
 	$(MAKE) panel-check
 	$(MAKE) platform-check
+	$(MAKE) docs-check
 	actionlint
 
 test:
@@ -39,6 +40,9 @@ provider-check:
 	$(PYTHON) -m pytest -q \
 		tests/test_firecrawl_scrape_do_fallback.py \
 		tests/test_firecrawl_key_rotation.py
+
+docs-check:
+	scripts/check-documentation-links.sh
 
 lint-report:
 	ruff check --no-cache app tests scripts

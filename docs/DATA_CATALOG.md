@@ -531,7 +531,7 @@ curl -s 'https://api.kolodahearthstone.com/v1/constructed/decks?class_name=Mage&
   | jq '{meta, decks: .data}'
 ```
 
-## Полный список 97 source ID
+## Полный список source ID
 
 Авторитетный актуальный список с site/category/kind/stale policy находится в
 [SOURCES.md](SOURCES.md). Этот файл генерируется из кода и проверяется в CI, то

@@ -2,7 +2,9 @@
 
 ## Границы проекта
 
-- Канонический Git-репозиторий: `/srv/projects/data/hs-data-api-strategy7`.
+- GitHub-репозиторий: `Manacost-Labs/api.kolodahearthstone.com`.
+- Локальный source checkout может находиться в любом рабочем каталоге; он не
+  должен совпадать с production runtime.
 - Production working copy: `/srv/hs-data-api`.
 - Канонический публичный API: `api.kolodahearthstone.com/v1/` (GraphQL).
 - Старые REST-контракты временно доступны на новом домене для поэтапного
@@ -24,6 +26,7 @@
 | `systemd/` | Services и timers для Docker и legacy host install. | Каждой плановой задаче нужны service, timer и тест расписания. |
 | `tests/` | Unit, contract и regression tests; `fixtures/` — обезличенные samples. | Реальную сеть и production secrets не использовать. |
 | `docs/` | Архитектура, API, каталоги и runbooks. | `SOURCES.md` генерируется скриптом. |
+| `wiki/` | Короткие связанные страницы Wiki и навигация. | Источник для repo-native и GitHub Wiki. |
 | `config/` | Версионируемая конфигурация без секретов. | Credentials здесь запрещены. |
 | `web/` | Встроенный web UI API-сервиса. | Не смешивать с WordPress plugin. |
 | `wp-plugins/` | Исходники интеграции WordPress. | Отдельная поверхность сборки и проверки. |
@@ -68,9 +71,11 @@ systemd timer / admin API / CLI
 
 Общий page-scrape должен проходить через `app/firecrawl_backend.py`, а не
 вызывать provider API из operational-скрипта. Это даёт одну точку ротации
-ключа, sanitization ошибок и учёта credits. Все browser-protected HTML-страницы
-и HSReplay sitemap обслуживаются только через Scrape.do; Firecrawl и Scrapfly
-не входят в production provider chain. Официальные JSON API остаются прямыми.
+ключа, sanitization ошибок и учёта credits. Общий cloud cascade начинается со
+Scrape.do; доступность следующих слоёв определяется конфигурацией, allowlist и
+budget guards. Специализированные adapters могут иметь более узкую policy.
+Официальные JSON API остаются прямыми. Точный порядок и условия включения:
+[SCRAPE_PROVIDERS.md](SCRAPE_PROVIDERS.md).
 
 ## Проверка и deployment
 

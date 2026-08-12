@@ -104,9 +104,12 @@ pipeline используется его собственный структур
 
 Любой backend-кандидат проходит через `app.publish_gate.validate_candidate_for_publish()` до сохранения. Gate последовательно применяет backend policy из `app/source_contracts.py`, структурный контракт и semantic validator из `app/source_validators.py`. Минимальные строки, fill-rate критичных полей и regression thresholds имеют один источник истины; `quality.py` остаётся orchestration-фасадом и логирует предупреждения/отказы. Провал даёт `quality_error`, предыдущий успешный dataset сохраняется.
 
-### 2.5. Источники данных (46)
+### 2.5. Источники данных
 
-Реестр содержит 44 scrape-источника и 2 dedicated pipeline (`hsreplay_archetypes`, `hsreplay_battlegrounds_hero_details`). Полный автоматически генерируемый каталог: [SOURCES.md](SOURCES.md). Его синхронизация с `app.sources.SOURCES` проверяется pytest.
+Количество и состав источников меняются вместе с системой. Полный
+автоматически генерируемый каталог: [SOURCES.md](SOURCES.md). Его синхронизация
+с `app.sources.SOURCES` проверяется pytest; этот раздел намеренно не дублирует
+ручное число scrape и dedicated pipeline.
 
 ---
 
