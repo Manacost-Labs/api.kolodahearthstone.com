@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -23,9 +22,9 @@ def test_token_administration_has_a_dedicated_rate_limit() -> None:
     vhost = (ROOT / "deploy" / "nginx" / "api.kolodahearthstone.com.conf").read_text(
         encoding="utf-8"
     )
-    zones = (
-        ROOT / "deploy" / "nginx" / "koloda-api-token-rate-limit.conf"
-    ).read_text(encoding="utf-8")
+    zones = (ROOT / "deploy" / "nginx" / "koloda-api-token-rate-limit.conf").read_text(
+        encoding="utf-8"
+    )
 
     assert "zone=koloda_api_token_auth" in zones
     assert "location ^~ /admin/api-tokens" in vhost

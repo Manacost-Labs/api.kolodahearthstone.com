@@ -36,7 +36,7 @@ This plugin adds a helpful guide page under **Tools** (Инструменты ->
 
 *   `rank` (string) - Starting rank. Defaults to `diamond_4to1`. Valid options: `top_legend`, `top_5k`, `legend`, `diamond_4to1`.
 *   `show_selector` (string) - Show buttons to toggle rank. Defaults to `yes`. Valid options: `yes`, `no`.
-*   `api_url` (string) - The Hearthstone Parses API URL. Defaults to `https://api.hs-manacost.ru`.
+*   `api_url` (string) - The Hearthstone Parses API URL. Defaults to `https://api.kolodahearthstone.com`.
 *   `archetypes_api_url` (string) - Public Deckview API used for Russian archetype names. Defaults to `https://api.blizzcore.ru`.
 *   `width` (integer) - Width of the canvas. Defaults to `850`.
 *   `height` (integer) - Height of the canvas. Defaults to `500`.
@@ -49,7 +49,7 @@ This plugin adds a helpful guide page under **Tools** (Инструменты ->
 
 *   `rank` (string) - Starting rank. Defaults to `legend`. Valid options: `top_legend`, `top_5k`, `legend`, `diamond_4to1`.
 *   `show_selector` (string) - Show buttons to toggle rank. Defaults to `yes`. Valid options: `yes`, `no`.
-*   `api_url` (string) - The Hearthstone Parses API URL. Defaults to `https://api.hs-manacost.ru`.
+*   `api_url` (string) - The Hearthstone Parses API URL. Defaults to `https://api.kolodahearthstone.com`.
 *   `archetypes_api_url` (string) - Public Deckview API used for Russian archetype names. Defaults to `https://api.blizzcore.ru`.
 
 *Example:*
@@ -60,7 +60,7 @@ This plugin adds a helpful guide page under **Tools** (Инструменты ->
 
 *   `class` (string) - Pre-select or lock to a specific class (e.g., `Druid`, `Hunter`, `Mage`, `Paladin`, `Priest`, `Rogue`, `Shaman`, `Warlock`, `Warrior`, `DeathKnight`, `DemonHunter`).
 *   `lock_class` (string) - Hide class tabs and lock to the specified class. Defaults to `no`. Valid options: `yes`, `no`.
-*   `api_url` (string) - The Hearthstone Parses API URL. Defaults to `https://api.hs-manacost.ru`.
+*   `api_url` (string) - The Hearthstone Parses API URL. Defaults to `https://api.kolodahearthstone.com`.
 *   `archetypes_api_url` (string) - Public Deckview API used for Russian archetype names. Defaults to `https://api.blizzcore.ru`.
 *   `width` (integer) - Maximum width of the canvas. Defaults to `750`.
 *   `height` (integer) - Maximum height of the canvas. Defaults to `750`.

@@ -1,19 +1,21 @@
 # Развёртывание и перенос на другой сервер
 
-Репозиторий: **https://github.com/Zulut30/hearthstone-parses**
+Репозиторий: **https://github.com/Manacost-Labs/api.kolodahearthstone.com**
 
 Канонический production checkout для Docker deployment: `/srv/hs-data-api`. Старые non-Docker units в репозитории сохраняют `/opt/hs-data-api` как legacy default; Docker units и новые установки должны использовать `/srv/hs-data-api`.
 
 Перед продакшеном:
 
 - **[docs/API.md](docs/API.md)** — публичные/admin endpoints, source IDs, JSON-схемы.
+- **[docs/GRAPHQL_API.md](docs/GRAPHQL_API.md)** — центральная PostgreSQL-база через GraphQL.
+- **[docs/API_TOKENS.md](docs/API_TOKENS.md)** — выпуск и ротация scoped-токенов.
 - **[docs/HSREPLAY_ARCHETYPE_DATABASE.md](docs/HSREPLAY_ARCHETYPE_DATABASE.md)** — SQLite база HSReplay архетипов, API, CLI и расписание.
 - **[docs/SECURITY_AND_PARSING.md](docs/SECURITY_AND_PARSING.md)** — секреты, API, прокси, парсинг, чеклист.
 
 ## Быстрая установка с нуля
 
 ```bash
-sudo git clone https://github.com/Zulut30/hearthstone-parses.git /srv/hs-data-api
+sudo git clone https://github.com/Manacost-Labs/api.kolodahearthstone.com.git /srv/hs-data-api
 cd /srv/hs-data-api
 sudo ./scripts/install.sh --dir /srv/hs-data-api
 sudo nano /etc/hs-data-api.env   # прокси, HS_API_KEY, опционально HSReplay/Telegram
@@ -26,7 +28,7 @@ sudo /srv/hs-data-api/scripts/server-readiness.sh --strict --refresh-all
 Legacy one-line installer по умолчанию использует `/opt/hs-data-api`; для canonical Docker layout используйте явную установку выше:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Zulut30/hearthstone-parses/main/scripts/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/Manacost-Labs/api.kolodahearthstone.com/main/scripts/install.sh | sudo bash
 ```
 
 > Для `curl | bash` сначала убедитесь, что в `main` на GitHub актуальная версия скриптов.

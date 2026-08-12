@@ -1,15 +1,17 @@
-# Hearthstone Parses & Data API
+# api.kolodahearthstone.com
 
-[![tests](https://github.com/Zulut30/hearthstone-parses/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/Zulut30/hearthstone-parses/actions/workflows/tests.yml)
+[![tests](https://github.com/Manacost-Labs/api.kolodahearthstone.com/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/Manacost-Labs/api.kolodahearthstone.com/actions/workflows/tests.yml)
 
-Кэширующий парсер и REST API для статистики Hearthstone. Сервис собирает данные
+Кэширующий парсер, REST и GraphQL API для статистики Hearthstone. Сервис собирает данные
 из HSReplay, HSGuru, Firestone, MetaStats, Hearthstone-Decks, HearthArena и
 Vicious Syndicate, проверяет их качество и публикует нормализованные JSON-срезы.
 
-- Production API: <https://api.hs-manacost.ru>
-- Репозиторий: <https://github.com/Zulut30/hearthstone-parses>
+- Production API: <https://api.kolodahearthstone.com>
+- Репозиторий: <https://github.com/Manacost-Labs/api.kolodahearthstone.com>
 - Каталог данных: [docs/DATA_CATALOG.md](docs/DATA_CATALOG.md)
 - Полная документация API: [docs/API.md](docs/API.md)
+- GraphQL: [docs/GRAPHQL_API.md](docs/GRAPHQL_API.md)
+- Токены и scopes: [docs/API_TOKENS.md](docs/API_TOKENS.md)
 
 > `GET /health` проверяет только доступность API. Он не гарантирует, что все
 > парсеры успешно обновились и данные свежие. Для полной проверки используйте
@@ -84,7 +86,9 @@ flowchart LR
 | `app/resource_locks.py` | Неблокирующие межпроцессные lock-файлы по ресурсам. |
 | `app/job_run.py` | Дедлайны, прогресс и атомарные snapshots длительных заданий. |
 | `app/storage.py`, `app/db.py` | JSON snapshots, резервные копии и SQLite/WAL. |
-| `app/main.py` | REST API, admin/ops endpoints и web UI. |
+| `app/graphql_api/` | Read-only GraphQL поверх центральной PostgreSQL-базы. |
+| `app/api_tokens.py` | Выпуск, проверка, срок действия и отзыв scoped API-токенов. |
+| `app/main.py` | REST/GraphQL API, admin/ops endpoints и web UI. |
 
 ## Политика провайдеров
 
@@ -289,7 +293,7 @@ units/CLI; browser sessions хранятся в закрытых файлах da
 Требуются Docker и Docker Compose:
 
 ```bash
-git clone https://github.com/Zulut30/hearthstone-parses.git
+git clone https://github.com/Manacost-Labs/api.kolodahearthstone.com.git
 cd hearthstone-parses
 
 cp .env.example .env.docker
@@ -363,6 +367,12 @@ docker exec hs-data-api python -m app.cli quality-check
 docker exec hs-data-api python -m app.cli refresh-hsguru-meta-matrix --concurrency 2
 docker compose run --rm api python -m app.cli \
   refresh-hsguru-archetype-analysis --scheduled --concurrency 4
+
+# Выпуск, просмотр и отзыв scoped API-токенов
+docker exec hs-data-api python -m app.cli api-token issue \
+  --name integration --scope database:read --expires-in-days 90
+docker exec hs-data-api python -m app.cli api-token list
+docker exec hs-data-api python -m app.cli api-token revoke TOKEN_ID
 ```
 
 Archetype analysis берёт цели из точных срезов `legend/past_week`, различает
@@ -456,7 +466,12 @@ Public:
 - `GET /system/technologies` — публичное описание parser stack без секретов.
 - `GET /ui`, `/ui/logs`, `/ui/technologies` — встроенный интерфейс.
 
-Admin/ops, требует `X-API-Key`:
+Полная база GraphQL:
+
+- `POST /v1/` — типизированные запросы; `collections` и `records` требуют
+  scope `database:read`.
+
+Admin/ops требуют токен со scope `admin`:
 
 - `POST /admin/refresh`
 - `PUT /admin/datasets/{source_id}`
@@ -466,6 +481,13 @@ Admin/ops, требует `X-API-Key`:
 - `GET /ops/trace/{trace_id}`
 - `GET /ops/run/{run_id}`
 - `GET /health/premium`
+
+Управление токенами требует scope `tokens:manage`:
+
+- `POST /admin/api-tokens`
+- `GET /admin/api-tokens`
+- `DELETE /admin/api-tokens/{token_id}`
+- `GET /v1/auth/token` — сведения о текущем токене.
 
 Scoped orchestration, требует отдельный `X-Orchestrator-Key`:
 
@@ -479,6 +501,8 @@ Scoped orchestration, требует отдельный `X-Orchestrator-Key`:
 - [docs/DATA_CATALOG.md](docs/DATA_CATALOG.md) — выбор endpoint и поля данных.
 - [docs/SOURCES.md](docs/SOURCES.md) — генерируемый реестр всех источников.
 - [docs/API.md](docs/API.md) — полная REST API документация.
+- [docs/GRAPHQL_API.md](docs/GRAPHQL_API.md) — GraphQL schema, pagination и errors.
+- [docs/API_TOKENS.md](docs/API_TOKENS.md) — выпуск, scopes, ротация и отзыв токенов.
 - [docs/SCRAPE_PROVIDERS.md](docs/SCRAPE_PROVIDERS.md) — Scrape.do, Firecrawl,
   opt-in Bright Data и Scrapfly.
 - [orchestration/triggerdev/README.md](orchestration/triggerdev/README.md) — безопасный rollout внешнего control plane.
@@ -491,7 +515,9 @@ Scoped orchestration, требует отдельный `X-Orchestrator-Key`:
 - Не коммитьте `.env*`, cookies, storage state, токены и production datasets.
 - Не передавайте секреты через query string или публичные endpoints.
 - Используйте `HS_FETCH_REQUIRE_PROXY=true` для защищённых production-источников.
-- Public API read-only; refresh и ops закрыты `X-API-Key`.
+- Public API read-only; GraphQL database, refresh и ops закрыты scoped-токенами.
+- `HS_API_KEY` используйте только как временный bootstrap для выпуска первого
+  токена; секрет каждого нового токена показывается один раз.
 - Для Trigger.dev используйте отдельный случайный токен длиной не менее 32
   символов; не переиспользуйте admin API key.
 - Bright Data оставляйте выключенным до настройки точного source allowlist,

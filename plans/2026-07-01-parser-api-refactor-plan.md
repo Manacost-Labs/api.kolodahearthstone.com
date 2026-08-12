@@ -2,7 +2,7 @@
 
 > Оркестровочный план для последовательного выполнения по фазам, каждая фаза самодостаточна
 > и может выполняться в новом чат-контексте. После каждой фазы — коммит в git и push в
-> https://github.com/Zulut30/hearthstone-parses. На каждой фазе исполнитель ОБЯЗАН запускать
+> https://github.com/Manacost-Labs/api.kolodahearthstone.com. На каждой фазе исполнитель ОБЯЗАН запускать
 > QA-сабагента параллельно с основной работой (см. раздел «QA-сабагент» в каждой фазе).
 >
 > Прод: контейнер `hs-data-api` (образ `hs-data-api:local`), код запечён в образ —
@@ -75,7 +75,7 @@
 
 **Шаги:**
 1. Снапшот: `sudo tar czf /home/debian/backups/hs-data-api-pre-git-$(date +%Y%m%d-%H%M).tar.gz -C /srv hs-data-api --exclude=hs-data-api/data` и `sudo docker tag hs-data-api:local hs-data-api:pre-phase1`.
-2. В `/srv/hs-data-api`: `git init && git remote add origin https://github.com/Zulut30/hearthstone-parses`; `git fetch origin`; создать `.gitignore` ДО add (скопировать из клона репо; убедиться что `data/`, `.env.docker`, `.env` игнорируются — проверить `git status` НЕ показывает секреты!).
+2. В `/srv/hs-data-api`: `git init && git remote add origin https://github.com/Manacost-Labs/api.kolodahearthstone.com`; `git fetch origin`; создать `.gitignore` ДО add (скопировать из клона репо; убедиться что `data/`, `.env.docker`, `.env` игнорируются — проверить `git status` НЕ показывает секреты!).
 3. `git checkout -b server-state && git add -A && git commit` — зафиксировать серверное состояние как есть.
 4. `git merge origin/main` — конфликты ожидаются в: `app/fetcher.py` (локальный `_enrich_firecrawl_bg_heroes_from_cache` + firecrawl-fallback vs repo `validate_candidate_for_publish`), `app/scrapers/quality.py` (локальный dual-class фикс vs repo `validate_structured`), `app/config.py`, `.env.example`. Правило разрешения: **брать ОБЕ стороны** — publish-gate из репо + firecrawl-обогащения с сервера; хотфикс dual-class перенести в ту ветку валидации, которая выживет (см. Phase 6, но здесь минимально: пустые matchups ≠ ошибка).
 5. `requirements-dev.txt` (новый): `pytest>=8`. В Dockerfile тесты НЕ добавлять (прод-образ чистый); канонический прогон — команда из Phase 0.
@@ -88,7 +88,7 @@
 - [x] `ls app/publish_gate.py app/source_validators.py` — существуют (repo-сторона взята)
 - [x] `git show HEAD:.gitignore | grep -E "^data/|\.env"` — секреты и данные вне git; `git ls-files | grep -E "\.env$|\.env\.docker"` — ПУСТО
 - [x] Тесты: 288P, 0F на последнем локальном прогоне
-- [ ] После deploy: `curl -sk --resolve api.hs-manacost.ru:443:151.80.21.140 https://api.hs-manacost.ru/health` → `"ok":true`; `/datasets` — 46 источников, 0 с ошибками; `freshness-check` (docker compose run … `python -m app.cli freshness-check --since-hours 48`) → exit 0
+- [ ] После deploy: `curl -sk --resolve api.hs-manacost.ru:443:151.80.21.140 https://api.kolodahearthstone.com/health` → `"ok":true`; `/datasets` — 46 источников, 0 с ошибками; `freshness-check` (docker compose run … `python -m app.cli freshness-check --since-hours 48`) → exit 0
 - [ ] Ночные таймеры (kolodahs/hs-data-api-docker-*) сработали без failed на следующий день
 
 **Анти-паттерны:** не делать `git add -A` до .gitignore; не «выбирать одну сторону целиком» в конфликтах fetcher.py; не пушить `data/`.
@@ -228,7 +228,7 @@
 **Верификация:**
 - [x] Активные Deckview legacy-пути из списка потребителей закреплены response-contract тестами без изменения тела
 - [x] `/v1/bg/heroes` отдаёт конверт; `openapi.json` содержит конкретные схемы
-- [ ] Повторный GET с `If-None-Match` → 304; через Cloudflare (`curl https://api.hs-manacost.ru/v1/bg/heroes -I` дважды) → `cf-cache-status: HIT` на втором
+- [ ] Повторный GET с `If-None-Match` → 304; через Cloudflare (`curl https://api.kolodahearthstone.com/v1/bg/heroes -I` дважды) → `cf-cache-status: HIT` на втором
 - [x] Тесты зелёные
 
 **Анти-паттерны:** не редиректить legacy на v1; не выдумывать параметры pydantic (Field/ConfigDict по документации pydantic v2 — сверяться через Context7 при сомнении); не кешировать /admin//ops.
@@ -251,7 +251,7 @@
 
 ## Phase 10 — Документация + GitHub
 
-**Цель:** документация соответствует коду после всех фаз; всё запушено в https://github.com/Zulut30/hearthstone-parses.
+**Цель:** документация соответствует коду после всех фаз; всё запушено в https://github.com/Manacost-Labs/api.kolodahearthstone.com.
 
 **Шаги (по карте документации Phase 0):**
 1. `README.md`: каталог источников 44+2 pipeline (генерировать из `SOURCES` скриптом, чтобы не рассинхронизировалось: `python -c "from app.sources import SOURCES; ..."` → markdown-таблица); state-список из enum; endpoints с /v1; раздел «Тесты» с канонической командой.

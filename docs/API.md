@@ -1,6 +1,6 @@
-# Hearthstone Parses API
+# Koloda Hearthstone API
 
-Актуальная документация REST API для `hearthstone-parses`.
+Актуальная документация REST API для `api.kolodahearthstone.com`.
 
 Практический каталог наборов, полей и готовых запросов:
 [DATA_CATALOG.md](DATA_CATALOG.md).
@@ -8,7 +8,7 @@
 Production base URL:
 
 ```text
-https://api.hs-manacost.ru
+https://api.kolodahearthstone.com
 ```
 
 Локально:
@@ -19,13 +19,15 @@ http://127.0.0.1:8000
 
 ## Auth
 
-Публичные read-only endpoints доступны без ключа. Операционные и admin endpoints требуют:
+Публичные read-only endpoints доступны без ключа. Закрытые endpoints используют
+scoped-токены:
 
 ```http
-X-API-Key: <HS_API_KEY>
+Authorization: Bearer khs_v1_<token-id>_<secret>
 ```
 
-`HS_API_KEY` хранится только в `/etc/hs-data-api.env`.
+`X-API-Key` и `HS_API_KEY` временно поддерживаются как bootstrap-совместимость.
+Выпуск, scopes и ротация описаны в [API_TOKENS.md](API_TOKENS.md).
 
 ## Public Endpoints
 
@@ -132,7 +134,7 @@ Query parameters:
 Пример:
 
 ```bash
-curl -s "https://api.hs-manacost.ru/sources?site=hsreplay" | jq .
+curl -s "https://api.kolodahearthstone.com/sources?site=hsreplay" | jq .
 ```
 
 Ответ:
@@ -302,7 +304,7 @@ Query parameters:
 Пример:
 
 ```bash
-curl -s "https://api.hs-manacost.ru/api/bg/trinkets?trinket_tier=lesser" | jq '.trinkets[] | select(.name=="Colorful Compass")'
+curl -s "https://api.kolodahearthstone.com/api/bg/trinkets?trinket_tier=lesser" | jq '.trinkets[] | select(.name=="Colorful Compass")'
 ```
 
 ### `GET /datasets/hsreplay_battlegrounds_comps`
@@ -326,7 +328,7 @@ HSReplay BG strategies парсятся через Firecrawl: список ст�
 Пример:
 
 ```bash
-curl -s "https://api.hs-manacost.ru/datasets/hsreplay_battlegrounds_comps" \
+curl -s "https://api.kolodahearthstone.com/datasets/hsreplay_battlegrounds_comps" \
   | jq '.data.structured.comps[] | {tier, title, difficulty, core: [.main_cards[].name], when: [.when_to_commit_cards[].name]}'
 ```
 
@@ -353,7 +355,7 @@ Query parameters:
 Пример:
 
 ```bash
-curl -s "https://api.hs-manacost.ru/api/db/archetypes?class_name=ROGUE" | jq .
+curl -s "https://api.kolodahearthstone.com/api/db/archetypes?class_name=ROGUE" | jq .
 ```
 
 ### `GET /api/db/archetypes/{id}`
@@ -361,7 +363,7 @@ curl -s "https://api.hs-manacost.ru/api/db/archetypes?class_name=ROGUE" | jq .
 Пример для Herald Rogue:
 
 ```bash
-curl -s "https://api.hs-manacost.ru/api/db/archetypes/856" | jq .
+curl -s "https://api.kolodahearthstone.com/api/db/archetypes/856" | jq .
 ```
 
 Ответ содержит:
@@ -375,7 +377,7 @@ curl -s "https://api.hs-manacost.ru/api/db/archetypes/856" | jq .
 ### `GET /api/db/archetypes/{id}/mulligan`
 
 ```bash
-curl -s "https://api.hs-manacost.ru/api/db/archetypes/856/mulligan?limit=40" | jq .
+curl -s "https://api.kolodahearthstone.com/api/db/archetypes/856/mulligan?limit=40" | jq .
 ```
 
 `display_only=true` включён по умолчанию и соответствует тому, что показывает
@@ -385,13 +387,13 @@ curl -s "https://api.hs-manacost.ru/api/db/archetypes/856/mulligan?limit=40" | j
 ### `GET /api/db/archetypes/{id}/matchups`
 
 ```bash
-curl -s "https://api.hs-manacost.ru/api/db/archetypes/856/matchups?min_games=100&limit=20" | jq .
+curl -s "https://api.kolodahearthstone.com/api/db/archetypes/856/matchups?min_games=100&limit=20" | jq .
 ```
 
 ### `GET /api/db/archetypes/{id}/decks`
 
 ```bash
-curl -s "https://api.hs-manacost.ru/api/db/archetypes/856/decks?include_cards=true&limit=5" | jq .
+curl -s "https://api.kolodahearthstone.com/api/db/archetypes/856/decks?include_cards=true&limit=5" | jq .
 ```
 
 `include_cards=true` раскрывает карты каждой сборки из `archetype_deck_cards`.
@@ -418,7 +420,7 @@ Query parameters:
 Пример:
 
 ```bash
-curl -s "https://api.hs-manacost.ru/api/db/bg/minions?limit=20" | jq .
+curl -s "https://api.kolodahearthstone.com/api/db/bg/minions?limit=20" | jq .
 ```
 
 ### `GET /api/db/bg/minions/{dbfId}`
@@ -427,7 +429,7 @@ curl -s "https://api.hs-manacost.ru/api/db/bg/minions?limit=20" | jq .
 графиков impact/combat winrate/popularity по combat round.
 
 ```bash
-curl -s "https://api.hs-manacost.ru/api/db/bg/minions/98592" | jq .
+curl -s "https://api.kolodahearthstone.com/api/db/bg/minions/98592" | jq .
 ```
 
 ### `GET /api/db/bg/minions/{dbfId}/history`
@@ -436,7 +438,7 @@ curl -s "https://api.hs-manacost.ru/api/db/bg/minions/98592" | jq .
 `{x: fetched_at, y: value}` для frontend-графиков.
 
 ```bash
-curl -s "https://api.hs-manacost.ru/api/db/bg/minions/98592/history" | jq .
+curl -s "https://api.kolodahearthstone.com/api/db/bg/minions/98592/history" | jq .
 ```
 
 ## HSReplay Battlegrounds Hero Details
@@ -464,8 +466,8 @@ Query parameters:
 | `q` | empty | Поиск по имени героя. |
 
 ```bash
-curl -s "https://api.hs-manacost.ru/api/bg/heroes?mode=solo" | jq .
-curl -s "https://api.hs-manacost.ru/api/bg/heroes?mode=duos" | jq .
+curl -s "https://api.kolodahearthstone.com/api/bg/heroes?mode=solo" | jq .
+curl -s "https://api.kolodahearthstone.com/api/bg/heroes?mode=duos" | jq .
 ```
 
 ### `GET /api/bg/heroes/{dbfId}`
@@ -473,15 +475,15 @@ curl -s "https://api.hs-manacost.ru/api/bg/heroes?mode=duos" | jq .
 Возвращает весь detail payload solo-героя:
 
 ```bash
-curl -s "https://api.hs-manacost.ru/api/bg/heroes/57946" | jq .
+curl -s "https://api.kolodahearthstone.com/api/bg/heroes/57946" | jq .
 ```
 
 Узкие endpoints для фронтенда и внешних графиков:
 
 ```bash
-curl -s "https://api.hs-manacost.ru/api/bg/heroes/57946/tavern-up" | jq .
-curl -s "https://api.hs-manacost.ru/api/bg/heroes/57946/hero-power" | jq .
-curl -s "https://api.hs-manacost.ru/api/bg/heroes/57946/best-composition" | jq .
+curl -s "https://api.kolodahearthstone.com/api/bg/heroes/57946/tavern-up" | jq .
+curl -s "https://api.kolodahearthstone.com/api/bg/heroes/57946/hero-power" | jq .
+curl -s "https://api.kolodahearthstone.com/api/bg/heroes/57946/best-composition" | jq .
 ```
 
 ## Hearthstone Patch Database
@@ -528,7 +530,7 @@ Query parameters:
 | `offset` | `0` | Offset для pagination. |
 
 ```bash
-curl -s "https://api.hs-manacost.ru/api/patches?limit=2" | jq .
+curl -s "https://api.kolodahearthstone.com/api/patches?limit=2" | jq .
 ```
 
 ### `GET /api/patches/{version}`
@@ -538,7 +540,7 @@ Manacost (`35.6.2`). По умолчанию detail включает `content_te
 отключить:
 
 ```bash
-curl -s "https://api.hs-manacost.ru/api/patches/35.6.2?include_content=false" | jq .
+curl -s "https://api.kolodahearthstone.com/api/patches/35.6.2?include_content=false" | jq .
 ```
 
 ## HSReplay Battlegrounds Compositions Screenshot
@@ -549,13 +551,14 @@ curl -s "https://api.hs-manacost.ru/api/patches/35.6.2?include_content=false" | 
 `latest.json`. Плановый systemd timer запускается ежедневно.
 
 ```bash
-curl -s "https://api.hs-manacost.ru/api/bg/compositions/screenshot/latest" | jq .
-curl -L "https://api.hs-manacost.ru/api/bg/compositions/screenshot/latest/image" -o bg-compositions.png
+curl -s "https://api.kolodahearthstone.com/api/bg/compositions/screenshot/latest" | jq .
+curl -L "https://api.kolodahearthstone.com/api/bg/compositions/screenshot/latest/image" -o bg-compositions.png
 ```
 
 ## Admin And Ops Endpoints
 
-Все endpoints из этого раздела требуют `X-API-Key`.
+Все endpoints из этого раздела требуют scope `admin` или временный bootstrap
+`HS_API_KEY`.
 
 | Method | Path | Назначение |
 | --- | --- | --- |
@@ -580,7 +583,7 @@ curl -L "https://api.hs-manacost.ru/api/bg/compositions/screenshot/latest/image"
 ```bash
 curl -s -X POST \
   -H "X-API-Key: ${HS_API_KEY}" \
-  "https://api.hs-manacost.ru/admin/refresh" | jq .
+  "https://api.kolodahearthstone.com/admin/refresh" | jq .
 ```
 
 Запустить один или несколько источников:
@@ -588,7 +591,7 @@ curl -s -X POST \
 ```bash
 curl -s -X POST \
   -H "X-API-Key: ${HS_API_KEY}" \
-  "https://api.hs-manacost.ru/admin/refresh?source_id=hsreplay_meta_archetypes_legend_eu_1d&source_id=vicious_syndicate_live_beta" | jq .
+  "https://api.kolodahearthstone.com/admin/refresh?source_id=hsreplay_meta_archetypes_legend_eu_1d&source_id=vicious_syndicate_live_beta" | jq .
 ```
 
 ### `GET /ops/health`
@@ -630,14 +633,14 @@ curl -s -X POST \
 
 ```bash
 curl -s -H "X-API-Key: ${HS_API_KEY}" \
-  "https://api.hs-manacost.ru/health/premium" | jq .
+  "https://api.kolodahearthstone.com/health/premium" | jq .
 ```
 
 Live probe:
 
 ```bash
 curl -s -H "X-API-Key: ${HS_API_KEY}" \
-  "https://api.hs-manacost.ru/health/premium?live=true" | jq .
+  "https://api.kolodahearthstone.com/health/premium?live=true" | jq .
 ```
 
 Проверяет:
@@ -659,7 +662,7 @@ Query parameters:
 
 ```bash
 curl -s -H "X-API-Key: ${HS_API_KEY}" \
-  "https://api.hs-manacost.ru/ops/summary?since_hours=48" | jq .
+  "https://api.kolodahearthstone.com/ops/summary?since_hours=48" | jq .
 ```
 
 ### `GET /ops/events`
@@ -682,7 +685,7 @@ Query parameters:
 
 ```bash
 curl -s -H "X-API-Key: ${HS_API_KEY}" \
-  "https://api.hs-manacost.ru/ops/events?since_hours=48&level=error&limit=20" | jq .
+  "https://api.kolodahearthstone.com/ops/events?since_hours=48&level=error&limit=20" | jq .
 ```
 
 ## SQL-backed Endpoints
@@ -812,35 +815,35 @@ If a legacy/generic dataset has no registered schema, `validated` can be `false`
 HSReplay cards, Legend, last 1 day:
 
 ```bash
-curl -s "https://api.hs-manacost.ru/datasets/hsreplay_cards_legend_1d" \
+curl -s "https://api.kolodahearthstone.com/datasets/hsreplay_cards_legend_1d" \
   | jq '.data.structured.cards[0:5]'
 ```
 
 HSReplay Wild cards, Legend, last 1 day:
 
 ```bash
-curl -s "https://api.hs-manacost.ru/datasets/hsreplay_cards_wild_legend_1d" \
+curl -s "https://api.kolodahearthstone.com/datasets/hsreplay_cards_wild_legend_1d" \
   | jq '.data.structured.cards[0:5]'
 ```
 
 HSReplay meta archetypes grouped by class:
 
 ```bash
-curl -s "https://api.hs-manacost.ru/datasets/hsreplay_meta_archetypes_legend_eu_1d" \
+curl -s "https://api.kolodahearthstone.com/datasets/hsreplay_meta_archetypes_legend_eu_1d" \
   | jq '.data.structured.classes[] | {class, winrate, popularity, games, archetypes: .archetypes[0:3]}'
 ```
 
 HSReplay Battlegrounds heroes:
 
 ```bash
-curl -s "https://api.hs-manacost.ru/datasets/hsreplay_battlegrounds_heroes" \
+curl -s "https://api.kolodahearthstone.com/datasets/hsreplay_battlegrounds_heroes" \
   | jq '.data.structured.heroes[0:5]'
 ```
 
 Vicious Syndicate Live tier list:
 
 ```bash
-curl -s "https://api.hs-manacost.ru/datasets/vicious_syndicate_live_beta" \
+curl -s "https://api.kolodahearthstone.com/datasets/vicious_syndicate_live_beta" \
   | jq '.data.structured.tier_list'
 ```
 
@@ -848,12 +851,12 @@ Detailed source diagnostics:
 
 ```bash
 curl -s -H "X-API-Key: ${HS_API_KEY}" \
-  "https://api.hs-manacost.ru/ops/health" | jq .
+  "https://api.kolodahearthstone.com/ops/health" | jq .
 ```
 
 Premium auth live probe:
 
 ```bash
 curl -s -H "X-API-Key: ${HS_API_KEY}" \
-  "https://api.hs-manacost.ru/health/premium?live=true" | jq .
+  "https://api.kolodahearthstone.com/health/premium?live=true" | jq .
 ```

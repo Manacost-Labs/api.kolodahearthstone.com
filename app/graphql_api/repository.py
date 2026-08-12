@@ -26,9 +26,7 @@ class PageResult:
     total: int
 
 
-ALLOWED_DATABASE_SCHEMAS = frozenset(
-    {"catalog", "analytics", "raw", "platform", "hub"}
-)
+ALLOWED_DATABASE_SCHEMAS = frozenset({"catalog", "analytics", "raw", "platform", "hub"})
 COLLECTION_RE = re.compile(r"^(?P<schema>[a-z][a-z0-9_]*)\.(?P<table>[a-z][a-z0-9_]*)$")
 
 
@@ -566,7 +564,9 @@ class PostgresGraphQLRepository:
             where.append("table_schema = %(schema)s")
             params["schema"] = schema_name
         if search:
-            where.append("(table_name ILIKE %(search)s OR table_schema ILIKE %(search)s)")
+            where.append(
+                "(table_name ILIKE %(search)s OR table_schema ILIKE %(search)s)"
+            )
             params["search"] = f"%{search}%"
         predicate = " AND ".join(where)
         count_query = (
@@ -637,7 +637,9 @@ class PostgresGraphQLRepository:
 
         selected_fields = fields or available_columns
         if not selected_fields or len(selected_fields) > 100:
-            raise RepositoryValidationError("fields must contain between 1 and 100 columns")
+            raise RepositoryValidationError(
+                "fields must contain between 1 and 100 columns"
+            )
         if len(selected_fields) != len(set(selected_fields)):
             raise RepositoryValidationError("fields must not contain duplicates")
         invalid_fields = sorted(set(selected_fields) - available_set)
@@ -655,7 +657,9 @@ class PostgresGraphQLRepository:
                 "unknown filter fields: " + ", ".join(invalid_filters[:5])
             )
 
-        sort_field = order_by or (primary_key[0] if primary_key else available_columns[0])
+        sort_field = order_by or (
+            primary_key[0] if primary_key else available_columns[0]
+        )
         if sort_field not in available_set:
             raise RepositoryValidationError("orderBy is not a collection field")
 

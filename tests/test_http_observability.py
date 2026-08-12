@@ -121,7 +121,7 @@ def test_application_cors_allows_and_exposes_request_id() -> None:
     preflight = client.options(
         "/v1/system/sources",
         headers={
-            "Origin": "https://api.hs-manacost.ru",
+            "Origin": "https://api.kolodahearthstone.com",
             "Access-Control-Request-Method": "GET",
             "Access-Control-Request-Headers": "X-Request-ID",
             "X-Request-ID": "cors-preflight-request",
@@ -134,7 +134,7 @@ def test_application_cors_allows_and_exposes_request_id() -> None:
     response = client.get(
         "/openapi.json",
         headers={
-            "Origin": "https://api.hs-manacost.ru",
+            "Origin": "https://api.kolodahearthstone.com",
             "X-Request-ID": "cors-visible-request",
         },
     )

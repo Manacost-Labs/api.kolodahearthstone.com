@@ -23,13 +23,13 @@ def test_v1_get_returns_etag_and_conditional_304() -> None:
     with patch("app.hsreplay_bg_hero_details.list_bg_heroes", return_value=payload):
         first = client.get(
             "/v1/bg/heroes",
-            headers={"Origin": "https://api.hs-manacost.ru"},
+            headers={"Origin": "https://api.kolodahearthstone.com"},
         )
         second = client.get(
             "/v1/bg/heroes",
             headers={
                 "If-None-Match": first.headers["etag"],
-                "Origin": "https://api.hs-manacost.ru",
+                "Origin": "https://api.kolodahearthstone.com",
             },
         )
 
@@ -39,7 +39,7 @@ def test_v1_get_returns_etag_and_conditional_304() -> None:
     assert second.status_code == 304
     assert second.content == b""
     assert second.headers["etag"] == first.headers["etag"]
-    assert second.headers["access-control-allow-origin"] == "https://api.hs-manacost.ru"
+    assert second.headers["access-control-allow-origin"] == "https://api.kolodahearthstone.com"
 
 
 def test_dataset_etag_changes_with_fetched_at() -> None:

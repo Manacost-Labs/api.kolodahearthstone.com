@@ -457,12 +457,102 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "telegram-setup",
         help="Fetch latest Telegram bot updates, automatically detect chat ID, and configure notifications.",
     )
+    api_token = sub.add_parser(
+        "api-token",
+        help="Issue, list or revoke scoped API tokens.",
+    )
+    api_token_commands = api_token.add_subparsers(dest="token_command", required=True)
+    token_issue = api_token_commands.add_parser(
+        "issue",
+        help="Issue a token and print its secret once.",
+    )
+    token_issue.add_argument("--name", required=True, help="Human-readable consumer name.")
+    token_issue.add_argument(
+        "--scope",
+        action="append",
+        required=True,
+        help="Scope to grant; repeat for multiple scopes.",
+    )
+    token_issue.add_argument("--expires-in-days", type=int, default=90)
+    api_token_commands.add_parser("list", help="List token metadata without secrets.")
+    token_revoke = api_token_commands.add_parser("revoke", help="Revoke a token by id.")
+    token_revoke.add_argument("token_id")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     load_env_file()
     args = parse_args(argv or sys.argv[1:])
+    if args.command == "api-token":
+        from .api_tokens import ApiTokenError, get_api_token_store
+
+        store = get_api_token_store()
+
+        def metadata_payload(token) -> dict[str, object]:
+            return {
+                "id": token.id,
+                "name": token.name,
+                "scopes": list(token.scopes),
+                "created_at": token.created_at.isoformat(),
+                "expires_at": token.expires_at.isoformat(),
+                "last_used_at": (
+                    token.last_used_at.isoformat() if token.last_used_at else None
+                ),
+                "revoked_at": token.revoked_at.isoformat() if token.revoked_at else None,
+                "created_by": token.created_by,
+                "revoked_by": token.revoked_by,
+            }
+
+        try:
+            if args.token_command == "issue":
+                issued = store.issue(
+                    name=args.name,
+                    scopes=args.scope,
+                    expires_in_days=args.expires_in_days,
+                    created_by="cli",
+                )
+                payload = metadata_payload(issued)
+                payload["token"] = issued.token
+                print(
+                    json.dumps(
+                        {
+                            "data": payload,
+                            "meta": {"secret_shown_once": True},
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+                )
+                return 0
+            if args.token_command == "list":
+                tokens = [metadata_payload(token) for token in store.list_tokens()]
+                print(
+                    json.dumps(
+                        {"data": tokens, "meta": {"count": len(tokens)}},
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+                )
+                return 0
+            revoked = store.revoke(args.token_id, revoked_by="cli")
+            print(
+                json.dumps(
+                    {"ok": revoked, "id": args.token_id, "revoked": revoked},
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return 0 if revoked else 1
+        except ApiTokenError as error:
+            print(
+                json.dumps(
+                    {"ok": False, "error": {"code": error.code, "message": error.message}},
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                file=sys.stderr,
+            )
+            return 2
     if args.command == "scheduled-check":
         if args.source not in SOURCE_BY_ID:
             print(json.dumps({

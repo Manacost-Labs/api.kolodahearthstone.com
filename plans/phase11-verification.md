@@ -8,12 +8,12 @@
 - `docker compose config --quiet` with a temporary non-secret env file: passed.
 - Anti-pattern checks: no `os.environ.get` outside `app/config.py`; no duplicate `_parse_percent_value` / `_is_percent` helpers.
 - Real Uvicorn smoke on isolated storage: `/health` 200, `/openapi.json` 200 with all eight v1 routes, `/v1/system/sources` returned 46 rows, conditional request returned 304 with an empty body.
-- GitHub review threads: all resolved; PR is mergeable. GitHub pytest and the clean Docker build are green on final verification commit `d22442a` ([run 29187899529](https://github.com/Zulut30/hearthstone-parses/actions/runs/29187899529)).
+- GitHub review threads: all resolved; PR is mergeable. GitHub pytest and the clean Docker build are green on final verification commit `d22442a` ([run 29187899529](https://github.com/Manacost-Labs/api.kolodahearthstone.com/actions/runs/29187899529)).
 - The production image is built from scratch in CI with browser installation failures treated as fatal. The image also has a Docker healthcheck against `/health`.
 
 ## Current production baseline (before merge/deploy)
 
-Read-only audit of `https://api.hs-manacost.ru`:
+Read-only audit of `https://api.kolodahearthstone.com`:
 
 - `/health`: healthy.
 - `/datasets`: 46/46 have a dataset and status `ok`.

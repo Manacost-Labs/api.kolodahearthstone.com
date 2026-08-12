@@ -58,7 +58,7 @@ _HTML_HEADERS = {
 _WORDPRESS_HEADERS = {
     "accept": "application/json",
     "user-agent": (
-        "Hearthstone-Parses/1.0 (+https://github.com/Zulut30/hearthstone-parses)"
+        "Hearthstone-Parses/1.0 (+https://github.com/Manacost-Labs/api.kolodahearthstone.com)"
     ),
 }
 

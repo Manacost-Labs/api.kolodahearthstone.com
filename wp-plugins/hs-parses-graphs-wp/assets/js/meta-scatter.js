@@ -22,7 +22,7 @@
     var rankSelector = wrapper.querySelector('.hs-meta-scatter-rank-selector');
     if (!canvas || !hoverInfo) return;
 
-    var apiUrl = normalizeApiUrl(wrapper.getAttribute('data-api-url') || 'https://api.hs-manacost.ru');
+    var apiUrl = normalizeApiUrl(wrapper.getAttribute('data-api-url') || 'https://api.kolodahearthstone.com');
     var translationsUrl = wrapper.getAttribute('data-archetypes-url') || '';
     var format = wrapper.getAttribute('data-format') || 'standard';
     var currentRank = wrapper.getAttribute('data-start-rank') || 'diamond_4to1';

@@ -13,8 +13,15 @@ fi
 
 echo "=== Sync $ROOT -> $INSTALL_DIR ==="
 rsync -av --delete \
+  --exclude data \
+  --exclude '.env*' \
+  --exclude '.credentials*' \
   --exclude venv \
   --exclude .git \
+  --exclude .codegraph \
+  --exclude .cursor \
+  --exclude .pytest_cache \
+  --exclude .ruff_cache \
   --exclude __pycache__ \
   --exclude scripts/fingerprint-node/node_modules \
   --exclude .venv \

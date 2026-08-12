@@ -69,7 +69,7 @@ function hs_parses_graphs_register_shortcodes() {
  * Helper to get the default api domain
  */
 function hs_parses_graphs_get_default_api_url() {
-	return 'https://api.hs-manacost.ru';
+	return 'https://api.kolodahearthstone.com';
 }
 
 function hs_parses_graphs_get_default_archetypes_api_url() {

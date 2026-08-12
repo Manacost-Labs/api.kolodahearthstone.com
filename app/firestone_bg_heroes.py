@@ -22,7 +22,7 @@ DEFAULT_TIME_PERIOD = "past-three"
 
 _HEADERS = {
     "accept": "application/json,text/plain,*/*",
-    "user-agent": "Hearthstone-Parses/1.0 (+https://github.com/Zulut30/hearthstone-parses)",
+    "user-agent": "Hearthstone-Parses/1.0 (+https://github.com/Manacost-Labs/api.kolodahearthstone.com)",
 }
 
 

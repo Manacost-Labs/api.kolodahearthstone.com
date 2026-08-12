@@ -670,9 +670,7 @@ class Query:
         return DatasetSnapshot(**row) if row else None
 
     @strawberry.field(
-        description=(
-            "Every table and view in the central store. Requires X-API-Key."
-        )
+        description=("Every table and view in the central store. Requires X-API-Key.")
     )
     async def collections(
         self,

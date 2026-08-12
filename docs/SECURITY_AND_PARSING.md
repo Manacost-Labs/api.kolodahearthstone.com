@@ -1,7 +1,7 @@
 # Безопасность и парсинг Hearthstone Data API
 
 Подробное руководство по устройству парсера на сервере, мерам защиты данных и снижению риска блокировок.  
-Репозиторий: [github.com/Zulut30/hearthstone-parses](https://github.com/Zulut30/hearthstone-parses)
+Репозиторий: [github.com/Manacost-Labs/api.kolodahearthstone.com](https://github.com/Manacost-Labs/api.kolodahearthstone.com)
 
 Связанные документы:
 - [DEPLOY.md](../DEPLOY.md) — установка и перенос на другой сервер
@@ -163,7 +163,7 @@ pipeline используется его собственный структур
 
 Если `HS_API_KEY` задан, неверный ключ → `401` на admin-методах.
 
-**Рекомендация для продакшена с публичным доменом** (например `api.hs-manacost.ru`):
+**Рекомендация для продакшена с публичным доменом** (например `api.kolodahearthstone.com`):
 
 1. Вынести admin-пути за VPN или отдельный internal host.
 2. На nginx: rate limiting на `/datasets`, basic auth или API gateway для публичного чтения при необходимости.
@@ -409,6 +409,6 @@ venv/bin/python -m app.cli refresh --source <SOURCE_ID>
 ## 9. Контакты и ответственность
 
 - Оператор сервера отвечает за: хранение `/etc/hs-data-api.env`, ротацию ключей, соблюдение ToS сайтов-источников.
-- Разработчик репозитория: Issues/PR на GitHub `Zulut30/hearthstone-parses`.
+- Разработчик репозитория: Issues/PR на GitHub `Manacost-Labs/api.kolodahearthstone.com`.
 
 **Версия документа:** 2026-07-12 (46 источников; contracts/publish-gate; API v1).

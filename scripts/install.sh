@@ -7,7 +7,7 @@ INSTALL_DIR="/opt/hs-data-api"
 DATA_DIR="/var/lib/hs-data-api"
 ENV_FILE="/etc/hs-data-api.env"
 USE_SYSTEMD=1
-REPO_URL="${HS_REPO_URL:-https://github.com/Zulut30/hearthstone-parses.git}"
+REPO_URL="${HS_REPO_URL:-https://github.com/Manacost-Labs/api.kolodahearthstone.com.git}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in

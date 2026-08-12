@@ -6,7 +6,7 @@
 Production base URL:
 
 ```text
-https://api.hs-manacost.ru
+https://api.kolodahearthstone.com
 ```
 
 Публичные `GET` endpoints не требуют API-ключа. Полная спецификация параметров,
@@ -458,11 +458,11 @@ ETag: "..."
 
 ```bash
 etag=$(curl -sD - -o /tmp/sources.json \
-  https://api.hs-manacost.ru/v1/system/sources \
+  https://api.kolodahearthstone.com/v1/system/sources \
   | awk 'tolower($1)=="etag:" {print $2}' | tr -d '\r')
 
 curl -i -H "If-None-Match: ${etag}" \
-  https://api.hs-manacost.ru/v1/system/sources
+  https://api.kolodahearthstone.com/v1/system/sources
 ```
 
 Если данные не изменились, API отвечает `304 Not Modified` без тела.
@@ -472,49 +472,49 @@ curl -i -H "If-None-Match: ${etag}" \
 Список всех источников HSReplay:
 
 ```bash
-curl -s 'https://api.hs-manacost.ru/v1/system/sources?site=hsreplay' \
+curl -s 'https://api.kolodahearthstone.com/v1/system/sources?site=hsreplay' \
   | jq '.data[] | {id, category, dataset_fetched_at}'
 ```
 
 Топ карт по deck winrate:
 
 ```bash
-curl -s 'https://api.hs-manacost.ru/datasets/hsreplay_cards_legend_1d' \
+curl -s 'https://api.kolodahearthstone.com/datasets/hsreplay_cards_legend_1d' \
   | jq '.data.structured.cards | sort_by(.deck_winrate) | reverse | .[:20]'
 ```
 
 Standard Legend meta HSGuru:
 
 ```bash
-curl -s 'https://api.hs-manacost.ru/datasets/hsguru_meta_standard_legend' \
+curl -s 'https://api.kolodahearthstone.com/datasets/hsguru_meta_standard_legend' \
   | jq '.data.structured.strategies[:20]'
 ```
 
 Solo BG-герои tier A:
 
 ```bash
-curl -s 'https://api.hs-manacost.ru/v1/bg/heroes?mode=solo&limit=500' \
+curl -s 'https://api.kolodahearthstone.com/v1/bg/heroes?mode=solo&limit=500' \
   | jq '[.data[] | select(.tier == "A")]'
 ```
 
 Существа шестой таверны:
 
 ```bash
-curl -s 'https://api.hs-manacost.ru/v1/bg/minions?tavern_tier=6&limit=500' \
+curl -s 'https://api.kolodahearthstone.com/v1/bg/minions?tavern_tier=6&limit=500' \
   | jq '.data'
 ```
 
 Классы Арены:
 
 ```bash
-curl -s 'https://api.hs-manacost.ru/v1/arena/classes' \
+curl -s 'https://api.kolodahearthstone.com/v1/arena/classes' \
   | jq '.data | sort_by(.win_rate) | reverse'
 ```
 
 Последний доступный Vicious radar:
 
 ```bash
-curl -s 'https://api.hs-manacost.ru/datasets/vicious_syndicate_radars' \
+curl -s 'https://api.kolodahearthstone.com/datasets/vicious_syndicate_radars' \
   | jq '.data.structured | {
       issue,
       latest_report_issue,
@@ -527,7 +527,7 @@ curl -s 'https://api.hs-manacost.ru/datasets/vicious_syndicate_radars' \
 Поиск колод Mage:
 
 ```bash
-curl -s 'https://api.hs-manacost.ru/v1/constructed/decks?class_name=Mage&limit=50' \
+curl -s 'https://api.kolodahearthstone.com/v1/constructed/decks?class_name=Mage&limit=50' \
   | jq '{meta, decks: .data}'
 ```
 
