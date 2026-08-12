@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import sys
 import uuid
 from collections.abc import Callable
@@ -17,6 +18,20 @@ from .sources import SOURCE_BY_ID
 
 DEFAULT_ENV_FILE = Path("/etc/hs-data-api.env")
 logger = logging.getLogger(__name__)
+_API_TOKEN_ID_PATTERN = re.compile(r"[A-Za-z0-9_-]{12}")
+
+
+def _normalize_api_token_revoke_argv(argv: list[str]) -> list[str]:
+    """Keep valid token IDs that begin with ``-`` positional for argparse."""
+
+    if (
+        len(argv) == 3
+        and argv[:2] == ["api-token", "revoke"]
+        and argv[2].startswith("-")
+        and _API_TOKEN_ID_PATTERN.fullmatch(argv[2]) is not None
+    ):
+        return [*argv[:2], "--", argv[2]]
+    return argv
 
 
 def _run_pipeline_command_with_telemetry(
@@ -237,6 +252,7 @@ def load_env_file(path: Path = DEFAULT_ENV_FILE) -> None:
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
+    argv = _normalize_api_token_revoke_argv(argv)
     parser = argparse.ArgumentParser(description="Refresh Hearthstone data sources.")
     sub = parser.add_subparsers(dest="command", required=True)
     refresh = sub.add_parser("refresh")

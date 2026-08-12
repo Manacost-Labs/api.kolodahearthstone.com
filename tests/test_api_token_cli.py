@@ -33,6 +33,9 @@ def test_api_token_cli_contract() -> None:
     revoke = parse_args(["api-token", "revoke", "abcdefghijkl"])
     assert revoke.token_id == "abcdefghijkl"
 
+    leading_dash_revoke = parse_args(["api-token", "revoke", "-qZoyXiy9lY0"])
+    assert leading_dash_revoke.token_id == "-qZoyXiy9lY0"
+
 
 def test_api_token_cli_issues_lists_and_revokes_without_reprinting_secret(
     monkeypatch: Any,
