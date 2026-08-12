@@ -7,6 +7,11 @@ from unittest.mock import patch
 from app.ai_review_evidence import build_ai_review_evidence_v2, evidence_sha256
 from app.sources import SOURCE_BY_ID, Source
 
+VALID_STREAMER_DECK_CODE = (
+    "AAEBAf0GBs30Av76A4f7A564BtvXB63ZBwycENfOA4j0A8b5A8f5A63pBdCeBu6h"
+    "Bom1BoSZB+C+B43cBwAA"
+)
+
 
 def _hero_rows(count: int, *, marker: str) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
@@ -215,6 +220,38 @@ def test_fetch_stage_does_not_invent_schema_or_semantic_failure() -> None:
     assert evidence["deterministic_validation"]["issue_codes"] == [
         "deterministic.http_5xx"
     ]
+
+
+def test_low_activity_streamer_window_is_not_reported_as_ai_contract_failure() -> None:
+    source = SOURCE_BY_ID["hsguru_streamer_decks_legend_1000"]
+    evidence = build_ai_review_evidence_v2(
+        source,
+        {
+            "source_id": source.id,
+            "structured": {
+                "type": "streamer_decks",
+                "rows": [
+                    {
+                        "Deck": "Low activity deck",
+                        "Streamer": "Low activity streamer",
+                        "deck_code": VALID_STREAMER_DECK_CODE,
+                    }
+                ],
+            },
+        },
+        backend="scrape_do",
+        stage="candidate_validation",
+        deterministic_ok=True,
+    )
+
+    contract = evidence["contract_validation"]
+    assert contract["passed"] is True
+    assert contract["low_activity"] is True
+    assert contract["row_minimum_met"] is True
+    assert (
+        "contract.minimum_rows_not_met"
+        not in evidence["deterministic_validation"]["issue_codes"]
+    )
 
 
 def test_hash_is_canonical_and_tracks_only_safe_signal_changes() -> None:

@@ -125,6 +125,19 @@ Production refresh schedule:
   matrix at `00:00` and `12:00 Europe/Warsaw`; every rank includes rolling,
   active-patch and Violet Hold periods. A newly advertised HSGuru `patch_*`
   becomes active only after the complete matrix passes its publication gate.
+- `hs-data-api-docker-firecrawl-streamer.timer`: HSGuru streamer decks every
+  hour at `:15`. One or two rows are accepted only as a verified low-activity
+  window when every row has deck, streamer and a decodable deckstring. The
+  non-persistent recovery timer checks every ten minutes, but starts the same
+  shared refresh only after a failed/LKG attempt is at least five minutes old.
+- `hs-data-api-docker-refresh-hsguru-archetype-analysis.timer`: daily at
+  `03:20 Europe/Warsaw`. An incomplete checkpoint younger than 12 hours is
+  resumed at `:45` by a non-persistent recovery timer in batches of at most 20
+  targets with a strict four-provider-failure budget per recovery run.
+- `hs-data-api-docker-bg-compositions-screenshot.timer`: daily at
+  `04:10 Europe/Warsaw`. A capture is published only after MIME, image decoder,
+  dimensions, redaction and crop checks; the last valid image remains available
+  after a failed or concurrent capture.
 - The HSGuru matrix carries forward an unavailable slice and an unavailable
   Standard/Wild current catalog only from the last published snapshot for the
   same patch. The refresh remains `partial`, exposes `cached_slices` and
@@ -141,6 +154,8 @@ Production refresh schedule:
 - `scripts/install-docker-systemd.sh`: автоматически устанавливает и включает все
   `hs-data-api-docker-*.timer`, поэтому новый pipeline timer не останется только
   в репозитории после следующего деплоя.
+- Parser-control показывает primary и recovery schedules отдельно: recovery не
+  подменяет обычный `nextRunAt`, а публикуется как `nextRecoveryRunAt`.
 - `hs-data-api-docker-export-timer-state.timer`: раз в минуту атомарно экспортирует
   фактические `enabled/active/last/next/result` таймеров и их services в общий
   `data/parser-control-systemd.json`. Контейнер принимает snapshot только пока он

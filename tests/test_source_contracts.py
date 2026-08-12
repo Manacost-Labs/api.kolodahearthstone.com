@@ -5,9 +5,18 @@ import unittest
 from app.api_only_sources import blocks_browser_fallback
 from app.dataset_regression import check_dataset_regression
 from app.hsreplay_client import _channel_urls
-from app.scrapers.quality import looks_like_real_page, quality_metrics, validate_parsed_data
+from app.scrapers.quality import (
+    looks_like_real_page,
+    quality_metrics,
+    validate_parsed_data,
+)
 from app.source_contracts import contract_quality_report, get_contract
 from app.sources import SOURCE_BY_ID
+
+VALID_STREAMER_DECK_CODE = (
+    "AAEBAf0GBs30Av76A4f7A564BtvXB63ZBwycENfOA4j0A8b5A8f5A63pBdCeBu6h"
+    "Bom1BoSZB+C+B43cBwAA"
+)
 
 
 class SourceContractsTest(unittest.TestCase):
@@ -49,6 +58,54 @@ class SourceContractsTest(unittest.TestCase):
         self.assertIn("legend=1000", source.fetch_url)
         self.assertIn("violet_hold=no", source.fetch_url)
         self.assertIn("limit=100", source.fetch_url)
+
+    def test_streamer_rolling_hour_accepts_one_or_two_complete_rows(self) -> None:
+        for row_count in (1, 2):
+            with self.subTest(row_count=row_count):
+                report = contract_quality_report(
+                    "hsguru_streamer_decks_legend_1000",
+                    {
+                        "type": "streamer_decks",
+                        "rows": [
+                            {
+                                "Deck": f"Deck {index}",
+                                "Streamer": f"Streamer {index}",
+                                "deck_code": VALID_STREAMER_DECK_CODE,
+                            }
+                            for index in range(row_count)
+                        ],
+                    },
+                )
+
+                self.assertTrue(report["ok"], report["warnings"])
+                self.assertTrue(report["low_activity"])
+                self.assertEqual(report["minimum_rows"], 3)
+                self.assertEqual(report["decodable_deck_codes"]["rate"], 1.0)
+
+    def test_streamer_rolling_hour_rejects_empty_or_undecodable_rows(self) -> None:
+        empty = contract_quality_report(
+            "hsguru_streamer_decks_legend_1000",
+            {"type": "streamer_decks", "rows": []},
+        )
+        invalid_code = contract_quality_report(
+            "hsguru_streamer_decks_legend_1000",
+            {
+                "type": "streamer_decks",
+                "rows": [
+                    {
+                        "Deck": "Deck",
+                        "Streamer": "Streamer",
+                        "deck_code": "AAE-this-is-filled-but-not-a-deckstring",
+                    }
+                ],
+            },
+        )
+
+        self.assertFalse(empty["ok"])
+        self.assertFalse(invalid_code["ok"])
+        self.assertFalse(invalid_code["low_activity"])
+        self.assertIn("too few rows", " ".join(empty["warnings"]))
+        self.assertIn("decodable deck codes", " ".join(invalid_code["warnings"]))
 
     def test_arena_advanced_contract_blocks_bad_fallback(self) -> None:
         contract = get_contract("hsreplay_arena_cards_advanced")

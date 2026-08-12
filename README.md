@@ -17,7 +17,7 @@ Vicious Syndicate, проверяет их качество и публикуе�
 
 ## Что находится в системе
 
-В текущем реестре **97 источников: 93 scrape + 4 dedicated pipeline**.
+В текущем реестре **99 источников: 93 scrape + 6 dedicated pipeline**.
 Авторитетный список генерируется из `app.sources.SOURCES` и хранится в
 [docs/SOURCES.md](docs/SOURCES.md). Ручной перечень здесь намеренно не
 дублируется: синхронизацию каталога проверяет pytest.
@@ -80,7 +80,7 @@ flowchart LR
 | `app/source_contracts.py` | Минимальные объёмы, обязательные поля и backend policy. |
 | `app/dataset_regression.py` | Защита от резкого уменьшения или деградации набора. |
 | `app/ai_review.py` | Опциональная семантическая проверка кандидата через OpenRouter со строгой JSON-схемой и безопасным fail-open. |
-| `app/reliability_telemetry.py` | Append-only учёт наблюдаемых fresh/LKG/failure исходов основного refresh и окон 24h/7d/30d. |
+| `app/reliability_telemetry.py` | Append-only учёт наблюдаемых fresh/LKG/failure исходов generic refresh и dedicated pipelines в окнах 24h/7d/30d. |
 | `app/resource_locks.py` | Неблокирующие межпроцессные lock-файлы по ресурсам. |
 | `app/job_run.py` | Дедлайны, прогресс и атомарные snapshots длительных заданий. |
 | `app/storage.py`, `app/db.py` | JSON snapshots, резервные копии и SQLite/WAL. |
@@ -196,8 +196,9 @@ status; отдельный запрос на каждый источник не 
 
 ## Гарантии устойчивости
 
-- Generic refresh и HSGuru matrix используют lock по конкретным ресурсам,
-  поэтому занятый источник не должен блокировать независимые источники.
+- Generic refresh и все шесть зарегистрированных dedicated pipeline writers
+  используют lock по конкретным ресурсам, поэтому занятый источник не должен
+  блокировать независимые источники или создавать параллельную публикацию.
 - Preflight учитывает выбранный маршрут: proxy или FlareSolverr становятся
   блокирующей проверкой только тогда, когда без них нет полезного маршрута для
   всей выбранной job. API-first, cloud-capable и независимые источники в
@@ -249,7 +250,6 @@ Scheduled systemd units, для которых определена деград
   worker thread, может жить до собственного timeout или остановки процесса.
 - Heartbeat подтверждает, что job-процесс жив и snapshot обновляется, но сам по
   себе не доказывает прогресс конкретного upstream-запроса.
-- Не все dedicated pipeline writers ещё используют `ResourceLockSet`.
 - Общий `storage.write_json()` использует одинаковое имя `.tmp` и не рассчитан
   на две одновременные записи одного source без внешнего lock.
 - Docker healthcheck проверяет liveness процесса, а не свежесть parser data.
@@ -276,7 +276,7 @@ Canonical Docker хранит runtime на host в `/srv/hs-data-api/data` и м
 | `data/control/` | `/var/lib/hs-data-api/control/` | Parser-control state и lock. |
 | `data/firecrawl/`, `data/scrapfly/` | Одноимённые каталоги | Состояние ротации provider keys без самих ключей. |
 | `data/brightdata/` | `/var/lib/hs-data-api/brightdata/` | Локальный счётчик billable reservations/requests и состояние circuit breaker; без API key. |
-| `data/logs/refresh-events.jsonl` | `/var/lib/hs-data-api/logs/refresh-events.jsonl` | Структурированные события. |
+| `data/logs/refresh-events.jsonl` | `/var/lib/hs-data-api/logs/refresh-events.jsonl` | Структурированные события; ротация по размеру/возрасту, архивы ограничены retention-политикой. |
 | `data/hs_parses.db` | `/var/lib/hs-data-api/hs_parses.db` | SQLite/WAL индексы. |
 | `data/parser-telemetry.sqlite3` | `/var/lib/hs-data-api/parser-telemetry.sqlite3` | Append-only исходы refresh для честной статистики; без URL и текстов ошибок. |
 
@@ -445,16 +445,14 @@ Public:
 - `GET /v1/constructed/*`, `/v1/bg/*`, `/v1/arena/*` — типизированные API.
 - `GET /v1/system/sources`, `/v1/system/datasets`, `/v1/system/health` —
   системные read-only представления.
-- `GET /v1/system/parsing-reliability` — fresh success, provisional, LKG и
-  failures основного generic refresh за 24 часа, 7 и 30 дней, bounded-классы
-  причин, цель 99% и error budget со статусом `collecting/meeting/breached`.
-  Месячная цель не объявляется достигнутой, пока в каждом из 30 последовательных
-  24-часовых интервалов не зафиксирован полный refresh без пропущенных источников,
-  а разрыв между такими запусками не превышает 25 часов (1 час на scheduler jitter).
-  Coverage считается только для текущего hash канонического scrape-реестра;
-  добавление или удаление источника начинает новый сопоставимый период наблюдения.
-  Четыре dedicated pipeline пока явно перечислены в `methodology.limitations`
-  и не смешиваются с этим процентом.
+- `GET /v1/system/parsing-reliability` — наблюдаемые fresh success,
+  provisional, LKG и failures generic refresh и шести dedicated pipelines за
+  24 часа, 7 и 30 дней. Диагностические `--limit`, занятые locks и намеренно
+  отключённые задания исключаются из знаменателя. `coverage_ratio` пока
+  подтверждает полноту только канонического scrape-реестра. Поэтому общий SLO
+  99% остаётся `collecting` и не может ложно показать `meeting`, пока не внедрён
+  отдельный ledger ожидаемых запусков всех pipeline timers; это ограничение
+  явно возвращается в `methodology`.
 - `GET /system/technologies` — публичное описание parser stack без секретов.
 - `GET /ui`, `/ui/logs`, `/ui/technologies` — встроенный интерфейс.
 

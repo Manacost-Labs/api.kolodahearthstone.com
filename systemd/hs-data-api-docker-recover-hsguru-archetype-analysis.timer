@@ -1,0 +1,11 @@
+[Unit]
+Description=Retry recent incomplete HSGuru archetype analysis checkpoints
+
+[Timer]
+OnCalendar=*-*-* *:45:00 Europe/Warsaw
+AccuracySec=5min
+RandomizedDelaySec=5min
+Persistent=false
+
+[Install]
+WantedBy=timers.target

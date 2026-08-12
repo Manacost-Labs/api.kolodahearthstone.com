@@ -171,12 +171,17 @@ class ReliabilityWindow(BaseModel):
 class ReliabilityMethodology(BaseModel):
     version: str
     unit: str
-    scope: Literal["generic_refresh_sources"]
+    scope: Literal["observed_scrape_and_pipeline_sources"]
     completeness: Literal["observed_attempts_only"]
     limitations: list[str]
-    coverage_method: Literal["complete_full_refresh_per_24h_bucket"]
+    coverage_method: Literal["complete_generic_refresh_per_24h_bucket"]
+    coverage_scope: Literal["generic_scrape_sources_only"]
     coverage_max_gap_hours: float = Field(gt=0.0)
     coverage_cohort_method: Literal["current_canonical_scrape_registry_hash"]
+    combined_slo_readiness: Literal[
+        "collecting_pipeline_schedule_ledger",
+        "ready",
+    ]
     eligible_outcomes: list[str]
     excluded_outcomes: list[str]
     slo_target_rate_pct: float = Field(ge=0.0, le=100.0)

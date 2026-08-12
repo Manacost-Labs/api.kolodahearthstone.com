@@ -8,6 +8,11 @@ from app.scrapers.quality import quality_metrics
 from app.source_contracts import contract_quality_report
 from app.sources import SOURCE_BY_ID
 
+VALID_STREAMER_DECK_CODE = (
+    "AAEBAf0GBs30Av76A4f7A564BtvXB63ZBwycENfOA4j0A8b5A8f5A63pBdCeBu6h"
+    "Bom1BoSZB+C+B43cBwAA"
+)
+
 
 class DatasetRegressionTest(unittest.TestCase):
     def test_estimate_card_stats(self) -> None:
@@ -83,7 +88,7 @@ class DatasetRegressionTest(unittest.TestCase):
                     {
                         "Deck": f"Current deck {index}",
                         "Streamer": f"Streamer {index}",
-                        "deck_code": f"current-{index}",
+                        "deck_code": VALID_STREAMER_DECK_CODE,
                     }
                     for index in range(3)
                 ],

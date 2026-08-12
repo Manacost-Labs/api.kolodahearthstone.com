@@ -436,6 +436,32 @@ SOURCES: tuple[Source, ...] = (
         stale_hours=36,
         kind="pipeline",
     ),
+    Source(
+        id="hsguru_archetype_analysis",
+        url="https://www.hsguru.com/matchups",
+        site="hsguru",
+        category="archetype_analysis",
+        description=(
+            "HSGuru per-archetype matchup and card-stat analysis refreshed daily by "
+            "a checkpointed dedicated pipeline; incomplete provider runs preserve the "
+            "last-known-good publication and are resumed by the recovery timer."
+        ),
+        stale_hours=48,
+        kind="pipeline",
+    ),
+    Source(
+        id="hsreplay_battlegrounds_compositions_screenshot",
+        url="https://hsreplay.net/battlegrounds/compositions/",
+        site="hsreplay",
+        category="battlegrounds",
+        description=(
+            "Validated HSReplay Battlegrounds compositions screenshot refreshed daily; "
+            "only a decoded image with a supported MIME type and valid dimensions is "
+            "published as a fresh capture."
+        ),
+        stale_hours=36,
+        kind="pipeline",
+    ),
 )
 
 

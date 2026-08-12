@@ -31,6 +31,7 @@ class SourceContract:
 
 
 HSREPLAY_JSON_CHANNELS = ("flaresolverr", "scrape_do", "curl_cffi")
+HSGURU_STREAMER_ROLLING_SOURCE_ID = "hsguru_streamer_decks_legend_1000"
 
 
 CONTRACTS: dict[str, SourceContract] = {
@@ -468,23 +469,23 @@ for _sid in (
         ),
     )
 
-CONTRACTS["hsguru_streamer_decks_legend_1000"] = SourceContract(
-    source_id="hsguru_streamer_decks_legend_1000",
+CONTRACTS[HSGURU_STREAMER_ROLLING_SOURCE_ID] = SourceContract(
+    source_id=HSGURU_STREAMER_ROLLING_SOURCE_ID,
     structured_type="streamer_decks",
     allow_browser_fallback=True,
     min_rows=3,
     critical_fields=("Deck", "Streamer", "deck_code"),
     min_field_fill_rate=1.0,
     # The endpoint is explicitly a rolling last-60-minutes activity window.
-    # Row-count contraction is therefore expected and is not evidence of a
-    # truncated response. The absolute row and field-completeness guards above
-    # remain mandatory before publication.
+    # Three rows is the normal floor; the report admits one or two rows only as
+    # verified low activity after every required field and deckstring passes.
+    # An empty window always remains a publication failure.
     regression_drop_ratio=1.0,
     volatility="rolling_hour",
     fallback_policy="html_allowed",
     recommendation=(
-        "Accept the current rolling-hour window only when at least three rows "
-        "retain deck, streamer, and decodable deck-code fields."
+        "Accept a one- or two-row low-activity window only when every row retains "
+        "deck, streamer, and a decodable deck code; reject empty windows."
     ),
     min_html_bytes=8_000,
 )
@@ -679,6 +680,25 @@ def _field_present(row: dict[str, Any], field: str) -> bool:
     return True
 
 
+def is_decodable_deck_code(value: Any) -> bool:
+    """Return true only for a complete Hearthstone deckstring.
+
+    This deliberately uses the canonical decoder instead of accepting an
+    ``AAE``-shaped string. Provider error pages and partially hydrated rows can
+    otherwise satisfy the ordinary non-empty-field check.
+    """
+
+    if not isinstance(value, str) or not value.strip():
+        return False
+    try:
+        from hearthstone.deckstrings import Deck
+
+        Deck.from_deckstring(value.strip())
+    except Exception:  # noqa: BLE001 - malformed upstream data fails closed
+        return False
+    return True
+
+
 def contract_quality_report(
     source_id: str,
     structured: dict[str, Any],
@@ -696,6 +716,7 @@ def contract_quality_report(
         "warnings": [],
         "minimum_rows": None,
         "minimum_collections": {},
+        "low_activity": False,
     }
     if contract is None:
         return report
@@ -707,7 +728,12 @@ def contract_quality_report(
     if contract.min_rows is not None:
         minimum_rows = effective_contract_min_rows(source_id, contract.min_rows)
         report["minimum_rows"] = minimum_rows
-        if len(rows) < minimum_rows:
+        low_activity_candidate = (
+            source_id == HSGURU_STREAMER_ROLLING_SOURCE_ID
+            and contract.volatility == "rolling_hour"
+            and 0 < len(rows) < minimum_rows
+        )
+        if len(rows) < minimum_rows and not low_activity_candidate:
             report["ok"] = False
             report["warnings"].append(f"too few rows ({len(rows)} < {minimum_rows})")
     for collection, minimum in contract.min_collection_rows:
@@ -738,6 +764,26 @@ def contract_quality_report(
             report["warnings"].append(
                 f"{field} fill rate {rate:.2%} below {contract.min_field_fill_rate:.0%}"
             )
+    if source_id == HSGURU_STREAMER_ROLLING_SOURCE_ID:
+        total = len(rows)
+        decodable = sum(
+            1 for row in rows if is_decodable_deck_code(row.get("deck_code"))
+        )
+        rate = (decodable / total) if total else 0.0
+        report["decodable_deck_codes"] = {
+            "filled": decodable,
+            "total": total,
+            "rate": round(rate, 4),
+        }
+        rates.append(rate)
+        if decodable != total:
+            report["ok"] = False
+            report["warnings"].append(
+                f"decodable deck codes {decodable}/{total}; every row is required"
+            )
+        report["low_activity"] = bool(
+            0 < total < int(report["minimum_rows"] or 0) and report["ok"]
+        )
     report["quality_score"] = round(sum(rates) / len(rates), 4) if rates else None
     return report
 

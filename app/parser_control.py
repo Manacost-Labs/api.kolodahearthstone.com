@@ -8,11 +8,12 @@ import logging
 import os
 import threading
 import time
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, date, datetime
 from datetime import time as datetime_time
 from pathlib import Path
-from typing import Any, Callable, Iterator
+from typing import Any
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -1573,6 +1574,14 @@ async def _run_pipeline_source(source_id: str) -> dict[str, Any]:
         from .fun_decks import refresh_fun_decks
 
         result = await asyncio.to_thread(refresh_fun_decks)
+    elif source_id == "hsguru_archetype_analysis":
+        from .hsguru_archetype_analysis import refresh_hsguru_archetype_analysis
+
+        result = await refresh_hsguru_archetype_analysis()
+    elif source_id == "hsreplay_battlegrounds_compositions_screenshot":
+        from .hsreplay_bg_screenshots import capture_compositions_screenshot
+
+        result = await capture_compositions_screenshot()
     elif source_id == "hsreplay_battlegrounds_minions":
         from .hsreplay_bg_minions_db import refresh_bg_minion_database_sync
 
@@ -1613,6 +1622,7 @@ async def _run_pipeline_source(source_id: str) -> dict[str, Any]:
             "hsreplay_archetypes": ("archetypes_ok",),
             "hsreplay_battlegrounds_hero_details": ("heroes",),
             "hsguru_fun_decks": ("fun_retained",),
+            "hsguru_archetype_analysis": ("archetypes",),
             "hsreplay_battlegrounds_minions": ("minions_ok", "minions_total"),
         }
         rows_total = next(
@@ -1785,7 +1795,7 @@ class ParserRunWorker:
                     "servingCachedDataset": False,
                 }
             summary["durationMs"] = max(
-                0, int(round(_monotonic_ms() - source_started_ms))
+                0, round(_monotonic_ms() - source_started_ms)
             )
             self.store.record_run_result(run_id, summary)
 

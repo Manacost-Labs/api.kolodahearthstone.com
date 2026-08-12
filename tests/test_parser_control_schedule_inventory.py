@@ -5,14 +5,14 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from app.hsreplay_card_periods import HSREPLAY_CARD_PERIOD_SOURCE_IDS
 from app.parser_control import ParserControlStore
+from app.parser_control_registry import SECTION_BY_ID, SOURCE_TO_SECTION
 from app.parser_control_schedule import (
-    SCHEDULE_INVENTORY_VERSION,
     SCHEDULE_INVENTORY_SCHEMA_VERSION,
+    SCHEDULE_INVENTORY_VERSION,
     build_schedule_inventory,
 )
-from app.parser_control_registry import SECTION_BY_ID, SOURCE_TO_SECTION
-from app.hsreplay_card_periods import HSREPLAY_CARD_PERIOD_SOURCE_IDS
 from app.sources import SOURCE_BY_ID
 
 
@@ -67,6 +67,15 @@ def test_schedule_inventory_calculates_nominal_next_runs_in_utc() -> None:
     assert _schedule(inventory, "refresh-streamer-decks")["nextRunAt"] == (
         "2026-07-21T00:15:00+00:00"
     )
+    streamer_recovery = _schedule(inventory, "recover-hsguru-streamer")
+    assert streamer_recovery["purpose"] == "recovery"
+    assert streamer_recovery["onCalendar"] == [
+        "*-*-* *:00/10:00 Europe/Warsaw"
+    ]
+    assert streamer_recovery["sourceIds"] == [
+        "hsguru_streamer_decks_legend_1000"
+    ]
+    assert streamer_recovery["nextRunAt"] == "2026-07-21T00:10:00+00:00"
     assert _schedule(inventory, "refresh-hsguru-meta-matrix")["nextRunAt"] == (
         "2026-07-21T10:00:00+00:00"
     )
@@ -93,6 +102,10 @@ def test_schedule_inventory_calculates_nominal_next_runs_in_utc() -> None:
     assert sources["hsguru_meta_standard_legend"]["nextRunAt"] == (
         "2026-07-21T05:00:00+00:00"
     )
+    streamer = sources["hsguru_streamer_decks_legend_1000"]
+    assert streamer["nextRunAt"] == "2026-07-21T00:15:00+00:00"
+    assert streamer["recoveryScheduleIds"] == ["recover-hsguru-streamer"]
+    assert streamer["nextRecoveryRunAt"] == "2026-07-21T00:10:00+00:00"
 
 
 def test_expired_bounded_schedule_remains_in_inventory_without_a_next_run() -> None:

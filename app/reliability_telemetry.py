@@ -34,8 +34,9 @@ WINDOWS = (
     ("7d", timedelta(days=7)),
     ("30d", timedelta(days=30)),
 )
-METHODOLOGY_VERSION = "logical-source-observed-v5"
+METHODOLOGY_VERSION = "logical-source-observed-v7"
 SLO_TARGET_RATE_PCT = 99.0
+PIPELINE_SCHEDULE_LEDGER_READY = False
 COVERAGE_BUCKET_SECONDS = 24 * 60 * 60
 COVERAGE_MAX_GAP_SECONDS = 25 * 60 * 60
 FAILURE_REASONS = (
@@ -120,7 +121,11 @@ def classify_terminal_status(status: Mapping[str, object]) -> str:
     """Map a terminal source status to one stable, bounded outcome."""
 
     state = str(status.get("state") or "").strip().lower()
-    if status.get("skipped") is True or state in {"locked", "skipped"}:
+    if (
+        status.get("diagnostic") is True
+        or status.get("skipped") is True
+        or state in {"diagnostic", "diagnostic_failed", "locked", "skipped"}
+    ):
         return "skipped"
     if state == SourceState.TIMED_OUT:
         return OUTCOME_TIMED_OUT
@@ -738,6 +743,7 @@ def _query_window(
         duration=duration,
         cohort_hash=coverage_cohort_hash,
     )
+    measurement_complete = coverage_ratio >= 1.0 and PIPELINE_SCHEDULE_LEDGER_READY
     ai_quality = _query_ai_quality(
         connection,
         from_epoch=from_at.timestamp(),
@@ -747,7 +753,7 @@ def _query_window(
         "window": label,
         "from_at": from_at.isoformat(),
         "to_at": report_at.isoformat(),
-        "measurement_status": "observed" if coverage_ratio >= 1.0 else "collecting",
+        "measurement_status": "observed" if measurement_complete else "collecting",
         "coverage_ratio": coverage_ratio,
         "total_attempts": total_attempts,
         "eligible_attempts": eligible_attempts,
@@ -759,12 +765,12 @@ def _query_window(
         "freshness_slo": _slo_budget(
             good_attempts=full_fresh,
             eligible_attempts=eligible_attempts,
-            measurement_complete=coverage_ratio >= 1.0,
+            measurement_complete=measurement_complete,
         ),
         "availability_slo": _slo_budget(
             good_attempts=data_available,
             eligible_attempts=eligible_attempts,
-            measurement_complete=coverage_ratio >= 1.0,
+            measurement_complete=measurement_complete,
         ),
         "ai_quality": ai_quality,
     }
@@ -811,15 +817,21 @@ def _methodology() -> dict[str, Any]:
     return {
         "version": METHODOLOGY_VERSION,
         "unit": "one terminal outcome per source in a refresh run",
-        "scope": "generic_refresh_sources",
+        "scope": "observed_scrape_and_pipeline_sources",
         "completeness": "observed_attempts_only",
         "limitations": [
-            "dedicated_pipeline_sources_excluded",
+            "missing_scheduled_pipeline_windows_not_detectable_until_ledger",
             "best_effort_write_gaps_not_detectable",
         ],
-        "coverage_method": "complete_full_refresh_per_24h_bucket",
+        "coverage_method": "complete_generic_refresh_per_24h_bucket",
+        "coverage_scope": "generic_scrape_sources_only",
         "coverage_max_gap_hours": COVERAGE_MAX_GAP_SECONDS / 3600,
         "coverage_cohort_method": "current_canonical_scrape_registry_hash",
+        "combined_slo_readiness": (
+            "ready"
+            if PIPELINE_SCHEDULE_LEDGER_READY
+            else "collecting_pipeline_schedule_ledger"
+        ),
         "eligible_outcomes": list(ELIGIBLE_OUTCOMES),
         "excluded_outcomes": ["skipped"],
         "slo_target_rate_pct": SLO_TARGET_RATE_PCT,
@@ -831,6 +843,8 @@ def _methodology() -> dict[str, Any]:
 def _bounded_terminal_state(value: object) -> str:
     state = str(value or "").strip().lower()
     allowed = {str(source_state) for source_state in SourceState} | {
+        "diagnostic",
+        "diagnostic_failed",
         "locked",
         "skipped",
     }

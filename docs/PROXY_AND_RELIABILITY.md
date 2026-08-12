@@ -207,6 +207,11 @@ HS_STALE_HOURS=12
 
 Дублирование в journalctl: строки `[error|warn|info] action source=…`.
 
+Ротация управляется переменными `HS_LOG_ROTATE_MAX_BYTES` и
+`HS_LOG_ROTATE_MAX_AGE_DAYS`. Сжатые архивы автоматически удаляются по двум
+ограничениям: `HS_LOG_RETENTION_DAYS` (по умолчанию 14 дней) и
+`HS_LOG_RETENTION_ARCHIVES` (по умолчанию пять последних архивов).
+
 ## Runbook
 
 ### Несколько источников в `fetch_error` после cron

@@ -215,6 +215,31 @@ class CliTest(unittest.TestCase):
 
         self.assertEqual(exit_code, 1)
 
+    def test_scheduled_archetype_recovery_accepts_a_completed_bounded_batch(
+        self,
+    ) -> None:
+        result = {
+            "ok": False,
+            "state": "partial",
+            "retryable": True,
+            "recovery_batch_complete": True,
+        }
+        refresh = AsyncMock(return_value=result)
+        with patch(
+            "app.hsguru_archetype_analysis.refresh_hsguru_archetype_analysis",
+            new=refresh,
+        ):
+            exit_code = cli.main(
+                [
+                    "refresh-hsguru-archetype-analysis",
+                    "--scheduled",
+                    "--recover-checkpoint",
+                ]
+            )
+
+        self.assertEqual(exit_code, 10)
+        self.assertTrue(refresh.await_args.kwargs["checkpoint_recovery"])
+
     def test_scheduled_archetype_lock_is_handled_degradation(self) -> None:
         result = {
             "ok": True,

@@ -244,6 +244,7 @@ GET /datasets/firestone_standard
 | `hsguru_matchups_legend` | Standard Legend: `matchups[]` with archetype, opponent (`vs`) and winrate; minimum 100 archetype games and 25 matchup games. |
 | `hsguru_matchups_wild_legend` | Wild Legend: the same matchup matrix and minimum sample thresholds. |
 | `hsguru_matchups_diamond_4to1` | Та же matchup-матрица для Diamond 4–1. |
+| `hsguru_archetype_analysis` | Daily checkpointed Standard/Wild archetype analysis: class matchups and card mulligan/drawn/kept impact, with sparse post-patch samples distinguished from unavailable upstream data. |
 | `metastats_matchups` | Archetype, opponent, winrate/vs_winrate и games. |
 
 HSGuru meta-строки находятся в `data.structured.strategies[]`, matchup-строки —
@@ -313,6 +314,7 @@ Firestone-наборы:
 | --- | --- | --- |
 | `hsreplay_battlegrounds_compositions` | `bg_compositions` | composition ID/type, first place, avg placement, popularity, games, распределение мест. |
 | `hsreplay_battlegrounds_comps` | `bg_comps` | Название/slug/tier, core/main/additional cards, описание, when to commit, how to play. |
+| `hsreplay_battlegrounds_compositions_screenshot` | validated image | Ежедневный screenshot: только PNG/JPEG/WebP с проверенными MIME, сигнатурой и размерами. |
 | `firestone_battlegrounds_comps` | `bg_comps` | Альтернативный список составов и ключевых карт. |
 
 Последний screenshot HSReplay compositions доступен через:

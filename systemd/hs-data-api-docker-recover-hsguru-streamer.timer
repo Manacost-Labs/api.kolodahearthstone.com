@@ -1,0 +1,11 @@
+[Unit]
+Description=Check HSGuru streamer decks recovery every ten minutes
+
+[Timer]
+OnCalendar=*-*-* *:00/10:00 Europe/Warsaw
+AccuracySec=30s
+RandomizedDelaySec=30s
+Persistent=false
+
+[Install]
+WantedBy=timers.target

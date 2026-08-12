@@ -655,6 +655,16 @@ def log_rotate_max_age_days() -> int:
     return max(1, int(os.environ.get("HS_LOG_ROTATE_MAX_AGE_DAYS", "7")))
 
 
+def log_retention_days() -> int:
+    """Maximum age of compressed structured-log archives."""
+    return max(1, int(os.environ.get("HS_LOG_RETENTION_DAYS", "14")))
+
+
+def log_retention_archives() -> int:
+    """Maximum number of compressed structured-log archives to retain."""
+    return max(1, int(os.environ.get("HS_LOG_RETENTION_ARCHIVES", "5")))
+
+
 def quality_thresholds_path() -> Path:
     return Path(
         os.environ.get(
@@ -736,12 +746,10 @@ def firecrawl_hsguru_matchups_timeout_ms() -> int:
 def firecrawl_primary_source_ids() -> set[str]:
     raw = os.environ.get(
         "HS_FIRECRAWL_PRIMARY_SOURCE_IDS",
-        ",".join(
-            [
-                "hsguru_streamer_decks_legend_1000",
-                "hsguru_matchups_legend",
-                "hsguru_matchups_wild_legend",
-            ]
+        (
+            "hsguru_streamer_decks_legend_1000,"
+            "hsguru_matchups_legend,"
+            "hsguru_matchups_wild_legend"
         ),
     )
     return {part.strip() for part in raw.split(",") if part.strip()}

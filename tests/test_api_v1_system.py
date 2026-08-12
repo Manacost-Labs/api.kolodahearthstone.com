@@ -48,17 +48,19 @@ def test_v1_system_paths_do_not_replace_legacy_paths() -> None:
 def test_v1_parsing_reliability_returns_sanitized_public_contract() -> None:
     report = {
         "methodology": {
-            "version": "logical-source-observed-v5",
+            "version": "logical-source-observed-v7",
             "unit": "one terminal outcome per source in a refresh run",
-            "scope": "generic_refresh_sources",
+            "scope": "observed_scrape_and_pipeline_sources",
             "completeness": "observed_attempts_only",
             "limitations": [
-                "dedicated_pipeline_sources_excluded",
+                "missing_scheduled_pipeline_windows_not_detectable_until_ledger",
                 "best_effort_write_gaps_not_detectable",
             ],
-            "coverage_method": "complete_full_refresh_per_24h_bucket",
+            "coverage_method": "complete_generic_refresh_per_24h_bucket",
+            "coverage_scope": "generic_scrape_sources_only",
             "coverage_max_gap_hours": 25.0,
             "coverage_cohort_method": "current_canonical_scrape_registry_hash",
+            "combined_slo_readiness": "collecting_pipeline_schedule_ledger",
             "eligible_outcomes": [
                 "fresh_published",
                 "provisional",
@@ -98,7 +100,7 @@ def test_v1_parsing_reliability_returns_sanitized_public_contract() -> None:
                 "window": "24h",
                 "from_at": "2026-08-10T12:00:00+00:00",
                 "to_at": "2026-08-11T12:00:00+00:00",
-                "measurement_status": "observed",
+                "measurement_status": "collecting",
                 "coverage_ratio": 1.0,
                 "total_attempts": 10,
                 "eligible_attempts": 10,
@@ -135,7 +137,7 @@ def test_v1_parsing_reliability_returns_sanitized_public_contract() -> None:
                 "data_available_rate_pct": 90.0,
                 "freshness_slo": {
                     "target_rate_pct": 99.0,
-                    "objective_status": "breached",
+                    "objective_status": "collecting",
                     "good_attempts": 8,
                     "bad_attempts": 2,
                     "allowed_bad_attempts": 0.1,
@@ -145,7 +147,7 @@ def test_v1_parsing_reliability_returns_sanitized_public_contract() -> None:
                 },
                 "availability_slo": {
                     "target_rate_pct": 99.0,
-                    "objective_status": "breached",
+                    "objective_status": "collecting",
                     "good_attempts": 9,
                     "bad_attempts": 1,
                     "allowed_bad_attempts": 0.1,

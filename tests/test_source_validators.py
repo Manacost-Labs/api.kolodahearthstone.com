@@ -8,6 +8,11 @@ from app.scrapers.quality import validate_parsed_data
 from app.source_validators import validate_structured
 from app.sources import SOURCE_BY_ID
 
+VALID_STREAMER_DECK_CODE = (
+    "AAEBAf0GBs30Av76A4f7A564BtvXB63ZBwycENfOA4j0A8b5A8f5A63pBdCeBu6h"
+    "Bom1BoSZB+C+B43cBwAA"
+)
+
 
 def _hero_row(idx: int, *, name: str | None = None, avg: str | None = None) -> dict:
     place_one = 20.0 + (idx % 5) * 0.1
@@ -610,14 +615,52 @@ class SourceValidatorsTest(unittest.TestCase):
         with patch("app.source_validators.threshold_for", return_value=5):
             self.assertTrue(validate_structured("hsguru_meta_standard_legend", structured).ok)
 
-    def test_hsguru_streamer_decks_accept_rows_or_codes(self) -> None:
-        sparse = {"type": "streamer_decks", "rows": [{"Deck": "One"}]}
-        report = validate_structured("hsguru_streamer_decks_legend_1000", sparse)
+    def test_hsguru_streamer_decks_accepts_complete_low_activity_window(self) -> None:
+        structured = {
+            "type": "streamer_decks",
+            "rows": [
+                {
+                    "Deck": "One",
+                    "Streamer": "Streamer",
+                    "deck_code": VALID_STREAMER_DECK_CODE,
+                }
+            ],
+        }
+
+        report = validate_structured(
+            "hsguru_streamer_decks_legend_1000", structured
+        )
+
+        self.assertTrue(report.ok, report.reason)
+        self.assertEqual(report.metrics["complete_rows"], 1)
+        self.assertEqual(report.metrics["decodable_deck_codes"], 1)
+
+    def test_hsguru_streamer_decks_rejects_any_incomplete_row(self) -> None:
+        structured = {
+            "type": "streamer_decks",
+            "rows": [
+                {
+                    "Deck": "One",
+                    "Streamer": "Streamer",
+                    "deck_code": VALID_STREAMER_DECK_CODE,
+                },
+                {
+                    "Deck": "Two",
+                    "Streamer": "Other streamer",
+                    "deck_code": "AAE-filled-but-undecodable",
+                },
+            ],
+        }
+
+        report = validate_structured(
+            "hsguru_streamer_decks_legend_1000", structured
+        )
+
         self.assertFalse(report.ok)
-        sparse["rows"].append({"Deck": "Two", "deck_code": "AAE-one"})
-        sparse["rows"].append({"Deck": "Three"})
-        self.assertTrue(
-            validate_structured("hsguru_streamer_decks_legend_1000", sparse).ok
+        self.assertFalse(report.metrics["low_activity"])
+        self.assertIn(
+            "hsguru_streamer_decks.incomplete_rows",
+            {issue.code for issue in report.issues},
         )
 
     def test_hsguru_matchups_require_rows_and_winrates(self) -> None:

@@ -37,6 +37,10 @@ PROVIDER_CIRCUIT_FAILURE_THRESHOLD = 3
 CHECKPOINT_INTERVAL_TARGETS = 5
 CHECKPOINT_TTL = timedelta(hours=2)
 CHECKPOINT_LABEL = "refresh_checkpoint_v1"
+CHECKPOINT_RECOVERY_TTL = timedelta(hours=12)
+CHECKPOINT_RECOVERY_COOLDOWN = timedelta(minutes=30)
+CHECKPOINT_RECOVERY_MAX_TARGETS = 20
+CHECKPOINT_RECOVERY_PROVIDER_FAILURE_BUDGET = 4
 
 CLASS_KEYS = {
     "death knight": "deathknight",
@@ -368,6 +372,7 @@ def _load_refresh_checkpoint(
     *,
     target_signature: str,
     now: datetime,
+    max_age: timedelta = CHECKPOINT_TTL,
 ) -> dict[str, Any] | None:
     checkpoint = load_baseline(SOURCE_ID, CHECKPOINT_LABEL) or {}
     if (
@@ -385,9 +390,21 @@ def _load_refresh_checkpoint(
     if started_at.tzinfo is None:
         started_at = started_at.replace(tzinfo=UTC)
     age = now - started_at
-    if age < -timedelta(minutes=5) or age > CHECKPOINT_TTL:
+    if age < -timedelta(minutes=5) or age > max_age:
         return None
     return checkpoint
+
+
+def _checkpoint_saved_at(checkpoint: dict[str, Any]) -> datetime | None:
+    for field in ("saved_at", "started_at"):
+        try:
+            value = datetime.fromisoformat(str(checkpoint.get(field) or ""))
+        except ValueError:
+            continue
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=UTC)
+        return value
+    return None
 
 
 def _retry_is_pending(entry: dict[str, Any] | None, now: datetime) -> bool:
@@ -496,6 +513,11 @@ async def _refresh_hsguru_archetype_analysis_unlocked(
     concurrency: int = 3,
     limit: int | None = None,
     archetypes: list[dict[str, str]] | None = None,
+    checkpoint_recovery: bool = False,
+    recovery_max_targets: int = CHECKPOINT_RECOVERY_MAX_TARGETS,
+    recovery_provider_failure_budget: int = (
+        CHECKPOINT_RECOVERY_PROVIDER_FAILURE_BUDGET
+    ),
     fetch_html=_fetch_html,
 ) -> dict[str, Any]:
     started = _utc_now()
@@ -508,15 +530,53 @@ async def _refresh_hsguru_archetype_analysis_unlocked(
     if not targets:
         raise RuntimeError("No HSGuru archetypes in the Legend/past-week matrix slices")
 
-    previous = _previous_analysis()
-    negative_cache = _previous_negative_cache()
     signature = _target_signature(targets)
     checkpoint_enabled = archetypes is None and limit is None
     checkpoint = (
-        _load_refresh_checkpoint(target_signature=signature, now=started)
+        _load_refresh_checkpoint(
+            target_signature=signature,
+            now=started,
+            max_age=(
+                CHECKPOINT_RECOVERY_TTL if checkpoint_recovery else CHECKPOINT_TTL
+            ),
+        )
         if checkpoint_enabled
         else None
     )
+    if checkpoint_recovery and checkpoint is None:
+        return {
+            "ok": True,
+            "published": False,
+            "skipped": True,
+            "reason": "checkpoint_not_available",
+            "state": SourceState.OK,
+            "source_id": SOURCE_ID,
+            "targets": len(targets),
+            "recovery": True,
+        }
+    if checkpoint_recovery and checkpoint is not None:
+        checkpoint_saved_at = _checkpoint_saved_at(checkpoint)
+        if (
+            checkpoint_saved_at is not None
+            and started - checkpoint_saved_at < CHECKPOINT_RECOVERY_COOLDOWN
+        ):
+            return {
+                "ok": True,
+                "published": False,
+                "skipped": True,
+                "reason": "checkpoint_recovery_cooldown",
+                "state": SourceState.OK,
+                "source_id": SOURCE_ID,
+                "targets": len(targets),
+                "targets_completed": len(checkpoint.get("completed") or []),
+                "next_retry_at": (
+                    checkpoint_saved_at + CHECKPOINT_RECOVERY_COOLDOWN
+                ).isoformat(),
+                "recovery": True,
+            }
+
+    previous = _previous_analysis()
+    negative_cache = _previous_negative_cache()
     checkpoint_rows = {
         _target_key(row): dict(row)
         for row in (checkpoint or {}).get("rows") or []
@@ -571,10 +631,19 @@ async def _refresh_hsguru_archetype_analysis_unlocked(
     provider_failures_total = int(
         (checkpoint or {}).get("provider_failures_total") or 0
     )
+    provider_failures_before_run = provider_failures_total
+    provider_failure_budget = (
+        max(1, recovery_provider_failure_budget) if checkpoint_recovery else None
+    )
     provider_circuit_reason: str | None = None
     provider_circuit_kind: str | None = None
     provider_circuit = asyncio.Event()
     provider_failure_lock = asyncio.Lock()
+    # Recovery is deliberately serialized at the provider boundary. Without
+    # this guard, concurrent requests can all fail after the configured budget
+    # has been reached, which defeats the cost/circuit protection. The regular
+    # daily refresh keeps its configured concurrency.
+    recovery_provider_request_lock = asyncio.Lock()
 
     async def fetch_and_parse(
         url: str,
@@ -587,30 +656,51 @@ async def _refresh_hsguru_archetype_analysis_unlocked(
         nonlocal provider_circuit_kind
         nonlocal provider_circuit_reason
         nonlocal provider_failures_total
-        async with semaphore:
-            if provider_circuit.is_set():
-                raise HSGuruProviderCircuitOpen(
-                    provider_circuit_reason or "HSGuru provider circuit is open"
-                )
-            try:
-                html, acquisition = await fetch_html(url)
-            except Exception as exc:
-                async with provider_failure_lock:
-                    provider_failures_total += 1
-                    provider_failure_streaks[kind] += 1
-                    if (
-                        provider_failure_streaks[kind]
-                        >= PROVIDER_CIRCUIT_FAILURE_THRESHOLD
-                    ):
-                        provider_circuit_kind = kind
-                        provider_circuit_reason = (
-                            f"{type(exc).__name__}: {str(exc)[:400]}"
-                        )
-                        provider_circuit.set()
-                raise
-            else:
-                async with provider_failure_lock:
-                    provider_failure_streaks[kind] = 0
+        async def fetch_guarded() -> tuple[str, dict[str, Any]]:
+            nonlocal provider_circuit_kind
+            nonlocal provider_circuit_reason
+            nonlocal provider_failures_total
+            async with semaphore:
+                if provider_circuit.is_set():
+                    raise HSGuruProviderCircuitOpen(
+                        provider_circuit_reason or "HSGuru provider circuit is open"
+                    )
+                try:
+                    fetched_html, fetched_acquisition = await fetch_html(url)
+                except Exception as exc:
+                    async with provider_failure_lock:
+                        provider_failures_total += 1
+                        provider_failure_streaks[kind] += 1
+                        if provider_failure_budget is not None and (
+                            provider_failures_total - provider_failures_before_run
+                            >= provider_failure_budget
+                        ):
+                            provider_circuit_kind = kind
+                            provider_circuit_reason = (
+                                "checkpoint recovery provider failure budget exhausted "
+                                f"({provider_failure_budget})"
+                            )
+                            provider_circuit.set()
+                        elif (
+                            provider_failure_streaks[kind]
+                            >= PROVIDER_CIRCUIT_FAILURE_THRESHOLD
+                        ):
+                            provider_circuit_kind = kind
+                            provider_circuit_reason = (
+                                f"{type(exc).__name__}: {str(exc)[:400]}"
+                            )
+                            provider_circuit.set()
+                    raise
+                else:
+                    async with provider_failure_lock:
+                        provider_failure_streaks[kind] = 0
+                return fetched_html, fetched_acquisition
+
+        if checkpoint_recovery:
+            async with recovery_provider_request_lock:
+                html, acquisition = await fetch_guarded()
+        else:
+            html, acquisition = await fetch_guarded()
 
         raw_rows = parser(html)
         fetched_at = _now()
@@ -823,6 +913,14 @@ async def _refresh_hsguru_archetype_analysis_unlocked(
     pending_targets = [
         target for target in targets if _target_key(target) not in resumed_keys
     ]
+    recovery_targets_deferred = 0
+    if checkpoint_recovery:
+        recovery_target_budget = max(1, recovery_max_targets)
+        recovery_targets_deferred = max(
+            0,
+            len(pending_targets) - recovery_target_budget,
+        )
+        pending_targets = pending_targets[:recovery_target_budget]
     completed_this_run = 0
 
     def negative_cache_rows() -> list[dict[str, Any]]:
@@ -899,6 +997,13 @@ async def _refresh_hsguru_archetype_analysis_unlocked(
         not errors
         and not provider_circuit.is_set()
         and completed_keys == target_keys
+    )
+    recovery_batch_complete = (
+        checkpoint_recovery
+        and not errors
+        and not provider_circuit.is_set()
+        and completed_this_run == len(pending_targets)
+        and completed_keys != target_keys
     )
     if not refresh_complete:
         save_progress_checkpoint()
@@ -982,13 +1087,20 @@ async def _refresh_hsguru_archetype_analysis_unlocked(
             "coverage": coverage,
             "published": False,
             "serving_cached_dataset": bool(cached_rows),
-            "last_refresh_state": SourceState.FETCH_ERROR,
+            "last_refresh_state": (
+                SourceState.PARTIAL
+                if recovery_batch_complete
+                else SourceState.FETCH_ERROR
+            ),
             "last_refresh_at": _now(),
             "errors": errors[:50],
             "errors_total": len(errors),
             "unavailable": unavailable[:500],
             "unavailable_total": len(unavailable),
             "provider_failures_total": provider_failures_total,
+            "provider_failures_this_run": (
+                provider_failures_total - provider_failures_before_run
+            ),
             "provider_circuit_open": provider_circuit.is_set(),
             "provider_circuit_kind": provider_circuit_kind,
             "provider_circuit_reason": provider_circuit_reason,
@@ -996,6 +1108,9 @@ async def _refresh_hsguru_archetype_analysis_unlocked(
             "targets_completed": len(completed_keys),
             "targets_remaining": len(target_keys - completed_keys),
             "resumed_targets": len(resumed_keys),
+            "recovery": checkpoint_recovery,
+            "recovery_batch_complete": recovery_batch_complete,
+            "recovery_targets_deferred": recovery_targets_deferred,
             "card_stats_requests_skipped": card_stats_requests_skipped,
             "firecrawl_credits_used": firecrawl_credits,
             "scrape_do_credits_used": scrape_do_credits,
@@ -1019,9 +1134,15 @@ async def _refresh_hsguru_archetype_analysis_unlocked(
             "unavailable": unavailable,
             "unavailable_total": len(unavailable),
             "provider_failures_total": provider_failures_total,
+            "provider_failures_this_run": (
+                provider_failures_total - provider_failures_before_run
+            ),
             "provider_circuit_open": provider_circuit.is_set(),
             "provider_circuit_kind": provider_circuit_kind,
             "provider_circuit_reason": provider_circuit_reason,
+            "recovery": checkpoint_recovery,
+            "recovery_batch_complete": recovery_batch_complete,
+            "recovery_targets_deferred": recovery_targets_deferred,
             "negative_cache_entries": len(negative_cache_rows()),
             "card_stats_requests_skipped": card_stats_requests_skipped,
             "firecrawl_credits_used": firecrawl_credits,
@@ -1097,11 +1218,15 @@ async def _refresh_hsguru_archetype_analysis_unlocked(
         "unavailable": unavailable[:500],
         "unavailable_total": len(unavailable),
         "provider_failures_total": provider_failures_total,
+        "provider_failures_this_run": (
+            provider_failures_total - provider_failures_before_run
+        ),
         "provider_circuit_open": False,
         "targets_total": len(targets),
         "targets_completed": len(completed_keys),
         "targets_remaining": 0,
         "resumed_targets": len(resumed_keys),
+        "recovery": checkpoint_recovery,
         "negative_cache_entries": len(negative_rows),
         "card_stats_requests_skipped": card_stats_requests_skipped,
         "firecrawl_credits_used": firecrawl_credits,
@@ -1125,7 +1250,11 @@ async def _refresh_hsguru_archetype_analysis_unlocked(
         "unavailable": unavailable,
         "unavailable_total": len(unavailable),
         "provider_failures_total": provider_failures_total,
+        "provider_failures_this_run": (
+            provider_failures_total - provider_failures_before_run
+        ),
         "provider_circuit_open": False,
+        "recovery": checkpoint_recovery,
         "negative_cache_entries": len(negative_rows),
         "card_stats_requests_skipped": card_stats_requests_skipped,
         "firecrawl_credits_used": firecrawl_credits,
@@ -1138,6 +1267,11 @@ async def refresh_hsguru_archetype_analysis(
     concurrency: int = 3,
     limit: int | None = None,
     archetypes: list[dict[str, str]] | None = None,
+    checkpoint_recovery: bool = False,
+    recovery_max_targets: int = CHECKPOINT_RECOVERY_MAX_TARGETS,
+    recovery_provider_failure_budget: int = (
+        CHECKPOINT_RECOVERY_PROVIDER_FAILURE_BUDGET
+    ),
     fetch_html=_fetch_html,
 ) -> dict[str, Any]:
     locks = ResourceLockSet(
@@ -1159,6 +1293,9 @@ async def refresh_hsguru_archetype_analysis(
             concurrency=concurrency,
             limit=limit,
             archetypes=archetypes,
+            checkpoint_recovery=checkpoint_recovery,
+            recovery_max_targets=recovery_max_targets,
+            recovery_provider_failure_budget=recovery_provider_failure_budget,
             fetch_html=fetch_html,
         )
     finally:

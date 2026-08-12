@@ -109,6 +109,21 @@ def test_docker_systemd_installer_covers_every_timer(tmp_path: Path) -> None:
         in archetype_service.read_text(encoding="utf-8")
     )
 
+    recovery_service = (
+        staged_systemd / "hs-data-api-docker-recover-hsguru-archetype-analysis.service"
+    )
+    recovery_text = recovery_service.read_text(encoding="utf-8")
+    assert "--scheduled --recover-checkpoint --concurrency 2" in recovery_text
+    assert "SuccessExitStatus=10" in recovery_text
+    assert "Restart=" not in recovery_text
+
+    recovery_timer = (
+        staged_systemd / "hs-data-api-docker-recover-hsguru-archetype-analysis.timer"
+    )
+    recovery_timer_text = recovery_timer.read_text(encoding="utf-8")
+    assert "RandomizedDelaySec=5min" in recovery_timer_text
+    assert "Persistent=false" in recovery_timer_text
+
 
 def test_legacy_refresh_units_rely_on_route_aware_internal_preflight() -> None:
     for service_name in (

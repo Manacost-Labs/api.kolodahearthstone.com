@@ -64,6 +64,7 @@ SECTIONS: tuple[ParserSection, ...] = (
             "hsguru_matchups_legend",
             "hsguru_matchups_wild_legend",
             "hsguru_matchups_diamond_4to1",
+            "hsguru_archetype_analysis",
             "metastats_matchups",
             "vicious_syndicate_radars",
         ),
@@ -160,6 +161,7 @@ SECTIONS: tuple[ParserSection, ...] = (
         source_ids=(
             "hsreplay_battlegrounds_comps",
             "hsreplay_battlegrounds_compositions",
+            "hsreplay_battlegrounds_compositions_screenshot",
             "firestone_battlegrounds_comps",
         ),
     ),
@@ -211,10 +213,14 @@ SOURCE_LABELS_RU: dict[str, str] = {
     "hsguru_matchups_legend": "HSGuru · Standard, матчапы Легенды",
     "hsguru_matchups_wild_legend": "HSGuru · Wild, матчапы Легенды",
     "hsguru_matchups_diamond_4to1": "HSGuru · матчапы Алмаза 4–1",
+    "hsguru_archetype_analysis": "HSGuru · анализ архетипов",
     "hsreplay_battlegrounds_comps": "HSReplay · составы Полей Сражений",
     "hsreplay_battlegrounds_heroes": "HSReplay · герои Полей Сражений",
     "hsreplay_battlegrounds_minions": "HSReplay · существа Полей Сражений",
     "hsreplay_battlegrounds_compositions": "HSReplay · статистика составов",
+    "hsreplay_battlegrounds_compositions_screenshot": (
+        "HSReplay · снимок составов Полей Сражений"
+    ),
     "hsreplay_battlegrounds_trinkets_lesser": "HSReplay · малые аксессуары",
     "hsreplay_battlegrounds_trinkets_greater": "HSReplay · большие аксессуары",
     "hsreplay_arena": "HSReplay · обзор Арены",

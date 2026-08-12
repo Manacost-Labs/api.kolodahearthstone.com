@@ -1,0 +1,13 @@
+[Unit]
+Description=Recover HSGuru streamer decks after a failed live refresh
+Requires=hs-data-api-docker.service
+After=hs-data-api-docker.service network-online.target
+
+[Service]
+Type=oneshot
+SuccessExitStatus=10
+WorkingDirectory=/srv/hs-data-api
+ExecCondition=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm api python -m app.recovery_condition --source hsguru_streamer_decks_legend_1000 --min-age-seconds 300
+ExecCondition=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm api python -m app.cli scheduled-check --source hsguru_streamer_decks_legend_1000
+ExecStart=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm api python /app/scripts/firecrawl-streamer-decks.py
+TimeoutStartSec=15min

@@ -346,6 +346,7 @@ def _contract_signals(
             "rows_total": 0,
             "minimum_rows": contract.min_rows if contract else None,
             "row_minimum_met": False if contract and contract.min_rows else None,
+            "low_activity": False,
             "collections": [],
             "field_fill_rates": {},
             "quality_score": None,
@@ -359,6 +360,7 @@ def _contract_signals(
             "rows_total": None,
             "minimum_rows": contract.min_rows if contract else None,
             "row_minimum_met": None,
+            "low_activity": False,
             "collections": [],
             "field_fill_rates": {},
             "quality_score": None,
@@ -366,8 +368,9 @@ def _contract_signals(
 
     rows_total = _safe_count(report.get("rows_total"))
     minimum_rows = _safe_count(report.get("minimum_rows"))
+    low_activity = report.get("low_activity") is True
     row_minimum_met = (
-        rows_total >= minimum_rows
+        rows_total >= minimum_rows or low_activity
         if rows_total is not None and minimum_rows is not None
         else None
     )
@@ -428,6 +431,7 @@ def _contract_signals(
         "rows_total": rows_total,
         "minimum_rows": minimum_rows,
         "row_minimum_met": row_minimum_met,
+        "low_activity": low_activity,
         "collections": collections,
         "field_fill_rates": fill_rates,
         "quality_score": _safe_ratio(report.get("quality_score")),
@@ -775,6 +779,7 @@ def build_ai_review_evidence_v2(
             "rows_total": None,
             "minimum_rows": contract.min_rows if contract else None,
             "row_minimum_met": None,
+            "low_activity": None,
             "collections": [],
             "field_fill_rates": {},
             "quality_score": None,

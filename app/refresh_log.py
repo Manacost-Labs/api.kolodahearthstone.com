@@ -1,28 +1,39 @@
 from __future__ import annotations
 
+import fcntl
 import gzip
 import json
 import logging
+import os
 import shutil
 import subprocess
 import threading
 import time
 import uuid
 from collections import Counter, defaultdict
+from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
-from .config import build_id, log_rotate_max_age_days, log_rotate_max_bytes, stale_dataset_hours
+from .config import (
+    build_id,
+    log_retention_archives,
+    log_retention_days,
+    log_rotate_max_age_days,
+    log_rotate_max_bytes,
+    stale_dataset_hours,
+)
 from .hsreplay_auth_status import hsreplay_auth_status
 from .source_state import ERROR_STATES, WARN_STATES, SourceState
-from .storage import load_dataset, load_status, root_dir
+from .storage import load_status, root_dir
 
 _logger = logging.getLogger(__name__)
 _write_lock = threading.Lock()
+_MAX_ARCHIVE_PRUNES_PER_PASS = 100
 
 _current_phase: ContextVar[str | None] = ContextVar("refresh_phase", default=None)
 _current_run_id: ContextVar[str | None] = ContextVar("refresh_run_id", default=None)
@@ -125,34 +136,164 @@ def events_path() -> Path:
     return root_dir() / "logs" / "refresh-events.jsonl"
 
 
+def _rotation_started_at_path(path: Path | None = None) -> Path:
+    active_path = path or events_path()
+    return active_path.with_name(f".{active_path.name}.started-at")
+
+
+@contextmanager
+def _event_log_process_lock() -> Iterator[None]:
+    """Serialize rotation and append across API and scheduled-job processes."""
+    lock_path = events_path().with_name(".refresh-events.lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a", encoding="utf-8") as lock_stream:
+        fcntl.flock(lock_stream.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_stream.fileno(), fcntl.LOCK_UN)
+
+
 def _event_log_paths() -> list[Path]:
     path = events_path()
     log_dir = path.parent
-    rotated = sorted(log_dir.glob("refresh-events.*.jsonl.gz"))[-5:] if log_dir.exists() else []
+    rotated = (
+        sorted(log_dir.glob("refresh-events.*.jsonl.gz"))[
+            -log_retention_archives():
+        ]
+        if log_dir.exists()
+        else []
+    )
     return [*rotated, path]
 
 
-def maybe_rotate_events_log() -> None:
-    """Rotate JSONL when size or age exceeds configured limits."""
+def _prune_rotated_events_logs(*, now: float | None = None) -> int:
+    """Delete a bounded batch of expired/surplus compressed archives."""
+    log_dir = events_path().parent
+    if not log_dir.exists():
+        return 0
+    archives_with_mtime: list[tuple[float, Path]] = []
+    for candidate in log_dir.glob("refresh-events.*.jsonl.gz"):
+        try:
+            archives_with_mtime.append((candidate.stat().st_mtime, candidate))
+        except OSError:
+            continue
+    archives = sorted(archives_with_mtime, reverse=True)
+    keep_count = log_retention_archives()
+    cutoff = (time.time() if now is None else now) - log_retention_days() * 86400
+    candidates: list[tuple[float, Path]] = []
+    for index, (mtime, archive) in enumerate(archives):
+        expired = mtime < cutoff
+        surplus = index >= keep_count
+        if expired or surplus:
+            candidates.append((mtime, archive))
+    removed = 0
+    for _mtime, archive in sorted(candidates)[:_MAX_ARCHIVE_PRUNES_PER_PASS]:
+        try:
+            archive.unlink()
+            removed += 1
+        except OSError as exc:
+            _logger.warning("Failed to prune refresh log archive %s: %s", archive, exc)
+    return removed
+
+
+def _write_rotation_started_at(path: Path, started_at: float) -> None:
+    """Atomically persist when the current active-log period began."""
+    marker = _rotation_started_at_path(path)
+    temporary = marker.with_name(f"{marker.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        with temporary.open("x", encoding="ascii") as stream:
+            stream.write(f"{started_at:.6f}\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, marker)
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def _rotation_started_at(path: Path, *, now: float) -> float:
+    marker = _rotation_started_at_path(path)
+    if not path.exists():
+        try:
+            _write_rotation_started_at(path, now)
+        except OSError as exc:
+            _logger.warning(
+                "Failed to persist refresh log rotation state: %s",
+                type(exc).__name__,
+            )
+        return now
+
+    try:
+        started_at = float(marker.read_text(encoding="ascii").strip())
+        if 0 < started_at <= now:
+            return started_at
+    except (OSError, ValueError):
+        pass
+
+    try:
+        started_at = min(path.stat().st_mtime, now) if path.exists() else now
+        _write_rotation_started_at(path, started_at)
+    except OSError as exc:
+        _logger.warning(
+            "Failed to persist refresh log rotation state: %s",
+            type(exc).__name__,
+        )
+    return started_at
+
+
+def _maintain_events_log(*, now: float | None = None) -> None:
+    """Prune archives and rotate the active JSONL when its period expires."""
+    current_time = time.time() if now is None else now
+    removed = _prune_rotated_events_logs(now=current_time)
+    if removed:
+        _logger.info("Pruned %s expired refresh log archives", removed)
+
     path = events_path()
     if not path.exists():
+        _rotation_started_at(path, now=current_time)
         return
     try:
         stat = path.stat()
     except OSError:
         return
-    age_days = (time.time() - stat.st_mtime) / 86400
+    age_days = max(0.0, current_time - _rotation_started_at(path, now=current_time)) / 86400
     if stat.st_size < log_rotate_max_bytes() and age_days < log_rotate_max_age_days():
         return
-    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
+    stamp = datetime.fromtimestamp(current_time, tz=UTC).strftime("%Y%m%dT%H%M%S%f")
     rotated = path.with_name(f"refresh-events.{stamp}.jsonl.gz")
+    temporary = rotated.with_name(f".{rotated.name}.{uuid.uuid4().hex}.tmp")
     try:
-        with path.open("rb") as src, gzip.open(rotated, "wb") as dst:
+        with path.open("rb") as src, gzip.open(temporary, "wb") as dst:
             shutil.copyfileobj(src, dst)
+        os.replace(temporary, rotated)
         path.unlink()
+        _rotation_started_at(path, now=current_time)
+        removed = _prune_rotated_events_logs(now=current_time)
         _logger.info("Rotated refresh log to %s", rotated)
+        if removed:
+            _logger.info("Pruned %s expired refresh log archives", removed)
     except OSError as exc:
-        _logger.warning("Failed to rotate refresh log: %s", exc)
+        _logger.warning("Failed to rotate refresh log: %s", type(exc).__name__)
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def maybe_rotate_events_log(*, now: float | None = None) -> None:
+    """Process-safe, fail-open structured-log maintenance entry point."""
+    try:
+        with _write_lock, _event_log_process_lock():
+            _maintain_events_log(now=now)
+    except (OSError, TypeError, ValueError) as exc:
+        _logger.warning(
+            "Structured refresh log maintenance failed: %s",
+            type(exc).__name__,
+        )
 
 
 def set_refresh_context(*, phase: str | None = None, run_id: str | None = None) -> None:
@@ -163,7 +304,7 @@ def set_refresh_context(*, phase: str | None = None, run_id: str | None = None) 
 
 
 def new_run_id() -> str:
-    run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%S") + f"-{int(time.time() * 1000) % 100000:05d}"
+    run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%S") + f"-{uuid.uuid4().hex[:12]}"
     _current_run_id.set(run_id)
     return run_id
 
@@ -269,13 +410,22 @@ def log_action(
     if extra:
         row["extra"] = extra
 
-    path = events_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    line = json.dumps(row, ensure_ascii=False) + "\n"
-    with _write_lock:
-        maybe_rotate_events_log()
-        with path.open("a", encoding="utf-8") as fh:
-            fh.write(line)
+    try:
+        path = events_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        line = json.dumps(row, ensure_ascii=False) + "\n"
+        with _write_lock, _event_log_process_lock():
+            _maintain_events_log()
+            with path.open("a", encoding="utf-8") as fh:
+                fh.write(line)
+    except (OSError, TypeError, ValueError) as exc:
+        # Observability must never turn an otherwise successful refresh into a
+        # failed one. Log only the bounded exception type; payloads may contain
+        # URLs or provider details that must not leak to the fallback channel.
+        _logger.warning(
+            "Structured refresh log write failed: %s",
+            type(exc).__name__,
+        )
 
     msg = f"[{resolved_level}] {action} source={resolved_source} {detail or ''}"[:500]
     if resolved_level == "error":
@@ -526,8 +676,8 @@ def _stale_sources() -> list[dict[str, Any]]:
 
 
 def build_summary(*, since_hours: float = 24.0) -> dict[str, Any]:
-    from .sources import SOURCES
     from .source_contracts import get_contract
+    from .sources import SOURCES
 
     events = read_events(limit=10000, since_hours=since_hours)
     by_event = Counter(e.get("event") for e in events)
@@ -599,9 +749,12 @@ def build_summary(*, since_hours: float = 24.0) -> dict[str, Any]:
         risk = "low"
         if st.get("state") != SourceState.OK or st.get("serving_cached_dataset") or source.id in stale_ids:
             risk = "high"
-        elif failures_24h >= 3 or preserved_24h:
-            risk = "medium"
-        elif isinstance(quality_score, (int, float)) and quality_score < 0.85:
+        elif (
+            failures_24h >= 3
+            or preserved_24h
+            or isinstance(quality_score, (int, float))
+            and quality_score < 0.85
+        ):
             risk = "medium"
         vulnerabilities.append(
             {

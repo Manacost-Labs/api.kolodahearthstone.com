@@ -5,7 +5,7 @@ import json
 import re
 
 import httpx
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from starlette.testclient import TestClient
 
 from app.http_observability import (
@@ -15,13 +15,22 @@ from app.http_observability import (
     request_id_from_header,
 )
 
-
 UUID_PATTERN = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 )
 SECRET_QUERY = "token=super-secret"
 SECRET_EMAIL = "qa@example.test"
-SECRET_DECK_CODE = "AAECAQcI+AeT0AOb2AP76APj6wO8igSIoASQtwQLju0D1ASQ1ASc1ASm1ASv1ATB3gQA"
+SECRET_DECK_CODE = (
+    "AAECAQcI"
+    "+AeT0AOb"
+    "2AP76APj"
+    "6wO8igSI"
+    "oASQtwQL"
+    "ju0D1ASQ"
+    "1ASc1ASm"
+    "1ASv1ATB"
+    "3gQA"
+)
 
 
 def _test_app(lines: list[str]) -> FastAPI:

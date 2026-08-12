@@ -50,6 +50,8 @@ def test_terminal_statuses_have_stable_honest_outcomes() -> None:
         classify_terminal_status(_status("failed", state="quality_error")) == "failed"
     )
     assert classify_terminal_status(_status("late", state="timed_out")) == "timed_out"
+    assert classify_terminal_status(_status("debug", diagnostic=True)) == "skipped"
+    assert classify_terminal_status(_status("debug", state="diagnostic")) == "skipped"
     assert (
         classify_terminal_status(
             _status("locked", state="locked", skipped=True, reason="resource_locked")
@@ -174,6 +176,29 @@ def test_report_uses_one_logical_attempt_and_excludes_skips(tmp_path: Path) -> N
     assert day["ai_quality"]["calibration"]["status"] == "not_calibrated"
 
 
+def test_diagnostic_attempt_is_recorded_but_excluded_from_slo(tmp_path: Path) -> None:
+    now = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
+    path = tmp_path / "reliability.sqlite3"
+    record_terminal_results(
+        "debug-run",
+        [_status("debug", state="diagnostic", diagnostic=True)],
+        finished_at=now,
+        path=path,
+    )
+
+    day = build_reliability_report(now=now, path=path)["windows"][0]
+
+    assert day["total_attempts"] == 1
+    assert day["counts"]["skipped"] == 1
+    assert day["eligible_attempts"] == 0
+    assert day["full_fresh_rate_pct"] is None
+    with sqlite3.connect(path) as connection:
+        stored = connection.execute(
+            "SELECT outcome, terminal_state FROM source_attempts"
+        ).fetchone()
+    assert stored == ("skipped", "diagnostic")
+
+
 def test_sparse_attempt_history_never_claims_complete_window_coverage(
     tmp_path: Path,
 ) -> None:
@@ -199,14 +224,17 @@ def test_sparse_attempt_history_never_claims_complete_window_coverage(
     assert report["windows"][0]["measurement_status"] == "collecting"
     assert report["windows"][1]["measurement_status"] == "collecting"
     assert report["windows"][2]["measurement_status"] == "collecting"
-    assert report["methodology"]["scope"] == "generic_refresh_sources"
+    assert report["methodology"]["scope"] == "observed_scrape_and_pipeline_sources"
     assert report["methodology"]["completeness"] == "observed_attempts_only"
-    assert "dedicated_pipeline_sources_excluded" in report["methodology"]["limitations"]
+    assert (
+        "missing_scheduled_pipeline_windows_not_detectable_until_ledger"
+        in report["methodology"]["limitations"]
+    )
     assert report["coverage_started_at"] is None
     assert report["windows"][0]["freshness_slo"]["objective_status"] == "collecting"
 
 
-def test_complete_full_refresh_in_every_daily_bucket_enables_slo(
+def test_complete_scrape_coverage_keeps_combined_slo_collecting_without_ledger(
     tmp_path: Path,
 ) -> None:
     now = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
@@ -226,11 +254,16 @@ def test_complete_full_refresh_in_every_daily_bucket_enables_slo(
     assert [window["eligible_attempts"] for window in report["windows"]] == [1, 7, 30]
     assert [window["coverage_ratio"] for window in report["windows"]] == [1.0, 1.0, 1.0]
     assert all(
-        window["measurement_status"] == "observed" for window in report["windows"]
+        window["measurement_status"] == "collecting" for window in report["windows"]
     )
     assert all(
-        window["freshness_slo"]["objective_status"] == "meeting"
+        window["freshness_slo"]["objective_status"] == "collecting"
         for window in report["windows"]
+    )
+    assert report["methodology"]["coverage_scope"] == "generic_scrape_sources_only"
+    assert (
+        report["methodology"]["combined_slo_readiness"]
+        == "collecting_pipeline_schedule_ledger"
     )
 
 

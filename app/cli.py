@@ -3,8 +3,11 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
 import os
 import sys
+import uuid
+from collections.abc import Callable
 from pathlib import Path
 
 from .exit_codes import ExitCode
@@ -13,6 +16,126 @@ from .source_state import SourceState
 from .sources import SOURCE_BY_ID
 
 DEFAULT_ENV_FILE = Path("/etc/hs-data-api.env")
+logger = logging.getLogger(__name__)
+
+
+def _run_pipeline_command_with_telemetry(
+    source_id: str,
+    operation: Callable[[], dict[str, object]],
+    *,
+    diagnostic: bool = False,
+) -> dict[str, object]:
+    """Run one dedicated pipeline and persist its terminal outcome best-effort.
+
+    The UUID makes the logical run process-safe. Telemetry always receives a
+    copy of the command result, so normalization cannot alter the JSON payload,
+    exit code, or exception observed by the scheduler.
+    """
+
+    run_id = f"pipeline:{source_id}:{uuid.uuid4().hex}"
+
+    def record(status: dict[str, object]) -> None:
+        try:
+            from .reliability_telemetry import record_terminal_results
+
+            source = SOURCE_BY_ID.get(source_id)
+            if source is None or source.kind != "pipeline":
+                raise ValueError(f"Unregistered pipeline source: {source_id}")
+            record_terminal_results(run_id, [status])
+        except Exception as telemetry_exc:  # noqa: BLE001 - telemetry is best-effort
+            logger.warning(
+                "Pipeline reliability telemetry write failed for %s: %s",
+                source_id,
+                type(telemetry_exc).__name__,
+            )
+
+    try:
+        result = operation()
+    except Exception as exc:
+        terminal: dict[str, object]
+        if diagnostic:
+            terminal = {
+                "source_id": source_id,
+                "state": "skipped",
+                "skipped": True,
+                "reason": "diagnostic_run",
+            }
+        else:
+            terminal = {
+                "source_id": source_id,
+                "state": (
+                    SourceState.TIMED_OUT
+                    if isinstance(exc, TimeoutError)
+                    else SourceState.FETCH_ERROR
+                ),
+                "failure_reason_code": (
+                    "timeout" if isinstance(exc, TimeoutError) else "unknown"
+                ),
+            }
+        screenshot_contract_failure = isinstance(exc, ValueError) or (
+            isinstance(exc, RuntimeError)
+            and str(exc) == "Firecrawl response did not include screenshot"
+        )
+        if (
+            not diagnostic
+            and source_id == "hsreplay_battlegrounds_compositions_screenshot"
+            and screenshot_contract_failure
+        ):
+            terminal.update(
+                state=SourceState.QUALITY_ERROR,
+                failure_reason_code="contract",
+            )
+        record(terminal)
+        raise
+
+    terminal = dict(result)
+    terminal["source_id"] = source_id
+    state = str(terminal.get("state") or "").strip().lower()
+    diagnostic_run = (
+        diagnostic
+        or terminal.get("diagnostic") is True
+        or state in {"diagnostic", "diagnostic_failed"}
+    )
+    if diagnostic_run:
+        terminal.update(
+            state="skipped",
+            skipped=True,
+            reason="diagnostic_run",
+        )
+    skipped = terminal.get("skipped") is True or state in {"locked", "skipped"}
+    if not skipped and source_id == "hsreplay_battlegrounds_compositions_screenshot":
+        mime_suffixes = {
+            "image/jpeg": ".jpg",
+            "image/png": ".png",
+            "image/webp": ".webp",
+        }
+        mime = str(terminal.get("image_mime") or "").strip().lower()
+        image_path = Path(str(terminal.get("image_path") or ""))
+        image_bytes = terminal.get("image_bytes")
+        validated_capture = (
+            terminal.get("ok") is True
+            and mime in mime_suffixes
+            and image_path.suffix.casefold() == mime_suffixes.get(mime)
+            and isinstance(image_bytes, int)
+            and not isinstance(image_bytes, bool)
+            and image_bytes > 0
+        )
+        terminal["state"] = (
+            SourceState.OK if validated_capture else SourceState.QUALITY_ERROR
+        )
+        if not validated_capture:
+            terminal["failure_reason_code"] = "contract"
+    elif (
+        not skipped and terminal.get("ok") is True and terminal.get("published") is True
+    ):
+        if state == SourceState.PARTIAL:
+            terminal["state"] = SourceState.OK
+            terminal["provisional"] = True
+        elif not state:
+            terminal["state"] = SourceState.OK
+
+    record(terminal)
+    return result
 
 
 def _is_fresh_refresh_result(result: dict[str, object]) -> bool:
@@ -109,9 +232,7 @@ def load_env_file(path: Path = DEFAULT_ENV_FILE) -> None:
                 "VICIOUS_SYNDICATE_",
                 "TELEGRAM_",
             )
-        ):
-            os.environ[key] = value
-        elif key not in os.environ:
+        ) or key not in os.environ:
             os.environ[key] = value
 
 
@@ -301,16 +422,23 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="Report a usable partial refresh as handled degradation.",
     )
-    hsguru_analysis.add_argument(
+    hsguru_scope = hsguru_analysis.add_mutually_exclusive_group()
+    hsguru_scope.add_argument(
         "--limit",
         type=int,
         default=None,
         help="Debug: refresh only the first N active archetypes.",
     )
-    sub.add_parser(
+    hsguru_scope.add_argument(
+        "--recover-checkpoint",
+        action="store_true",
+        help="Resume a recent incomplete checkpoint with bounded provider usage.",
+    )
+    bg_compositions_screenshot = sub.add_parser(
         "capture-bg-compositions-screenshot",
         help="Capture a Firecrawl screenshot of HSReplay Battlegrounds compositions.",
     )
+    bg_compositions_screenshot.add_argument("--scheduled", action="store_true")
     sub.add_parser("hsreplay-login", help="Log into HSReplay Premium and save browser session.")
     imp = sub.add_parser(
         "hsreplay-import-storage",
@@ -622,25 +750,33 @@ def main(argv: list[str] | None = None) -> int:
             from .parser_control import is_source_scheduled_enabled
 
             if not is_source_scheduled_enabled("hsreplay_archetypes"):
-                print(json.dumps({
-                    "ok": True,
-                    "skipped": True,
-                    "reason": "section_disabled",
-                    "source_id": "hsreplay_archetypes",
-                }, ensure_ascii=False, indent=2))
+                result = _run_pipeline_command_with_telemetry(
+                    "hsreplay_archetypes",
+                    lambda: {
+                        "ok": True,
+                        "skipped": True,
+                        "reason": "section_disabled",
+                        "source_id": "hsreplay_archetypes",
+                    },
+                )
+                print(json.dumps(result, ensure_ascii=False, indent=2))
                 return 0
         from .hsreplay_archetypes_db import refresh_hsreplay_archetype_database
 
-        result = asyncio.run(
-            refresh_hsreplay_archetype_database(
-                rank_range=args.rank_range,
-                game_type=args.game_type,
-                region=args.region,
-                summary_time_range=args.summary_time_range,
-                deck_time_range=args.deck_time_range,
-                mulligan_time_range=args.mulligan_time_range,
-                limit=args.limit,
-            )
+        result = _run_pipeline_command_with_telemetry(
+            "hsreplay_archetypes",
+            lambda: asyncio.run(
+                refresh_hsreplay_archetype_database(
+                    rank_range=args.rank_range,
+                    game_type=args.game_type,
+                    region=args.region,
+                    summary_time_range=args.summary_time_range,
+                    deck_time_range=args.deck_time_range,
+                    mulligan_time_range=args.mulligan_time_range,
+                    limit=args.limit,
+                )
+            ),
+            diagnostic=args.limit is not None,
         )
         print(json.dumps(result, ensure_ascii=False, indent=2))
         if args.scheduled and result.get("state") == "locked":
@@ -670,22 +806,30 @@ def main(argv: list[str] | None = None) -> int:
             from .parser_control import is_source_scheduled_enabled
 
             if not is_source_scheduled_enabled("hsreplay_battlegrounds_hero_details"):
-                print(json.dumps({
-                    "ok": True,
-                    "skipped": True,
-                    "reason": "section_disabled",
-                    "source_id": "hsreplay_battlegrounds_hero_details",
-                }, ensure_ascii=False, indent=2))
+                result = _run_pipeline_command_with_telemetry(
+                    "hsreplay_battlegrounds_hero_details",
+                    lambda: {
+                        "ok": True,
+                        "skipped": True,
+                        "reason": "section_disabled",
+                        "source_id": "hsreplay_battlegrounds_hero_details",
+                    },
+                )
+                print(json.dumps(result, ensure_ascii=False, indent=2))
                 return 0
         from .hsreplay_bg_hero_details import refresh_bg_hero_details
 
-        result = asyncio.run(
-            refresh_bg_hero_details(
-                limit=args.limit,
-                concurrency=args.concurrency,
-                mmr=args.mmr,
-                time_range=args.time_range,
-            )
+        result = _run_pipeline_command_with_telemetry(
+            "hsreplay_battlegrounds_hero_details",
+            lambda: asyncio.run(
+                refresh_bg_hero_details(
+                    limit=args.limit,
+                    concurrency=args.concurrency,
+                    mmr=args.mmr,
+                    time_range=args.time_range,
+                )
+            ),
+            diagnostic=args.limit is not None,
         )
         print(json.dumps(result, ensure_ascii=False, indent=2))
         if args.scheduled and result.get("state") == "locked":
@@ -700,17 +844,24 @@ def main(argv: list[str] | None = None) -> int:
             from .parser_control import is_source_scheduled_enabled
 
             if not is_source_scheduled_enabled("hsguru_meta_matrix"):
-                print(json.dumps({
-                    "ok": True,
-                    "skipped": True,
-                    "reason": "section_disabled",
-                    "source_id": "hsguru_meta_matrix",
-                }, ensure_ascii=False, indent=2))
+                result = _run_pipeline_command_with_telemetry(
+                    "hsguru_meta_matrix",
+                    lambda: {
+                        "ok": True,
+                        "skipped": True,
+                        "reason": "section_disabled",
+                        "source_id": "hsguru_meta_matrix",
+                    },
+                )
+                print(json.dumps(result, ensure_ascii=False, indent=2))
                 return 0
         from .hsguru_meta_matrix import refresh_hsguru_meta_matrix
 
-        result = asyncio.run(
-            refresh_hsguru_meta_matrix(concurrency=max(1, min(args.concurrency, 5)))
+        result = _run_pipeline_command_with_telemetry(
+            "hsguru_meta_matrix",
+            lambda: asyncio.run(
+                refresh_hsguru_meta_matrix(concurrency=max(1, min(args.concurrency, 5)))
+            ),
         )
         print(json.dumps(result, ensure_ascii=False, indent=2))
         if args.scheduled:
@@ -729,32 +880,72 @@ def main(argv: list[str] | None = None) -> int:
             from .parser_control import is_source_scheduled_enabled
 
             if not is_source_scheduled_enabled("hsguru_fun_decks"):
-                print(json.dumps({
-                    "ok": True,
-                    "skipped": True,
-                    "reason": "section_disabled",
-                    "source_id": "hsguru_fun_decks",
-                }, ensure_ascii=False, indent=2))
+                result = _run_pipeline_command_with_telemetry(
+                    "hsguru_fun_decks",
+                    lambda: {
+                        "ok": True,
+                        "skipped": True,
+                        "reason": "section_disabled",
+                        "source_id": "hsguru_fun_decks",
+                    },
+                )
+                print(json.dumps(result, ensure_ascii=False, indent=2))
                 return 0
         from .fun_decks import refresh_fun_decks
 
-        focus = None if getattr(args, "format", "all") in (None, "all") else str(args.format)
-        result = refresh_fun_decks(scheduled=bool(args.scheduled), format_focus=focus)
+        focus = (
+            None
+            if getattr(args, "format", "all") in (None, "all")
+            else str(args.format)
+        )
+        result = _run_pipeline_command_with_telemetry(
+            "hsguru_fun_decks",
+            lambda: refresh_fun_decks(
+                scheduled=bool(args.scheduled),
+                format_focus=focus,
+            ),
+        )
         print(json.dumps(result, ensure_ascii=False, indent=2))
         if args.scheduled and result.get("state") == "locked":
             return int(ExitCode.DEGRADED)
         return 0 if result.get("ok") else 1
     if args.command == "refresh-hsguru-archetype-analysis":
+        if args.scheduled:
+            from .parser_control import is_source_scheduled_enabled
+
+            if not is_source_scheduled_enabled("hsguru_archetype_analysis"):
+                result = _run_pipeline_command_with_telemetry(
+                    "hsguru_archetype_analysis",
+                    lambda: {
+                        "ok": True,
+                        "skipped": True,
+                        "reason": "section_disabled",
+                        "source_id": "hsguru_archetype_analysis",
+                    },
+                )
+                print(json.dumps(result, ensure_ascii=False, indent=2))
+                return 0
         from .hsguru_archetype_analysis import refresh_hsguru_archetype_analysis
 
-        result = asyncio.run(
-            refresh_hsguru_archetype_analysis(
-                concurrency=max(1, min(args.concurrency, 10)),
-                limit=args.limit,
-            )
+        result = _run_pipeline_command_with_telemetry(
+            "hsguru_archetype_analysis",
+            lambda: asyncio.run(
+                refresh_hsguru_archetype_analysis(
+                    concurrency=max(1, min(args.concurrency, 10)),
+                    limit=args.limit,
+                    checkpoint_recovery=bool(args.recover_checkpoint),
+                )
+            ),
+            diagnostic=args.limit is not None,
         )
         print(json.dumps(result, ensure_ascii=False, indent=2))
         if args.scheduled and result.get("state") == "locked":
+            return int(ExitCode.DEGRADED)
+        if (
+            args.scheduled
+            and args.recover_checkpoint
+            and result.get("recovery_batch_complete")
+        ):
             return int(ExitCode.DEGRADED)
         if args.scheduled and result.get("retryable"):
             return int(ExitCode.ERROR)
@@ -769,9 +960,31 @@ def main(argv: list[str] | None = None) -> int:
             return int(ExitCode.DEGRADED)
         return int(ExitCode.ERROR)
     if args.command == "capture-bg-compositions-screenshot":
+        if args.scheduled:
+            from .parser_control import is_source_scheduled_enabled
+
+            if not is_source_scheduled_enabled(
+                "hsreplay_battlegrounds_compositions_screenshot"
+            ):
+                result = _run_pipeline_command_with_telemetry(
+                    "hsreplay_battlegrounds_compositions_screenshot",
+                    lambda: {
+                        "ok": True,
+                        "skipped": True,
+                        "reason": "section_disabled",
+                        "source_id": (
+                            "hsreplay_battlegrounds_compositions_screenshot"
+                        ),
+                    },
+                )
+                print(json.dumps(result, ensure_ascii=False, indent=2))
+                return 0
         from .hsreplay_bg_screenshots import capture_compositions_screenshot
 
-        result = asyncio.run(capture_compositions_screenshot())
+        result = _run_pipeline_command_with_telemetry(
+            "hsreplay_battlegrounds_compositions_screenshot",
+            lambda: asyncio.run(capture_compositions_screenshot()),
+        )
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0 if result.get("ok") else 1
     if args.command == "hsreplay-login":

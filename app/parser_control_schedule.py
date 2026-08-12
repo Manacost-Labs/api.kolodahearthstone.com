@@ -19,7 +19,7 @@ from .source_tiers import LIGHT_API_IDS, MEDIUM_API_IDS
 from .sources import SOURCE_BY_ID
 
 SCHEDULE_INVENTORY_SCHEMA_VERSION = 2
-SCHEDULE_INVENTORY_VERSION = "2026-07-22.1"
+SCHEDULE_INVENTORY_VERSION = "2026-08-12.2"
 SCHEDULE_TIMEZONE = "Europe/Warsaw"
 
 _SYSTEMCTL_SEARCH_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
@@ -43,6 +43,7 @@ _SYSTEMD_SHOW_PROPERTIES = (
 
 
 Recurrence = Literal["daily", "weekly", "odd-month-days", "explicit"]
+SchedulePurpose = Literal["primary", "recovery"]
 
 
 @dataclass(frozen=True)
@@ -56,6 +57,7 @@ class _ScheduleSpec:
     local_times: tuple[time, ...] = ()
     weekdays: tuple[int, ...] = ()
     explicit_local_datetimes: tuple[datetime, ...] = ()
+    purpose: SchedulePurpose = "primary"
 
 
 def _times(*values: tuple[int, int]) -> tuple[time, ...]:
@@ -123,6 +125,18 @@ _SCHEDULES: tuple[_ScheduleSpec, ...] = (
         local_times=_times(*((hour, 15) for hour in range(24))),
     ),
     _ScheduleSpec(
+        id="recover-hsguru-streamer",
+        label="Каждые 10 минут — восстановление после неудачного обновления",
+        systemd_unit="hs-data-api-docker-recover-hsguru-streamer.timer",
+        on_calendar=("*-*-* *:00/10:00 Europe/Warsaw",),
+        source_ids=frozenset({"hsguru_streamer_decks_legend_1000"}),
+        recurrence="daily",
+        local_times=_times(
+            *((hour, minute) for hour in range(24) for minute in range(0, 60, 10))
+        ),
+        purpose="recovery",
+    ),
+    _ScheduleSpec(
         id="refresh-hsguru-meta-matrix",
         label="Каждые 12 часов",
         systemd_unit="hs-data-api-docker-refresh-hsguru-meta-matrix.timer",
@@ -133,6 +147,36 @@ _SCHEDULES: tuple[_ScheduleSpec, ...] = (
         source_ids=frozenset({"hsguru_meta_matrix"}),
         recurrence="daily",
         local_times=_times((0, 0), (12, 0)),
+    ),
+    _ScheduleSpec(
+        id="refresh-hsguru-archetype-analysis",
+        label="Ежедневно в 03:20",
+        systemd_unit="hs-data-api-docker-refresh-hsguru-archetype-analysis.timer",
+        on_calendar=("*-*-* 03:20:00 Europe/Warsaw",),
+        source_ids=frozenset({"hsguru_archetype_analysis"}),
+        recurrence="daily",
+        local_times=_times((3, 20)),
+    ),
+    _ScheduleSpec(
+        id="recover-hsguru-archetype-analysis",
+        label="Каждый час в :45 — восстановление checkpoint",
+        systemd_unit="hs-data-api-docker-recover-hsguru-archetype-analysis.timer",
+        on_calendar=("*-*-* *:45:00 Europe/Warsaw",),
+        source_ids=frozenset({"hsguru_archetype_analysis"}),
+        recurrence="daily",
+        local_times=_times(*((hour, 45) for hour in range(24))),
+        purpose="recovery",
+    ),
+    _ScheduleSpec(
+        id="capture-bg-compositions-screenshot",
+        label="Ежедневно в 04:10",
+        systemd_unit="hs-data-api-docker-bg-compositions-screenshot.timer",
+        on_calendar=("*-*-* 04:10:00 Europe/Warsaw",),
+        source_ids=frozenset(
+            {"hsreplay_battlegrounds_compositions_screenshot"}
+        ),
+        recurrence="daily",
+        local_times=_times((4, 10)),
     ),
     _ScheduleSpec(
         id="refresh-hsreplay-meta-firecrawl",
@@ -752,15 +796,29 @@ def _summary(schedule_rows: list[dict[str, Any]]) -> str:
 
 
 def _combined_view(schedule_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    primary_rows = [row for row in schedule_rows if row.get("purpose") == "primary"]
+    recovery_rows = [
+        row for row in schedule_rows if row.get("purpose") == "recovery"
+    ]
     next_runs = [
         str(row["nextRunAt"])
-        for row in schedule_rows
+        for row in primary_rows
+        if row.get("nextRunAt") is not None
+    ]
+    recovery_next_runs = [
+        str(row["nextRunAt"])
+        for row in recovery_rows
         if row.get("nextRunAt") is not None
     ]
     return {
         "scheduleIds": [str(row["id"]) for row in schedule_rows],
-        "schedule": _summary(schedule_rows),
+        "schedule": _summary(primary_rows),
         "nextRunAt": min(next_runs) if next_runs else None,
+        "recoveryScheduleIds": [str(row["id"]) for row in recovery_rows],
+        "recoverySchedule": _summary(recovery_rows) if recovery_rows else None,
+        "nextRecoveryRunAt": (
+            min(recovery_next_runs) if recovery_next_runs else None
+        ),
     }
 
 
@@ -824,6 +882,7 @@ def build_schedule_inventory(
             {
                 "id": spec.id,
                 "label": spec.label,
+                "purpose": spec.purpose,
                 "systemdUnit": spec.systemd_unit,
                 "onCalendar": list(spec.on_calendar),
                 "timezone": SCHEDULE_TIMEZONE,

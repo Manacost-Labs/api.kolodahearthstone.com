@@ -20,6 +20,7 @@ from .post_patch_policy import (
     policy_for,
 )
 from .quality_thresholds import threshold_for
+from .source_contracts import is_decodable_deck_code
 from .trinket_slices import TRINKET_SLICE_SOURCE_IDS
 
 ARENA_PERCENT_FIELDS = (
@@ -1289,15 +1290,40 @@ def _validate_hsguru_streamer_decks(
 ) -> ValidationReport:
     report = ValidationReport()
     rows = [row for row in (structured.get("rows") or []) if isinstance(row, dict)]
-    deck_codes = sum(1 for row in rows if row.get("deck_code"))
-    report.metrics.update({"rows": len(rows), "deck_codes": deck_codes})
-    if deck_codes < 2 and len(rows) < 3:
+    decodable_deck_codes = sum(
+        1 for row in rows if is_decodable_deck_code(row.get("deck_code"))
+    )
+    complete_rows = sum(
+        1
+        for row in rows
+        if _valid_name(row.get("Deck"))
+        and _valid_name(row.get("Streamer"))
+        and is_decodable_deck_code(row.get("deck_code"))
+    )
+    report.metrics.update(
+        {
+            "rows": len(rows),
+            "complete_rows": complete_rows,
+            "decodable_deck_codes": decodable_deck_codes,
+            "low_activity": 0 < len(rows) < 3 and complete_rows == len(rows),
+        }
+    )
+    if not rows:
         report.add_issue(
-            "hsguru_streamer_decks.missing_codes_or_rows",
-            f"HSGuru streamer decks missing codes/rows ({deck_codes} codes, {len(rows)} rows)",
-            field="deck_code,rows",
+            "hsguru_streamer_decks.empty_window",
+            "HSGuru streamer decks rolling-hour window is empty",
+            field="rows",
         )
-    report.score = round(max(min(deck_codes / 2.0, 1.0), min(len(rows) / 3.0, 1.0)), 4)
+    elif complete_rows != len(rows):
+        report.add_issue(
+            "hsguru_streamer_decks.incomplete_rows",
+            (
+                "HSGuru streamer decks requires Deck, Streamer and a decodable "
+                f"deck code on every row ({complete_rows}/{len(rows)} complete)"
+            ),
+            field="Deck,Streamer,deck_code",
+        )
+    report.score = round(complete_rows / len(rows), 4) if rows else 0.0
     return report
 
 
