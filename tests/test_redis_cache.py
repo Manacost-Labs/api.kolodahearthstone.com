@@ -22,6 +22,11 @@ class FakeBackend:
     async def delete(self, key: str) -> bool:
         return self.values.pop(key, None) is not None
 
+    async def increment(self, key: str, *, ttl_seconds: int) -> int | None:
+        value = int(self.values.get(key, b"0")) + 1
+        self.values[key] = str(value).encode()
+        return value if ttl_seconds > 0 else None
+
     async def close(self) -> None:
         self.closed = True
 
@@ -58,5 +63,18 @@ def test_tiered_cache_is_bounded_and_delete_reaches_backend() -> None:
         assert (value, layer) == (None, "miss")
         await cache.close()
         assert backend.closed is True
+
+    asyncio.run(scenario())
+
+
+def test_tiered_cache_uses_shared_atomic_counter() -> None:
+    async def scenario() -> None:
+        cache = TieredCache(FakeBackend(), max_local_entries=1)
+
+        first = await cache.increment("rate", ttl_seconds=60)
+        second = await cache.increment("rate", ttl_seconds=60)
+
+        assert first == (1, "redis")
+        assert second == (2, "redis")
 
     asyncio.run(scenario())

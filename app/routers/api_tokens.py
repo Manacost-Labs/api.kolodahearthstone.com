@@ -3,7 +3,16 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Path, Response, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    Header,
+    HTTPException,
+    Path,
+    Query,
+    Response,
+    status,
+)
 from pydantic import BaseModel, ConfigDict, Field
 
 from .. import config
@@ -11,6 +20,7 @@ from ..api_tokens import (
     ApiTokenError,
     ApiTokenMetadata,
     ApiTokenPrincipal,
+    ApiTokenUsage,
     api_token_http_exception,
     authenticate_api_token,
     extract_api_token,
@@ -26,6 +36,16 @@ class IssueApiTokenRequest(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     scopes: list[str] = Field(min_length=1, max_length=3)
     expires_in_days: int = Field(default=90, ge=1, le=365)
+    rate_limit_per_minute: int | None = Field(default=None, ge=1, le=100_000)
+    monthly_quota: int | None = Field(default=None, ge=1, le=1_000_000_000)
+
+
+class ApiTokenUsageResponse(BaseModel):
+    month: str
+    request_count: int
+    error_count: int
+    response_bytes: int
+    last_request_at: datetime | None
 
 
 class ApiTokenMetadataResponse(BaseModel):
@@ -38,6 +58,9 @@ class ApiTokenMetadataResponse(BaseModel):
     revoked_at: datetime | None
     created_by: str
     revoked_by: str | None
+    rate_limit_per_minute: int
+    monthly_quota: int
+    usage: ApiTokenUsageResponse
 
 
 class IssuedApiTokenResponse(ApiTokenMetadataResponse):
@@ -49,6 +72,8 @@ class ApiTokenIdentityResponse(BaseModel):
     name: str
     scopes: list[str]
     expires_at: datetime | None
+    rate_limit_per_minute: int
+    monthly_quota: int
     is_legacy: bool
 
 
@@ -64,6 +89,10 @@ class TokenListEnvelope(BaseModel):
 
 class TokenIdentityEnvelope(BaseModel):
     data: ApiTokenIdentityResponse
+
+
+class TokenUsageEnvelope(BaseModel):
+    data: ApiTokenUsageResponse
 
 
 def _authenticate_headers(
@@ -111,6 +140,19 @@ def _metadata_response(token: ApiTokenMetadata) -> ApiTokenMetadataResponse:
         revoked_at=token.revoked_at,
         created_by=token.created_by,
         revoked_by=token.revoked_by,
+        rate_limit_per_minute=token.rate_limit_per_minute,
+        monthly_quota=token.monthly_quota,
+        usage=_usage_response(token.usage),
+    )
+
+
+def _usage_response(usage: ApiTokenUsage) -> ApiTokenUsageResponse:
+    return ApiTokenUsageResponse(
+        month=usage.month,
+        request_count=usage.request_count,
+        error_count=usage.error_count,
+        response_bytes=usage.response_bytes,
+        last_request_at=usage.last_request_at,
     )
 
 
@@ -124,6 +166,8 @@ def token_identity(
             name=principal.name,
             scopes=sorted(principal.scopes),
             expires_at=principal.expires_at,
+            rate_limit_per_minute=principal.rate_limit_per_minute,
+            monthly_quota=principal.monthly_quota,
             is_legacy=principal.is_legacy,
         )
     )
@@ -144,6 +188,8 @@ def issue_api_token(
             scopes=payload.scopes,
             expires_in_days=payload.expires_in_days,
             created_by=f"{principal.id}:{principal.name}",
+            rate_limit_per_minute=payload.rate_limit_per_minute,
+            monthly_quota=payload.monthly_quota,
         )
     except ApiTokenError as error:
         raise api_token_http_exception(error) from None
@@ -164,6 +210,25 @@ def list_api_tokens(
         _metadata_response(token) for token in get_api_token_store().list_tokens()
     ]
     return TokenListEnvelope(data=tokens, meta={"count": len(tokens)})
+
+
+@router.get(
+    "/admin/api-tokens/{token_id}/usage",
+    response_model=TokenUsageEnvelope,
+)
+def api_token_usage(
+    _principal: Annotated[ApiTokenPrincipal, Depends(require_token_manager)],
+    token_id: Annotated[str, Path(pattern=r"^[A-Za-z0-9_-]{12}$")],
+    month: Annotated[
+        str | None,
+        Query(pattern=r"^\d{4}-(?:0[1-9]|1[0-2])$"),
+    ] = None,
+) -> TokenUsageEnvelope:
+    try:
+        usage = get_api_token_store().usage(token_id, month=month)
+    except ApiTokenError as error:
+        raise api_token_http_exception(error) from None
+    return TokenUsageEnvelope(data=_usage_response(usage))
 
 
 @router.delete(

@@ -131,11 +131,27 @@ function panel_api_token_normalize_issue_input(array $input): array
     if ($expiresInDays === false || $expiresInDays < 1 || $expiresInDays > 365) {
         throw new InvalidArgumentException('Срок токена должен быть от 1 до 365 дней.');
     }
+    $rateLimit = filter_var(
+        $input['rate_limit_per_minute'] ?? 600,
+        FILTER_VALIDATE_INT
+    );
+    if ($rateLimit === false || $rateLimit < 1 || $rateLimit > 100000) {
+        throw new InvalidArgumentException('Минутный лимит должен быть от 1 до 100 000 запросов.');
+    }
+    $monthlyQuota = filter_var(
+        $input['monthly_quota'] ?? 1000000,
+        FILTER_VALIDATE_INT
+    );
+    if ($monthlyQuota === false || $monthlyQuota < 1 || $monthlyQuota > 1000000000) {
+        throw new InvalidArgumentException('Месячная квота должна быть от 1 до 1 000 000 000 запросов.');
+    }
 
     return [
         'name' => $name,
         'scopes' => $scopes,
         'expires_in_days' => $expiresInDays,
+        'rate_limit_per_minute' => $rateLimit,
+        'monthly_quota' => $monthlyQuota,
     ];
 }
 
@@ -168,6 +184,8 @@ function panel_api_token_error_message(int $status, array $payload): string
         'INVALID_NAME' => 'Проверьте название токена.',
         'INVALID_SCOPES' => 'Проверьте выбранные права доступа.',
         'INVALID_EXPIRY' => 'Проверьте срок действия токена.',
+        'INVALID_RATE_LIMIT' => 'Проверьте минутный лимит токена.',
+        'INVALID_MONTHLY_QUOTA' => 'Проверьте месячную квоту токена.',
         'TOKEN_NOT_FOUND' => 'Токен уже удалён или не существует.',
         'TOKEN_REVOKED' => 'Служебный токен панели был отозван.',
         'TOKEN_EXPIRED' => 'Служебный токен панели истёк.',
@@ -263,6 +281,9 @@ function panel_api_token_metadata(array $raw): array
     $scopes = $raw['scopes'] ?? null;
     $createdAt = $raw['created_at'] ?? null;
     $expiresAt = $raw['expires_at'] ?? null;
+    $rateLimit = filter_var($raw['rate_limit_per_minute'] ?? null, FILTER_VALIDATE_INT);
+    $monthlyQuota = filter_var($raw['monthly_quota'] ?? null, FILTER_VALIDATE_INT);
+    $usage = $raw['usage'] ?? null;
     if (!panel_api_token_id_is_valid($tokenId)
         || !is_string($name)
         || $name === ''
@@ -270,8 +291,24 @@ function panel_api_token_metadata(array $raw): array
         || !is_string($createdAt)
         || strtotime($createdAt) === false
         || !is_string($expiresAt)
-        || strtotime($expiresAt) === false) {
+        || strtotime($expiresAt) === false
+        || $rateLimit === false
+        || $rateLimit < 1
+        || $monthlyQuota === false
+        || $monthlyQuota < 1
+        || !is_array($usage)) {
         throw new RuntimeException('Сервис токенов вернул некорректные метаданные.');
+    }
+    $usageCount = filter_var($usage['request_count'] ?? null, FILTER_VALIDATE_INT);
+    $usageErrors = filter_var($usage['error_count'] ?? null, FILTER_VALIDATE_INT);
+    $usageBytes = filter_var($usage['response_bytes'] ?? null, FILTER_VALIDATE_INT);
+    $usageMonth = $usage['month'] ?? null;
+    if ($usageCount === false || $usageCount < 0
+        || $usageErrors === false || $usageErrors < 0
+        || $usageBytes === false || $usageBytes < 0
+        || !is_string($usageMonth)
+        || preg_match('/^\d{4}-(?:0[1-9]|1[0-2])$/D', $usageMonth) !== 1) {
+        throw new RuntimeException('Сервис токенов вернул некорректную статистику использования.');
     }
 
     $allowedScopes = array_keys(panel_api_token_scope_catalog());
@@ -291,6 +328,17 @@ function panel_api_token_metadata(array $raw): array
         'revoked_at' => is_string($raw['revoked_at'] ?? null) ? $raw['revoked_at'] : null,
         'created_by' => is_string($raw['created_by'] ?? null) ? $raw['created_by'] : '',
         'revoked_by' => is_string($raw['revoked_by'] ?? null) ? $raw['revoked_by'] : null,
+        'rate_limit_per_minute' => $rateLimit,
+        'monthly_quota' => $monthlyQuota,
+        'usage' => [
+            'month' => $usageMonth,
+            'request_count' => $usageCount,
+            'error_count' => $usageErrors,
+            'response_bytes' => $usageBytes,
+            'last_request_at' => is_string($usage['last_request_at'] ?? null)
+                ? $usage['last_request_at']
+                : null,
+        ],
     ];
 }
 

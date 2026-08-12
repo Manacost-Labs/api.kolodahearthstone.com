@@ -110,19 +110,31 @@ def graphql_cache_ttl_seconds() -> int:
 
 
 def graphql_cache_local_entries() -> int:
-    return max(0, min(10_000, int(os.environ.get("HS_GRAPHQL_CACHE_LOCAL_ENTRIES", "256"))))
+    return max(
+        0, min(10_000, int(os.environ.get("HS_GRAPHQL_CACHE_LOCAL_ENTRIES", "256")))
+    )
 
 
 def graphql_max_complexity() -> int:
-    return max(100, min(100_000, int(os.environ.get("HS_GRAPHQL_MAX_COMPLEXITY", "5000"))))
+    return max(
+        100, min(100_000, int(os.environ.get("HS_GRAPHQL_MAX_COMPLEXITY", "5000")))
+    )
 
 
 def graphql_max_request_bytes() -> int:
-    return max(1_024, min(1_048_576, int(os.environ.get("HS_GRAPHQL_MAX_REQUEST_BYTES", "65536"))))
+    return max(
+        1_024,
+        min(1_048_576, int(os.environ.get("HS_GRAPHQL_MAX_REQUEST_BYTES", "65536"))),
+    )
 
 
 def graphql_max_response_bytes() -> int:
-    return max(16_384, min(20_971_520, int(os.environ.get("HS_GRAPHQL_MAX_RESPONSE_BYTES", "2097152"))))
+    return max(
+        16_384,
+        min(
+            20_971_520, int(os.environ.get("HS_GRAPHQL_MAX_RESPONSE_BYTES", "2097152"))
+        ),
+    )
 
 
 def graphql_timeout_seconds() -> float:
@@ -135,6 +147,23 @@ def graphql_persisted_query_ttl_seconds() -> int:
         min(
             31_536_000,
             int(os.environ.get("HS_GRAPHQL_PERSISTED_QUERY_TTL_SECONDS", "2592000")),
+        ),
+    )
+
+
+def api_token_default_rate_per_minute() -> int:
+    return max(
+        1,
+        min(100_000, int(os.environ.get("HS_API_TOKEN_RATE_PER_MINUTE", "600"))),
+    )
+
+
+def api_token_default_monthly_quota() -> int:
+    return max(
+        1,
+        min(
+            1_000_000_000,
+            int(os.environ.get("HS_API_TOKEN_MONTHLY_QUOTA", "1000000")),
         ),
     )
 

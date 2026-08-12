@@ -20,6 +20,8 @@ class CacheBackend(Protocol):
 
     async def delete(self, key: str) -> bool: ...
 
+    async def increment(self, key: str, *, ttl_seconds: int) -> int | None: ...
+
     async def close(self) -> None: ...
 
 
@@ -108,6 +110,25 @@ class RedisCacheBackend:
             await self._failed()
             return False
 
+    async def increment(self, key: str, *, ttl_seconds: int) -> int | None:
+        client = await self._get_client()
+        if client is None:
+            return None
+        script = """
+        local value = redis.call('INCR', KEYS[1])
+        if value == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
+        return value
+        """
+        try:
+            value = await asyncio.wait_for(
+                client.eval(script, 1, self._key(key), ttl_seconds),
+                self._timeout,
+            )
+            return int(value)
+        except (RedisError, TimeoutError, TypeError, ValueError):
+            await self._failed()
+            return None
+
     async def close(self) -> None:
         async with self._lock:
             client, self._client = self._client, None
@@ -139,6 +160,7 @@ class TieredCache:
         )
         self._clock = clock
         self._local: OrderedDict[str, _LocalEntry] = OrderedDict()
+        self._local_counters: dict[str, tuple[int, float]] = {}
         self._lock = asyncio.Lock()
 
     async def get(self, key: str) -> tuple[bytes | None, str]:
@@ -166,6 +188,22 @@ class TieredCache:
             self._local.pop(key, None)
         await self._backend.delete(key)
 
+    async def increment(self, key: str, *, ttl_seconds: int) -> tuple[int, str]:
+        shared = await self._backend.increment(key, ttl_seconds=ttl_seconds)
+        if shared is not None:
+            return shared, "redis"
+        now = self._clock()
+        async with self._lock:
+            value, expires_at = self._local_counters.get(
+                key,
+                (0, now + ttl_seconds),
+            )
+            if expires_at <= now:
+                value, expires_at = 0, now + ttl_seconds
+            value += 1
+            self._local_counters[key] = (value, expires_at)
+            return value, "local"
+
     async def _put_local(self, key: str, value: bytes, *, ttl_seconds: int) -> None:
         if self._max_local_entries < 1:
             return
@@ -181,6 +219,7 @@ class TieredCache:
     async def close(self) -> None:
         async with self._lock:
             self._local.clear()
+            self._local_counters.clear()
         await self._backend.close()
 
 

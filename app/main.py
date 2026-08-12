@@ -21,6 +21,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
+from .api_token_limits import ApiTokenLimitsMiddleware
 from .api_tokens import (
     ApiTokenError,
     api_token_http_exception,
@@ -80,6 +81,7 @@ app = FastAPI(
     description="Cached API for configured Hearthstone public data sources.",
 )
 
+app.add_middleware(ApiTokenLimitsMiddleware)
 app.add_middleware(GraphQLGovernanceMiddleware)
 app.add_middleware(
     CORSMiddleware,
@@ -93,7 +95,16 @@ app.add_middleware(
         "X-API-Key",
         "X-Request-ID",
     ],
-    expose_headers=["X-Request-ID", "X-Koloda-Cache", "X-GraphQL-Complexity"],
+    expose_headers=[
+        "X-Request-ID",
+        "X-Koloda-Cache",
+        "X-GraphQL-Complexity",
+        "X-RateLimit-Limit",
+        "X-RateLimit-Remaining",
+        "X-RateLimit-Layer",
+        "X-Quota-Limit",
+        "X-Quota-Remaining",
+    ],
 )
 app.add_middleware(PublicCacheMiddleware)
 app.include_router(graphql_router, prefix="/v1", tags=["GraphQL"])

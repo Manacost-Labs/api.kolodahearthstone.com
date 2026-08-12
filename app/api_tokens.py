@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from . import config
 from .db import get_db_path
 
 TOKEN_PREFIX = "khs_v1"
@@ -25,6 +26,8 @@ VALID_SCOPES = frozenset(
 )
 MAX_TOKEN_LIFETIME_DAYS = 365
 LAST_USED_WRITE_INTERVAL = timedelta(minutes=5)
+MAX_RATE_PER_MINUTE = 100_000
+MAX_MONTHLY_QUOTA = 1_000_000_000
 
 
 class ApiTokenError(ValueError):
@@ -41,10 +44,21 @@ class ApiTokenPrincipal:
     name: str
     scopes: frozenset[str]
     expires_at: datetime | None
+    rate_limit_per_minute: int
+    monthly_quota: int
     is_legacy: bool = False
 
     def has_scope(self, scope: str) -> bool:
         return scope in self.scopes
+
+
+@dataclass(frozen=True)
+class ApiTokenUsage:
+    month: str
+    request_count: int
+    error_count: int
+    response_bytes: int
+    last_request_at: datetime | None
 
 
 @dataclass(frozen=True)
@@ -58,6 +72,9 @@ class ApiTokenMetadata:
     revoked_at: datetime | None
     created_by: str
     revoked_by: str | None
+    rate_limit_per_minute: int
+    monthly_quota: int
+    usage: ApiTokenUsage
 
     @property
     def is_active(self) -> bool:
@@ -124,6 +141,28 @@ def _validate_actor(actor: str) -> str:
     return normalized
 
 
+def _validate_rate_limit(value: int | None) -> int:
+    normalized = config.api_token_default_rate_per_minute() if value is None else value
+    if normalized < 1 or normalized > MAX_RATE_PER_MINUTE:
+        raise ApiTokenError(
+            "INVALID_RATE_LIMIT",
+            f"Rate limit must be between 1 and {MAX_RATE_PER_MINUTE}",
+            status_code=422,
+        )
+    return normalized
+
+
+def _validate_monthly_quota(value: int | None) -> int:
+    normalized = config.api_token_default_monthly_quota() if value is None else value
+    if normalized < 1 or normalized > MAX_MONTHLY_QUOTA:
+        raise ApiTokenError(
+            "INVALID_MONTHLY_QUOTA",
+            f"Monthly quota must be between 1 and {MAX_MONTHLY_QUOTA}",
+            status_code=422,
+        )
+    return normalized
+
+
 class ApiTokenStore:
     def __init__(
         self,
@@ -162,6 +201,33 @@ class ApiTokenStore:
                     )
                     """
                 )
+                columns = {
+                    str(row["name"])
+                    for row in connection.execute("PRAGMA table_info(api_tokens)")
+                }
+                if "rate_limit_per_minute" not in columns:
+                    connection.execute(
+                        "ALTER TABLE api_tokens ADD COLUMN rate_limit_per_minute "
+                        f"INTEGER NOT NULL DEFAULT {config.api_token_default_rate_per_minute()}"
+                    )
+                if "monthly_quota" not in columns:
+                    connection.execute(
+                        "ALTER TABLE api_tokens ADD COLUMN monthly_quota "
+                        f"INTEGER NOT NULL DEFAULT {config.api_token_default_monthly_quota()}"
+                    )
+                connection.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS api_token_usage_monthly (
+                        token_id TEXT NOT NULL REFERENCES api_tokens(id) ON DELETE CASCADE,
+                        month TEXT NOT NULL,
+                        request_count INTEGER NOT NULL DEFAULT 0,
+                        error_count INTEGER NOT NULL DEFAULT 0,
+                        response_bytes INTEGER NOT NULL DEFAULT 0,
+                        last_request_at TEXT,
+                        PRIMARY KEY (token_id, month)
+                    )
+                    """
+                )
                 connection.execute(
                     "CREATE INDEX IF NOT EXISTS idx_api_tokens_active "
                     "ON api_tokens(revoked_at, expires_at)"
@@ -176,10 +242,14 @@ class ApiTokenStore:
         scopes: Iterable[str],
         expires_in_days: int,
         created_by: str,
+        rate_limit_per_minute: int | None = None,
+        monthly_quota: int | None = None,
     ) -> IssuedApiToken:
         normalized_name = _validate_name(name)
         normalized_scopes = _normalize_scopes(scopes)
         actor = _validate_actor(created_by)
+        normalized_rate_limit = _validate_rate_limit(rate_limit_per_minute)
+        normalized_monthly_quota = _validate_monthly_quota(monthly_quota)
         if expires_in_days < 1 or expires_in_days > MAX_TOKEN_LIFETIME_DAYS:
             raise ApiTokenError(
                 "INVALID_EXPIRY",
@@ -200,8 +270,9 @@ class ApiTokenStore:
                             """
                             INSERT INTO api_tokens (
                                 id, token_hash, name, scopes_json, created_at,
-                                expires_at, created_by
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                                expires_at, created_by, rate_limit_per_minute,
+                                monthly_quota
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                             """,
                             (
                                 token_id,
@@ -211,6 +282,8 @@ class ApiTokenStore:
                                 _format_time(now),
                                 _format_time(expires_at),
                                 actor,
+                                normalized_rate_limit,
+                                normalized_monthly_quota,
                             ),
                         )
                     return IssuedApiToken(
@@ -224,6 +297,15 @@ class ApiTokenStore:
                         revoked_at=None,
                         created_by=actor,
                         revoked_by=None,
+                        rate_limit_per_minute=normalized_rate_limit,
+                        monthly_quota=normalized_monthly_quota,
+                        usage=ApiTokenUsage(
+                            month=now.strftime("%Y-%m"),
+                            request_count=0,
+                            error_count=0,
+                            response_bytes=0,
+                            last_request_at=None,
+                        ),
                     )
                 except sqlite3.IntegrityError:
                     continue
@@ -283,40 +365,175 @@ class ApiTokenStore:
                 name=str(row["name"]),
                 scopes=scopes,
                 expires_at=expires_at,
+                rate_limit_per_minute=int(row["rate_limit_per_minute"]),
+                monthly_quota=int(row["monthly_quota"]),
             )
         finally:
             connection.close()
 
     def list_tokens(self) -> list[ApiTokenMetadata]:
+        month = self._now().astimezone(UTC).strftime("%Y-%m")
         connection = self._connect()
         try:
             rows = connection.execute(
                 """
-                SELECT id, name, scopes_json, created_at, expires_at,
-                       last_used_at, revoked_at, created_by, revoked_by
-                FROM api_tokens
-                ORDER BY created_at DESC, id DESC
-                """
+                SELECT token.id, token.name, token.scopes_json, token.created_at,
+                       token.expires_at, token.last_used_at, token.revoked_at,
+                       token.created_by, token.revoked_by,
+                       token.rate_limit_per_minute, token.monthly_quota,
+                       COALESCE(usage.request_count, 0) AS usage_request_count,
+                       COALESCE(usage.error_count, 0) AS usage_error_count,
+                       COALESCE(usage.response_bytes, 0) AS usage_response_bytes,
+                       usage.last_request_at AS usage_last_request_at,
+                       ? AS usage_month
+                FROM api_tokens AS token
+                LEFT JOIN api_token_usage_monthly AS usage
+                  ON usage.token_id = token.id AND usage.month = ?
+                ORDER BY token.created_at DESC, token.id DESC
+                """,
+                (month, month),
             ).fetchall()
         finally:
             connection.close()
         return [self._metadata_from_row(row) for row in rows]
 
     def get(self, token_id: str) -> ApiTokenMetadata | None:
+        month = self._now().astimezone(UTC).strftime("%Y-%m")
         connection = self._connect()
         try:
             row = connection.execute(
                 """
-                SELECT id, name, scopes_json, created_at, expires_at,
-                       last_used_at, revoked_at, created_by, revoked_by
-                FROM api_tokens
-                WHERE id = ?
+                SELECT token.id, token.name, token.scopes_json, token.created_at,
+                       token.expires_at, token.last_used_at, token.revoked_at,
+                       token.created_by, token.revoked_by,
+                       token.rate_limit_per_minute, token.monthly_quota,
+                       COALESCE(usage.request_count, 0) AS usage_request_count,
+                       COALESCE(usage.error_count, 0) AS usage_error_count,
+                       COALESCE(usage.response_bytes, 0) AS usage_response_bytes,
+                       usage.last_request_at AS usage_last_request_at,
+                       ? AS usage_month
+                FROM api_tokens AS token
+                LEFT JOIN api_token_usage_monthly AS usage
+                  ON usage.token_id = token.id AND usage.month = ?
+                WHERE token.id = ?
                 """,
-                (token_id,),
+                (month, month, token_id),
             ).fetchone()
         finally:
             connection.close()
         return self._metadata_from_row(row) if row is not None else None
+
+    def reserve_request(self, token_id: str) -> ApiTokenUsage:
+        now = self._now().astimezone(UTC).replace(microsecond=0)
+        month = now.strftime("%Y-%m")
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT monthly_quota FROM api_tokens WHERE id = ?",
+                (token_id,),
+            ).fetchone()
+            if row is None:
+                connection.rollback()
+                raise ApiTokenError("INVALID_TOKEN", "Missing or invalid API token")
+            usage_row = connection.execute(
+                """
+                SELECT request_count, error_count, response_bytes, last_request_at
+                FROM api_token_usage_monthly
+                WHERE token_id = ? AND month = ?
+                """,
+                (token_id, month),
+            ).fetchone()
+            current_count = int(usage_row["request_count"]) if usage_row else 0
+            if current_count >= int(row["monthly_quota"]):
+                connection.rollback()
+                raise ApiTokenError(
+                    "MONTHLY_QUOTA_EXCEEDED",
+                    "API token monthly request quota has been exhausted",
+                    status_code=429,
+                )
+            connection.execute(
+                """
+                INSERT INTO api_token_usage_monthly (
+                    token_id, month, request_count, last_request_at
+                ) VALUES (?, ?, 1, ?)
+                ON CONFLICT (token_id, month) DO UPDATE SET
+                    request_count = request_count + 1,
+                    last_request_at = excluded.last_request_at
+                """,
+                (token_id, month, _format_time(now)),
+            )
+            connection.commit()
+            return self.usage(token_id, month=month)
+        except ApiTokenError:
+            raise
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def complete_request(
+        self, token_id: str, *, status: int, response_bytes: int
+    ) -> None:
+        now = self._now().astimezone(UTC).replace(microsecond=0)
+        month = now.strftime("%Y-%m")
+        connection = self._connect()
+        try:
+            with connection:
+                connection.execute(
+                    """
+                    UPDATE api_token_usage_monthly
+                    SET error_count = error_count + ?,
+                        response_bytes = response_bytes + ?,
+                        last_request_at = ?
+                    WHERE token_id = ? AND month = ?
+                    """,
+                    (
+                        1 if status >= 400 else 0,
+                        max(0, response_bytes),
+                        _format_time(now),
+                        token_id,
+                        month,
+                    ),
+                )
+        finally:
+            connection.close()
+
+    def usage(self, token_id: str, *, month: str | None = None) -> ApiTokenUsage:
+        normalized_month = month or self._now().astimezone(UTC).strftime("%Y-%m")
+        if not re.fullmatch(r"\d{4}-(?:0[1-9]|1[0-2])", normalized_month):
+            raise ApiTokenError(
+                "INVALID_USAGE_MONTH",
+                "Usage month must use YYYY-MM format",
+                status_code=422,
+            )
+        connection = self._connect()
+        try:
+            token_exists = connection.execute(
+                "SELECT 1 FROM api_tokens WHERE id = ?", (token_id,)
+            ).fetchone()
+            if token_exists is None:
+                raise ApiTokenError(
+                    "TOKEN_NOT_FOUND", "API token was not found", status_code=404
+                )
+            row = connection.execute(
+                """
+                SELECT request_count, error_count, response_bytes, last_request_at
+                FROM api_token_usage_monthly
+                WHERE token_id = ? AND month = ?
+                """,
+                (token_id, normalized_month),
+            ).fetchone()
+        finally:
+            connection.close()
+        return ApiTokenUsage(
+            month=normalized_month,
+            request_count=int(row["request_count"]) if row else 0,
+            error_count=int(row["error_count"]) if row else 0,
+            response_bytes=int(row["response_bytes"]) if row else 0,
+            last_request_at=_parse_time(row["last_request_at"]) if row else None,
+        )
 
     def revoke(self, token_id: str, *, revoked_by: str) -> bool:
         actor = _validate_actor(revoked_by)
@@ -353,6 +570,15 @@ class ApiTokenStore:
             revoked_at=_parse_time(row["revoked_at"]),
             created_by=str(row["created_by"]),
             revoked_by=str(row["revoked_by"]) if row["revoked_by"] else None,
+            rate_limit_per_minute=int(row["rate_limit_per_minute"]),
+            monthly_quota=int(row["monthly_quota"]),
+            usage=ApiTokenUsage(
+                month=str(row["usage_month"]),
+                request_count=int(row["usage_request_count"]),
+                error_count=int(row["usage_error_count"]),
+                response_bytes=int(row["usage_response_bytes"]),
+                last_request_at=_parse_time(row["usage_last_request_at"]),
+            ),
         )
 
 
@@ -403,6 +629,8 @@ def authenticate_api_token(
             name="Legacy bootstrap key",
             scopes=VALID_SCOPES,
             expires_at=None,
+            rate_limit_per_minute=config.api_token_default_rate_per_minute(),
+            monthly_quota=config.api_token_default_monthly_quota(),
             is_legacy=True,
         )
     return (store or get_api_token_store()).authenticate(

@@ -26,6 +26,8 @@ $tokenFormScopes = $issuedApiToken === null && is_array($_POST['scopes'] ?? null
     ? $_POST['scopes']
     : ['database:read'];
 $tokenFormExpiry = $issuedApiToken === null ? (string)($_POST['expires_in_days'] ?? '90') : '90';
+$tokenFormRate = $issuedApiToken === null ? (string)($_POST['rate_limit_per_minute'] ?? '600') : '600';
+$tokenFormQuota = $issuedApiToken === null ? (string)($_POST['monthly_quota'] ?? '1000000') : '1000000';
 ?>
 <section class="token-workspace" data-token-page aria-labelledby="api-token-heading">
     <header class="token-page-head">
@@ -106,6 +108,18 @@ $tokenFormExpiry = $issuedApiToken === null ? (string)($_POST['expires_in_days']
                         </select>
                     </label>
 
+                    <label class="token-field">
+                        <span>Запросов в минуту</span>
+                        <input type="number" name="rate_limit_per_minute" value="<?= h($tokenFormRate) ?>" min="1" max="100000" required inputmode="numeric">
+                        <small>Защищает API от резких всплесков нагрузки.</small>
+                    </label>
+
+                    <label class="token-field">
+                        <span>Запросов в месяц</span>
+                        <input type="number" name="monthly_quota" value="<?= h($tokenFormQuota) ?>" min="1" max="1000000000" required inputmode="numeric">
+                        <small>Общая квота токена, обнуляется в начале месяца UTC.</small>
+                    </label>
+
                     <div class="token-form-actions">
                         <button class="button" type="submit">Выпустить токен</button>
                         <p>Секрет появится только в следующем ответе и не сохраняется панелью.</p>
@@ -153,6 +167,8 @@ $tokenFormExpiry = $issuedApiToken === null ? (string)($_POST['expires_in_days']
                             <th>Создан</th>
                             <th>Истекает</th>
                             <th>Последнее использование</th>
+                            <th>Лимиты</th>
+                            <th>Использование за месяц</th>
                             <th>Статус</th>
                             <th>Действие</th>
                         </tr>
@@ -176,6 +192,14 @@ $tokenFormExpiry = $issuedApiToken === null ? (string)($_POST['expires_in_days']
                                 <td><?= h($tokenFormatDate($token['created_at'])) ?></td>
                                 <td><?= h($tokenFormatDate($token['expires_at'])) ?></td>
                                 <td><?= h($tokenFormatDate($token['last_used_at'])) ?></td>
+                                <td>
+                                    <strong><?= h(number_format((int)$token['rate_limit_per_minute'], 0, ',', ' ')) ?>/мин</strong>
+                                    <small><?= h(number_format((int)$token['monthly_quota'], 0, ',', ' ')) ?>/мес</small>
+                                </td>
+                                <td>
+                                    <strong><?= h(number_format((int)$token['usage']['request_count'], 0, ',', ' ')) ?> запросов</strong>
+                                    <small><?= h(number_format((int)$token['usage']['error_count'], 0, ',', ' ')) ?> ошибок · <?= h($token['usage']['month']) ?></small>
+                                </td>
                                 <td><span class="token-status <?= h($tokenStatusClass) ?>"><i aria-hidden="true"></i><?= h($tokenStatusLabel) ?></span></td>
                                 <td>
                                     <?php if ($isManagerToken): ?>
