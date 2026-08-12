@@ -1073,7 +1073,11 @@ def main(argv: list[str] | None = None) -> int:
 
         result = _run_pipeline_command_with_telemetry(
             "hsreplay_battlegrounds_compositions_screenshot",
-            lambda: asyncio.run(capture_compositions_screenshot()),
+            lambda: asyncio.run(
+                capture_compositions_screenshot(
+                    allow_cached_on_failure=bool(args.scheduled)
+                )
+            ),
         )
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0 if result.get("ok") else 1
