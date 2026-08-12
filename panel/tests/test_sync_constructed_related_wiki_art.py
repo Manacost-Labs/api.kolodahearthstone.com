@@ -74,6 +74,21 @@ class ScrapeDoFetchTest(unittest.TestCase):
         self.assertNotIn("test-secret", str(caught.exception))
         self.assertNotIn("api.scrape.do", str(caught.exception))
 
+    def test_page_image_lookup_uses_mediawiki_fifty_title_batches(self) -> None:
+        requests: list[dict[str, object]] = []
+
+        def fake_wiki_api(params):
+            requests.append(params)
+            return {"query": {"pages": []}}
+
+        titles = [f"Card {index}" for index in range(51)]
+        with patch.object(wiki_art, "wiki_api", side_effect=fake_wiki_api):
+            wiki_art.fetch_page_images(titles)
+
+        self.assertEqual(len(requests), 2)
+        self.assertEqual(len(str(requests[0]["titles"]).split("|")), 50)
+        self.assertEqual(len(str(requests[1]["titles"]).split("|")), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -10,6 +10,8 @@
   and cache storage outside Git; the retired domain path is no longer used by
   active Nginx or systemd configuration.
 - Excluded Python bytecode and test caches from immutable panel releases.
+- Batched Wiki full-art page discovery at MediaWiki's 50-title limit, reducing
+  Scrape.do requests for the same catalogue by roughly five times.
 - Extended the full HSGuru archetype-analysis timeout to two hours so the
   checkpointed Scrape.do refresh can finish all rank/format targets.
 - Restricted HSGuru archetype-analysis acquisition to Scrape.do; it no longer

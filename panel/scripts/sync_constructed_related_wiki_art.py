@@ -25,6 +25,7 @@ UPLOAD_DIR = APP_ROOT / "uploads" / "constructed-related-wiki-full-art"
 UPLOAD_URL = "/uploads/constructed-related-wiki-full-art"
 USER_AGENT = "db.kolodahs.ru-wiki-full-art-sync/1.0 (admin@kolodahs.ru)"
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+MEDIAWIKI_TITLE_BATCH_SIZE = 50
 EXCLUDED_VARIANT_RE = re.compile(r"\b(?:signature|golden|diamond|premium|animated)\b", re.IGNORECASE)
 
 
@@ -202,7 +203,7 @@ def resolve_alias(aliases: dict[str, str], title: str) -> str:
 def fetch_page_images(page_titles: list[str]) -> tuple[dict[str, list[str]], dict[str, str]]:
     result: dict[str, list[str]] = {}
     aliases: dict[str, str] = {canonical_title(title): canonical_title(title) for title in page_titles}
-    for batch in chunks(page_titles, 10):
+    for batch in chunks(page_titles, MEDIAWIKI_TITLE_BATCH_SIZE):
         continuation: dict[str, Any] = {}
         while True:
             payload = wiki_api(
