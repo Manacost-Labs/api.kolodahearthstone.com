@@ -22,9 +22,12 @@ def test_v1_bg_heroes_envelope_and_pagination() -> None:
         ],
     }
     with patch("app.hsreplay_bg_hero_details.list_bg_heroes", return_value=payload):
-        response = client.get("/v1/bg/heroes?limit=1&offset=1")
+        legacy_response = client.get("/v1/bg/heroes?limit=1&offset=1")
+        response = client.get("/v1/battlegrounds/heroes?limit=1&offset=1")
 
+    assert legacy_response.status_code == 200
     assert response.status_code == 200
+    assert response.json() == legacy_response.json()
     body = response.json()
     assert [row["hero"] for row in body["data"]] == ["Ragnaros"]
     assert body["meta"]["count"] == 2
@@ -42,12 +45,19 @@ def test_v1_bg_minions_has_concrete_schema() -> None:
             ],
         },
     ):
-        response = client.get("/v1/bg/minions")
+        legacy_response = client.get("/v1/bg/minions")
+        response = client.get("/v1/battlegrounds/minions")
 
+    assert legacy_response.status_code == 200
     assert response.status_code == 200
+    assert response.json() == legacy_response.json()
     assert response.json()["data"][0]["dbf_id"] == 42
     schema = client.get("/openapi.json").json()["components"]["schemas"]["BgMinionRow"]
     assert schema["properties"]["dbf_id"]["type"] == "integer"
+
+    paths = client.get("/openapi.json").json()["paths"]
+    assert paths["/v1/bg/minions"]["get"]["deprecated"] is True
+    assert paths["/v1/battlegrounds/minions"]["get"].get("deprecated") is not True
 
 
 def test_v1_arena_classes_reads_cached_snapshot() -> None:

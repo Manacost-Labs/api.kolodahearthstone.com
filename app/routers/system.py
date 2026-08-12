@@ -12,6 +12,7 @@ from ..storage import load_status
 from .models import ApiMeta, Envelope, freshest_timestamp, timestamp_is_stale
 
 router = APIRouter(prefix="/v1/system", tags=["v1-system"])
+canonical_router = APIRouter(prefix="/v1", tags=["v1-system"])
 
 
 class SourceSummary(BaseModel):
@@ -204,6 +205,7 @@ class ReliabilityReport(BaseModel):
     "/sources",
     response_model=Envelope[list[SourceSummary]],
     response_model_exclude_none=True,
+    deprecated=True,
 )
 def sources(
     site: str | None = Query(None, min_length=1, max_length=80),
@@ -244,6 +246,7 @@ def sources(
     "/datasets",
     response_model=Envelope[list[DatasetSummary]],
     response_model_exclude_none=True,
+    deprecated=True,
 )
 def datasets() -> Envelope[list[DatasetSummary]]:
     rows: list[dict[str, Any]] = []
@@ -270,7 +273,11 @@ def datasets() -> Envelope[list[DatasetSummary]]:
     )
 
 
-@router.get("/health", response_model=Envelope[dict[str, Any]])
+@router.get(
+    "/health",
+    response_model=Envelope[dict[str, Any]],
+    deprecated=True,
+)
 def health() -> Envelope[dict[str, Any]]:
     from ..main import cached_health_diagnostics
 
@@ -316,3 +323,25 @@ def parsing_reliability(response: Response) -> Envelope[ReliabilityReport]:
             count=eligible_attempts,
         ),
     )
+
+
+canonical_router.add_api_route(
+    "/sources",
+    sources,
+    methods=["GET"],
+    response_model=Envelope[list[SourceSummary]],
+    response_model_exclude_none=True,
+)
+canonical_router.add_api_route(
+    "/datasets",
+    datasets,
+    methods=["GET"],
+    response_model=Envelope[list[DatasetSummary]],
+    response_model_exclude_none=True,
+)
+canonical_router.add_api_route(
+    "/health",
+    health,
+    methods=["GET"],
+    response_model=Envelope[dict[str, Any]],
+)
