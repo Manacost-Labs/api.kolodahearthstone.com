@@ -24,6 +24,7 @@ from .storage import (
 
 SOURCE_ID = "hsguru_archetype_analysis"
 SCHEMA_VERSION = 2
+CHECKPOINT_SCHEMA_VERSION = 3
 ANALYSIS_RANK = "legend"
 ANALYSIS_PERIOD = "past_week"
 CARD_STATS_MIN_MULL_COUNT = 25
@@ -368,19 +369,73 @@ def _target_signature(targets: list[dict[str, str]]) -> str:
     return hashlib.sha256("\n".join(normalized).encode("utf-8")).hexdigest()
 
 
+def _validated_checkpoint_targets(
+    checkpoint: dict[str, Any],
+) -> list[dict[str, str]] | None:
+    raw_targets = checkpoint.get("targets")
+    if not isinstance(raw_targets, list) or not raw_targets:
+        return None
+
+    targets: list[dict[str, str]] = []
+    target_keys: set[tuple[str, str]] = set()
+    for raw_target in raw_targets:
+        if not isinstance(raw_target, dict) or set(raw_target) != {
+            "format",
+            "archetype",
+        }:
+            return None
+        format_name = raw_target.get("format")
+        archetype = raw_target.get("archetype")
+        if (
+            not isinstance(format_name, str)
+            or format_name not in FORMAT_IDS
+            or not isinstance(archetype, str)
+            or not archetype
+            or archetype != archetype.strip()
+            or len(archetype) > 200
+            or any(ord(character) < 32 for character in archetype)
+        ):
+            return None
+        target = {"format": format_name, "archetype": archetype}
+        target_key = _target_key(target)
+        if target_key in target_keys:
+            return None
+        target_keys.add(target_key)
+        targets.append(target)
+
+    expected_order = sorted(
+        targets,
+        key=lambda target: (target["format"], target["archetype"].casefold()),
+    )
+    targets_total = checkpoint.get("targets_total")
+    if (
+        targets != expected_order
+        or not isinstance(targets_total, int)
+        or isinstance(targets_total, bool)
+        or targets_total != len(targets)
+        or checkpoint.get("target_signature") != _target_signature(targets)
+    ):
+        return None
+    return targets
+
+
 def _load_refresh_checkpoint(
     *,
-    target_signature: str,
+    target_signature: str | None,
     now: datetime,
     max_age: timedelta = CHECKPOINT_TTL,
 ) -> dict[str, Any] | None:
     checkpoint = load_baseline(SOURCE_ID, CHECKPOINT_LABEL) or {}
     if (
         checkpoint.get("state") != "in_progress"
-        or checkpoint.get("schema_version") != SCHEMA_VERSION
+        or checkpoint.get("schema_version") != CHECKPOINT_SCHEMA_VERSION
         or checkpoint.get("rank") != ANALYSIS_RANK
         or checkpoint.get("period") != ANALYSIS_PERIOD
-        or checkpoint.get("target_signature") != target_signature
+        or _validated_checkpoint_targets(checkpoint) is None
+        or (
+            target_signature is not None
+            and checkpoint.get("target_signature") != target_signature
+        )
     ):
         return None
     try:
@@ -522,39 +577,30 @@ async def _refresh_hsguru_archetype_analysis_unlocked(
 ) -> dict[str, Any]:
     started = _utc_now()
     started_at = started.isoformat()
-    targets = list(archetypes if archetypes is not None else _active_archetypes())
-    targets = list({_target_key(target): target for target in targets}.values())
-    targets.sort(key=lambda row: (row["format"], row["archetype"].casefold()))
-    if limit is not None:
-        targets = targets[: max(0, limit)]
-    if not targets:
-        raise RuntimeError("No HSGuru archetypes in the Legend/past-week matrix slices")
-
-    signature = _target_signature(targets)
     checkpoint_enabled = archetypes is None and limit is None
-    checkpoint = (
-        _load_refresh_checkpoint(
-            target_signature=signature,
-            now=started,
-            max_age=(
-                CHECKPOINT_RECOVERY_TTL if checkpoint_recovery else CHECKPOINT_TTL
-            ),
+    checkpoint: dict[str, Any] | None = None
+    if checkpoint_recovery:
+        if checkpoint_enabled:
+            checkpoint = _load_refresh_checkpoint(
+                target_signature=None,
+                now=started,
+                max_age=CHECKPOINT_RECOVERY_TTL,
+            )
+        targets = (
+            _validated_checkpoint_targets(checkpoint) if checkpoint is not None else None
         )
-        if checkpoint_enabled
-        else None
-    )
-    if checkpoint_recovery and checkpoint is None:
-        return {
-            "ok": True,
-            "published": False,
-            "skipped": True,
-            "reason": "checkpoint_not_available",
-            "state": SourceState.OK,
-            "source_id": SOURCE_ID,
-            "targets": len(targets),
-            "recovery": True,
-        }
-    if checkpoint_recovery and checkpoint is not None:
+        if targets is None:
+            return {
+                "ok": True,
+                "published": False,
+                "skipped": True,
+                "reason": "checkpoint_not_available",
+                "state": SourceState.OK,
+                "source_id": SOURCE_ID,
+                "targets": 0,
+                "recovery": True,
+            }
+        signature = _target_signature(targets)
         checkpoint_saved_at = _checkpoint_saved_at(checkpoint)
         if (
             checkpoint_saved_at is not None
@@ -574,6 +620,28 @@ async def _refresh_hsguru_archetype_analysis_unlocked(
                 ).isoformat(),
                 "recovery": True,
             }
+    else:
+        targets = list(archetypes if archetypes is not None else _active_archetypes())
+        targets = list({_target_key(target): target for target in targets}.values())
+        targets.sort(key=lambda row: (row["format"], row["archetype"].casefold()))
+        if limit is not None:
+            targets = targets[: max(0, limit)]
+        if not targets:
+            raise RuntimeError(
+                "No HSGuru archetypes in the Legend/past-week matrix slices"
+            )
+        signature = _target_signature(targets)
+        if checkpoint_enabled:
+            checkpoint = _load_refresh_checkpoint(
+                target_signature=signature,
+                now=started,
+                max_age=CHECKPOINT_TTL,
+            )
+
+    target_descriptors = [
+        {"format": target["format"], "archetype": target["archetype"]}
+        for target in targets
+    ]
 
     previous = _previous_analysis()
     negative_cache = _previous_negative_cache()
@@ -941,13 +1009,14 @@ async def _refresh_hsguru_archetype_analysis_unlocked(
             CHECKPOINT_LABEL,
             {
                 "state": "in_progress",
-                "schema_version": SCHEMA_VERSION,
+                "schema_version": CHECKPOINT_SCHEMA_VERSION,
                 "rank": ANALYSIS_RANK,
                 "period": ANALYSIS_PERIOD,
                 "started_at": started_at,
                 "saved_at": _now(),
                 "target_signature": signature,
                 "targets_total": len(targets),
+                "targets": target_descriptors,
                 "completed": [
                     {"format": format_name, "archetype": archetype}
                     for format_name, archetype in sorted(completed_keys)
@@ -1196,9 +1265,13 @@ async def _refresh_hsguru_archetype_analysis_unlocked(
             CHECKPOINT_LABEL,
             {
                 "state": "complete",
-                "schema_version": SCHEMA_VERSION,
+                "schema_version": CHECKPOINT_SCHEMA_VERSION,
+                "rank": ANALYSIS_RANK,
+                "period": ANALYSIS_PERIOD,
                 "completed_at": _now(),
                 "target_signature": signature,
+                "targets_total": len(targets),
+                "targets": target_descriptors,
             },
         )
     status = {

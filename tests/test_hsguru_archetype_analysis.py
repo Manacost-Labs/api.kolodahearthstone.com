@@ -10,9 +10,11 @@ from urllib.parse import parse_qs, urlparse
 from app.hsguru_archetype_analysis import (
     ANALYSIS_TIMEOUT_MS,
     ANALYSIS_WAIT_MS,
+    CHECKPOINT_SCHEMA_VERSION,
     _active_archetypes,
     _fetch_html,
     _load_refresh_checkpoint,
+    _target_signature,
     analysis_urls,
     parse_card_stats_games,
     parse_card_stats_html,
@@ -95,12 +97,15 @@ CARD_STATS_SPARSE_HTML = (
 class HSGuruArchetypeAnalysisTest(unittest.TestCase):
     def test_checkpoint_loader_uses_the_requested_recovery_ttl(self) -> None:
         now = datetime(2026, 8, 12, 12, 0, tzinfo=UTC)
+        targets = [{"format": "standard", "archetype": "Checkpoint Mage"}]
         checkpoint = {
             "state": "in_progress",
-            "schema_version": 2,
+            "schema_version": CHECKPOINT_SCHEMA_VERSION,
             "rank": "legend",
             "period": "past_week",
-            "target_signature": "expected",
+            "target_signature": _target_signature(targets),
+            "targets_total": 1,
+            "targets": targets,
             "started_at": (now - timedelta(hours=3)).isoformat(),
         }
         with patch(
@@ -109,18 +114,61 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
         ):
             self.assertIsNone(
                 _load_refresh_checkpoint(
-                    target_signature="expected",
+                    target_signature=_target_signature(targets),
                     now=now,
                 )
             )
             self.assertEqual(
                 _load_refresh_checkpoint(
-                    target_signature="expected",
+                    target_signature=_target_signature(targets),
                     now=now,
                     max_age=timedelta(hours=12),
                 ),
                 checkpoint,
             )
+
+    def test_checkpoint_loader_rejects_legacy_or_corrupt_target_lists(self) -> None:
+        now = datetime(2026, 8, 12, 12, 0, tzinfo=UTC)
+        targets = [{"format": "standard", "archetype": "Checkpoint Mage"}]
+        valid = {
+            "state": "in_progress",
+            "schema_version": CHECKPOINT_SCHEMA_VERSION,
+            "rank": "legend",
+            "period": "past_week",
+            "target_signature": _target_signature(targets),
+            "targets_total": 1,
+            "targets": targets,
+            "started_at": (now - timedelta(hours=1)).isoformat(),
+        }
+        invalid_checkpoints = {
+            "legacy_v2": {**valid, "schema_version": 2, "targets": None},
+            "missing_targets": {
+                key: value for key, value in valid.items() if key != "targets"
+            },
+            "missing_descriptor_field": {
+                **valid,
+                "targets": [{"format": "standard"}],
+            },
+            "invalid_format": {
+                **valid,
+                "targets": [{"format": "arena", "archetype": "Checkpoint Mage"}],
+            },
+            "duplicate_descriptor": {
+                **valid,
+                "targets_total": 2,
+                "targets": [*targets, *targets],
+            },
+            "signature_mismatch": {**valid, "target_signature": "not-the-targets"},
+        }
+
+        for label, checkpoint in invalid_checkpoints.items():
+            with self.subTest(label=label), patch(
+                "app.hsguru_archetype_analysis.load_baseline",
+                return_value=checkpoint,
+            ):
+                self.assertIsNone(
+                    _load_refresh_checkpoint(target_signature=None, now=now)
+                )
 
     def test_fetch_html_runs_one_shared_provider_cascade_without_retries(self) -> None:
         from app import firecrawl_backend
@@ -826,8 +874,16 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
         now = datetime(2026, 8, 12, 6, 0, tzinfo=UTC)
         checkpoint = {
             "state": "in_progress",
+            "schema_version": CHECKPOINT_SCHEMA_VERSION,
+            "rank": "legend",
+            "period": "past_week",
             "started_at": (now - timedelta(hours=1)).isoformat(),
             "saved_at": (now - timedelta(minutes=10)).isoformat(),
+            "target_signature": _target_signature(
+                [{"format": "standard", "archetype": "Cooldown Mage"}]
+            ),
+            "targets_total": 1,
+            "targets": [{"format": "standard", "archetype": "Cooldown Mage"}],
             "completed": [],
         }
         fetch_html = AsyncMock(side_effect=AssertionError("upstream must not run"))
@@ -875,8 +931,14 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
         ]
         checkpoint = {
             "state": "in_progress",
+            "schema_version": CHECKPOINT_SCHEMA_VERSION,
+            "rank": "legend",
+            "period": "past_week",
             "started_at": (now - timedelta(hours=3)).isoformat(),
             "saved_at": (now - timedelta(hours=1)).isoformat(),
+            "target_signature": _target_signature(targets),
+            "targets_total": len(targets),
+            "targets": targets,
             "completed": completed,
             "rows": checkpoint_rows,
             "negative_cache": [],
@@ -947,8 +1009,14 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
         ]
         checkpoint = {
             "state": "in_progress",
+            "schema_version": CHECKPOINT_SCHEMA_VERSION,
+            "rank": "legend",
+            "period": "past_week",
             "started_at": (now - timedelta(hours=2)).isoformat(),
             "saved_at": (now - timedelta(hours=1)).isoformat(),
+            "target_signature": _target_signature(targets),
+            "targets_total": len(targets),
+            "targets": targets,
             "completed": [],
             "rows": [],
             "negative_cache": [],
@@ -997,6 +1065,129 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
         self.assertEqual(result["provider_failures_this_run"], 1)
         self.assertIn("failure budget exhausted", result["provider_circuit_reason"])
         self.assertEqual(calls, 1)
+
+    def test_checkpoint_recovery_uses_saved_targets_when_live_matrix_drifts(self) -> None:
+        now = datetime(2026, 8, 12, 6, 0, tzinfo=UTC)
+        saved_targets = [
+            {"format": "standard", "archetype": "Saved Mage"},
+            {"format": "wild", "archetype": "Saved Priest"},
+        ]
+        checkpoint = {
+            "state": "in_progress",
+            "schema_version": CHECKPOINT_SCHEMA_VERSION,
+            "rank": "legend",
+            "period": "past_week",
+            "started_at": (now - timedelta(hours=3)).isoformat(),
+            "saved_at": (now - timedelta(hours=1)).isoformat(),
+            "target_signature": _target_signature(saved_targets),
+            "targets_total": len(saved_targets),
+            "targets": saved_targets,
+            "completed": [],
+            "rows": [],
+            "negative_cache": [],
+            "unavailable": [],
+            "acquisitions": [],
+        }
+        calls: list[str] = []
+
+        async def fetch_html(url: str):
+            calls.append(url)
+            html = MATCHUPS_HTML if "/archetype/" in url else CARD_STATS_HTML
+            return html, {"backend": "scrape_do_super", "request_credits": 25}
+
+        with (
+            patch(
+                "app.hsguru_archetype_analysis._active_archetypes",
+                side_effect=AssertionError("recovery must not read the live matrix"),
+            ),
+            patch(
+                "app.hsguru_archetype_analysis.load_baseline",
+                return_value=checkpoint,
+            ),
+            patch(
+                "app.hsguru_archetype_analysis._previous_analysis",
+                return_value={},
+            ),
+            patch(
+                "app.hsguru_archetype_analysis._previous_negative_cache",
+                return_value={},
+            ),
+            patch("app.hsguru_archetype_analysis._utc_now", return_value=now),
+            patch("app.hsguru_archetype_analysis.save_baseline"),
+            patch("app.hsguru_archetype_analysis.save_dataset"),
+            patch("app.hsguru_archetype_analysis.save_status"),
+        ):
+            result = asyncio.run(
+                refresh_hsguru_archetype_analysis(
+                    checkpoint_recovery=True,
+                    recovery_max_targets=1,
+                    concurrency=1,
+                    fetch_html=fetch_html,
+                )
+            )
+
+        self.assertTrue(result["recovery_batch_complete"])
+        self.assertEqual(result["targets"], 2)
+        self.assertEqual(result["targets_completed"], 1)
+        self.assertEqual(result["targets_remaining"], 1)
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(any("Saved%20Mage" in url for url in calls))
+
+    def test_fresh_run_persists_deterministic_checkpoint_targets(self) -> None:
+        active_targets = [
+            {"format": "wild", "archetype": "Wild Priest"},
+            {"format": "standard", "archetype": "Standard Mage"},
+        ]
+        expected_targets = list(reversed(active_targets))
+        saved_checkpoints: list[dict[str, object]] = []
+
+        async def fetch_html(url: str):
+            html = MATCHUPS_HTML if "/archetype/" in url else CARD_STATS_HTML
+            return html, {"backend": "scrape_do_super", "request_credits": 25}
+
+        with (
+            patch(
+                "app.hsguru_archetype_analysis._active_archetypes",
+                return_value=active_targets,
+            ),
+            patch(
+                "app.hsguru_archetype_analysis._load_refresh_checkpoint",
+                return_value=None,
+            ),
+            patch(
+                "app.hsguru_archetype_analysis._previous_analysis",
+                return_value={},
+            ),
+            patch(
+                "app.hsguru_archetype_analysis._previous_negative_cache",
+                return_value={},
+            ),
+            patch(
+                "app.hsguru_archetype_analysis.save_baseline",
+                side_effect=lambda _source, _label, payload: saved_checkpoints.append(
+                    payload
+                ),
+            ),
+            patch("app.hsguru_archetype_analysis.save_dataset"),
+            patch("app.hsguru_archetype_analysis.save_status"),
+        ):
+            result = asyncio.run(
+                refresh_hsguru_archetype_analysis(
+                    concurrency=1,
+                    fetch_html=fetch_html,
+                )
+            )
+
+        self.assertTrue(result["published"])
+        self.assertGreaterEqual(len(saved_checkpoints), 2)
+        for checkpoint in saved_checkpoints:
+            self.assertEqual(checkpoint["schema_version"], CHECKPOINT_SCHEMA_VERSION)
+            self.assertEqual(checkpoint["targets"], expected_targets)
+            self.assertEqual(checkpoint["targets_total"], len(expected_targets))
+            self.assertEqual(
+                checkpoint["target_signature"],
+                _target_signature(expected_targets),
+            )
 
     def test_expired_checkpoint_gap_is_retried_and_stale_unavailable_is_cleared(
         self,
