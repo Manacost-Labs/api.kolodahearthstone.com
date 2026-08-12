@@ -69,8 +69,9 @@ curl -fsS https://api.kolodahearthstone.com/v1/graphql \
 | `records` | `database:read` | Строки любой разрешённой PostgreSQL collection |
 
 GraphQL pagination возвращает `items` и `pageInfo`. Максимальный `limit` —
-`200`, максимальный `offset` — `100000`. Ошибки находятся в
-`errors[].extensions.code`.
+`200`, максимальный `offset` — `100000`. `cards` также возвращает
+`pageInfo.nextCursor`, который передаётся в `after` для быстрой глубокой
+пагинации. Ошибки находятся в `errors[].extensions.code`.
 
 ## REST v1 — Constructed, Battlegrounds и Arena
 
