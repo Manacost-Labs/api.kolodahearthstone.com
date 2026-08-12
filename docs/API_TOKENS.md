@@ -33,6 +33,25 @@ Scopes are independent and follow least privilege. For example, a WordPress
 integration that only reads GraphQL collections should receive only
 `database:read`.
 
+## Web panel
+
+The preferred operator workflow is the authenticated panel at
+`https://api.kolodahearthstone.com/`. Sign in with the allowlisted GitHub
+account, then open **API-токены** under **Доступ**. The page issues, lists and
+revokes tokens without exposing the bootstrap credential or the panel manager
+credential to the browser.
+
+Choose one descriptive token name per consumer, grant the minimum scopes and
+set the shortest practical lifetime. The newly issued plaintext credential is
+rendered once, immediately after the form submission. Copy it directly into the
+consumer secret manager; refreshing or leaving the page removes it.
+
+The panel's dedicated credential has only `tokens:manage`, lives in a
+root-provisioned file outside the web root with mode `0600`, and is used only for
+fixed local API routes. The UI and server both prevent that credential from
+revoking itself. GitHub authentication, CSRF protection, one-time form nonces
+and a per-session issue rate limit protect token mutations.
+
 ## Issue a token
 
 The existing `HS_API_KEY` is a temporary bootstrap credential and has every
