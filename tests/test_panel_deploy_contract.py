@@ -16,6 +16,8 @@ def test_panel_deploy_keeps_secrets_and_data_outside_releases() -> None:
     assert "--exclude='config.php'" in script
     assert "--exclude='uploads/'" in script
     assert "--exclude='var/'" in script
+    assert "--exclude='__pycache__/'" in script
+    assert "--exclude='*.pyc'" in script
     assert '[[ "$path" != "/"' in script
     assert '[[ "$EUID" -eq 0 ]]' in script
     assert "chown -R koloda:koloda \"$DATA_ROOT\"" not in script

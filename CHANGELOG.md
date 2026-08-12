@@ -9,6 +9,7 @@
 - Moved the production panel to a domain-neutral runtime with persistent media
   and cache storage outside Git; the retired domain path is no longer used by
   active Nginx or systemd configuration.
+- Excluded Python bytecode and test caches from immutable panel releases.
 - Extended the full HSGuru archetype-analysis timeout to two hours so the
   checkpointed Scrape.do refresh can finish all rank/format targets.
 - Accepted title-less structured API snapshots during last-known-good

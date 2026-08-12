@@ -46,6 +46,9 @@ rsync -a --delete \
   --exclude='var/' \
   --exclude='tests/' \
   --exclude='systemd/' \
+  --exclude='__pycache__/' \
+  --exclude='*.pyc' \
+  --exclude='.pytest_cache/' \
   "$SOURCE_ROOT/" "$RELEASE_ROOT/"
 
 ln -s "$CONFIG_PATH" "$RELEASE_ROOT/config.php"
