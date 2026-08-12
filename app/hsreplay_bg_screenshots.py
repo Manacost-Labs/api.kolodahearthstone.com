@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import io
 import json
+import math
 import os
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageFilter, ImageStat, UnidentifiedImageError
 
 from .config import data_dir
 from .firecrawl_backend import (
@@ -36,6 +37,16 @@ _PIL_FORMAT_MIMES = {
 _MIN_IMAGE_DIMENSION = 64
 _MAX_IMAGE_DIMENSION = 20_000
 _MAX_IMAGE_PIXELS = 100_000_000
+_CONTENT_THUMBNAIL_SIZE = (640, 640)
+_CONTENT_GRID_COLUMNS = 8
+_CONTENT_GRID_ROWS = 6
+_BLANK_MAX_QUANTIZED_ENTROPY = 0.8
+_BLANK_MIN_DOMINANT_LUMINANCE_FRACTION = 0.90
+_BLANK_MIN_ACTIVE_TILES = 8
+_BLANK_MIN_ACTIVE_BANDS = 2
+_ACTIVE_TILE_MIN_STDDEV = 6.0
+_ACTIVE_TILE_MIN_EDGE_FRACTION = 0.015
+_EDGE_VALUE_THRESHOLD = 17
 _PUBLIC_CAPTURE_BACKENDS = frozenset(
     {"firecrawl", "scrape_do", "scrape_do_super", "scrapfly"}
 )
@@ -113,6 +124,7 @@ def _write_screenshot(value: str, image_path: Path) -> dict[str, Any]:
         _redact_account_area(temporary_path)
         _crop_compositions_table(temporary_path)
         _validated_image_mime(temporary_path.read_bytes(), declared_mime=mime)
+        _validate_compositions_content(temporary_path)
         os.replace(temporary_path, final_path)
     finally:
         try:
@@ -155,14 +167,95 @@ def _crop_compositions_table(image_path: Path) -> None:
     try:
         with Image.open(image_path) as image:
             width, height = image.size
-            left = int(width * 0.16)
-            top = int(height * 0.18)
-            right = int(width * 0.84)
-            bottom = min(int(height * 0.77), top + int(width * 0.48))
-            cropped = image.crop((left, top, right, bottom))
+            cropped = image.crop(_compositions_crop_box(width, height))
             cropped.save(image_path)
     except (Image.DecompressionBombError, OSError, SyntaxError, ValueError) as exc:
         raise ValueError("Failed to crop screenshot compositions table") from exc
+
+
+def _compositions_crop_box(width: int, height: int) -> tuple[int, int, int, int]:
+    left = int(width * 0.16)
+    top = int(height * 0.18)
+    right = int(width * 0.84)
+    bottom = min(int(height * 0.77), top + int(width * 0.48))
+    return left, top, right, bottom
+
+
+def _validate_compositions_image(image: Image.Image) -> None:
+    """Reject an unloaded page shell without requiring a minimum row count."""
+    sample = image.convert("L")
+    sample.thumbnail(_CONTENT_THUMBNAIL_SIZE, Image.Resampling.BILINEAR)
+    histogram = sample.histogram()
+    luminance_buckets = [
+        sum(histogram[start : start + 16]) for start in range(0, 256, 16)
+    ]
+    total_pixels = max(1, sum(luminance_buckets))
+    fractions = [count / total_pixels for count in luminance_buckets if count]
+    quantized_entropy = -sum(
+        fraction * math.log2(fraction) for fraction in fractions
+    )
+    dominant_fraction = max(fractions, default=1.0)
+
+    width, height = sample.size
+    if width > 4 and height > 4:
+        sample = sample.crop((2, 2, width - 2, height - 2))
+        width, height = sample.size
+    edges = sample.filter(ImageFilter.FIND_EDGES)
+    active_tiles = 0
+    active_bands: set[int] = set()
+    for row in range(_CONTENT_GRID_ROWS):
+        top = row * height // _CONTENT_GRID_ROWS
+        bottom = (row + 1) * height // _CONTENT_GRID_ROWS
+        for column in range(_CONTENT_GRID_COLUMNS):
+            left = column * width // _CONTENT_GRID_COLUMNS
+            right = (column + 1) * width // _CONTENT_GRID_COLUMNS
+            tile = sample.crop((left, top, right, bottom))
+            edge_tile = edges.crop((left, top, right, bottom))
+            edge_histogram = edge_tile.histogram()
+            edge_fraction = sum(edge_histogram[_EDGE_VALUE_THRESHOLD:]) / max(
+                1, sum(edge_histogram)
+            )
+            if (
+                ImageStat.Stat(tile).stddev[0] >= _ACTIVE_TILE_MIN_STDDEV
+                and edge_fraction >= _ACTIVE_TILE_MIN_EDGE_FRACTION
+            ):
+                active_tiles += 1
+                active_bands.add(row)
+
+    # All three signals must indicate an empty shell. This deliberately allows
+    # sparse post-patch tables and does not impose a row-count requirement.
+    if (
+        quantized_entropy < _BLANK_MAX_QUANTIZED_ENTROPY
+        and dominant_fraction > _BLANK_MIN_DOMINANT_LUMINANCE_FRACTION
+        and (
+            active_tiles < _BLANK_MIN_ACTIVE_TILES
+            or len(active_bands) < _BLANK_MIN_ACTIVE_BANDS
+        )
+    ):
+        raise ValueError("Screenshot does not contain meaningful compositions content")
+
+
+def _validate_compositions_content(image_path: Path) -> None:
+    try:
+        with Image.open(image_path) as image:
+            _validate_compositions_image(image)
+    except ValueError:
+        raise
+    except (Image.DecompressionBombError, OSError, SyntaxError) as exc:
+        raise ValueError("Failed to validate screenshot content") from exc
+
+
+def _accept_compositions_capture(scraped: Any) -> bool:
+    screenshot = str(getattr(scraped, "screenshot", "") or "")
+    try:
+        _mime, raw = _read_screenshot(screenshot)
+        with Image.open(io.BytesIO(raw)) as image:
+            width, height = image.size
+            cropped = image.crop(_compositions_crop_box(width, height))
+            _validate_compositions_image(cropped)
+    except (OSError, RuntimeError, ValueError):
+        return False
+    return True
 
 
 def _hsreplay_cookie_header() -> str:
@@ -219,10 +312,12 @@ async def _capture_compositions_screenshot_unlocked() -> dict[str, Any]:
         source,
         formats=["markdown", {"type": "screenshot", "fullPage": True}],
         only_main_content=False,
+        wait_ms=8_000,
         headers={
             "Cookie": _hsreplay_cookie_header(),
             "Accept-Language": "en-US,en;q=0.9",
         },
+        accept_result=_accept_compositions_capture,
     )
     if not scraped.screenshot:
         raise RuntimeError("Firecrawl response did not include screenshot")
@@ -267,6 +362,7 @@ def _load_valid_screenshot_metadata(
         mime = _validated_image_mime(image_path.read_bytes())
         if image_path.suffix.casefold() != _IMAGE_SUFFIXES[mime]:
             return None
+        _validate_compositions_content(image_path)
         return payload
     except (OSError, TypeError, ValueError, json.JSONDecodeError):
         return None

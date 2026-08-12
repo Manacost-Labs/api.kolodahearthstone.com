@@ -9,11 +9,12 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from app import cli
 from app.hsreplay_bg_screenshots import (
     SCREENSHOT_SOURCE_ID,
+    _accept_compositions_capture,
     _public_capture_metadata,
     _write_screenshot,
     capture_compositions_screenshot,
@@ -24,12 +25,35 @@ from app.resource_locks import ResourceLocked
 
 def _valid_png_bytes() -> bytes:
     buffer = BytesIO()
-    Image.new("RGB", (1_200, 800), color=(31, 24, 38)).save(buffer, format="PNG")
+    image = Image.new("RGB", (1_200, 800), color=(31, 24, 38))
+    draw = ImageDraw.Draw(image)
+    for row in range(8):
+        top = 160 + row * 65
+        draw.rectangle((180, top, 1_020, top + 52), fill=(72, 51, 74))
+        draw.rectangle((205, top + 12, 340, top + 40), fill=(138, 104, 143))
+        for column in range(7):
+            left = 580 + column * 55
+            draw.ellipse(
+                (left, top + 5, left + 42, top + 47),
+                fill=(170 + row * 4, 105 + column * 8, 48 + row * 5),
+            )
+    image.save(buffer, format="PNG")
     return buffer.getvalue()
 
 
 def _valid_png_data_uri() -> str:
     encoded = base64.b64encode(_valid_png_bytes()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
+
+
+def _blank_shell_png_data_uri() -> str:
+    buffer = BytesIO()
+    image = Image.new("RGB", (1_036, 841), color=(22, 12, 26))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((0, 700, 1_036, 841), fill=(34, 24, 35))
+    draw.rectangle((0, 735, 145, 750), fill=(240, 235, 240))
+    image.save(buffer, format="PNG")
+    encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
     return f"data:image/png;base64,{encoded}"
 
 
@@ -41,6 +65,24 @@ def test_write_screenshot_accepts_and_preserves_a_valid_image(tmp_path: Path) ->
     assert image_path.stat().st_size == result["image_bytes"]
     with Image.open(image_path) as image:
         image.verify()
+
+
+def test_write_screenshot_rejects_a_valid_but_blank_page_shell(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="meaningful compositions content"):
+        _write_screenshot(_blank_shell_png_data_uri(), tmp_path / "capture")
+
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_provider_validation_rejects_blank_shell_and_accepts_sparse_content() -> None:
+    assert not _accept_compositions_capture(
+        SimpleNamespace(screenshot=_blank_shell_png_data_uri())
+    )
+    assert _accept_compositions_capture(
+        SimpleNamespace(screenshot=_valid_png_data_uri())
+    )
 
 
 @pytest.mark.parametrize(
@@ -212,6 +254,40 @@ def test_latest_falls_back_to_newest_valid_historical_image(tmp_path: Path) -> N
     }
     (tmp_path / "latest.json").write_text(
         json.dumps(invalid_payload),
+        encoding="utf-8",
+    )
+
+    old_image = tmp_path / "20260804T021000Z.png"
+    old_image.write_bytes(_valid_png_bytes())
+    old_payload = {
+        "ok": True,
+        "image_path": str(old_image),
+        "image_bytes": old_image.stat().st_size,
+        "captured_at": "2026-08-04T02:10:00+00:00",
+    }
+    (tmp_path / "20260804T021000Z.json").write_text(
+        json.dumps(old_payload),
+        encoding="utf-8",
+    )
+
+    with patch("app.hsreplay_bg_screenshots._screenshot_dir", return_value=tmp_path):
+        assert latest_compositions_screenshot() == old_payload
+
+
+def test_latest_falls_back_when_newest_image_is_a_blank_page_shell(
+    tmp_path: Path,
+) -> None:
+    blank_image = tmp_path / "20260812T120148Z.png"
+    blank_encoded = _blank_shell_png_data_uri().partition(",")[2]
+    blank_image.write_bytes(base64.b64decode(blank_encoded))
+    blank_payload = {
+        "ok": True,
+        "image_path": str(blank_image),
+        "image_bytes": blank_image.stat().st_size,
+        "captured_at": "2026-08-12T12:01:48+00:00",
+    }
+    (tmp_path / "latest.json").write_text(
+        json.dumps(blank_payload),
         encoding="utf-8",
     )
 

@@ -32,6 +32,11 @@ services:
     shm_size: "4gb"
     mem_limit: "12g"
     cpus: 6
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
 
   flaresolverr:
     image: ghcr.io/flaresolverr/flaresolverr:latest
