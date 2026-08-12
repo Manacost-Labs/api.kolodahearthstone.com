@@ -104,5 +104,14 @@ assert_contains sql/007_large_collection_pagination.sql \
 assert_contains sql/007_large_collection_pagination.sql \
   'bg_minion_snapshots_cursor_idx' \
   'Battlegrounds minion history must have a keyset pagination index'
+assert_contains scripts/apply-migrations.sh \
+  '008_unified_search_and_history\.sql' \
+  'unified search and patch history indexes must be deployed'
+assert_contains sql/008_unified_search_and_history.sql \
+  'CREATE OR REPLACE VIEW hub\.unified_search' \
+  'the cross-entity search view must be installed'
+assert_contains sql/008_unified_search_and_history.sql \
+  'game_stat_rows_entity_history_idx' \
+  'per-entity patch history must have a lookup index'
 
 echo 'OK: migration cutover contract'

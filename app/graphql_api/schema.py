@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 import hashlib
 import json
 from datetime import datetime
 from decimal import Decimal
+from enum import Enum
 from typing import Any
 
 import strawberry
@@ -139,12 +141,32 @@ class GameStatistic:
     image_url: str | None
     source_url: str | None
     metrics: JSON | None
+    snapshot_id: int | None
 
 
 @strawberry.type
 class GameStatisticConnection:
     items: list[GameStatistic]
     page_info: PageInfo
+
+
+@strawberry.type
+class PatchMetricDelta:
+    metric: str
+    before_value: float | None
+    after_value: float | None
+    absolute_change: float | None
+    percent_change: float | None
+
+
+@strawberry.type
+class StatisticPatchComparison:
+    entity_key: str
+    from_patch: str
+    to_patch: str
+    before: GameStatistic | None
+    after: GameStatistic | None
+    deltas: list[PatchMetricDelta]
 
 
 @strawberry.type
@@ -214,6 +236,34 @@ class DataSource:
 @strawberry.type
 class DataSourceConnection:
     items: list[DataSource]
+    page_info: PageInfo
+
+
+@strawberry.enum
+class SearchEntityKind(str, Enum):
+    CARD = "card"
+    MINION = "minion"
+    HERO = "hero"
+    ARCHETYPE = "archetype"
+    SOURCE = "source"
+
+
+@strawberry.type
+class SearchResult:
+    kind: SearchEntityKind
+    entity_id: str
+    name: str
+    name_ru: str | None
+    subtitle: str | None
+    image_url: str | None
+    source_id: str
+    updated_at: datetime | None
+    metadata: JSON
+
+
+@strawberry.type
+class SearchResultConnection:
+    items: list[SearchResult]
     page_info: PageInfo
 
 
@@ -464,12 +514,53 @@ def _statistic(row: dict[str, Any]) -> GameStatistic:
     return GameStatistic(
         **{
             **row,
+            "snapshot_id": row.get("snapshot_id"),
             "win_rate": _optional_float(row.get("win_rate")),
             "popularity": _optional_float(row.get("popularity")),
             "pick_rate": _optional_float(row.get("pick_rate")),
             "avg_placement": _optional_float(row.get("avg_placement")),
             "score": _optional_float(row.get("score")),
         }
+    )
+
+
+def _search_result(row: dict[str, Any]) -> SearchResult:
+    return SearchResult(
+        kind=SearchEntityKind(str(row["kind"])),
+        entity_id=str(row["entity_id"]),
+        name=str(row["name"]),
+        name_ru=row.get("name_ru"),
+        subtitle=row.get("subtitle"),
+        image_url=row.get("image_url"),
+        source_id=str(row["source_id"]),
+        updated_at=row.get("updated_at"),
+        metadata=row.get("metadata") or {},
+    )
+
+
+def _metric_delta(
+    metric: str,
+    before: dict[str, Any] | None,
+    after: dict[str, Any] | None,
+) -> PatchMetricDelta:
+    before_value = _optional_float(before.get(metric)) if before else None
+    after_value = _optional_float(after.get(metric)) if after else None
+    absolute_change = (
+        after_value - before_value
+        if before_value is not None and after_value is not None
+        else None
+    )
+    percent_change = (
+        absolute_change / abs(before_value) * 100
+        if absolute_change is not None and before_value not in {None, 0.0}
+        else None
+    )
+    return PatchMetricDelta(
+        metric=metric,
+        before_value=before_value,
+        after_value=after_value,
+        absolute_change=absolute_change,
+        percent_change=percent_change,
     )
 
 
@@ -716,6 +807,141 @@ class Query:
         )
 
     @strawberry.field(
+        description="All stored snapshots for one statistic entity across patches."
+    )
+    async def statistic_history(
+        self,
+        info: Info[GraphQLContext, None],
+        entity_key: str,
+        domain: str | None = None,
+        entity_type: str | None = None,
+        source_id: str | None = None,
+        format_name: str | None = None,
+        rank_range: str | None = None,
+        mode: str | None = None,
+        patch: str | None = None,
+        after: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> GameStatisticConnection:
+        limit, offset = _normalize_page(limit, offset)
+        normalized_entity = _normalize_text(entity_key, "entityKey", 160)
+        if normalized_entity is None:
+            raise _validation_error("entityKey is required")
+        normalized_filters = {
+            "entityKey": normalized_entity,
+            "domain": _normalize_text(domain, "domain", 64),
+            "entityType": _normalize_text(entity_type, "entityType", 64),
+            "sourceId": _normalize_text(source_id, "sourceId", 120),
+            "formatName": _normalize_text(format_name, "formatName", 64),
+            "rankRange": _normalize_text(rank_range, "rankRange", 64),
+            "mode": _normalize_text(mode, "mode", 64),
+            "patch": _normalize_text(patch, "patch", 64),
+        }
+        scope = _cursor_scope("statistic_history", normalized_filters)
+        normalized_after = _normalize_after(after, offset)
+        result = await _call_repository(
+            _repository(info).statistic_history(
+                entity_key=normalized_entity,
+                domain=normalized_filters["domain"],
+                entity_type=normalized_filters["entityType"],
+                source_id=normalized_filters["sourceId"],
+                format_name=normalized_filters["formatName"],
+                rank_range=normalized_filters["rankRange"],
+                mode=normalized_filters["mode"],
+                patch=normalized_filters["patch"],
+                after=(
+                    _decode_values_cursor(normalized_after, "statistic_history", scope)
+                    if normalized_after
+                    else None
+                ),
+                limit=limit,
+                offset=offset,
+            )
+        )
+        return GameStatisticConnection(
+            items=[_statistic(row) for row in result.items],
+            page_info=_page_info(
+                result,
+                limit,
+                offset,
+                next_cursor=_result_cursor(
+                    result,
+                    kind="statistic_history",
+                    scope=scope,
+                ),
+            ),
+        )
+
+    @strawberry.field(
+        description="Compare the latest stored values for one entity in two patches."
+    )
+    async def compare_statistic_patches(
+        self,
+        info: Info[GraphQLContext, None],
+        entity_key: str,
+        from_patch: str,
+        to_patch: str,
+        domain: str | None = None,
+        entity_type: str | None = None,
+        source_id: str | None = None,
+        format_name: str | None = None,
+        rank_range: str | None = None,
+        mode: str | None = None,
+    ) -> StatisticPatchComparison:
+        normalized_entity = _normalize_text(entity_key, "entityKey", 160)
+        normalized_from = _normalize_text(from_patch, "fromPatch", 64)
+        normalized_to = _normalize_text(to_patch, "toPatch", 64)
+        if normalized_entity is None:
+            raise _validation_error("entityKey is required")
+        if normalized_from is None or normalized_to is None:
+            raise _validation_error("fromPatch and toPatch are required")
+        filters = {
+            "entity_key": normalized_entity,
+            "domain": _normalize_text(domain, "domain", 64),
+            "entity_type": _normalize_text(entity_type, "entityType", 64),
+            "source_id": _normalize_text(source_id, "sourceId", 120),
+            "format_name": _normalize_text(format_name, "formatName", 64),
+            "rank_range": _normalize_text(rank_range, "rankRange", 64),
+            "mode": _normalize_text(mode, "mode", 64),
+            "after": None,
+            "limit": 1,
+            "offset": 0,
+        }
+        before_result, after_result = await asyncio.gather(
+            _call_repository(
+                _repository(info).statistic_history(
+                    **filters,
+                    patch=normalized_from,
+                )
+            ),
+            _call_repository(
+                _repository(info).statistic_history(
+                    **filters,
+                    patch=normalized_to,
+                )
+            ),
+        )
+        before_row = before_result.items[0] if before_result.items else None
+        after_row = after_result.items[0] if after_result.items else None
+        metrics = (
+            "games",
+            "win_rate",
+            "popularity",
+            "pick_rate",
+            "avg_placement",
+            "score",
+        )
+        return StatisticPatchComparison(
+            entity_key=normalized_entity,
+            from_patch=normalized_from,
+            to_patch=normalized_to,
+            before=_statistic(before_row) if before_row else None,
+            after=_statistic(after_row) if after_row else None,
+            deltas=[_metric_delta(metric, before_row, after_row) for metric in metrics],
+        )
+
+    @strawberry.field(
         description="Latest archetype statistics by rank, format and region."
     )
     async def archetypes(
@@ -854,6 +1080,55 @@ class Query:
                 limit,
                 offset,
                 next_cursor=_result_cursor(result, kind="sources", scope=scope),
+            ),
+        )
+
+    @strawberry.field(
+        description=(
+            "Search cards, minions, heroes, archetypes and data sources together."
+        )
+    )
+    async def search(
+        self,
+        info: Info[GraphQLContext, None],
+        query: str,
+        kinds: list[SearchEntityKind] | None = None,
+        after: str | None = None,
+        limit: int = 30,
+        offset: int = 0,
+    ) -> SearchResultConnection:
+        limit, offset = _normalize_page(limit, offset)
+        normalized_query = _normalize_text(query, "query", 120)
+        if normalized_query is None or len(normalized_query) < 2:
+            raise _validation_error("query must contain at least 2 characters")
+        normalized_kinds = (
+            sorted({kind.value for kind in kinds}) if kinds is not None else None
+        )
+        scope = _cursor_scope(
+            "search",
+            {"query": normalized_query, "kinds": normalized_kinds},
+        )
+        normalized_after = _normalize_after(after, offset)
+        result = await _call_repository(
+            _repository(info).search(
+                query=normalized_query,
+                kinds=normalized_kinds,
+                after=(
+                    _decode_values_cursor(normalized_after, "search", scope)
+                    if normalized_after
+                    else None
+                ),
+                limit=limit,
+                offset=offset,
+            )
+        )
+        return SearchResultConnection(
+            items=[_search_result(row) for row in result.items],
+            page_info=_page_info(
+                result,
+                limit,
+                offset,
+                next_cursor=_result_cursor(result, kind="search", scope=scope),
             ),
         )
 

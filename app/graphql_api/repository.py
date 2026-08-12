@@ -46,11 +46,15 @@ class GraphQLRepository(Protocol):
 
     async def statistics(self, **filters: Any) -> PageResult: ...
 
+    async def statistic_history(self, **filters: Any) -> PageResult: ...
+
     async def archetypes(self, **filters: Any) -> PageResult: ...
 
     async def battleground_minions(self, **filters: Any) -> PageResult: ...
 
     async def sources(self, **filters: Any) -> PageResult: ...
+
+    async def search(self, **filters: Any) -> PageResult: ...
 
     async def datasets(self, **filters: Any) -> PageResult: ...
 
@@ -442,6 +446,124 @@ class PostgresGraphQLRepository:
 
         return self._keyset_result(result, limit=limit, cursor=statistic_cursor)
 
+    async def statistic_history(
+        self,
+        *,
+        entity_key: str,
+        domain: str | None,
+        entity_type: str | None,
+        source_id: str | None,
+        format_name: str | None,
+        rank_range: str | None,
+        mode: str | None,
+        patch: str | None,
+        after: list[Any] | None,
+        limit: int,
+        offset: int,
+    ) -> PageResult:
+        where = ["entity_key = %(entity_key)s"]
+        params: dict[str, Any] = {
+            "entity_key": entity_key,
+            "limit": limit + 1,
+            "offset": 0 if after else offset,
+        }
+        for column, value in (
+            ("domain", domain),
+            ("entity_type", entity_type),
+            ("source_id", source_id),
+            ("format_name", format_name),
+            ("rank_range", rank_range),
+            ("mode", mode),
+            ("patch", patch),
+        ):
+            if value:
+                where.append(f"{column} = %({column})s")
+                params[column] = value
+        count_where = list(where)
+        if after:
+            if (
+                len(after) != 3
+                or not isinstance(after[0], bool)
+                or isinstance(after[1], bool)
+                or not isinstance(after[1], (int, float))
+                or isinstance(after[2], bool)
+                or not isinstance(after[2], int)
+            ):
+                raise RepositoryValidationError(
+                    "after is not a valid statistic history cursor"
+                )
+            where.append(
+                "(fetched_at IS NULL, COALESCE(-extract(epoch FROM fetched_at), 0), "
+                "-snapshot_id) > (%(after_null)s, %(after_epoch)s, %(after_id)s)"
+            )
+            params.update(
+                {
+                    "after_null": after[0],
+                    "after_epoch": after[1],
+                    "after_id": after[2],
+                }
+            )
+        base = """(
+            SELECT
+                snapshot.id AS snapshot_id,
+                snapshot.source_id,
+                snapshot.dataset_version,
+                snapshot.domain,
+                snapshot.entity_type AS snapshot_entity_type,
+                snapshot.format_name,
+                snapshot.rank_range,
+                snapshot.period,
+                snapshot.mode,
+                snapshot.rating_bracket,
+                snapshot.patch,
+                snapshot.source_url AS snapshot_source_url,
+                snapshot.fetched_at,
+                snapshot.metadata,
+                stat.entity_key,
+                stat.entity_type,
+                stat.card_id,
+                stat.dbf_id,
+                stat.name,
+                stat.name_ru,
+                stat.class_name,
+                stat.tier,
+                stat.games,
+                stat.win_rate,
+                stat.popularity,
+                stat.pick_rate,
+                stat.avg_placement,
+                stat.score,
+                stat.image_url,
+                stat.source_url,
+                stat.metrics
+            FROM analytics.game_stat_snapshots AS snapshot
+            JOIN analytics.game_stat_rows AS stat ON stat.snapshot_id = snapshot.id
+        ) AS statistic_history"""
+        count_query, rows_query = self._page_sql(
+            base,
+            where,
+            "fetched_at IS NULL, COALESCE(-extract(epoch FROM fetched_at), 0), "
+            "-snapshot_id",
+            count_where=count_where,
+        )
+        result = await self._fetch_page(
+            count_query=count_query,
+            rows_query=rows_query,
+            params=params,
+        )
+
+        def history_cursor(row: dict[str, Any]) -> dict[str, Any]:
+            fetched_at = row.get("fetched_at")
+            return {
+                "values": [
+                    fetched_at is None,
+                    -fetched_at.timestamp() if fetched_at is not None else 0,
+                    -int(row["snapshot_id"]),
+                ]
+            }
+
+        return self._keyset_result(result, limit=limit, cursor=history_cursor)
+
     async def archetypes(
         self,
         *,
@@ -673,6 +795,94 @@ class PostgresGraphQLRepository:
             limit=limit,
             cursor=lambda row: {
                 "values": [str(row["display_name"]), str(row["source_id"])]
+            },
+        )
+
+    async def search(
+        self,
+        *,
+        query: str,
+        kinds: list[str] | None,
+        after: list[Any] | None,
+        limit: int,
+        offset: int,
+    ) -> PageResult:
+        escaped_query = (
+            query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        )
+        params: dict[str, Any] = {
+            "query": query,
+            "prefix": f"{escaped_query}%",
+            "pattern": f"%{escaped_query}%",
+            "limit": limit + 1,
+            "offset": 0 if after else offset,
+        }
+        kind_filter = ""
+        if kinds:
+            kind_filter = "AND kind = ANY(%(kinds)s)"
+            params["kinds"] = kinds
+        base = f"""(
+            SELECT searched.*,
+                   lower(COALESCE(searched.name_ru, searched.name, '')) AS search_name,
+                   CASE
+                       WHEN lower(searched.entity_id) = lower(%(query)s)
+                         OR lower(searched.name) = lower(%(query)s) THEN 0
+                       WHEN searched.entity_id ILIKE %(prefix)s ESCAPE '\\'
+                         OR searched.name ILIKE %(prefix)s ESCAPE '\\'
+                         OR searched.name_ru ILIKE %(prefix)s ESCAPE '\\' THEN 1
+                       ELSE 2
+                   END AS search_rank
+            FROM hub.unified_search AS searched
+            WHERE (
+                searched.entity_id ILIKE %(pattern)s ESCAPE '\\'
+                OR searched.name ILIKE %(pattern)s ESCAPE '\\'
+                OR searched.name_ru ILIKE %(pattern)s ESCAPE '\\'
+                OR searched.subtitle ILIKE %(pattern)s ESCAPE '\\'
+            )
+            {kind_filter}
+        ) AS unified_results"""
+        where: list[str] = []
+        if after:
+            if (
+                len(after) != 4
+                or isinstance(after[0], bool)
+                or not isinstance(after[0], int)
+                or not all(isinstance(value, str) for value in after[1:])
+            ):
+                raise RepositoryValidationError("after is not a valid search cursor")
+            where.append(
+                "(search_rank, kind, search_name, entity_id) > "
+                "(%(after_rank)s, %(after_kind)s, %(after_name)s, %(after_id)s)"
+            )
+            params.update(
+                {
+                    "after_rank": after[0],
+                    "after_kind": after[1],
+                    "after_name": after[2],
+                    "after_id": after[3],
+                }
+            )
+        count_query, rows_query = self._page_sql(
+            base,
+            where,
+            "search_rank, kind, search_name, entity_id",
+            count_where=[],
+        )
+        result = await self._fetch_page(
+            count_query=count_query,
+            rows_query=rows_query,
+            params=params,
+        )
+        return self._keyset_result(
+            result,
+            limit=limit,
+            cursor=lambda row: {
+                "values": [
+                    int(row["search_rank"]),
+                    str(row["kind"]),
+                    str(row["search_name"]),
+                    str(row["entity_id"]),
+                ]
             },
         )
 
