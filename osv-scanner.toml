@@ -1,0 +1,11 @@
+# cloudscraper declares requests>=2.9.2. OSV-Scanner reports that lower bound as
+# an installed transitive version when scanning unconstrained manifests, even
+# though this project explicitly requires requests>=2.33 and the resolved venv
+# uses a newer version. Keep this exception version-specific and time-bounded.
+[[PackageOverrides]]
+name = "requests"
+version = "2.9.2"
+ecosystem = "PyPI"
+vulnerability.ignore = true
+effectiveUntil = 2027-02-01
+reason = "Manifest resolver treats cloudscraper's minimum as installed; project constraint is requests>=2.33."
