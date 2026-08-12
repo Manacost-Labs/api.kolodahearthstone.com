@@ -184,9 +184,61 @@ def test_graphql_v1_serves_health_and_paginated_cards(monkeypatch: Any) -> None:
             "collection": None,
             "card_type": None,
             "active": None,
+            "after": None,
             "limit": 1,
             "offset": 1,
         },
+    )
+
+
+def test_graphql_cards_cursor_is_opaque_and_forwarded(monkeypatch: Any) -> None:
+    fake = FakeRepository()
+    first = _post(
+        "query { cards(limit: 1) { pageInfo { hasNextPage nextCursor } } }",
+        fake,
+        monkeypatch,
+    )
+    cursor = first.json()["data"]["cards"]["pageInfo"]["nextCursor"]
+
+    response = _post(
+        f'query {{ cards(limit: 1, after: "{cursor}") '
+        "{ items { cardId } pageInfo { nextCursor } } }",
+        fake,
+        monkeypatch,
+    )
+
+    assert response.status_code == 200
+    assert "errors" not in response.json()
+    assert fake.last_call == (
+        "cards",
+        {
+            "search": None,
+            "collection": None,
+            "card_type": None,
+            "active": None,
+            "after": ("constructed", "Тестовая карта", "EX1_001"),
+            "limit": 1,
+            "offset": 0,
+        },
+    )
+
+
+def test_graphql_cards_rejects_invalid_or_ambiguous_cursor(monkeypatch: Any) -> None:
+    invalid = _post(
+        'query { cards(after: "not-a-cursor") { pageInfo { total } } }',
+        FakeRepository(),
+        monkeypatch,
+    )
+    ambiguous = _post(
+        'query { cards(after: "not-a-cursor", offset: 1) { pageInfo { total } } }',
+        FakeRepository(),
+        monkeypatch,
+    )
+
+    assert invalid.json()["errors"][0]["extensions"]["code"] == "VALIDATION_ERROR"
+    assert invalid.json()["errors"][0]["message"] == "after is not a valid cards cursor"
+    assert ambiguous.json()["errors"][0]["message"] == (
+        "after and a non-zero offset cannot be combined"
     )
 
 
@@ -202,9 +254,7 @@ def test_canonical_graphql_endpoint_matches_legacy_contract(monkeypatch: Any) ->
     discovery = client.get("/v1/graphql")
 
     assert response.status_code == 200
-    assert response.json() == {
-        "data": {"health": {"status": "ok", "sourceCount": 7}}
-    }
+    assert response.json() == {"data": {"health": {"status": "ok", "sourceCount": 7}}}
     assert discovery.status_code == 200
     assert discovery.json() == {
         "name": "Koloda Hearthstone GraphQL API",

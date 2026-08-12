@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import base64
+import binascii
+import json
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
@@ -37,6 +40,7 @@ class PageInfo:
     offset: int
     total: int
     has_next_page: bool
+    next_cursor: str | None = None
 
 
 @strawberry.type
@@ -303,12 +307,59 @@ def _optional_float(value: Any) -> float | None:
     return float(value)
 
 
-def _page_info(result: PageResult, limit: int, offset: int) -> PageInfo:
+def _encode_card_cursor(row: dict[str, Any]) -> str:
+    payload = json.dumps(
+        {
+            "v": 1,
+            "collection": str(row["collection"]),
+            "name": str(row.get("name_ru") or row.get("name_en") or ""),
+            "cardId": str(row["card_id"]),
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode()
+    return base64.urlsafe_b64encode(payload).decode().rstrip("=")
+
+
+def _decode_card_cursor(value: str) -> tuple[str, str, str]:
+    if not value or len(value) > 1_024:
+        raise _validation_error("after is not a valid cards cursor")
+    try:
+        padding = "=" * (-len(value) % 4)
+        payload = json.loads(
+            base64.b64decode(value + padding, altchars=b"-_", validate=True)
+        )
+    except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError):
+        raise _validation_error("after is not a valid cards cursor") from None
+    if not isinstance(payload, dict) or payload.get("v") != 1:
+        raise _validation_error("after is not a valid cards cursor")
+    values = (payload.get("collection"), payload.get("name"), payload.get("cardId"))
+    if not all(isinstance(item, str) for item in values):
+        raise _validation_error("after is not a valid cards cursor")
+    collection, name, card_id = values
+    if not collection or not card_id or any(len(item) > 256 for item in values):
+        raise _validation_error("after is not a valid cards cursor")
+    return collection, name, card_id
+
+
+def _page_info(
+    result: PageResult,
+    limit: int,
+    offset: int,
+    *,
+    next_cursor: str | None = None,
+) -> PageInfo:
+    has_next_page = (
+        result.has_next_page
+        if result.has_next_page is not None
+        else offset + len(result.items) < result.total
+    )
     return PageInfo(
         limit=limit,
         offset=offset,
         total=result.total,
-        has_next_page=offset + len(result.items) < result.total,
+        has_next_page=has_next_page,
+        next_cursor=next_cursor if has_next_page else None,
     )
 
 
@@ -443,23 +494,38 @@ class Query:
         collection: str | None = None,
         card_type: str | None = None,
         active: bool | None = None,
+        after: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> CardConnection:
         limit, offset = _normalize_page(limit, offset)
+        normalized_after = _normalize_text(after, "after", 1_024)
+        if normalized_after is not None and offset != 0:
+            raise _validation_error("after and a non-zero offset cannot be combined")
+        decoded_after = (
+            _decode_card_cursor(normalized_after) if normalized_after else None
+        )
         result = await _call_repository(
             _repository(info).cards(
                 search=_normalize_text(search, "search"),
                 collection=_normalize_text(collection, "collection", 40),
                 card_type=_normalize_text(card_type, "cardType", 40),
                 active=active,
+                after=decoded_after,
                 limit=limit,
                 offset=offset,
             )
         )
         return CardConnection(
             items=[_card(row) for row in result.items],
-            page_info=_page_info(result, limit, offset),
+            page_info=_page_info(
+                result,
+                limit,
+                offset,
+                next_cursor=(
+                    _encode_card_cursor(result.items[-1]) if result.items else None
+                ),
+            ),
         )
 
     @strawberry.field(description="One card by stable Blizzard card ID.")
