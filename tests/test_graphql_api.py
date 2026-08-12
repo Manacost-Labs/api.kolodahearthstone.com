@@ -43,6 +43,8 @@ class FakeRepository:
                 }
             ],
             total=3,
+            has_next_page=True,
+            next_cursor={"values": ["constructed", "Тестовая карта", "EX1_001"]},
         )
 
     async def card(self, card_id: str, collection: str | None) -> dict[str, Any] | None:
@@ -220,6 +222,86 @@ def test_graphql_cards_cursor_is_opaque_and_forwarded(monkeypatch: Any) -> None:
             "limit": 1,
             "offset": 0,
         },
+    )
+
+
+def test_graphql_cursor_is_available_on_every_large_collection(
+    monkeypatch: Any,
+) -> None:
+    fake = FakeRepository()
+    method_names = (
+        "battleground_heroes",
+        "statistics",
+        "archetypes",
+        "battleground_minions",
+        "sources",
+        "datasets",
+        "collections",
+        "records",
+    )
+    for method_name in method_names:
+        original = getattr(fake, method_name)
+
+        async def paged(_original: Any = original, **filters: Any) -> PageResult:
+            result = await _original(**filters)
+            return PageResult(
+                items=result.items,
+                total=max(1, result.total),
+                has_next_page=True,
+                next_cursor={"values": ["next"]},
+            )
+
+        setattr(fake, method_name, paged)
+
+    monkeypatch.setattr("app.config.api_key", lambda: "expected-key")
+    response = _post(
+        """
+        query {
+          battlegroundHeroes(limit: 1) { pageInfo { nextCursor } }
+          statistics(limit: 1) { pageInfo { nextCursor } }
+          archetypes(limit: 1) { pageInfo { nextCursor } }
+          battlegroundMinions(limit: 1) { pageInfo { nextCursor } }
+          sources(limit: 1) { pageInfo { nextCursor } }
+          datasets(limit: 1) { pageInfo { nextCursor } }
+          collections(limit: 1) { pageInfo { nextCursor } }
+          records(collection: "catalog.cards", limit: 1) {
+            pageInfo { nextCursor }
+          }
+        }
+        """,
+        fake,
+        monkeypatch,
+        headers={"X-API-Key": "expected-key"},
+    )
+
+    assert response.status_code == 200
+    assert "errors" not in response.json()
+    assert all(
+        connection["pageInfo"]["nextCursor"]
+        for connection in response.json()["data"].values()
+    )
+
+
+def test_graphql_cursor_is_bound_to_collection_filters(monkeypatch: Any) -> None:
+    fake = FakeRepository()
+    first = _post(
+        'query { cards(collection: "constructed", limit: 1) '
+        "{ pageInfo { nextCursor } } }",
+        fake,
+        monkeypatch,
+    )
+    cursor = first.json()["data"]["cards"]["pageInfo"]["nextCursor"]
+
+    response = _post(
+        f'query {{ cards(collection: "battlegrounds", after: "{cursor}") '
+        "{ pageInfo { total } } }",
+        fake,
+        monkeypatch,
+    )
+
+    assert response.json()["errors"][0]["extensions"]["code"] == "VALIDATION_ERROR"
+    assert response.json()["errors"][0]["message"] == (
+        "after is not a valid cards cursor"
     )
 
 
@@ -426,6 +508,7 @@ def test_graphql_lists_and_reads_every_database_collection(monkeypatch: Any) -> 
             "filters": {"card_id": "EX1_001"},
             "order_by": None,
             "descending": False,
+            "after": None,
             "limit": 1,
             "offset": 0,
         },

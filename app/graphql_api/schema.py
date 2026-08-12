@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import json
 from datetime import datetime
 from decimal import Decimal
@@ -307,39 +308,70 @@ def _optional_float(value: Any) -> float | None:
     return float(value)
 
 
-def _encode_card_cursor(row: dict[str, Any]) -> str:
+def _cursor_scope(kind: str, filters: dict[str, Any]) -> str:
+    encoded = json.dumps(
+        {"kind": kind, "filters": filters},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    return hashlib.sha256(encoded).hexdigest()[:24]
+
+
+def _encode_cursor(kind: str, data: dict[str, Any], scope: str) -> str:
     payload = json.dumps(
-        {
-            "v": 1,
-            "collection": str(row["collection"]),
-            "name": str(row.get("name_ru") or row.get("name_en") or ""),
-            "cardId": str(row["card_id"]),
-        },
+        {"v": 2, "kind": kind, "scope": scope, "data": data},
         ensure_ascii=False,
         separators=(",", ":"),
     ).encode()
     return base64.urlsafe_b64encode(payload).decode().rstrip("=")
 
 
-def _decode_card_cursor(value: str) -> tuple[str, str, str]:
+def _decode_cursor(value: str, kind: str, scope: str) -> dict[str, Any]:
     if not value or len(value) > 1_024:
-        raise _validation_error("after is not a valid cards cursor")
+        raise _validation_error(f"after is not a valid {kind} cursor")
     try:
         padding = "=" * (-len(value) % 4)
         payload = json.loads(
             base64.b64decode(value + padding, altchars=b"-_", validate=True)
         )
     except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError):
-        raise _validation_error("after is not a valid cards cursor") from None
-    if not isinstance(payload, dict) or payload.get("v") != 1:
-        raise _validation_error("after is not a valid cards cursor")
-    values = (payload.get("collection"), payload.get("name"), payload.get("cardId"))
-    if not all(isinstance(item, str) for item in values):
-        raise _validation_error("after is not a valid cards cursor")
-    collection, name, card_id = values
-    if not collection or not card_id or any(len(item) > 256 for item in values):
-        raise _validation_error("after is not a valid cards cursor")
-    return collection, name, card_id
+        raise _validation_error(f"after is not a valid {kind} cursor") from None
+    if (
+        not isinstance(payload, dict)
+        or payload.get("v") != 2
+        or payload.get("kind") != kind
+        or payload.get("scope") != scope
+        or not isinstance(payload.get("data"), dict)
+    ):
+        raise _validation_error(f"after is not a valid {kind} cursor")
+    return payload["data"]
+
+
+def _decode_values_cursor(value: str, kind: str, scope: str) -> list[Any]:
+    data = _decode_cursor(value, kind, scope)
+    values = data.get("values")
+    if not isinstance(values, list) or len(values) > 20:
+        raise _validation_error(f"after is not a valid {kind} cursor")
+    return values
+
+
+def _normalize_after(after: str | None, offset: int) -> str | None:
+    normalized = _normalize_text(after, "after", 1_024)
+    if normalized is not None and offset != 0:
+        raise _validation_error("after and a non-zero offset cannot be combined")
+    return normalized
+
+
+def _result_cursor(
+    result: PageResult,
+    *,
+    kind: str,
+    scope: str,
+    fallback: dict[str, Any] | None = None,
+) -> str | None:
+    data = result.next_cursor or fallback
+    return _encode_cursor(kind, data, scope) if data else None
 
 
 def _page_info(
@@ -499,17 +531,36 @@ class Query:
         offset: int = 0,
     ) -> CardConnection:
         limit, offset = _normalize_page(limit, offset)
-        normalized_after = _normalize_text(after, "after", 1_024)
-        if normalized_after is not None and offset != 0:
-            raise _validation_error("after and a non-zero offset cannot be combined")
-        decoded_after = (
-            _decode_card_cursor(normalized_after) if normalized_after else None
+        normalized_search = _normalize_text(search, "search")
+        normalized_collection = _normalize_text(collection, "collection", 40)
+        normalized_card_type = _normalize_text(card_type, "cardType", 40)
+        scope = _cursor_scope(
+            "cards",
+            {
+                "search": normalized_search,
+                "collection": normalized_collection,
+                "cardType": normalized_card_type,
+                "active": active,
+            },
         )
+        normalized_after = _normalize_after(after, offset)
+        decoded_values = (
+            _decode_values_cursor(normalized_after, "cards", scope)
+            if normalized_after
+            else None
+        )
+        decoded_after: tuple[str, str, str] | None = None
+        if decoded_values is not None:
+            if len(decoded_values) != 3 or not all(
+                isinstance(item, str) for item in decoded_values
+            ):
+                raise _validation_error("after is not a valid cards cursor")
+            decoded_after = (decoded_values[0], decoded_values[1], decoded_values[2])
         result = await _call_repository(
             _repository(info).cards(
-                search=_normalize_text(search, "search"),
-                collection=_normalize_text(collection, "collection", 40),
-                card_type=_normalize_text(card_type, "cardType", 40),
+                search=normalized_search,
+                collection=normalized_collection,
+                card_type=normalized_card_type,
                 active=active,
                 after=decoded_after,
                 limit=limit,
@@ -523,7 +574,26 @@ class Query:
                 limit,
                 offset,
                 next_cursor=(
-                    _encode_card_cursor(result.items[-1]) if result.items else None
+                    _result_cursor(
+                        result,
+                        kind="cards",
+                        scope=scope,
+                        fallback=(
+                            {
+                                "values": [
+                                    str(result.items[-1]["collection"]),
+                                    str(
+                                        result.items[-1].get("name_ru")
+                                        or result.items[-1].get("name_en")
+                                        or ""
+                                    ),
+                                    str(result.items[-1]["card_id"]),
+                                ]
+                            }
+                            if result.items
+                            else None
+                        ),
+                    )
                 ),
             ),
         )
@@ -553,21 +623,38 @@ class Query:
         info: Info[GraphQLContext, None],
         search: str | None = None,
         status: str | None = "ok",
+        after: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> BattlegroundHeroConnection:
         limit, offset = _normalize_page(limit, offset)
+        normalized_search = _normalize_text(search, "search")
+        normalized_status = _normalize_text(status, "status", 32)
+        scope = _cursor_scope(
+            "heroes", {"search": normalized_search, "status": normalized_status}
+        )
+        normalized_after = _normalize_after(after, offset)
         result = await _call_repository(
             _repository(info).battleground_heroes(
-                search=_normalize_text(search, "search"),
-                status=_normalize_text(status, "status", 32),
+                search=normalized_search,
+                status=normalized_status,
+                after=(
+                    _decode_values_cursor(normalized_after, "heroes", scope)
+                    if normalized_after
+                    else None
+                ),
                 limit=limit,
                 offset=offset,
             )
         )
         return BattlegroundHeroConnection(
             items=[_hero(row) for row in result.items],
-            page_info=_page_info(result, limit, offset),
+            page_info=_page_info(
+                result,
+                limit,
+                offset,
+                next_cursor=_result_cursor(result, kind="heroes", scope=scope),
+            ),
         )
 
     @strawberry.field(description="Normalized statistics from every integrated source.")
@@ -582,27 +669,50 @@ class Query:
         rank_range: str | None = None,
         mode: str | None = None,
         patch: str | None = None,
+        after: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> GameStatisticConnection:
         limit, offset = _normalize_page(limit, offset)
+        normalized_filters = {
+            "search": _normalize_text(search, "search"),
+            "domain": _normalize_text(domain, "domain", 64),
+            "entityType": _normalize_text(entity_type, "entityType", 64),
+            "sourceId": _normalize_text(source_id, "sourceId", 120),
+            "formatName": _normalize_text(format_name, "formatName", 64),
+            "rankRange": _normalize_text(rank_range, "rankRange", 64),
+            "mode": _normalize_text(mode, "mode", 64),
+            "patch": _normalize_text(patch, "patch", 64),
+        }
+        scope = _cursor_scope("statistics", normalized_filters)
+        normalized_after = _normalize_after(after, offset)
         result = await _call_repository(
             _repository(info).statistics(
-                search=_normalize_text(search, "search"),
-                domain=_normalize_text(domain, "domain", 64),
-                entity_type=_normalize_text(entity_type, "entityType", 64),
-                source_id=_normalize_text(source_id, "sourceId", 120),
-                format_name=_normalize_text(format_name, "formatName", 64),
-                rank_range=_normalize_text(rank_range, "rankRange", 64),
-                mode=_normalize_text(mode, "mode", 64),
-                patch=_normalize_text(patch, "patch", 64),
+                search=normalized_filters["search"],
+                domain=normalized_filters["domain"],
+                entity_type=normalized_filters["entityType"],
+                source_id=normalized_filters["sourceId"],
+                format_name=normalized_filters["formatName"],
+                rank_range=normalized_filters["rankRange"],
+                mode=normalized_filters["mode"],
+                patch=normalized_filters["patch"],
+                after=(
+                    _decode_values_cursor(normalized_after, "statistics", scope)
+                    if normalized_after
+                    else None
+                ),
                 limit=limit,
                 offset=offset,
             )
         )
         return GameStatisticConnection(
             items=[_statistic(row) for row in result.items],
-            page_info=_page_info(result, limit, offset),
+            page_info=_page_info(
+                result,
+                limit,
+                offset,
+                next_cursor=_result_cursor(result, kind="statistics", scope=scope),
+            ),
         )
 
     @strawberry.field(
@@ -616,24 +726,44 @@ class Query:
         game_type: str | None = None,
         rank_range: str | None = None,
         region: str | None = None,
+        after: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> ArchetypeConnection:
         limit, offset = _normalize_page(limit, offset)
+        normalized_filters = {
+            "search": _normalize_text(search, "search"),
+            "playerClass": _normalize_text(player_class, "playerClass", 64),
+            "gameType": _normalize_text(game_type, "gameType", 64),
+            "rankRange": _normalize_text(rank_range, "rankRange", 64),
+            "region": _normalize_text(region, "region", 32),
+        }
+        scope = _cursor_scope("archetypes", normalized_filters)
+        normalized_after = _normalize_after(after, offset)
         result = await _call_repository(
             _repository(info).archetypes(
-                search=_normalize_text(search, "search"),
-                player_class=_normalize_text(player_class, "playerClass", 64),
-                game_type=_normalize_text(game_type, "gameType", 64),
-                rank_range=_normalize_text(rank_range, "rankRange", 64),
-                region=_normalize_text(region, "region", 32),
+                search=normalized_filters["search"],
+                player_class=normalized_filters["playerClass"],
+                game_type=normalized_filters["gameType"],
+                rank_range=normalized_filters["rankRange"],
+                region=normalized_filters["region"],
+                after=(
+                    _decode_values_cursor(normalized_after, "archetypes", scope)
+                    if normalized_after
+                    else None
+                ),
                 limit=limit,
                 offset=offset,
             )
         )
         return ArchetypeConnection(
             items=[_archetype(row) for row in result.items],
-            page_info=_page_info(result, limit, offset),
+            page_info=_page_info(
+                result,
+                limit,
+                offset,
+                next_cursor=_result_cursor(result, kind="archetypes", scope=scope),
+            ),
         )
 
     @strawberry.field(
@@ -646,25 +776,44 @@ class Query:
         tavern_tier: int | None = None,
         mmr_percentile: str | None = None,
         time_range: str | None = None,
+        after: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> BattlegroundMinionConnection:
         limit, offset = _normalize_page(limit, offset)
         if tavern_tier is not None and not 1 <= tavern_tier <= 7:
             raise _validation_error("tavernTier must be between 1 and 7")
+        normalized_filters = {
+            "search": _normalize_text(search, "search"),
+            "tavernTier": tavern_tier,
+            "mmrPercentile": _normalize_text(mmr_percentile, "mmrPercentile", 64),
+            "timeRange": _normalize_text(time_range, "timeRange", 64),
+        }
+        scope = _cursor_scope("minions", normalized_filters)
+        normalized_after = _normalize_after(after, offset)
         result = await _call_repository(
             _repository(info).battleground_minions(
-                search=_normalize_text(search, "search"),
+                search=normalized_filters["search"],
                 tavern_tier=tavern_tier,
-                mmr_percentile=_normalize_text(mmr_percentile, "mmrPercentile", 64),
-                time_range=_normalize_text(time_range, "timeRange", 64),
+                mmr_percentile=normalized_filters["mmrPercentile"],
+                time_range=normalized_filters["timeRange"],
+                after=(
+                    _decode_values_cursor(normalized_after, "minions", scope)
+                    if normalized_after
+                    else None
+                ),
                 limit=limit,
                 offset=offset,
             )
         )
         return BattlegroundMinionConnection(
             items=[_minion(row) for row in result.items],
-            page_info=_page_info(result, limit, offset),
+            page_info=_page_info(
+                result,
+                limit,
+                offset,
+                next_cursor=_result_cursor(result, kind="minions", scope=scope),
+            ),
         )
 
     @strawberry.field(
@@ -675,21 +824,37 @@ class Query:
         info: Info[GraphQLContext, None],
         enabled: bool | None = None,
         state: str | None = None,
+        after: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> DataSourceConnection:
         limit, offset = _normalize_page(limit, offset)
+        normalized_state = _normalize_text(state, "state", 32)
+        scope = _cursor_scope(
+            "sources", {"enabled": enabled, "state": normalized_state}
+        )
+        normalized_after = _normalize_after(after, offset)
         result = await _call_repository(
             _repository(info).sources(
                 enabled=enabled,
-                state=_normalize_text(state, "state", 32),
+                state=normalized_state,
+                after=(
+                    _decode_values_cursor(normalized_after, "sources", scope)
+                    if normalized_after
+                    else None
+                ),
                 limit=limit,
                 offset=offset,
             )
         )
         return DataSourceConnection(
             items=[DataSource(**row) for row in result.items],
-            page_info=_page_info(result, limit, offset),
+            page_info=_page_info(
+                result,
+                limit,
+                offset,
+                next_cursor=_result_cursor(result, kind="sources", scope=scope),
+            ),
         )
 
     @strawberry.field(description="Latest imported dataset version for every source.")
@@ -698,21 +863,38 @@ class Query:
         info: Info[GraphQLContext, None],
         source_id: str | None = None,
         state: str | None = None,
+        after: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> DatasetConnection:
         limit, offset = _normalize_page(limit, offset)
+        normalized_source = _normalize_text(source_id, "sourceId", 120)
+        normalized_state = _normalize_text(state, "state", 32)
+        scope = _cursor_scope(
+            "datasets", {"sourceId": normalized_source, "state": normalized_state}
+        )
+        normalized_after = _normalize_after(after, offset)
         result = await _call_repository(
             _repository(info).datasets(
-                source_id=_normalize_text(source_id, "sourceId", 120),
-                state=_normalize_text(state, "state", 32),
+                source_id=normalized_source,
+                state=normalized_state,
+                after=(
+                    _decode_values_cursor(normalized_after, "datasets", scope)
+                    if normalized_after
+                    else None
+                ),
                 limit=limit,
                 offset=offset,
             )
         )
         return DatasetConnection(
             items=[Dataset(**row) for row in result.items],
-            page_info=_page_info(result, limit, offset),
+            page_info=_page_info(
+                result,
+                limit,
+                offset,
+                next_cursor=_result_cursor(result, kind="datasets", scope=scope),
+            ),
         )
 
     @strawberry.field(
@@ -743,15 +925,28 @@ class Query:
         info: Info[GraphQLContext, None],
         schema_name: str | None = None,
         search: str | None = None,
+        after: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> DataCollectionConnection:
         _require_full_access(info)
         limit, offset = _normalize_page(limit, offset)
+        normalized_schema = _normalize_text(schema_name, "schemaName", 32)
+        normalized_search = _normalize_text(search, "search", 120)
+        scope = _cursor_scope(
+            "collections",
+            {"schemaName": normalized_schema, "search": normalized_search},
+        )
+        normalized_after = _normalize_after(after, offset)
         result = await _call_repository(
             _repository(info).collections(
-                schema_name=_normalize_text(schema_name, "schemaName", 32),
-                search=_normalize_text(search, "search", 120),
+                schema_name=normalized_schema,
+                search=normalized_search,
+                after=(
+                    _decode_values_cursor(normalized_after, "collections", scope)
+                    if normalized_after
+                    else None
+                ),
                 limit=limit,
                 offset=offset,
             )
@@ -770,7 +965,12 @@ class Query:
         ]
         return DataCollectionConnection(
             items=items,
-            page_info=_page_info(result, limit, offset),
+            page_info=_page_info(
+                result,
+                limit,
+                offset,
+                next_cursor=_result_cursor(result, kind="collections", scope=scope),
+            ),
         )
 
     @strawberry.field(
@@ -787,6 +987,7 @@ class Query:
         filters: JSON | None = None,
         order_by: str | None = None,
         descending: bool = False,
+        after: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> RecordConnection:
@@ -805,20 +1006,42 @@ class Query:
                 normalized_fields.append(normalized)
         if filters is not None and not isinstance(filters, dict):
             raise _validation_error("filters must be a JSON object")
+        normalized_order = _normalize_text(order_by, "orderBy", 64)
+        scope = _cursor_scope(
+            "records",
+            {
+                "collection": normalized_collection,
+                "fields": normalized_fields,
+                "filters": filters,
+                "orderBy": normalized_order,
+                "descending": descending,
+            },
+        )
+        normalized_after = _normalize_after(after, offset)
         result = await _call_repository(
             _repository(info).records(
                 collection=normalized_collection,
                 fields=normalized_fields,
                 filters=filters,
-                order_by=_normalize_text(order_by, "orderBy", 64),
+                order_by=normalized_order,
                 descending=descending,
+                after=(
+                    _decode_cursor(normalized_after, "records", scope)
+                    if normalized_after
+                    else None
+                ),
                 limit=limit,
                 offset=offset,
             )
         )
         return RecordConnection(
             items=result.items,
-            page_info=_page_info(result, limit, offset),
+            page_info=_page_info(
+                result,
+                limit,
+                offset,
+                next_cursor=_result_cursor(result, kind="records", scope=scope),
+            ),
         )
 
 
