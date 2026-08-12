@@ -7,15 +7,29 @@ import random
 import time
 import uuid
 from collections import Counter
+from collections.abc import Awaitable, Callable
 from contextlib import ExitStack
 from contextvars import ContextVar
+from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
+if TYPE_CHECKING:
+    from .ai_review_evidence import PreparedAIReviewEvidence
+
 from .api_only_sources import blocks_browser_fallback
 from .config import (
+    ai_review_candidate_max_concurrency,
+    ai_review_diagnose_failures_enabled,
+    ai_review_diagnosis_max_concurrency,
+    ai_review_enabled,
+    ai_review_max_failures_per_refresh,
+    ai_review_max_per_refresh,
+    ai_review_mode,
+    ai_review_post_refresh_timeout_seconds,
+    ai_review_source_ids,
     fetch_backends,
     fetch_direct_enabled,
     fetch_proxy_url,
@@ -73,6 +87,7 @@ from .scrapers.quality import is_cloudflare_challenge, quality_metrics
 from .scrapers.rotator import fetch_html, record_residential_proxy_failure
 from .source_state import EFFECTIVE_OK_CACHED, FAILURE_STATES, SourceState
 from .source_tiers import (
+    API_FIRST_SOURCE_IDS,
     API_FIRST_TIERS,
     SourceTier,
     partition_sources,
@@ -97,6 +112,20 @@ _firecrawl_fallback_attempts = 0
 _firecrawl_fallback_attempts_by_source: dict[str, int] = {}
 _standard_publication_attempt: ContextVar[Any | None] = ContextVar(
     "standard_publication_attempt", default=None
+)
+
+
+@dataclass(frozen=True)
+class _DeferredAIJob:
+    source_id: str
+    review_kind: str
+    execute: Callable[[], Awaitable[Any]]
+    affected_source_ids: tuple[str, ...] = ()
+
+
+_deferred_ai_jobs: ContextVar[list[_DeferredAIJob] | None] = ContextVar(
+    "deferred_ai_jobs",
+    default=None,
 )
 
 
@@ -156,6 +185,225 @@ def _best_effort_log_action(action: str, **kwargs: Any) -> None:
         )
 
 
+def _begin_deferred_ai_collection() -> None:
+    _deferred_ai_jobs.set([])
+
+
+def _enqueue_deferred_ai_job(job: _DeferredAIJob) -> bool | None:
+    jobs = _deferred_ai_jobs.get()
+    if jobs is None:
+        return None
+    kind_limit = (
+        ai_review_max_failures_per_refresh()
+        if job.review_kind == "failure_diagnosis"
+        else ai_review_max_per_refresh()
+    )
+    if sum(existing.review_kind == job.review_kind for existing in jobs) >= kind_limit:
+        return False
+    jobs.append(job)
+    return True
+
+
+def _update_reliability_ai_best_effort(
+    run_id: str,
+    results: list[dict[str, Any]],
+) -> None:
+    try:
+        from .reliability_telemetry import update_terminal_ai_results
+
+        update_terminal_ai_results(run_id, results)
+    except Exception as exc:  # noqa: BLE001 - advisory telemetry is fail-open
+        logger.warning(
+            "Reliability AI telemetry update failed for run %s: %s",
+            run_id,
+            type(exc).__name__,
+        )
+
+
+def _terminal_ai_reason_code(status: dict[str, Any]) -> str:
+    state = str(status.get("last_refresh_state") or status.get("state") or "")
+    failure_class = str(
+        status.get("last_refresh_failure_class")
+        or status.get("failure_class")
+        or ""
+    ).casefold()
+    raw_http_status = status.get("last_refresh_http_status") or status.get(
+        "http_status"
+    )
+    try:
+        http_status = int(raw_http_status)
+    except (TypeError, ValueError):
+        http_status = 0
+    if state == SourceState.TIMED_OUT:
+        return "timeout"
+    if http_status == 401 or "auth" in failure_class:
+        return "login_wall"
+    if failure_class.startswith("proxy_"):
+        return "provider_exhausted"
+    if state == SourceState.BLOCKED_BY_PROTECTION:
+        return "challenge_page"
+    if 400 <= http_status <= 499:
+        return "http_4xx"
+    if 500 <= http_status <= 599:
+        return "http_5xx"
+    if state == SourceState.PROXY_REQUIRED:
+        return "provider_exhausted"
+    if state == SourceState.QUALITY_ERROR:
+        return "semantic_failure"
+    if state == SourceState.FETCH_ERROR:
+        return "transport_error"
+    return "unknown"
+
+
+async def _enqueue_terminal_failure_ai_jobs(
+    statuses: list[dict[str, Any]],
+) -> None:
+    if not ai_review_enabled() or not ai_review_diagnose_failures_enabled():
+        return
+    jobs = _deferred_ai_jobs.get()
+    if jobs is None:
+        return
+    already_scheduled = {
+        job.source_id
+        for job in jobs
+        if job.review_kind == "failure_diagnosis"
+    }
+    for status in statuses:
+        source_id = str(status.get("source_id") or "")
+        review = status.get("ai_review") or status.get("latest_ai_review")
+        if (
+            not source_id
+            or source_id in already_scheduled
+            or status.get("skipped") is True
+            or (isinstance(review, dict) and review.get("quarantine") is True)
+        ):
+            continue
+        state = str(status.get("state") or "")
+        failed_live_refresh = state in FAILURE_STATES or bool(
+            status.get("serving_cached_dataset")
+            and status.get("last_refresh_state") not in (None, SourceState.OK)
+        )
+        if not failed_live_refresh:
+            continue
+        source = SOURCE_BY_ID.get(source_id)
+        if source is None:
+            continue
+        reason_code = _terminal_ai_reason_code(status)
+        quality = status.get("quality")
+        await _diagnose_candidate_with_ai(
+            source,
+            {},
+            backend=str(
+                status.get("last_refresh_transport_backend")
+                or status.get("last_refresh_backend")
+                or status.get("backend")
+                or "unknown"
+            ),
+            stage="fetch",
+            deterministic_reason=reason_code,
+            deterministic_extra={"reason_code": reason_code},
+            quality=quality if isinstance(quality, dict) else None,
+        )
+        already_scheduled.add(source_id)
+
+
+async def _flush_deferred_ai_jobs(
+    run_id: str,
+    statuses: list[dict[str, Any]],
+    *,
+    enqueue_terminal_failures: bool = True,
+    persist_statuses: bool = True,
+) -> None:
+    if enqueue_terminal_failures:
+        await _enqueue_terminal_failure_ai_jobs(statuses)
+    jobs = list(_deferred_ai_jobs.get() or [])
+    _deferred_ai_jobs.set(None)
+    if not jobs:
+        return
+
+    lane_semaphores = {
+        "candidate": asyncio.Semaphore(ai_review_candidate_max_concurrency()),
+        "failure_diagnosis": asyncio.Semaphore(
+            ai_review_diagnosis_max_concurrency()
+        ),
+    }
+
+    async def execute_job(job: _DeferredAIJob) -> Any:
+        async with lane_semaphores[job.review_kind]:
+            return await job.execute()
+
+    tasks = {asyncio.create_task(execute_job(job)): job for job in jobs}
+    done, pending = await asyncio.wait(
+        tasks,
+        timeout=ai_review_post_refresh_timeout_seconds(),
+    )
+    for task in pending:
+        task.cancel()
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
+
+    statuses_by_source = {
+        str(status.get("source_id") or ""): status for status in statuses
+    }
+    attached = 0
+    for task in done:
+        job = tasks[task]
+        try:
+            result = task.result()
+        except Exception as exc:  # noqa: BLE001 - advisory job is fail-open
+            _best_effort_log_action(
+                "ai.audit.error",
+                source_id=job.source_id,
+                level="warn",
+                error_type=type(exc).__name__,
+            )
+            continue
+        telemetry = (
+            result[0]
+            if job.review_kind == "candidate"
+            and isinstance(result, tuple)
+            and result
+            else result
+            if job.review_kind == "failure_diagnosis" and isinstance(result, dict)
+            else None
+        )
+        target_ids = job.affected_source_ids or (job.source_id,)
+        for target_id in target_ids:
+            status = statuses_by_source.get(target_id)
+            if status is None:
+                continue
+            if job.review_kind == "candidate":
+                _attach_ai_review_status(status, telemetry)
+            else:
+                _attach_ai_diagnosis_status(status, telemetry)
+            if telemetry:
+                attached += 1
+                if not persist_statuses:
+                    continue
+                try:
+                    save_status(target_id, status)
+                except Exception as exc:  # noqa: BLE001 - outcome already durable
+                    logger.debug(
+                        "Deferred AI status save failed for %s: %s",
+                        target_id,
+                        type(exc).__name__,
+                    )
+
+    if attached:
+        _update_reliability_ai_best_effort(run_id, statuses)
+    _best_effort_log_action(
+        "ai.audit.complete",
+        level="warn" if pending else "info",
+        extra={
+            "run_id": run_id,
+            "scheduled": len(jobs),
+            "completed": len(done),
+            "timed_out": len(pending),
+            "attached": attached,
+        },
+    )
+
+
 async def _review_candidate_with_ai(
     source: Source,
     parsed: dict[str, Any],
@@ -164,8 +412,63 @@ async def _review_candidate_with_ai(
     deterministic_reason: str,
     deterministic_extra: dict[str, Any] | None,
     quality: dict[str, Any] | None,
+    _defer_if_refresh: bool = True,
+    _prepared_evidence: PreparedAIReviewEvidence | None = None,
 ) -> tuple[dict[str, Any] | None, bool, str | None]:
     """Run the optional passive reviewer without making parsing depend on it."""
+
+    if not ai_review_enabled():
+        return None, False, None
+    selected_sources = ai_review_source_ids()
+    if not selected_sources or (
+        "*" not in selected_sources and source.id not in selected_sources
+    ):
+        return None, False, None
+    if _defer_if_refresh and ai_review_mode() != "quarantine":
+
+        try:
+            from .ai_review_evidence import build_ai_review_evidence_v2
+
+            prepared_evidence = build_ai_review_evidence_v2(
+                source,
+                parsed,
+                backend=backend,
+                stage="candidate_validation",
+                deterministic_ok=True,
+                deterministic_extra=deterministic_extra,
+                quality=quality,
+            )
+        except Exception as exc:  # noqa: BLE001 - advisory evidence is fail-open
+            _best_effort_log_action(
+                "ai.review.evidence_error",
+                source_id=source.id,
+                backend=backend,
+                level="warn",
+                error_type=type(exc).__name__,
+            )
+            return None, False, None
+
+        async def execute() -> tuple[dict[str, Any] | None, bool, str | None]:
+            return await _review_candidate_with_ai(
+                source,
+                {},
+                backend=backend,
+                deterministic_reason="prepared_evidence",
+                deterministic_extra=None,
+                quality=None,
+                _defer_if_refresh=False,
+                _prepared_evidence=prepared_evidence,
+            )
+
+        queued = _enqueue_deferred_ai_job(
+            _DeferredAIJob(
+                source_id=source.id,
+                review_kind="candidate",
+                execute=execute,
+            )
+        )
+        if queued is not None:
+            return None, False, None
 
     try:
         from .ai_review import review_candidate
@@ -178,9 +481,15 @@ async def _review_candidate_with_ai(
             deterministic_reason=deterministic_reason,
             deterministic_extra=deterministic_extra,
             quality=quality,
+            prepared_evidence=_prepared_evidence,
         )
         telemetry = result.telemetry()
         if result.state == "disabled":
+            return None, False, None
+        if result.state == "skipped" and result.error_type in {
+            "source_allowlist_empty",
+            "source_not_selected",
+        }:
             return None, False, None
         if result.should_quarantine:
             action = "ai.review.quarantine"
@@ -225,12 +534,221 @@ async def _review_candidate_with_ai(
         return telemetry, False, None
 
 
+async def _diagnose_candidate_with_ai(
+    source: Source,
+    parsed: dict[str, Any],
+    *,
+    backend: str | None,
+    stage: str,
+    deterministic_reason: str,
+    deterministic_extra: dict[str, Any] | None,
+    quality: dict[str, Any] | None,
+    regression: dict[str, Any] | None = None,
+    lkg: dict[str, Any] | None = None,
+    post_patch: dict[str, Any] | None = None,
+    _defer_if_refresh: bool = True,
+    _prepared_evidence: PreparedAIReviewEvidence | None = None,
+    _affected_source_ids: tuple[str, ...] = (),
+) -> dict[str, Any] | None:
+    """Diagnose a rejected candidate without changing its terminal outcome."""
+
+    if not ai_review_enabled() or not ai_review_diagnose_failures_enabled():
+        return None
+    if _defer_if_refresh:
+
+        try:
+            from .ai_review_evidence import build_ai_review_evidence_v2
+
+            prepared_evidence = build_ai_review_evidence_v2(
+                source,
+                parsed,
+                backend=backend,
+                stage=stage,
+                deterministic_ok=False,
+                deterministic_extra=deterministic_extra,
+                quality=quality,
+                regression=regression,
+                lkg=lkg,
+                post_patch=post_patch,
+            )
+        except Exception as exc:  # noqa: BLE001 - advisory evidence is fail-open
+            _best_effort_log_action(
+                "ai.diagnosis.evidence_error",
+                source_id=source.id,
+                backend=backend,
+                level="warn",
+                error_type=type(exc).__name__,
+            )
+            return None
+
+        async def execute() -> dict[str, Any] | None:
+            return await _diagnose_candidate_with_ai(
+                source,
+                {},
+                backend=backend,
+                stage=stage,
+                deterministic_reason="prepared_evidence",
+                deterministic_extra=None,
+                quality=None,
+                regression=None,
+                lkg=None,
+                post_patch=None,
+                _defer_if_refresh=False,
+                _prepared_evidence=prepared_evidence,
+            )
+
+        queued = _enqueue_deferred_ai_job(
+            _DeferredAIJob(
+                source_id=source.id,
+                review_kind="failure_diagnosis",
+                execute=execute,
+                affected_source_ids=_affected_source_ids,
+            )
+        )
+        if queued is not None:
+            return None
+
+    try:
+        from .ai_review import review_candidate
+
+        result = await review_candidate(
+            source,
+            parsed,
+            backend=backend,
+            deterministic_ok=False,
+            deterministic_reason=deterministic_reason,
+            deterministic_extra=deterministic_extra,
+            quality=quality,
+            review_kind="failure_diagnosis",
+            stage=stage,
+            regression=regression,
+            lkg=lkg,
+            post_patch=post_patch,
+            prepared_evidence=_prepared_evidence,
+        )
+        if result.state == "disabled":
+            return None
+        telemetry = result.telemetry()
+        if result.state == "ok" and result.diagnosis is not None:
+            action = f"ai.diagnosis.{result.diagnosis.classification}"
+            level = "warn" if result.diagnosis.classification == "anomalous" else "info"
+        else:
+            action = f"ai.diagnosis.{result.state}"
+            level = "warn" if result.state == "error" else "info"
+        _best_effort_log_action(
+            action,
+            source_id=source.id,
+            backend=backend,
+            level=level,
+            extra={"ai_diagnosis": telemetry},
+        )
+        return telemetry
+    except Exception as exc:  # noqa: BLE001 - diagnosis must remain fail-open
+        telemetry = {
+            "state": "error",
+            "model": "configured",
+            "review_kind": "failure_diagnosis",
+            "error_type": f"internal_{type(exc).__name__}",
+            "quarantine": False,
+        }
+        _best_effort_log_action(
+            "ai.diagnosis.error",
+            source_id=source.id,
+            backend=backend,
+            level="warn",
+            extra={"ai_diagnosis": telemetry},
+        )
+        return telemetry
+
+
+async def _diagnose_refresh_failure_with_ai(
+    selected: list[Source],
+    *,
+    phase: str,
+    backend: str,
+) -> None:
+    """Schedule one safe AI diagnosis for a failure affecting a whole refresh."""
+
+    if not selected:
+        return
+    affected_ids = tuple(source.id for source in selected)
+    affected_tiers = len({tier_for(source.id) for source in selected})
+    await _diagnose_candidate_with_ai(
+        selected[0],
+        {},
+        backend=backend,
+        stage="fetch",
+        deterministic_reason=phase,
+        deterministic_extra={"reason_code": phase},
+        quality={
+            "affected_sources": len(affected_ids),
+            "affected_tiers": affected_tiers,
+        },
+        _affected_source_ids=affected_ids,
+    )
+
+
 def _attach_ai_review_status(
     status: dict[str, Any], telemetry: dict[str, Any] | None
 ) -> dict[str, Any]:
     if telemetry:
         status["ai_review"] = telemetry
     return status
+
+
+def _attach_ai_diagnosis_status(
+    status: dict[str, Any], telemetry: dict[str, Any] | None
+) -> dict[str, Any]:
+    if telemetry:
+        status["ai_diagnosis"] = telemetry
+    return status
+
+
+def _published_data_for_ai(source_id: str) -> dict[str, Any] | None:
+    """Return the published payload; the evidence builder keeps only safe metrics."""
+
+    try:
+        from .parser_control import load_resolved_public_dataset
+
+        dataset = load_resolved_public_dataset(source_id) or {}
+    except Exception:  # noqa: BLE001 - optional diagnostic context
+        try:
+            dataset = load_dataset(source_id) or {}
+        except Exception:  # noqa: BLE001 - optional context must be total
+            return None
+    data = dataset.get("data") if isinstance(dataset, dict) else None
+    return data if isinstance(data, dict) else None
+
+
+def _regression_evidence_for_ai(
+    source: Source,
+    parsed: dict[str, Any],
+    *,
+    authoritative_reason: str | None = None,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    lkg = _published_data_for_ai(source.id)
+    try:
+        detected, message, extra = check_dataset_regression(
+            source,
+            previous_data=lkg,
+            new_data=parsed,
+        )
+    except Exception:  # noqa: BLE001 - optional diagnosis must remain fail-open
+        detected, message, extra = False, None, {}
+    if authoritative_reason:
+        detected = True
+        message = authoritative_reason
+    if isinstance(extra.get("collections"), dict):
+        reason_code = "collection_drop"
+    elif message and "policy changed" in message.casefold():
+        reason_code = "policy_changed"
+    elif message and "filled metric count" in message.casefold():
+        reason_code = "filled_metric_drop"
+    elif detected:
+        reason_code = "row_count_drop"
+    else:
+        reason_code = "none"
+    return {"detected": detected, "reason_code": reason_code, "extra": extra}, lkg
 
 
 PROVISIONAL_STATUS_KEYS = (
@@ -481,8 +999,18 @@ def _preserve_cached_ok_status(source: Source, failed_status: dict[str, Any]) ->
     )
     if isinstance(failed_status.get("ai_review"), dict):
         status["latest_ai_review"] = failed_status["ai_review"]
+    if isinstance(failed_status.get("ai_diagnosis"), dict):
+        status["latest_ai_diagnosis"] = failed_status["ai_diagnosis"]
     if failed_status.get("failure_class"):
         status["last_refresh_failure_class"] = failed_status["failure_class"]
+    if isinstance(failed_status.get("http_status"), int):
+        status["last_refresh_http_status"] = failed_status["http_status"]
+    if failed_status.get("backend"):
+        status["last_refresh_backend"] = failed_status["backend"]
+    if failed_status.get("transport_backend"):
+        status["last_refresh_transport_backend"] = failed_status[
+            "transport_backend"
+        ]
     if failed_status.get("proxy_status") in {402, 407}:
         status["last_refresh_proxy_status"] = failed_status["proxy_status"]
     try:
@@ -1211,7 +1739,8 @@ async def _try_firecrawl_html(
         ok, validation_reason = gate.ok, gate.reason
         qmetrics = quality_metrics(source, parsed)
         ai_telemetry: dict[str, Any] | None = None
-        if ok:
+        ai_quarantine = False
+        if ok and ai_review_mode() == "quarantine":
             ai_telemetry, ai_quarantine, ai_reason = await _review_candidate_with_ai(
                 source,
                 parsed,
@@ -1237,7 +1766,40 @@ async def _try_firecrawl_html(
                     "ai_review": ai_telemetry,
                 },
             )
-            return None
+            if is_primary:
+                return None
+            ai_diagnosis = None
+            if not ai_quarantine:
+                ai_diagnosis = await _diagnose_candidate_with_ai(
+                    source,
+                    parsed,
+                    backend=backend,
+                    stage="deterministic_rejection",
+                    deterministic_reason=validation_reason,
+                    deterministic_extra=gate.extra,
+                    quality=qmetrics,
+                    lkg=_published_data_for_ai(source.id),
+                )
+            status = _status_payload(
+                source,
+                SourceState.QUALITY_ERROR,
+                fetched_at=fetched_at,
+                http_status=scraped.status_code,
+                final_url=scraped.final_url,
+                content_length=scraped.content_length,
+                backend=backend,
+                detail=validation_reason,
+                used_residential_proxy=False,
+                quality=qmetrics,
+            )
+            _attach_ai_review_status(status, ai_telemetry)
+            _attach_ai_diagnosis_status(status, ai_diagnosis)
+            status["firecrawl_credits_used"] = scraped.firecrawl_credits_used
+            status["scrape_do_credits_used"] = scraped.scrape_do_credits_used
+            status["scrapfly_credits_used"] = scraped.scrapfly_credits_used
+            status["brightdata_credits_used"] = scraped.brightdata_credits_used
+            status["brightdata_requests_used"] = scraped.brightdata_requests_used
+            return _save_failure_status(source, status)
 
         dataset = {
             "state": SourceState.OK,
@@ -1252,6 +1814,34 @@ async def _try_firecrawl_html(
         reg, reg_msg, provisional_metadata = _save_dataset_with_checks(
             source, dataset, fetched_at=fetched_at
         )
+        if not reg and ai_review_mode() != "quarantine":
+            ai_telemetry, _, _ = await _review_candidate_with_ai(
+                source,
+                parsed,
+                backend=backend,
+                deterministic_reason=validation_reason,
+                deterministic_extra=gate.extra,
+                quality=qmetrics,
+            )
+        ai_diagnosis = None
+        if reg:
+            regression_evidence, lkg = _regression_evidence_for_ai(
+                source,
+                parsed,
+                authoritative_reason=reg_msg,
+            )
+            ai_diagnosis = await _diagnose_candidate_with_ai(
+                source,
+                parsed,
+                backend=backend,
+                stage="regression_rejection",
+                deterministic_reason=reg_msg or "dataset regression",
+                deterministic_extra=None,
+                quality=qmetrics,
+                regression=regression_evidence,
+                lkg=lkg,
+                post_patch=provisional_metadata,
+            )
         state = SourceState.PARTIAL if reg else SourceState.OK
         status = _status_payload(
             source,
@@ -1281,6 +1871,7 @@ async def _try_firecrawl_html(
         )
         status["firecrawl_cache_state"] = scraped.metadata.get("cacheState")
         _attach_ai_review_status(status, ai_telemetry)
+        _attach_ai_diagnosis_status(status, ai_diagnosis)
         _attach_provisional_status(status, provisional_metadata)
         if reg:
             status = _save_failure_status(source, status)
@@ -1322,6 +1913,14 @@ async def _try_firecrawl_html(
 
 
 async def _fetch_hsreplay_api_source(source: Source) -> dict[str, Any] | None:
+    if source.id == "hsreplay_decks_trending":
+        from .hsreplay_trending import fetch_hsreplay_trending
+
+        structured = await fetch_hsreplay_trending(source)
+        backend = structured.get("source", {}).get(
+            "backend", "hsreplay_trending_api"
+        )
+        return _dataset_from_structured(source, structured, backend=backend)
     if source.id == "hsreplay_arena_winning_decks":
         from .hsreplay_arena_api import fetch_winning_decks
 
@@ -1514,7 +2113,10 @@ async def _fetch_source_with_active_lifecycle(
         if firecrawl_status is not None:
             return _finish(firecrawl_status)
 
-    if tier_for(source.id) in API_FIRST_TIERS:
+    if (
+        tier_for(source.id) in API_FIRST_TIERS
+        or source.id in API_FIRST_SOURCE_IDS
+    ):
         log_action("api.route.begin", source_id=source.id, tier=source_tier)
         try:
             parsed = await _fetch_hsreplay_api_source(source)
@@ -1559,7 +2161,7 @@ async def _fetch_source_with_active_lifecycle(
                 qmetrics = quality_metrics(source, parsed)
                 ai_telemetry: dict[str, Any] | None = None
                 ai_quarantine = False
-                if ok:
+                if ok and ai_review_mode() == "quarantine":
                     ai_telemetry, ai_quarantine, ai_reason = (
                         await _review_candidate_with_ai(
                             source,
@@ -1603,6 +2205,34 @@ async def _fetch_source_with_active_lifecycle(
                         reg, reg_msg, provisional_metadata = _save_dataset_with_checks(
                             source, dataset, fetched_at=fetched_at
                         )
+                    if not reg and ai_review_mode() != "quarantine":
+                        ai_telemetry, _, _ = await _review_candidate_with_ai(
+                            source,
+                            parsed,
+                            backend=backend,
+                            deterministic_reason=reason,
+                            deterministic_extra=gate_extra,
+                            quality=qmetrics,
+                        )
+                    ai_diagnosis = None
+                    if reg:
+                        regression_evidence, lkg = _regression_evidence_for_ai(
+                            source,
+                            parsed,
+                            authoritative_reason=reg_msg,
+                        )
+                        ai_diagnosis = await _diagnose_candidate_with_ai(
+                            source,
+                            parsed,
+                            backend=backend,
+                            stage="regression_rejection",
+                            deterministic_reason=reg_msg or "dataset regression",
+                            deterministic_extra=None,
+                            quality=qmetrics,
+                            regression=regression_evidence,
+                            lkg=lkg,
+                            post_patch=provisional_metadata,
+                        )
                     state = SourceState.PARTIAL if reg else SourceState.OK
                     status = _status_payload(
                         source,
@@ -1618,6 +2248,7 @@ async def _fetch_source_with_active_lifecycle(
                         quality=qmetrics,
                     )
                     _attach_ai_review_status(status, ai_telemetry)
+                    _attach_ai_diagnosis_status(status, ai_diagnosis)
                     _attach_provisional_status(status, provisional_metadata)
                     if reg:
                         status = _save_failure_status(source, status)
@@ -1734,6 +2365,35 @@ async def _fetch_source_with_active_lifecycle(
                     and publication_decision.rejection_kind == "regression"
                     else SourceState.QUALITY_ERROR
                 )
+                rejection_is_regression = bool(
+                    publication_decision is not None
+                    and publication_decision.rejection_kind == "regression"
+                )
+                ai_diagnosis = None
+                if not ai_quarantine:
+                    ai_diagnosis = await _diagnose_candidate_with_ai(
+                        source,
+                        parsed,
+                        backend=backend,
+                        stage=(
+                            "regression_rejection"
+                            if rejection_is_regression
+                            else "deterministic_rejection"
+                        ),
+                        deterministic_reason=reason,
+                        deterministic_extra=gate_extra,
+                        quality=qmetrics,
+                        regression=(
+                            {
+                                "detected": True,
+                                "reason_code": "row_count_drop",
+                                "extra": gate_extra,
+                            }
+                            if rejection_is_regression
+                            else None
+                        ),
+                        lkg=_published_data_for_ai(source.id),
+                    )
                 status = _status_payload(
                     source,
                     rejected_state,
@@ -1748,6 +2408,7 @@ async def _fetch_source_with_active_lifecycle(
                     quality=qmetrics,
                 )
                 _attach_ai_review_status(status, ai_telemetry)
+                _attach_ai_diagnosis_status(status, ai_diagnosis)
                 if publication_decision is not None:
                     try:
                         reconciliation = DatasetPublicationStore().reconcile_current_publication(
@@ -1812,6 +2473,7 @@ async def _fetch_source_with_active_lifecycle(
                         "quality_metrics": qmetrics,
                         "publish_gate": gate_extra,
                         "ai_review": ai_telemetry,
+                        "ai_diagnosis": ai_diagnosis,
                     },
                 )
                 if status.get("state") != SourceState.OK:
@@ -2037,7 +2699,8 @@ async def _fetch_source_with_active_lifecycle(
     ok, reason = gate.ok, gate.reason
     qmetrics = quality_metrics(source, parsed)
     ai_telemetry: dict[str, Any] | None = None
-    if ok:
+    ai_quarantine = False
+    if ok and ai_review_mode() == "quarantine":
         ai_telemetry, ai_quarantine, ai_reason = await _review_candidate_with_ai(
             source,
             parsed,
@@ -2098,6 +2761,19 @@ async def _fetch_source_with_active_lifecycle(
         if firecrawl_status is not None:
             return _finish(firecrawl_status)
 
+        ai_diagnosis = None
+        if not ai_quarantine:
+            ai_diagnosis = await _diagnose_candidate_with_ai(
+                source,
+                parsed,
+                backend=backend,
+                stage="deterministic_rejection",
+                deterministic_reason=reason,
+                deterministic_extra=gate.extra,
+                quality=qmetrics,
+                lkg=_published_data_for_ai(source.id),
+            )
+
         status = _status_payload(
             source,
             SourceState.QUALITY_ERROR,
@@ -2110,6 +2786,7 @@ async def _fetch_source_with_active_lifecycle(
             used_residential_proxy=_source_uses_residential_proxy(source, backend),
         )
         _attach_ai_review_status(status, ai_telemetry)
+        _attach_ai_diagnosis_status(status, ai_diagnosis)
         status = _save_failure_status(source, status)
         if status.get("state") != SourceState.OK:
             await send_telegram_alert(source.id, SourceState.QUALITY_ERROR, reason, source.url)
@@ -2128,6 +2805,34 @@ async def _fetch_source_with_active_lifecycle(
     reg, reg_msg, provisional_metadata = _save_dataset_with_checks(
         source, dataset, fetched_at=fetched_at
     )
+    if not reg and ai_review_mode() != "quarantine":
+        ai_telemetry, _, _ = await _review_candidate_with_ai(
+            source,
+            parsed,
+            backend=backend,
+            deterministic_reason=reason,
+            deterministic_extra=gate.extra,
+            quality=qmetrics,
+        )
+    ai_diagnosis = None
+    if reg:
+        regression_evidence, lkg = _regression_evidence_for_ai(
+            source,
+            parsed,
+            authoritative_reason=reg_msg,
+        )
+        ai_diagnosis = await _diagnose_candidate_with_ai(
+            source,
+            parsed,
+            backend=backend,
+            stage="regression_rejection",
+            deterministic_reason=reg_msg or "dataset regression",
+            deterministic_extra=None,
+            quality=qmetrics,
+            regression=regression_evidence,
+            lkg=lkg,
+            post_patch=provisional_metadata,
+        )
     log_action(
         "quality.validate.ok",
         source_id=source.id,
@@ -2152,6 +2857,7 @@ async def _fetch_source_with_active_lifecycle(
         quality=qmetrics,
     )
     _attach_ai_review_status(status, ai_telemetry)
+    _attach_ai_diagnosis_status(status, ai_diagnosis)
     _attach_provisional_status(status, provisional_metadata)
     if reg:
         status = _save_failure_status(source, status)
@@ -2378,6 +3084,9 @@ def _refresh_traffic_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
 def _record_reliability_results_best_effort(
     run_id: str,
     results: list[dict[str, Any]],
+    *,
+    coverage_scope: str = "partial",
+    expected_source_count: int | None = None,
 ) -> None:
     """Persist aggregate telemetry without changing a parser outcome."""
 
@@ -2386,7 +3095,12 @@ def _record_reliability_results_best_effort(
     try:
         from .reliability_telemetry import record_terminal_results
 
-        record_terminal_results(run_id, results)
+        record_terminal_results(
+            run_id,
+            results,
+            coverage_scope=coverage_scope,
+            expected_source_count=expected_source_count,
+        )
     except Exception as exc:  # noqa: BLE001 - telemetry cannot invert parser outcomes
         logger.warning(
             "Reliability telemetry write failed for run %s: %s",
@@ -2684,6 +3398,9 @@ async def _refresh_sources_unlocked(
         },
     )
 
+    canonical_scrape_source_ids = {
+        source.id for source in SOURCES if source.kind == "scrape"
+    }
     selected = list(SOURCES)
     if source_ids:
         selected = [SOURCE_BY_ID[source_id] for source_id in source_ids]
@@ -2725,9 +3442,18 @@ async def _refresh_sources_unlocked(
         tier_enum = SourceTier(tier_filter)
         selected = [s for s in selected if tier_for(s.id) == tier_enum]
 
-    full_refresh = source_ids is None and tier_filter is None
+    selected_source_ids = {source.id for source in selected}
+    full_refresh = bool(canonical_scrape_source_ids) and (
+        source_ids is None
+        and tier_filter is None
+        and selected_source_ids == canonical_scrape_source_ids
+    )
+    reliability_expected_source_count = (
+        len(canonical_scrape_source_ids) if full_refresh else len(selected)
+    )
     parts_preview = partition_sources(selected)
     backends_lower_preview = [b.lower() for b in fetch_backends()]
+    _begin_deferred_ai_collection()
     from .preflight import (
         ensure_refresh_preflight,
         selection_needs_flaresolverr_preflight,
@@ -2752,19 +3478,22 @@ async def _refresh_sources_unlocked(
             if isinstance(exc, TimeoutError)
             else SourceState.FETCH_ERROR
         )
+        terminal_results = [
+            {
+                "source_id": source.id,
+                "state": terminal_state,
+                "failure_reason_code": "preflight",
+            }
+            for source in selected
+        ]
         _record_reliability_results_best_effort(
             run_id,
-            [
-                {
-                    "source_id": source.id,
-                    "state": terminal_state,
-                    "failure_reason_code": "preflight",
-                }
-                for source in selected
-            ],
+            terminal_results,
+            coverage_scope="full" if full_refresh else "partial",
+            expected_source_count=reliability_expected_source_count,
         )
         try:
-            log_action(
+            _best_effort_log_action(
                 "refresh.end",
                 state=SourceState.FETCH_ERROR,
                 level="error",
@@ -2777,6 +3506,23 @@ async def _refresh_sources_unlocked(
                     "phase": "preflight",
                 },
             )
+            try:
+                await _diagnose_refresh_failure_with_ai(
+                    selected,
+                    phase="preflight",
+                    backend="preflight",
+                )
+                await _flush_deferred_ai_jobs(
+                    run_id,
+                    terminal_results,
+                    enqueue_terminal_failures=False,
+                    persist_statuses=False,
+                )
+            except Exception as ai_exc:  # noqa: BLE001 - retain original failure
+                logger.warning(
+                    "Refresh-level AI diagnosis failed after preflight: %s",
+                    type(ai_exc).__name__,
+                )
         finally:
             end_refresh_run()
         raise
@@ -2792,19 +3538,22 @@ async def _refresh_sources_unlocked(
                 if isinstance(exc, TimeoutError)
                 else SourceState.FETCH_ERROR
             )
+            terminal_results = [
+                {
+                    "source_id": source.id,
+                    "state": terminal_state,
+                    "failure_reason_code": "dependency",
+                }
+                for source in selected
+            ]
             _record_reliability_results_best_effort(
                 run_id,
-                [
-                    {
-                        "source_id": source.id,
-                        "state": terminal_state,
-                        "failure_reason_code": "dependency",
-                    }
-                    for source in selected
-                ],
+                terminal_results,
+                coverage_scope="full" if full_refresh else "partial",
+                expected_source_count=reliability_expected_source_count,
             )
             try:
-                log_action(
+                _best_effort_log_action(
                     "refresh.end",
                     state=terminal_state,
                     level="error",
@@ -2817,6 +3566,23 @@ async def _refresh_sources_unlocked(
                         "phase": "prefetch_hearthstonejson",
                     },
                 )
+                try:
+                    await _diagnose_refresh_failure_with_ai(
+                        selected,
+                        phase="dependency",
+                        backend="hearthstonejson",
+                    )
+                    await _flush_deferred_ai_jobs(
+                        run_id,
+                        terminal_results,
+                        enqueue_terminal_failures=False,
+                        persist_statuses=False,
+                    )
+                except Exception as ai_exc:  # noqa: BLE001 - retain original failure
+                    logger.warning(
+                        "Refresh-level AI diagnosis failed after dependency error: %s",
+                        type(ai_exc).__name__,
+                    )
             finally:
                 end_refresh_run()
             raise
@@ -2957,7 +3723,12 @@ async def _refresh_sources_unlocked(
                 if source.id not in completed_source_ids
             ),
         ]
-        _record_reliability_results_best_effort(run_id, terminal_results)
+        _record_reliability_results_best_effort(
+            run_id,
+            terminal_results,
+            coverage_scope="full" if full_refresh else "partial",
+            expected_source_count=reliability_expected_source_count,
+        )
         if use_patchright or use_flaresolverr:
             await PatchrightPool.shutdown()
         if use_cloakbrowser:
@@ -2997,6 +3768,7 @@ async def _refresh_sources_unlocked(
                     )
             except Exception as exc:
                 logger.warning("Stale source alerts failed: %s", exc)
+        await _flush_deferred_ai_jobs(run_id, terminal_results)
     return results
 
 

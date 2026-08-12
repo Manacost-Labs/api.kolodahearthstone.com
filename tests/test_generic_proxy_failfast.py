@@ -581,7 +581,7 @@ def test_refresh_circuit_crosses_phases_but_keeps_hsreplay_scrape_do() -> None:
 
 def test_scrape_do_capability_is_limited_to_hsreplay_json_sources() -> None:
     json_source = SOURCE_BY_ID["hsreplay_cards_legend_1d"]
-    html_source = SOURCE_BY_ID["hsreplay_decks_trending"]
+    trending_api_source = SOURCE_BY_ID["hsreplay_decks_trending"]
     with patch.dict(
         os.environ,
         {
@@ -593,4 +593,4 @@ def test_scrape_do_capability_is_limited_to_hsreplay_json_sources() -> None:
         clear=False,
     ):
         assert source_has_hsreplay_scrape_do_json_route(json_source)
-        assert not source_has_hsreplay_scrape_do_json_route(html_source)
+        assert source_has_hsreplay_scrape_do_json_route(trending_api_source)

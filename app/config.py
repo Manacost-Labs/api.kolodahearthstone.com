@@ -409,9 +409,9 @@ def ai_review_source_ids() -> set[str]:
 
 def ai_review_timeout_seconds() -> float:
     try:
-        value = float(os.environ.get("HS_AI_REVIEW_TIMEOUT_SECONDS", "45"))
+        value = float(os.environ.get("HS_AI_REVIEW_TIMEOUT_SECONDS", "15"))
     except ValueError:
-        value = 45.0
+        value = 15.0
     return min(120.0, max(5.0, value))
 
 
@@ -433,13 +433,15 @@ def ai_review_max_prompt_chars() -> int:
 
 def ai_review_confidence_threshold() -> float:
     try:
-        value = float(os.environ.get("HS_AI_REVIEW_CONFIDENCE_THRESHOLD", "0.90"))
+        value = float(os.environ.get("HS_AI_REVIEW_CONFIDENCE_THRESHOLD", "0.95"))
     except ValueError:
-        value = 0.90
+        value = 0.95
     return min(1.0, max(0.5, value))
 
 
 def ai_review_max_concurrency() -> int:
+    """Legacy per-lane concurrency setting kept for existing deployments."""
+
     try:
         value = int(os.environ.get("HS_AI_REVIEW_MAX_CONCURRENCY", "2"))
     except ValueError:
@@ -447,12 +449,70 @@ def ai_review_max_concurrency() -> int:
     return min(8, max(1, value))
 
 
+def _ai_review_lane_concurrency(variable: str, *, default: int) -> int:
+    raw = os.environ.get(variable)
+    if raw is None:
+        raw = os.environ.get("HS_AI_REVIEW_MAX_CONCURRENCY", str(default))
+    try:
+        value = int(raw)
+    except ValueError:
+        value = default
+    return min(8, max(1, value))
+
+
+def ai_review_candidate_max_concurrency() -> int:
+    return _ai_review_lane_concurrency(
+        "HS_AI_REVIEW_CANDIDATE_MAX_CONCURRENCY",
+        default=1,
+    )
+
+
+def ai_review_diagnosis_max_concurrency() -> int:
+    return _ai_review_lane_concurrency(
+        "HS_AI_REVIEW_DIAGNOSIS_MAX_CONCURRENCY",
+        default=2,
+    )
+
+
 def ai_review_max_per_refresh() -> int:
     try:
-        value = int(os.environ.get("HS_AI_REVIEW_MAX_PER_REFRESH", "120"))
+        value = int(os.environ.get("HS_AI_REVIEW_MAX_PER_REFRESH", "10"))
     except ValueError:
-        value = 120
+        value = 10
     return min(1000, max(1, value))
+
+
+def ai_review_diagnose_failures_enabled() -> bool:
+    return os.environ.get("HS_AI_REVIEW_DIAGNOSE_FAILURES", "true").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def ai_review_max_failures_per_refresh() -> int:
+    try:
+        value = int(os.environ.get("HS_AI_REVIEW_MAX_FAILURES_PER_REFRESH", "20"))
+    except ValueError:
+        value = 20
+    return min(200, max(1, value))
+
+
+def ai_review_retry_attempts() -> int:
+    try:
+        value = int(os.environ.get("HS_AI_REVIEW_RETRY_ATTEMPTS", "2"))
+    except ValueError:
+        value = 2
+    return min(3, max(1, value))
+
+
+def ai_review_retry_base_seconds() -> float:
+    try:
+        value = float(os.environ.get("HS_AI_REVIEW_RETRY_BASE_SECONDS", "0.25"))
+    except ValueError:
+        value = 0.25
+    return min(2.0, max(0.0, value))
 
 
 def ai_review_circuit_failure_threshold() -> int:
@@ -461,6 +521,14 @@ def ai_review_circuit_failure_threshold() -> int:
     except ValueError:
         value = 3
     return min(20, max(1, value))
+
+
+def ai_review_post_refresh_timeout_seconds() -> float:
+    try:
+        value = float(os.environ.get("HS_AI_REVIEW_POST_REFRESH_TIMEOUT_SECONDS", "30"))
+    except ValueError:
+        value = 30.0
+    return min(120.0, max(5.0, value))
 
 
 def hsguru_current_patch_period() -> str | None:

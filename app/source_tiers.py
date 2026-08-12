@@ -26,6 +26,10 @@ API_FIRST_TIERS: frozenset[SourceTier] = frozenset(
     }
 )
 
+# These sources retain their browser-protected cadence/concurrency class, but
+# have a cheaper deterministic API route before the existing browser fallback.
+API_FIRST_SOURCE_IDS: frozenset[str] = frozenset({"hsreplay_decks_trending"})
+
 
 LIGHT_API_IDS: frozenset[str] = frozenset(
     {

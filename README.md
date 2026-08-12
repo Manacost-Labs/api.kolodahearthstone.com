@@ -54,9 +54,14 @@ flowchart LR
     API --> Normalize["Нормализация и схема"]
     Cloud --> Normalize
     Browser --> Normalize
-    Normalize --> Gate["Contracts + semantic checks + regression gate"]
-    Gate --> AI["Optional Gemma review: observe / quarantine"]
-    AI --> Store["JSON cache + SQLite + last-known-good"]
+    Normalize --> Gate["Contracts + semantic checks"]
+    Gate -->|valid| Regression["Authoritative regression / patch gate"]
+    Gate -->|rejected after fallbacks| Diagnose["Gemma anomaly diagnosis"]
+    Regression -->|rejected| Diagnose
+    Regression -->|accepted| Store["JSON cache + SQLite + last-known-good"]
+    Store --> AI["Gemma success sample after durable save"]
+    Diagnose --> LKG["Preserve LKG; AI cannot override gate"]
+    LKG --> Store
     Store --> REST["REST API / UI / consumers"]
     Start --> Jobs["Deadline + progress snapshots + job-runs"]
     Jobs --> Lock
@@ -110,7 +115,10 @@ Scrapfly могут ротировать ключи. Каждый HTTP 2xx-ка�
 
 Для специализированных источников действуют дополнительные узкие правила:
 HSReplay JSON использует cost-first порядок FlareSolverr → Scrape.do →
-residential curl_cffi. Hearthstone-Decks сначала делает ровно два
+residential curl_cffi. `hsreplay_trending` сначала читает структурированный
+analytics endpoint, дедуплицирует классы и проверяет числовые изменения
+популярности; browser/Scrape.do остаются только резервом, а Bright Data для
+этого маршрута не используется. Hearthstone-Decks сначала делает ровно два
 прямых WordPress REST-запроса: по 20 постов из категорий Standard `3` и
 Wild `13`. ID, URL, категория, timestamps и deck code в `content.rendered`
 проверяются до приёма. Для отсутствующих кодов используется LKG
@@ -143,21 +151,48 @@ regression gate. Upstream `last_updated` обязан быть timezone-aware IS
 
 ## AI-проверка кандидатов
 
-Опциональный слой использует `google/gemma-4-26b-a4b-it` через OpenRouter только
-после успешных детерминированных проверок. Модель не может превратить провал
-contracts/semantic/regression gate в успех. В `observe` её вердикт записывается
-в телеметрию, но не влияет на публикацию; `quarantine` разрешено включать только
-после проверки точности shadow-режима.
+Опциональный слой использует `google/gemma-4-26b-a4b-it` через OpenRouter в двух
+режимах. Валидные кандидаты проверяются небольшой настраиваемой выборкой, а
+кандидаты, окончательно отклонённые contract/semantic/regression gate после
+исчерпания штатных fallback, попадают в отдельный приоритетный контур
+диагностики. Диагноз может предложить retry, обновление авторизации или парсера,
+но не может превратить отказ в публикацию и не расходует квоту успешных страниц.
+В `observe` результат только записывается в телеметрию; `quarantine` разрешено
+включать только после проверки на размеченном shadow-наборе.
 
-Во внешний запрос не передаются сырой HTML, тексты полей, URL, cookies, headers,
-deck codes или токены. Модель получает ограниченные структурные признаки,
-результат локальных проверок и агрегаты качества. Ответ принимается только при
-полной строгой JSON-схеме и `finish_reason=stop`. Ошибка, timeout или отсутствие
-OpenRouter не останавливают парсер; после трёх последовательных ошибок circuit
-breaker отключает AI до следующего refresh. Лимиты источников, параллелизма,
-времени, токенов и запросов задаются переменными `HS_AI_REVIEW_*` из
-`.env.example`. Пустой `HS_AI_REVIEW_SOURCE_IDS` не делает запросов; все
-источники разрешаются только явным значением `*`.
+Во внешний запрос не передаются сырой HTML, тексты строк, URL, cookies, headers,
+deck codes или токены. Evidence v2 содержит только доверенный source contract,
+boolean identity/type checks, числовые row/fill/semantic метрики, post-patch
+контекст и отклонения от LKG; его канонический hash сохраняется в телеметрии.
+Ответ принимается только при полной строгой JSON-схеме и `finish_reason=stop`.
+Transient 408/429/502/503/504, provider overload и повреждённый structured output
+повторяются ограниченно с `Retry-After`, backoff и jitter. Ошибка, timeout или
+отсутствие OpenRouter не останавливают парсер; circuit breaker действует только
+на внешний AI-слой. Success-sample и failure-диагностика имеют независимые
+circuit breakers и отдельные лимиты параллелизма: их суммарный максимум равен
+сумме `HS_AI_REVIEW_CANDIDATE_MAX_CONCURRENCY` и
+`HS_AI_REVIEW_DIAGNOSIS_MAX_CONCURRENCY`. Общий deadline одного review охватывает
+все retry, а refresh-лимиты считают фактические внешние запросы. Настройки
+задаются переменными `HS_AI_REVIEW_*` из `.env.example`. Пустой
+`HS_AI_REVIEW_SOURCE_IDS` отключает только успешную выборку; безопасная
+диагностика отказов управляется `HS_AI_REVIEW_DIAGNOSE_FAILURES`.
+
+В режиме `observe` выборочная проверка и диагностика выполняются только после
+сохранения terminal status, завершения fetch-фаз и первичной записи reliability.
+Они не удерживают tier semaphore и ограничены общим post-refresh окном
+`HS_AI_REVIEW_POST_REFRESH_TIMEOUT_SECONDS`; незавершённые review отменяются, а
+исход парсинга не меняется. Только явно включённый `quarantine` остаётся
+синхронным pre-publish gate. HTTP/proxy/timeout/auth ошибки классифицируются
+детерминированно, а AI получает безопасный числовой evidence для неоднозначных
+semantic/contract/regression отказов. Общий сбой preflight или зависимости
+HearthstoneJSON создаёт один bounded AI-запрос с числом затронутых
+источников/tiers, после чего единый диагноз привязывается ко всем их terminal
+status; отдельный запрос на каждый источник не создаётся.
+
+Публичная reliability-телеметрия отдельно показывает AI coverage, расход,
+ошибки и `calibration.status`. Пока нет human-labeled выборки,
+`calibration.status=not_calibrated`: высокая confidence самой модели не считается
+доказанной точностью и не даёт оснований включать `quarantine`.
 
 ## Гарантии устойчивости
 
@@ -411,9 +446,15 @@ Public:
 - `GET /v1/system/sources`, `/v1/system/datasets`, `/v1/system/health` —
   системные read-only представления.
 - `GET /v1/system/parsing-reliability` — fresh success, provisional, LKG и
-  failures основного generic refresh за 24 часа, 7 и 30 дней со статусом
-  `collecting/observed`. Четыре dedicated pipeline пока явно перечислены в
-  `methodology.limitations` и не смешиваются с этим процентом.
+  failures основного generic refresh за 24 часа, 7 и 30 дней, bounded-классы
+  причин, цель 99% и error budget со статусом `collecting/meeting/breached`.
+  Месячная цель не объявляется достигнутой, пока в каждом из 30 последовательных
+  24-часовых интервалов не зафиксирован полный refresh без пропущенных источников,
+  а разрыв между такими запусками не превышает 25 часов (1 час на scheduler jitter).
+  Coverage считается только для текущего hash канонического scrape-реестра;
+  добавление или удаление источника начинает новый сопоставимый период наблюдения.
+  Четыре dedicated pipeline пока явно перечислены в `methodology.limitations`
+  и не смешиваются с этим процентом.
 - `GET /system/technologies` — публичное описание parser stack без секретов.
 - `GET /ui`, `/ui/logs`, `/ui/technologies` — встроенный интерфейс.
 

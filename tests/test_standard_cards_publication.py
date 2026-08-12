@@ -1084,7 +1084,9 @@ class StandardCardsFetcherPublicationTest(unittest.IsolatedAsyncioTestCase):
                 "HS_API_DATA_DIR": directory,
                 "HS_FETCH_REQUIRE_PROXY": "false",
                 "HS_STANDARD_CARDS_MAX_STALE_HOURS": "36",
+                "HS_AI_REVIEW_ENABLED": "true",
                 "HS_AI_REVIEW_MODE": "quarantine",
+                "HS_AI_REVIEW_SOURCE_IDS": STANDARD_CARDS_SOURCE_ID,
             },
             clear=False,
         ):
@@ -1152,8 +1154,10 @@ class StandardCardsFetcherPublicationTest(unittest.IsolatedAsyncioTestCase):
                 "HS_API_DATA_DIR": directory,
                 "HS_FETCH_REQUIRE_PROXY": "false",
                 "HS_STANDARD_CARDS_MAX_STALE_HOURS": "36",
+                "HS_AI_REVIEW_ENABLED": "true",
                 "HS_AI_REVIEW_MODE": "quarantine",
                 "HS_AI_REVIEW_CONFIDENCE_THRESHOLD": "0.90",
+                "HS_AI_REVIEW_SOURCE_IDS": STANDARD_CARDS_SOURCE_ID,
             },
             clear=False,
         ):

@@ -252,6 +252,7 @@ CONTRACTS: dict[str, SourceContract] = {
     "hsreplay_decks_trending": SourceContract(
         source_id="hsreplay_decks_trending",
         structured_type="trending_decks",
+        preferred_channels=HSREPLAY_JSON_CHANNELS,
         allow_browser_fallback=True,
         min_rows=5,
         critical_fields=("name", "winrate", "games"),

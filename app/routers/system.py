@@ -75,6 +75,81 @@ class ReliabilitySLO(BaseModel):
     error_budget_consumed_pct: float | None = Field(default=None, ge=0.0)
 
 
+class AIReviewVerdicts(BaseModel):
+    model_config = ConfigDict(serialize_by_alias=True)
+
+    pass_: int = Field(alias="pass", ge=0)
+    fail: int = Field(ge=0)
+    uncertain: int = Field(ge=0)
+
+
+class AICandidateReviewSummary(BaseModel):
+    all_parser_attempts: int = Field(ge=0)
+    attempted: int = Field(ge=0)
+    completed: int = Field(ge=0)
+    errors: int = Field(ge=0)
+    coverage_of_all_parser_attempts_pct: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=100.0,
+    )
+    valid_response_rate_pct: float | None = Field(default=None, ge=0.0, le=100.0)
+    verdicts: AIReviewVerdicts
+    quarantined: int = Field(ge=0)
+
+
+class AIDiagnosisClassifications(BaseModel):
+    healthy: int = Field(ge=0)
+    anomalous: int = Field(ge=0)
+    inconclusive: int = Field(ge=0)
+
+
+class AIDiagnosisDomains(BaseModel):
+    model_config = ConfigDict(serialize_by_alias=True)
+
+    identity: int = Field(ge=0)
+    protection: int = Field(ge=0)
+    auth: int = Field(ge=0)
+    scope: int = Field(ge=0)
+    schema_: int = Field(alias="schema", ge=0)
+    completeness: int = Field(ge=0)
+    semantics: int = Field(ge=0)
+    freshness: int = Field(ge=0)
+    regression: int = Field(ge=0)
+    backend_policy: int = Field(ge=0)
+    unknown: int = Field(ge=0)
+
+
+class AIFailureDiagnosisSummary(BaseModel):
+    all_problem_attempts: int = Field(ge=0)
+    attempted: int = Field(ge=0)
+    completed: int = Field(ge=0)
+    errors: int = Field(ge=0)
+    coverage_of_all_problem_attempts_pct: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=100.0,
+    )
+    valid_response_rate_pct: float | None = Field(default=None, ge=0.0, le=100.0)
+    classifications: AIDiagnosisClassifications
+    failure_domains: AIDiagnosisDomains
+
+
+class AICalibrationSummary(BaseModel):
+    status: Literal["not_calibrated"]
+    human_labeled_examples: int = Field(ge=0)
+    precision_pct: float | None = Field(default=None, ge=0.0, le=100.0)
+    recall_pct: float | None = Field(default=None, ge=0.0, le=100.0)
+    false_positive_rate_pct: float | None = Field(default=None, ge=0.0, le=100.0)
+    limitation: Literal["human_labels_not_collected"]
+
+
+class AIQualitySummary(BaseModel):
+    candidate_review: AICandidateReviewSummary
+    failure_diagnosis: AIFailureDiagnosisSummary
+    calibration: AICalibrationSummary
+
+
 class ReliabilityWindow(BaseModel):
     window: Literal["24h", "7d", "30d"]
     from_at: str
@@ -90,6 +165,7 @@ class ReliabilityWindow(BaseModel):
     data_available_rate_pct: float | None = Field(default=None, ge=0.0, le=100.0)
     freshness_slo: ReliabilitySLO
     availability_slo: ReliabilitySLO
+    ai_quality: AIQualitySummary
 
 
 class ReliabilityMethodology(BaseModel):
@@ -98,15 +174,23 @@ class ReliabilityMethodology(BaseModel):
     scope: Literal["generic_refresh_sources"]
     completeness: Literal["observed_attempts_only"]
     limitations: list[str]
+    coverage_method: Literal["complete_full_refresh_per_24h_bucket"]
+    coverage_max_gap_hours: float = Field(gt=0.0)
+    coverage_cohort_method: Literal["current_canonical_scrape_registry_hash"]
     eligible_outcomes: list[str]
     excluded_outcomes: list[str]
     slo_target_rate_pct: float = Field(ge=0.0, le=100.0)
     failure_reason_values: list[str]
+    ai_accuracy_method: Literal["human_labels_required"]
 
 
 class ReliabilityReport(BaseModel):
     methodology: ReliabilityMethodology
     generated_at: str
+    coverage_cohort_hash: str | None = Field(
+        default=None,
+        pattern=r"^[a-f0-9]{64}$",
+    )
     coverage_started_at: str | None = None
     windows: list[ReliabilityWindow]
 
@@ -123,7 +207,8 @@ def sources(
     selected = [
         source
         for source in SOURCES
-        if (not site or source.site == site) and (not category or source.category == category)
+        if (not site or source.site == site)
+        and (not category or source.category == category)
     ]
     rows: list[dict[str, Any]] = []
     for source in selected:
@@ -188,9 +273,9 @@ def health() -> Envelope[dict[str, Any]]:
     fetched_at = freshest_timestamp(
         [
             {
-                "fetched_at": (
-                    load_resolved_public_dataset(source.id) or {}
-                ).get("fetched_at")
+                "fetched_at": (load_resolved_public_dataset(source.id) or {}).get(
+                    "fetched_at"
+                )
             }
             for source in SOURCES
         ],

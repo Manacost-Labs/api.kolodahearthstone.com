@@ -34,8 +34,10 @@ WINDOWS = (
     ("7d", timedelta(days=7)),
     ("30d", timedelta(days=30)),
 )
-METHODOLOGY_VERSION = "logical-source-observed-v2"
+METHODOLOGY_VERSION = "logical-source-observed-v5"
 SLO_TARGET_RATE_PCT = 99.0
+COVERAGE_BUCKET_SECONDS = 24 * 60 * 60
+COVERAGE_MAX_GAP_SECONDS = 25 * 60 * 60
 FAILURE_REASONS = (
     "proxy_payment",
     "authentication",
@@ -56,12 +58,45 @@ FAILURE_REASONS = (
     "dependency",
     "unknown",
 )
+AI_REVIEW_STATES = ("not_run", "ok", "disabled", "skipped", "error")
+AI_REVIEW_VERDICTS = ("not_run", "pass", "fail", "uncertain")
+AI_DIAGNOSIS_CLASSIFICATIONS = (
+    "not_run",
+    "healthy",
+    "anomalous",
+    "inconclusive",
+)
+AI_DIAGNOSIS_DOMAINS = (
+    "none",
+    "identity",
+    "protection",
+    "auth",
+    "scope",
+    "schema",
+    "completeness",
+    "semantics",
+    "freshness",
+    "regression",
+    "backend_policy",
+    "unknown",
+)
 
 _schema_lock = threading.Lock()
 
 
 def telemetry_db_path() -> Path:
     return root_dir() / "parser-telemetry.sqlite3"
+
+
+def canonical_scrape_cohort_hash() -> str | None:
+    """Hash the current complete generic scrape registry without exposing IDs."""
+
+    from .sources import SOURCES
+
+    source_ids = sorted(source.id for source in SOURCES if source.kind == "scrape")
+    if not source_ids:
+        return None
+    return hashlib.sha256("\0".join(source_ids).encode()).hexdigest()
 
 
 def reliability_cache_revision(*, path: Path | None = None) -> str:
@@ -197,12 +232,57 @@ def classify_failure_reason(status: Mapping[str, object]) -> str:
     return "unknown"
 
 
+def _ai_terminal_fields(
+    status: Mapping[str, object],
+) -> tuple[str, str, str, str, str, int]:
+    review = status.get("ai_review") or status.get("latest_ai_review")
+    diagnosis = status.get("ai_diagnosis") or status.get("latest_ai_diagnosis")
+    review_mapping = review if isinstance(review, Mapping) else {}
+    diagnosis_mapping = diagnosis if isinstance(diagnosis, Mapping) else {}
+    review_state = _bounded_enum(
+        review_mapping.get("state"),
+        AI_REVIEW_STATES,
+        default="not_run",
+    )
+    review_verdict = _bounded_enum(
+        review_mapping.get("verdict"),
+        AI_REVIEW_VERDICTS,
+        default="not_run",
+    )
+    diagnosis_state = _bounded_enum(
+        diagnosis_mapping.get("state"),
+        AI_REVIEW_STATES,
+        default="not_run",
+    )
+    diagnosis_classification = _bounded_enum(
+        diagnosis_mapping.get("classification"),
+        AI_DIAGNOSIS_CLASSIFICATIONS,
+        default="not_run",
+    )
+    diagnosis_domain = _bounded_enum(
+        diagnosis_mapping.get("failure_domain"),
+        AI_DIAGNOSIS_DOMAINS,
+        default="none",
+    )
+    quarantined = int(review_mapping.get("quarantine") is True)
+    return (
+        review_state,
+        review_verdict,
+        diagnosis_state,
+        diagnosis_classification,
+        diagnosis_domain,
+        quarantined,
+    )
+
+
 def record_terminal_results(
     run_id: str,
     results: Iterable[Mapping[str, object]],
     *,
     finished_at: datetime | None = None,
     path: Path | None = None,
+    coverage_scope: str = "partial",
+    expected_source_count: int | None = None,
 ) -> int:
     """Persist terminal source results atomically and idempotently.
 
@@ -217,7 +297,7 @@ def record_terminal_results(
     if not normalized_run_id:
         raise ValueError("run_id is required")
 
-    rows: list[tuple[str, str, str, float, str, str, str, float]] = []
+    rows: list[tuple[object, ...]] = []
     seen_sources: set[str] = set()
     for result in results:
         source_id = str(result.get("source_id") or "").strip()[:160]
@@ -226,6 +306,7 @@ def record_terminal_results(
         seen_sources.add(source_id)
         outcome = classify_terminal_status(result)
         reason_code = classify_failure_reason(result)
+        ai_fields = _ai_terminal_fields(result)
         terminal_state = _bounded_terminal_state(result.get("state"))
         attempt_id = hashlib.sha256(
             f"{normalized_run_id}\0{source_id}".encode()
@@ -239,12 +320,27 @@ def record_terminal_results(
                 outcome,
                 terminal_state,
                 reason_code,
+                *ai_fields,
                 recorded_epoch,
             )
         )
 
     if not rows:
         return 0
+
+    normalized_scope = "full" if coverage_scope == "full" else "partial"
+    cohort_hash = (
+        canonical_scrape_cohort_hash() or "" if normalized_scope == "full" else ""
+    )
+    observed_sources = sum(1 for row in rows if row[4] != "skipped")
+    try:
+        expected_sources = (
+            max(0, int(expected_source_count))
+            if expected_source_count is not None
+            else len(rows)
+        )
+    except (TypeError, ValueError, OverflowError):
+        expected_sources = len(rows)
 
     resolved_path = path or telemetry_db_path()
     connection = _connect(resolved_path)
@@ -263,12 +359,49 @@ def record_terminal_results(
                     outcome,
                     terminal_state,
                     reason_code,
+                    ai_review_state,
+                    ai_review_verdict,
+                    ai_diagnosis_state,
+                    ai_diagnosis_classification,
+                    ai_diagnosis_domain,
+                    ai_quarantined,
                     recorded_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 row,
             )
             inserted += max(0, cursor.rowcount)
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO refresh_runs (
+                run_id,
+                finished_at,
+                scope,
+                cohort_hash,
+                expected_sources,
+                observed_sources,
+                recorded_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(run_id) DO UPDATE SET
+                observed_sources = MAX(
+                    refresh_runs.observed_sources,
+                    excluded.observed_sources
+                )
+            WHERE refresh_runs.finished_at = excluded.finished_at
+              AND refresh_runs.scope = excluded.scope
+              AND refresh_runs.cohort_hash = excluded.cohort_hash
+              AND refresh_runs.expected_sources = excluded.expected_sources
+            """,
+            (
+                normalized_run_id,
+                completed_epoch,
+                normalized_scope,
+                cohort_hash,
+                expected_sources,
+                observed_sources,
+                recorded_epoch,
+            ),
+        )
         connection.commit()
     except BaseException:
         connection.rollback()
@@ -276,6 +409,63 @@ def record_terminal_results(
     finally:
         connection.close()
     return inserted
+
+
+def update_terminal_ai_results(
+    run_id: str,
+    results: Iterable[Mapping[str, object]],
+    *,
+    path: Path | None = None,
+) -> int:
+    """Attach bounded advisory AI fields after terminal outcomes are durable."""
+
+    normalized_run_id = str(run_id).strip()[:160]
+    if not normalized_run_id:
+        raise ValueError("run_id is required")
+    rows: list[tuple[object, ...]] = []
+    seen_sources: set[str] = set()
+    for result in results:
+        source_id = str(result.get("source_id") or "").strip()[:160]
+        if not source_id or source_id in seen_sources:
+            continue
+        seen_sources.add(source_id)
+        ai_fields = _ai_terminal_fields(result)
+        if ai_fields[:5] == ("not_run", "not_run", "not_run", "not_run", "none"):
+            continue
+        attempt_id = hashlib.sha256(
+            f"{normalized_run_id}\0{source_id}".encode()
+        ).hexdigest()
+        rows.append((*ai_fields, attempt_id, normalized_run_id))
+    if not rows:
+        return 0
+
+    connection = _connect(path or telemetry_db_path())
+    updated = 0
+    try:
+        _ensure_schema(connection)
+        connection.execute("BEGIN IMMEDIATE")
+        for row in rows:
+            cursor = connection.execute(
+                """
+                UPDATE source_attempts
+                SET ai_review_state = ?,
+                    ai_review_verdict = ?,
+                    ai_diagnosis_state = ?,
+                    ai_diagnosis_classification = ?,
+                    ai_diagnosis_domain = ?,
+                    ai_quarantined = ?
+                WHERE attempt_id = ? AND run_id = ?
+                """,
+                row,
+            )
+            updated += max(0, cursor.rowcount)
+        connection.commit()
+    except BaseException:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+    return updated
 
 
 def build_reliability_report(
@@ -292,11 +482,25 @@ def build_reliability_report(
 
     connection = _connect(resolved_path)
     try:
-        _ensure_schema(connection)
+        if not _schema_is_current(connection):
+            _ensure_schema(connection)
         connection.execute("BEGIN")
-        coverage_row = connection.execute(
-            "SELECT MIN(finished_at) FROM source_attempts"
-        ).fetchone()
+        coverage_cohort_hash = canonical_scrape_cohort_hash()
+        coverage_row = (
+            connection.execute(
+                """
+                SELECT MIN(finished_at)
+                FROM refresh_runs
+                WHERE scope = 'full'
+                  AND cohort_hash = ?
+                  AND expected_sources > 0
+                  AND observed_sources >= expected_sources
+                """,
+                (coverage_cohort_hash,),
+            ).fetchone()
+            if coverage_cohort_hash is not None
+            else None
+        )
         coverage_epoch = (
             float(coverage_row[0])
             if coverage_row is not None and coverage_row[0] is not None
@@ -308,7 +512,7 @@ def build_reliability_report(
                 label=label,
                 duration=duration,
                 report_at=report_at,
-                coverage_epoch=coverage_epoch,
+                coverage_cohort_hash=coverage_cohort_hash,
             )
             for label, duration in WINDOWS
         ]
@@ -322,6 +526,7 @@ def build_reliability_report(
     return {
         "methodology": _methodology(),
         "generated_at": report_at.isoformat(),
+        "coverage_cohort_hash": coverage_cohort_hash,
         "coverage_started_at": _iso_from_epoch(coverage_epoch),
         "windows": windows,
     }
@@ -334,50 +539,153 @@ def _connect(path: Path) -> sqlite3.Connection:
     return connection
 
 
+def _schema_is_current(connection: sqlite3.Connection) -> bool:
+    """Check the read contract without taking a SQLite write lock."""
+
+    try:
+        source_columns = {
+            str(row[1])
+            for row in connection.execute("PRAGMA table_info(source_attempts)")
+        }
+        run_columns = {
+            str(row[1]) for row in connection.execute("PRAGMA table_info(refresh_runs)")
+        }
+    except sqlite3.DatabaseError:
+        return False
+    return {
+        "attempt_id",
+        "run_id",
+        "source_id",
+        "finished_at",
+        "outcome",
+        "terminal_state",
+        "reason_code",
+        "ai_review_state",
+        "ai_review_verdict",
+        "ai_diagnosis_state",
+        "ai_diagnosis_classification",
+        "ai_diagnosis_domain",
+        "ai_quarantined",
+        "recorded_at",
+    }.issubset(source_columns) and {
+        "run_id",
+        "finished_at",
+        "scope",
+        "cohort_hash",
+        "expected_sources",
+        "observed_sources",
+        "recorded_at",
+    }.issubset(run_columns)
+
+
 def _ensure_schema(connection: sqlite3.Connection) -> None:
     # The in-process lock avoids competing PRAGMA journal-mode transitions.
-    # SQLite's own lock plus busy_timeout protects the same initialization when
-    # multiple parser processes start concurrently.
+    # BEGIN IMMEDIATE also serializes migrations across parser processes. Every
+    # waiter re-reads table_info only after the previous migration commits, so
+    # two cold-start workers can never attempt the same ALTER TABLE.
     with _schema_lock:
-        connection.execute("PRAGMA journal_mode = WAL")
+        try:
+            connection.execute("PRAGMA journal_mode = WAL")
+        except sqlite3.OperationalError as exc:
+            # A concurrent process may already be switching the database to WAL.
+            # That PRAGMA can fail immediately despite busy_timeout; the schema
+            # transaction below is still safe and will wait for the winner.
+            if "locked" not in str(exc).casefold():
+                raise
         connection.execute("PRAGMA synchronous = NORMAL")
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS source_attempts (
-                attempt_id TEXT PRIMARY KEY,
-                run_id TEXT NOT NULL,
-                source_id TEXT NOT NULL,
-                finished_at REAL NOT NULL,
-                outcome TEXT NOT NULL CHECK (
-                    outcome IN (
-                        'fresh_published',
-                        'provisional',
-                        'lkg_served',
-                        'failed',
-                        'timed_out',
-                        'skipped'
-                    )
-                ),
-                terminal_state TEXT NOT NULL,
-                reason_code TEXT NOT NULL DEFAULT 'unknown',
-                recorded_at REAL NOT NULL
-            )
-            """
-        )
-        columns = {
-            str(row[1]) for row in connection.execute("PRAGMA table_info(source_attempts)")
-        }
-        if "reason_code" not in columns:
+        connection.execute("BEGIN IMMEDIATE")
+        try:
             connection.execute(
-                "ALTER TABLE source_attempts "
-                "ADD COLUMN reason_code TEXT NOT NULL DEFAULT 'unknown'"
+                """
+                CREATE TABLE IF NOT EXISTS source_attempts (
+                    attempt_id TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL,
+                    source_id TEXT NOT NULL,
+                    finished_at REAL NOT NULL,
+                    outcome TEXT NOT NULL CHECK (
+                        outcome IN (
+                            'fresh_published',
+                            'provisional',
+                            'lkg_served',
+                            'failed',
+                            'timed_out',
+                            'skipped'
+                        )
+                    ),
+                    terminal_state TEXT NOT NULL,
+                    reason_code TEXT NOT NULL DEFAULT 'unknown',
+                    ai_review_state TEXT NOT NULL DEFAULT 'not_run',
+                    ai_review_verdict TEXT NOT NULL DEFAULT 'not_run',
+                    ai_diagnosis_state TEXT NOT NULL DEFAULT 'not_run',
+                    ai_diagnosis_classification TEXT NOT NULL DEFAULT 'not_run',
+                    ai_diagnosis_domain TEXT NOT NULL DEFAULT 'none',
+                    ai_quarantined INTEGER NOT NULL DEFAULT 0,
+                    recorded_at REAL NOT NULL
+                )
+                """
             )
-        connection.execute(
-            """
-            CREATE INDEX IF NOT EXISTS source_attempts_finished_at_idx
-            ON source_attempts (finished_at)
-            """
-        )
+            columns = {
+                str(row[1])
+                for row in connection.execute("PRAGMA table_info(source_attempts)")
+            }
+            migrations = {
+                "reason_code": "TEXT NOT NULL DEFAULT 'unknown'",
+                "ai_review_state": "TEXT NOT NULL DEFAULT 'not_run'",
+                "ai_review_verdict": "TEXT NOT NULL DEFAULT 'not_run'",
+                "ai_diagnosis_state": "TEXT NOT NULL DEFAULT 'not_run'",
+                "ai_diagnosis_classification": "TEXT NOT NULL DEFAULT 'not_run'",
+                "ai_diagnosis_domain": "TEXT NOT NULL DEFAULT 'none'",
+                "ai_quarantined": "INTEGER NOT NULL DEFAULT 0",
+            }
+            for column, definition in migrations.items():
+                if column not in columns:
+                    connection.execute(
+                        f"ALTER TABLE source_attempts ADD COLUMN {column} {definition}"
+                    )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS source_attempts_finished_at_idx
+                ON source_attempts (finished_at)
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS refresh_runs (
+                    run_id TEXT PRIMARY KEY,
+                    finished_at REAL NOT NULL,
+                    scope TEXT NOT NULL CHECK (scope IN ('full', 'partial')),
+                    cohort_hash TEXT NOT NULL DEFAULT '',
+                    expected_sources INTEGER NOT NULL,
+                    observed_sources INTEGER NOT NULL,
+                    recorded_at REAL NOT NULL
+                )
+                """
+            )
+            run_columns = {
+                str(row[1])
+                for row in connection.execute("PRAGMA table_info(refresh_runs)")
+            }
+            if "cohort_hash" not in run_columns:
+                connection.execute(
+                    "ALTER TABLE refresh_runs "
+                    "ADD COLUMN cohort_hash TEXT NOT NULL DEFAULT ''"
+                )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS refresh_runs_coverage_idx
+                ON refresh_runs (scope, finished_at)
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS refresh_runs_cohort_coverage_idx
+                ON refresh_runs (cohort_hash, scope, finished_at)
+                """
+            )
+            connection.commit()
+        except BaseException:
+            connection.rollback()
+            raise
 
 
 def _query_window(
@@ -386,7 +694,7 @@ def _query_window(
     label: str,
     duration: timedelta,
     report_at: datetime,
-    coverage_epoch: float | None,
+    coverage_cohort_hash: str | None,
 ) -> dict[str, Any]:
     from_at = report_at - duration
     rows = connection.execute(
@@ -424,9 +732,16 @@ def _query_window(
     accepted_fresh = full_fresh + counts["provisional"]
     data_available = accepted_fresh + counts["lkg_served"]
     coverage_ratio = _coverage_ratio(
-        coverage_epoch=coverage_epoch,
+        connection,
         from_at=from_at,
         report_at=report_at,
+        duration=duration,
+        cohort_hash=coverage_cohort_hash,
+    )
+    ai_quality = _query_ai_quality(
+        connection,
+        from_epoch=from_at.timestamp(),
+        to_epoch=report_at.timestamp(),
     )
     return {
         "window": label,
@@ -451,6 +766,7 @@ def _query_window(
             eligible_attempts=eligible_attempts,
             measurement_complete=coverage_ratio >= 1.0,
         ),
+        "ai_quality": ai_quality,
     }
 
 
@@ -458,6 +774,7 @@ def _empty_report(report_at: datetime) -> dict[str, Any]:
     return {
         "methodology": _methodology(),
         "generated_at": report_at.isoformat(),
+        "coverage_cohort_hash": canonical_scrape_cohort_hash(),
         "coverage_started_at": None,
         "windows": [
             {
@@ -483,6 +800,7 @@ def _empty_report(report_at: datetime) -> dict[str, Any]:
                     eligible_attempts=0,
                     measurement_complete=False,
                 ),
+                "ai_quality": _empty_ai_quality(),
             }
             for label, duration in WINDOWS
         ],
@@ -499,10 +817,14 @@ def _methodology() -> dict[str, Any]:
             "dedicated_pipeline_sources_excluded",
             "best_effort_write_gaps_not_detectable",
         ],
+        "coverage_method": "complete_full_refresh_per_24h_bucket",
+        "coverage_max_gap_hours": COVERAGE_MAX_GAP_SECONDS / 3600,
+        "coverage_cohort_method": "current_canonical_scrape_registry_hash",
         "eligible_outcomes": list(ELIGIBLE_OUTCOMES),
         "excluded_outcomes": ["skipped"],
         "slo_target_rate_pct": SLO_TARGET_RATE_PCT,
         "failure_reason_values": list(FAILURE_REASONS),
+        "ai_accuracy_method": "human_labels_required",
     }
 
 
@@ -513,6 +835,161 @@ def _bounded_terminal_state(value: object) -> str:
         "skipped",
     }
     return state if state in allowed else "unknown_error"
+
+
+def _bounded_enum(value: object, allowed: tuple[str, ...], *, default: str) -> str:
+    normalized = str(value or "").strip().lower()
+    return normalized if normalized in allowed else default
+
+
+def _query_ai_quality(
+    connection: sqlite3.Connection,
+    *,
+    from_epoch: float,
+    to_epoch: float,
+) -> dict[str, Any]:
+    rows = connection.execute(
+        """
+        SELECT
+            outcome,
+            ai_review_state,
+            ai_review_verdict,
+            ai_diagnosis_state,
+            ai_diagnosis_classification,
+            ai_diagnosis_domain,
+            ai_quarantined
+        FROM source_attempts
+        WHERE finished_at >= ? AND finished_at <= ?
+          AND outcome != 'skipped'
+        """,
+        (from_epoch, to_epoch),
+    ).fetchall()
+    eligible = len(rows)
+    review_attempted = 0
+    review_completed = 0
+    review_errors = 0
+    review_counts = {
+        verdict: 0 for verdict in AI_REVIEW_VERDICTS if verdict != "not_run"
+    }
+    quarantined = 0
+    problem_attempts = 0
+    diagnosis_attempted = 0
+    diagnosis_completed = 0
+    diagnosis_errors = 0
+    diagnosis_counts = {
+        value: 0 for value in AI_DIAGNOSIS_CLASSIFICATIONS if value != "not_run"
+    }
+    diagnosis_domains = {value: 0 for value in AI_DIAGNOSIS_DOMAINS if value != "none"}
+    for (
+        outcome,
+        review_state,
+        review_verdict,
+        diagnosis_state,
+        diagnosis_classification,
+        diagnosis_domain,
+        ai_quarantined,
+    ) in rows:
+        if review_state != "not_run":
+            review_attempted += 1
+        if review_state == "error":
+            review_errors += 1
+        if review_state == "ok" and review_verdict in review_counts:
+            review_completed += 1
+            review_counts[str(review_verdict)] += 1
+        quarantined += int(int(ai_quarantined or 0) > 0)
+        if outcome not in {"lkg_served", "failed", OUTCOME_TIMED_OUT}:
+            continue
+        problem_attempts += 1
+        if diagnosis_state != "not_run":
+            diagnosis_attempted += 1
+        if diagnosis_state == "error":
+            diagnosis_errors += 1
+        if diagnosis_state == "ok" and diagnosis_classification in diagnosis_counts:
+            diagnosis_completed += 1
+            diagnosis_counts[str(diagnosis_classification)] += 1
+            if diagnosis_domain in diagnosis_domains:
+                diagnosis_domains[str(diagnosis_domain)] += 1
+    return {
+        "candidate_review": {
+            "all_parser_attempts": eligible,
+            "attempted": review_attempted,
+            "completed": review_completed,
+            "errors": review_errors,
+            "coverage_of_all_parser_attempts_pct": _percentage(
+                review_completed,
+                eligible,
+            ),
+            "valid_response_rate_pct": _percentage(
+                review_completed,
+                review_completed + review_errors,
+            ),
+            "verdicts": review_counts,
+            "quarantined": quarantined,
+        },
+        "failure_diagnosis": {
+            "all_problem_attempts": problem_attempts,
+            "attempted": diagnosis_attempted,
+            "completed": diagnosis_completed,
+            "errors": diagnosis_errors,
+            "coverage_of_all_problem_attempts_pct": _percentage(
+                diagnosis_completed,
+                problem_attempts,
+            ),
+            "valid_response_rate_pct": _percentage(
+                diagnosis_completed,
+                diagnosis_completed + diagnosis_errors,
+            ),
+            "classifications": diagnosis_counts,
+            "failure_domains": diagnosis_domains,
+        },
+        "calibration": {
+            "status": "not_calibrated",
+            "human_labeled_examples": 0,
+            "precision_pct": None,
+            "recall_pct": None,
+            "false_positive_rate_pct": None,
+            "limitation": "human_labels_not_collected",
+        },
+    }
+
+
+def _empty_ai_quality() -> dict[str, Any]:
+    return {
+        "candidate_review": {
+            "all_parser_attempts": 0,
+            "attempted": 0,
+            "completed": 0,
+            "errors": 0,
+            "coverage_of_all_parser_attempts_pct": None,
+            "valid_response_rate_pct": None,
+            "verdicts": {"pass": 0, "fail": 0, "uncertain": 0},
+            "quarantined": 0,
+        },
+        "failure_diagnosis": {
+            "all_problem_attempts": 0,
+            "attempted": 0,
+            "completed": 0,
+            "errors": 0,
+            "coverage_of_all_problem_attempts_pct": None,
+            "valid_response_rate_pct": None,
+            "classifications": {
+                "healthy": 0,
+                "anomalous": 0,
+                "inconclusive": 0,
+            },
+            "failure_domains": {
+                value: 0 for value in AI_DIAGNOSIS_DOMAINS if value != "none"
+            },
+        },
+        "calibration": {
+            "status": "not_calibrated",
+            "human_labeled_examples": 0,
+            "precision_pct": None,
+            "recall_pct": None,
+            "false_positive_rate_pct": None,
+            "limitation": "human_labels_not_collected",
+        },
+    }
 
 
 def _failure_signal(status: Mapping[str, object]) -> str:
@@ -560,25 +1037,69 @@ def _slo_budget(
         "bad_attempts_over_budget": max(0, math.ceil(bad_attempts - allowed_bad)),
         "error_budget_remaining_attempts": round(remaining, 2),
         "error_budget_consumed_pct": (
-            round((bad_attempts / allowed_bad) * 100.0, 2)
-            if allowed_bad > 0
-            else None
+            round((bad_attempts / allowed_bad) * 100.0, 2) if allowed_bad > 0 else None
         ),
     }
 
 
 def _coverage_ratio(
+    connection: sqlite3.Connection,
     *,
-    coverage_epoch: float | None,
     from_at: datetime,
     report_at: datetime,
+    duration: timedelta,
+    cohort_hash: str | None,
 ) -> float:
-    if coverage_epoch is None:
+    if cohort_hash is None:
         return 0.0
-    coverage_at = datetime.fromtimestamp(coverage_epoch, tz=UTC)
-    observed_seconds = max(0.0, (report_at - coverage_at).total_seconds())
-    window_seconds = max(1.0, (report_at - from_at).total_seconds())
-    return round(min(1.0, observed_seconds / window_seconds), 4)
+    expected_buckets = max(
+        1,
+        math.ceil(duration.total_seconds() / COVERAGE_BUCKET_SECONDS),
+    )
+    rows = connection.execute(
+        """
+        SELECT finished_at
+        FROM refresh_runs
+        WHERE scope = 'full'
+          AND cohort_hash = ?
+          AND expected_sources > 0
+          AND observed_sources >= expected_sources
+          AND finished_at >= ?
+          AND finished_at <= ?
+        """,
+        (cohort_hash, from_at.timestamp(), report_at.timestamp()),
+    ).fetchall()
+    timestamps = sorted({float(row[0]) for row in rows if row and row[0] is not None})
+    if not timestamps:
+        return 0.0
+    window_start = from_at.timestamp()
+    window_end = report_at.timestamp()
+    covered_buckets = {
+        min(
+            expected_buckets - 1,
+            max(
+                0,
+                int((timestamp - window_start) // COVERAGE_BUCKET_SECONDS),
+            ),
+        )
+        for timestamp in timestamps
+    }
+    cadence_misses = 0
+    anchors = [window_start, *timestamps, window_end]
+    for index in range(1, len(anchors)):
+        previous = anchors[index - 1]
+        current = anchors[index]
+        gap_seconds = max(0.0, current - previous)
+        cadence_misses += max(
+            0,
+            math.ceil(gap_seconds / COVERAGE_MAX_GAP_SECONDS) - 1,
+        )
+    bucket_ratio = len(covered_buckets) / expected_buckets
+    cadence_ratio = max(
+        0.0,
+        (expected_buckets - min(expected_buckets, cadence_misses)) / expected_buckets,
+    )
+    return round(min(bucket_ratio, cadence_ratio), 4)
 
 
 def _percentage(numerator: int, denominator: int) -> float | None:
