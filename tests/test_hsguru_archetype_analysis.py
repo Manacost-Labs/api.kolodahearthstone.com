@@ -170,7 +170,7 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
                     _load_refresh_checkpoint(target_signature=None, now=now)
                 )
 
-    def test_fetch_html_runs_one_shared_provider_cascade_without_retries(self) -> None:
+    def test_fetch_html_uses_only_scrape_do_without_provider_fallbacks(self) -> None:
         from app import firecrawl_backend
 
         provider_calls: list[str] = []
@@ -234,7 +234,7 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
 
         self.assertEqual(
             provider_calls,
-            ["scrape_do", "firecrawl", "scrapfly"],
+            ["scrape_do"],
         )
 
     def test_fetch_html_uses_ssr_wait_timeout_and_schema_validator(self) -> None:
@@ -255,6 +255,9 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
         options = scrape.await_args.kwargs
         self.assertEqual(options["wait_ms"], ANALYSIS_WAIT_MS)
         self.assertEqual(options["timeout_ms"], ANALYSIS_TIMEOUT_MS)
+        self.assertEqual(
+            options["skip_providers"], {"firecrawl", "brightdata", "scrapfly"}
+        )
         self.assertTrue(options["accept_result"](result))
 
     def test_parses_class_matchups_and_excludes_total(self) -> None:

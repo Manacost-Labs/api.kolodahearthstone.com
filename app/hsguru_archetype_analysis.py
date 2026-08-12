@@ -550,6 +550,7 @@ async def _fetch_html(url: str) -> tuple[str, dict[str, Any]]:
         max_age_ms=0,
         wait_ms=ANALYSIS_WAIT_MS,
         timeout_ms=ANALYSIS_TIMEOUT_MS,
+        skip_providers={"firecrawl", "brightdata", "scrapfly"},
         accept_result=lambda scraped: _analysis_html_is_valid(url, scraped.html),
     )
     return result.html, {
