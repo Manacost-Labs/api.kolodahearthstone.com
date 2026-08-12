@@ -39,6 +39,7 @@ from .graphql_api import canonical_graphql_router, graphql_router
 from .graphql_api.repository import close_graphql_repository
 from .http_observability import RequestObservabilityMiddleware, generic_server_error
 from .public_cache import PublicCacheMiddleware
+from .redis_cache import close_tiered_cache
 from .routers.api_tokens import router as api_tokens_router
 from .routers.arena import router as arena_v1_router
 from .routers.bg import canonical_router as canonical_bg_v1_router
@@ -112,6 +113,7 @@ app.include_router(api_tokens_router)
 @app.on_event("shutdown")
 async def close_graphql_database_pool() -> None:
     await close_graphql_repository()
+    await close_tiered_cache()
 
 
 @app.on_event("startup")

@@ -88,6 +88,31 @@ def request_timeout_seconds() -> float:
     return float(os.environ.get("HS_API_REQUEST_TIMEOUT_SECONDS", "150.0"))
 
 
+def redis_url() -> str | None:
+    value = os.environ.get("HS_REDIS_URL", "").strip()
+    return value or None
+
+
+def redis_key_prefix() -> str:
+    value = os.environ.get("HS_REDIS_KEY_PREFIX", "koloda:v1").strip()
+    return value or "koloda:v1"
+
+
+def redis_operation_timeout_seconds() -> float:
+    return max(
+        0.05,
+        min(2.0, float(os.environ.get("HS_REDIS_TIMEOUT_SECONDS", "0.25"))),
+    )
+
+
+def graphql_cache_ttl_seconds() -> int:
+    return max(0, min(3_600, int(os.environ.get("HS_GRAPHQL_CACHE_TTL_SECONDS", "60"))))
+
+
+def graphql_cache_local_entries() -> int:
+    return max(0, min(10_000, int(os.environ.get("HS_GRAPHQL_CACHE_LOCAL_ENTRIES", "256"))))
+
+
 def user_agent() -> str:
     return os.environ.get(
         "HS_API_USER_AGENT",
