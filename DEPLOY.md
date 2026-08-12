@@ -87,10 +87,13 @@ curl -s -H "X-API-Key: ${HS_API_KEY}" http://127.0.0.1:8000/ops/health | jq .
 
 ```bash
 sudo ./scripts/deploy-panel.sh
+sudo ./scripts/deploy-platform.sh
 ```
 
 Скрипт создаёт неизменяемый release и атомарно переключает symlink `current`.
 Он не удаляет `panel-data` и не копирует секреты в Git.
+`deploy-platform.sh` обновляет только код, SQL, тесты и systemd units платформы;
+PostgreSQL credentials, connection metadata и backups остаются на месте.
 
 ## Зависимости
 

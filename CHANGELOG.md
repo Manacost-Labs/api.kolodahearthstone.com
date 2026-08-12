@@ -4,6 +4,8 @@
 
 - Added the authenticated database web panel, its sync jobs, tests, Nginx
   configuration and atomic release deployment to the canonical API repository.
+- Added the PostgreSQL data platform, statistics normalizers, migrations and
+  deployment contract to the same canonical repository.
 - Moved the production panel to a domain-neutral runtime with persistent media
   and cache storage outside Git; the retired domain path is no longer used by
   active Nginx or systemd configuration.

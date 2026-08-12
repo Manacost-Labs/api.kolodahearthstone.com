@@ -1,0 +1,17 @@
+[Unit]
+Description=Import Hearthstone datasets and normalized statistics into PostgreSQL
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/srv/hs-data-platform/scripts/import-datasets.php
+ExecStartPost=/srv/hs-data-platform/scripts/import-statistics.php
+ExecStartPost=/srv/hs-data-platform/scripts/index-media-assets.php
+TimeoutStartSec=20min
+Nice=10
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+StandardOutput=append:/var/log/hs-data-platform/jobs.jsonl
+StandardError=append:/var/log/hs-data-platform/jobs.jsonl

@@ -1,7 +1,7 @@
 PYTHON := .venv/bin/python
 AI_QUALITY_BIN := /home/debian/server/tools/ai-quality/bin
 
-.PHONY: setup check test panel-check provider-check lint-report security
+.PHONY: setup check test panel-check platform-check provider-check lint-report security
 
 setup:
 	uv venv --python 3.12 .venv
@@ -12,6 +12,7 @@ check:
 	@test -x $(PYTHON) || { printf 'Run make setup first.\n' >&2; exit 1; }
 	$(PYTHON) -m pytest -q
 	$(MAKE) panel-check
+	$(MAKE) platform-check
 	actionlint
 
 test:
@@ -25,6 +26,13 @@ panel-check:
 	panel/tests/test_sync_locking.sh
 	panel/tests/runtime_layout_test.sh
 	@find panel -type f -name '*.php' -print0 | xargs -0 -n1 php -l >/dev/null
+
+platform-check:
+	PANEL_ROOT=$(CURDIR)/panel platform/tests/admin-ui-contract.sh
+	platform/tests/migration-cutover-contract.sh
+	php platform/tests/statistics-normalizer.test.php
+	@find platform/scripts -type f -name '*.php' -print0 | xargs -0 -n1 php -l >/dev/null
+	@find platform/scripts -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n
 
 provider-check:
 	@test -x $(PYTHON) || { printf 'Run make setup first.\n' >&2; exit 1; }
