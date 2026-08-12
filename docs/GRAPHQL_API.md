@@ -25,9 +25,12 @@ to the new hostname first and adopt GraphQL separately.
 | `cards` / `card` | Constructed and Battlegrounds card catalogue |
 | `battlegroundHeroes` | Heroes, hero art, powers, buddies and availability |
 | `statistics` | Normalized statistics for cards, heroes, modes and other entities |
+| `statisticHistory` | Every stored snapshot for one entity, optionally filtered by patch |
+| `compareStatisticPatches` | Before/after values and deltas for two patches |
 | `archetypes` | Latest archetype data split by rank, format and region |
 | `battlegroundMinions` | Minion performance split by tier, MMR and time range |
 | `sources` | Integrated sources and their last update state |
+| `search` | One search across cards, minions, heroes, archetypes and sources |
 | `datasets` | Latest imported version and payload size for each source |
 | `dataset` | One complete raw dataset for compatibility during migration |
 | `collections` | Every table/view and its columns; requires `database:read` |
@@ -36,16 +39,46 @@ to the new hostname first and adopt GraphQL separately.
 Every collection returns `items` and `pageInfo`. `limit` defaults to 50 or 100
 and cannot exceed 200. `offset` cannot exceed 100,000.
 
-`cards` additionally supports keyset pagination. Read `pageInfo.nextCursor` and
-pass it as `after` in the next query. Do not combine `after` with a non-zero
-`offset`; keep all filters unchanged between pages. The cursor is opaque and
-must be stored and returned without decoding or editing it.
+Every large collection supports keyset pagination. This includes `cards`,
+`battlegroundHeroes`, `statistics`, `statisticHistory`, `archetypes`,
+`battlegroundMinions`, `sources`, `search`, `datasets`, `collections` and
+`records`. Read `pageInfo.nextCursor` and pass it as `after` in the next query.
+Do not combine `after` with a non-zero `offset`; keep all filters unchanged
+between pages. The cursor is opaque and must be returned without editing it.
 
 ```graphql
 query NextCardsPage($after: String) {
   cards(limit: 50, after: $after) {
     items { cardId nameRu imageUrl }
     pageInfo { hasNextPage nextCursor }
+  }
+}
+```
+
+Unified search:
+
+```graphql
+query SearchEverything($after: String) {
+  search(query: "Reno", kinds: [CARD, HERO, ARCHETYPE], after: $after, limit: 30) {
+    items { kind entityId name nameRu subtitle imageUrl sourceId metadata }
+    pageInfo { total hasNextPage nextCursor }
+  }
+}
+```
+
+Patch comparison:
+
+```graphql
+query PatchDelta {
+  compareStatisticPatches(
+    entityKey: "wild:reno-priest"
+    fromPatch: "34.0"
+    toPatch: "34.1"
+    formatName: "wild"
+  ) {
+    before { patch games winRate popularity }
+    after { patch games winRate popularity }
+    deltas { metric beforeValue afterValue absoluteChange percentChange }
   }
 }
 ```
@@ -113,10 +146,27 @@ Expected application errors use `errors[].extensions.code`:
 | `UNAUTHORIZED` | API token is missing, expired, revoked or invalid |
 | `FORBIDDEN` | API token lacks `database:read` |
 | `SERVICE_UNAVAILABLE` | The central PostgreSQL store is temporarily unavailable |
+| `QUERY_TOO_COMPLEX` | Weighted query cost exceeds the configured budget |
+| `QUERY_TIMEOUT` | Execution exceeded the server deadline |
+| `REQUEST_TOO_LARGE` / `RESPONSE_TOO_LARGE` | Transport size budget was exceeded |
+| `PERSISTED_QUERY_NOT_FOUND` | The query must first be registered with its document |
 
 The endpoint accepts POST only. It has no mutations, subscriptions, file
-uploads, browser IDE or production introspection UI. GraphQL documents are
-limited to depth 8, 20 aliases and 1,500 tokens.
+uploads, browser IDE or production introspection UI. Default limits are depth
+8, 20 aliases, 1,500 document tokens, weighted cost 5,000, 64 KiB request body,
+2 MiB response body and an 8-second deadline. Successful public queries are
+cached for 60 seconds in a process-local hot cache backed by Redis. Credentialed
+queries bypass the shared response cache.
+
+## Persisted Queries
+
+The endpoint implements Apollo Persisted Queries v1. Send
+`extensions.persistedQuery.version = 1` and the lowercase SHA-256 document
+hash. A hash-only miss returns HTTP 200 with
+`PERSISTED_QUERY_NOT_FOUND`; repeat the request with both the same extension and
+the full `query`. Later requests can send only the hash. Registrations remain in
+Redis for 30 days by default. Both official SDKs perform this handshake
+automatically.
 
 ## Complete database access
 

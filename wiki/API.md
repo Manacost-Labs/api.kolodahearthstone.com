@@ -51,9 +51,11 @@ Content-Type: application/json
 | `cards` / `card` | Constructed и BG cards |
 | `battlegroundHeroes` | Герои, art, powers, buddies |
 | `statistics` | Нормализованная статистика |
+| `statisticHistory` / `compareStatisticPatches` | История и сравнение патчей |
 | `archetypes` | Архетипы по формату/рангу/региону |
 | `battlegroundMinions` | BG minions по tier/MMR/time range |
 | `sources` / `datasets` | Интеграции и snapshots |
+| `search` | Поиск карт, существ, героев, архетипов и источников |
 | `collections` / `records` | Полная PostgreSQL‑база |
 
 Пример:
@@ -99,7 +101,9 @@ metadata allowlist и безопасно quote-ятся.
 - обычный `limit`: 50–100;
 - максимум `limit`: 200;
 - максимум `offset`: 100 000;
-- GraphQL ограничен depth, aliases и размером документа;
+- `nextCursor`/`after` доступны у всех больших коллекций;
+- GraphQL ограничен depth, weighted cost, размером request/response и timeout;
+- Apollo Persisted Queries v1 поддерживаются для мобильных клиентов;
 - mutations/subscriptions/uploads отсутствуют.
 
 ## Ошибки

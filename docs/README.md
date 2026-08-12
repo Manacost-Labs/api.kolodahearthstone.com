@@ -13,6 +13,7 @@
 | Найти подходящий набор и понять его поля | [Каталог данных](DATA_CATALOG.md) |
 | Выполнить REST‑запрос | [REST API](API.md) |
 | Запросить центральную базу через GraphQL | [GraphQL API](GRAPHQL_API.md) |
+| Подключить TypeScript или C# SDK | [Official SDKs](SDK.md) |
 | Выпустить или отозвать токен | [API‑токены](API_TOKENS.md) |
 | Понять устройство системы | [Архитектура](ARCHITECTURE.md) |
 | Разобраться, как проверяются данные | [Pipeline парсинга](PARSER_PIPELINE.md) |
@@ -38,6 +39,7 @@
 | [API.md](API.md) | Полный REST reference: параметры, ответы и admin/ops endpoints |
 | [GRAPHQL_API.md](GRAPHQL_API.md) | Query roots, фильтры, полная база, лимиты и error contract |
 | [API_TOKENS.md](API_TOKENS.md) | Scopes, выпуск, проверка, ротация и отзыв токенов |
+| [SDK.md](SDK.md) | TypeScript и C# clients, Persisted Queries и cursor helpers |
 | [HSREPLAY_ARCHETYPE_DATABASE.md](HSREPLAY_ARCHETYPE_DATABASE.md) | Детальная HSReplay база архетипов и связанные endpoints |
 
 ## Для оператора

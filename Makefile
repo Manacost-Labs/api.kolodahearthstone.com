@@ -1,7 +1,7 @@
 PYTHON := .venv/bin/python
 AI_QUALITY_BIN := /home/debian/server/tools/ai-quality/bin
 
-.PHONY: setup check test panel-check platform-check provider-check docs-check lint-report security benchmark-smoke
+.PHONY: setup check test panel-check platform-check provider-check docs-check sdk-check lint-report security benchmark-smoke
 
 API_BENCHMARK_BASE_URL ?= http://127.0.0.1:8000
 
@@ -16,6 +16,7 @@ check:
 	$(MAKE) panel-check
 	$(MAKE) platform-check
 	$(MAKE) docs-check
+	$(MAKE) sdk-check
 	actionlint
 
 test:
@@ -46,6 +47,19 @@ provider-check:
 docs-check:
 	scripts/check-documentation-links.sh
 	$(PYTHON) scripts/check-readme-endpoints.py
+
+sdk-check:
+	npm --prefix sdks/typescript ci --ignore-scripts
+	npm --prefix sdks/typescript run check
+	npm --prefix sdks/typescript test
+	npm --prefix sdks/typescript audit --audit-level=high
+	@if command -v dotnet >/dev/null 2>&1; then \
+		dotnet format sdks/dotnet/KolodaHearthstone.Api.SmokeTests/KolodaHearthstone.Api.SmokeTests.csproj --verify-no-changes; \
+		dotnet build sdks/dotnet/KolodaHearthstone.Api.SmokeTests/KolodaHearthstone.Api.SmokeTests.csproj --configuration Release; \
+		dotnet run --project sdks/dotnet/KolodaHearthstone.Api.SmokeTests/KolodaHearthstone.Api.SmokeTests.csproj --configuration Release --no-build; \
+	else \
+		printf 'dotnet is unavailable locally; the C# SDK gate runs in CI.\n'; \
+	fi
 
 lint-report:
 	ruff check --no-cache app tests scripts

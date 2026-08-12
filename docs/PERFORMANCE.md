@@ -36,3 +36,16 @@ production этим инструментом запрещён; для высок
 Числа baseline сохраняются как CI artifact или operational report, а не
 коммитятся в документацию: измерение зависит от hardware, объёма базы и
 состояния кэша.
+
+## Runtime budgets и Redis
+
+Публичные GraphQL query кэшируются на 60 секунд: маленький LRU‑слой остаётся в
+процессе API, а Redis делит ответы, Persisted Queries и rate counters между
+workers. При недоступности Redis API продолжает работать с локальным bounded
+fallback; durable месячные квоты токенов остаются обязательными.
+
+GraphQL до обращения к PostgreSQL проверяет depth, aliases, число токенов и
+weighted cost. По умолчанию максимальная стоимость — 5 000, body запроса —
+64 KiB, body ответа — 2 MiB, timeout — 8 секунд. Значения задаются переменными
+`HS_GRAPHQL_*` из `.env.example` и должны изменяться только вместе с benchmark и
+наблюдением p95/p99.

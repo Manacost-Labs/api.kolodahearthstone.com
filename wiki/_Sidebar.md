@@ -9,6 +9,7 @@
 - [Каталог данных](Data-Catalog.md)
 - [REST и GraphQL](API.md)
 - [Авторизация](Authentication.md)
+- [TypeScript и C# SDK](SDK.md)
 
 ### Система
 
