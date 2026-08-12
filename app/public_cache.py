@@ -68,7 +68,13 @@ def _db_revision(path: str) -> str | None:
 
             run = latest_run() or {}
             return str(run.get("completed_at") or run.get("started_at") or "") or None
-        if path.startswith(("/v1/bg/minions", "/api/db/bg/minions")):
+        if path.startswith(
+            (
+                "/v1/bg/minions",
+                "/v1/battlegrounds/minions",
+                "/api/db/bg/minions",
+            )
+        ):
             from .hsreplay_bg_minions_db import latest_run
 
             run = latest_run() or {}
@@ -88,7 +94,13 @@ def cache_revision(path: str, query_string: bytes) -> str:
             query.get("source_id") or ["hsreplay_arena_class_pages_firecrawl"]
         )[0]
         return _dataset_timestamp(source_id) or "not-cached"
-    if path.startswith(("/v1/bg/heroes", "/api/bg/heroes")):
+    if path.startswith(
+        (
+            "/v1/bg/heroes",
+            "/v1/battlegrounds/heroes",
+            "/api/bg/heroes",
+        )
+    ):
         return _dataset_timestamp("hsreplay_battlegrounds_hero_details") or "not-cached"
     if path.startswith("/v1/constructed/hsguru-deck"):
         from .hsguru_decks import hsguru_matrix_cache_revision
