@@ -79,6 +79,18 @@ curl -s -H "X-API-Key: ${HS_API_KEY}" http://127.0.0.1:8000/ops/health | jq .
 | `/var/lib/hs-data-api` | Кэш JSON, статусы, `hsreplay-auth.json` |
 | `/etc/hs-data-api.env` | Секреты и настройки (не в git) |
 | `systemd/hs-data-api*.service` | API и ежедневный refresh |
+| `/srv/api-kolodahearthstone/panel/current` | Активный релиз закрытой веб-панели |
+| `/srv/api-kolodahearthstone/panel-data` | Изображения, кеши и состояние панели |
+| `/etc/api-kolodahearthstone/panel-config.php` | Приватная конфигурация панели |
+
+Веб-панель разворачивается отдельно от Docker API, но из того же репозитория:
+
+```bash
+sudo ./scripts/deploy-panel.sh
+```
+
+Скрипт создаёт неизменяемый release и атомарно переключает symlink `current`.
+Он не удаляет `panel-data` и не копирует секреты в Git.
 
 ## Зависимости
 

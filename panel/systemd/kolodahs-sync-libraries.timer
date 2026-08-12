@@ -1,0 +1,11 @@
+[Unit]
+Description=Kolodahs auxiliary library sync every 6 hours
+
+[Timer]
+OnCalendar=*-*-* 00/6:20:00
+RandomizedDelaySec=20m
+Persistent=true
+Unit=kolodahs-sync@libraries.service
+
+[Install]
+WantedBy=timers.target

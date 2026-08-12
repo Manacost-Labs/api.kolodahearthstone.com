@@ -1,0 +1,12 @@
+[Unit]
+Description=Kolodahs missing constructed Standard/Wild wiki metadata sync
+
+[Timer]
+OnBootSec=20m
+OnUnitActiveSec=8m
+RandomizedDelaySec=90s
+Persistent=true
+Unit=kolodahs-sync@constructed-wiki-missing.service
+
+[Install]
+WantedBy=timers.target

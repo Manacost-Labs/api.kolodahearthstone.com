@@ -1,0 +1,17 @@
+[Unit]
+Description=Kolodahs DB sync job (%i)
+Wants=network-online.target
+After=network-online.target mysql.service mariadb.service
+
+[Service]
+Type=oneshot
+User=koloda
+Group=koloda
+WorkingDirectory=/srv/api-kolodahearthstone/panel/current
+EnvironmentFile=-/etc/kolodahs-sync.env
+ExecStart=/srv/api-kolodahearthstone/panel/current/scripts/run_sync_job.sh %i
+TimeoutStartSec=12h
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+UMask=0022

@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Kolodahs cards and pool sync
+
+[Timer]
+OnCalendar=*-*-* 03:10:00
+RandomizedDelaySec=20m
+Persistent=true
+Unit=kolodahs-sync@cards.service
+
+[Install]
+WantedBy=timers.target

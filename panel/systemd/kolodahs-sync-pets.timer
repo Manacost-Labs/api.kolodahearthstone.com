@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Kolodahs Hearthstone pets sync
+
+[Timer]
+OnCalendar=*-*-* 07:15:00
+RandomizedDelaySec=15m
+Persistent=true
+Unit=kolodahs-sync@pets.service
+
+[Install]
+WantedBy=timers.target

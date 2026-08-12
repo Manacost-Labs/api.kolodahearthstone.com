@@ -108,6 +108,7 @@ def test_docker_systemd_installer_covers_every_timer(tmp_path: Path) -> None:
         "refresh-hsguru-archetype-analysis --scheduled"
         in archetype_service.read_text(encoding="utf-8")
     )
+    assert "TimeoutStartSec=2h" in archetype_service.read_text(encoding="utf-8")
 
     recovery_service = (
         staged_systemd / "hs-data-api-docker-recover-hsguru-archetype-analysis.service"

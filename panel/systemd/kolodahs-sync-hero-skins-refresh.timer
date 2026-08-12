@@ -1,0 +1,11 @@
+[Unit]
+Description=Weekly full Kolodahs Hearthstone hero skin page and media refresh
+
+[Timer]
+OnCalendar=Wed *-*-* 11:15:00
+RandomizedDelaySec=30m
+Persistent=true
+Unit=kolodahs-sync@hero-skins-refresh.service
+
+[Install]
+WantedBy=timers.target

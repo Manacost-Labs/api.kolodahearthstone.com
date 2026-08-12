@@ -19,3 +19,8 @@ hs-data-api.credentials
 .DS_Store
 .cursor/
 .codegraph/
+/panel/config.php
+/panel/uploads/
+/panel/var/
+/panel/.playwright-cli/
+/panel/output/
