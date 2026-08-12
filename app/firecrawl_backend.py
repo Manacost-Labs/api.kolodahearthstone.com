@@ -224,15 +224,22 @@ def _image_mime(raw: bytes) -> str | None:
 
 def _decode_inline_screenshot(value: str) -> tuple[str, bytes] | None:
     header, separator, encoded = value.partition(",")
-    if not separator:
-        return None
-    declared_mime = {
-        "data:image/png;base64": "image/png",
-        "data:image/jpeg;base64": "image/jpeg",
-        "data:image/jpg;base64": "image/jpeg",
-        "data:image/webp;base64": "image/webp",
-    }.get(header.casefold())
-    if declared_mime is None or not encoded:
+    declared_mime: str | None = None
+    if separator:
+        declared_mime = {
+            "data:image/png;base64": "image/png",
+            "data:image/jpeg;base64": "image/jpeg",
+            "data:image/jpg;base64": "image/jpeg",
+            "data:image/webp;base64": "image/webp",
+        }.get(header.casefold())
+        if declared_mime is None:
+            return None
+    else:
+        # Scrape.do's documented screenshot response is the bare Base64
+        # payload rather than a data URI. It is still accepted only after the
+        # same bounded decoding and image-signature validation below.
+        encoded = value
+    if not encoded:
         return None
     maximum_encoded_size = ((_SCREENSHOT_MAX_BYTES + 2) // 3) * 4
     if len(encoded) > maximum_encoded_size:
@@ -242,7 +249,9 @@ def _decode_inline_screenshot(value: str) -> tuple[str, bytes] | None:
     except (binascii.Error, ValueError):
         return None
     detected_mime = _image_mime(raw)
-    if detected_mime is None or detected_mime != declared_mime:
+    if detected_mime is None or (
+        declared_mime is not None and detected_mime != declared_mime
+    ):
         return None
     return detected_mime, raw
 

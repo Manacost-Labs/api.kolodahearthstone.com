@@ -779,6 +779,26 @@ def test_screenshot_only_result_is_accepted_without_html_padding() -> None:
     firecrawl.assert_not_called()
 
 
+def test_scrape_do_bare_base64_screenshot_is_validated_and_normalized() -> None:
+    screenshot = valid_png_data_uri()
+    bare_base64 = screenshot.partition(",")[2]
+    with (
+        patch("app.firecrawl_backend.scrape_do_token", return_value="configured"),
+        patch(
+            "app.firecrawl_backend.scrape_url_sync",
+            return_value=scrape_do_result(html="", screenshot=bare_base64),
+        ),
+        patch("app.firecrawl_backend.acquire_firecrawl_key") as firecrawl,
+    ):
+        result = _scrape_sync(
+            SOURCE,
+            formats=[{"type": "screenshot", "fullPage": True}],
+        )
+
+    assert result.screenshot == screenshot
+    firecrawl.assert_not_called()
+
+
 @pytest.mark.parametrize(
     "invalid_screenshot",
     [
