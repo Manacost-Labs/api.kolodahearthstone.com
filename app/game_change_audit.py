@@ -18,7 +18,7 @@ from .source_state import SourceState
 from .storage import load_dataset, load_status, read_json, write_json
 
 WIKI_API_URL = "https://hearthstone.wiki.gg/api.php"
-USER_AGENT = "HSDataAPI/0.1 (+https://api.hs-manacost.ru)"
+USER_AGENT = "HSDataAPI/0.1 (+https://api.kolodahearthstone.com)"
 AUDIT_SCHEMA_VERSION = 1
 
 # One representative, user-visible feed per product area. Detailed freshness

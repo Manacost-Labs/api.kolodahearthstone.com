@@ -1,0 +1,15 @@
+[Unit]
+Description=Atomically synchronize legacy Hearthstone databases into PostgreSQL
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/srv/hs-data-platform/scripts/sync-shadow.php
+TimeoutStartSec=30min
+Nice=10
+PrivateTmp=false
+ProtectHome=true
+ProtectSystem=full
+StandardOutput=append:/var/log/hs-data-platform/shadow-sync.log
+StandardError=append:/var/log/hs-data-platform/shadow-sync.log

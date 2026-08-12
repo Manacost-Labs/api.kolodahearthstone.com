@@ -1,0 +1,11 @@
+[Unit]
+Description=Kolodahs constructed Standard/Wild card sync every four hours
+
+[Timer]
+OnCalendar=*-*-* 00,04,08,12,16,20:25:00
+RandomizedDelaySec=10m
+Persistent=true
+Unit=kolodahs-sync@constructed-cards.service
+
+[Install]
+WantedBy=timers.target

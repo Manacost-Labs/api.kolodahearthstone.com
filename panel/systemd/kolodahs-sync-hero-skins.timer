@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Kolodahs Hearthstone hero skin discovery sync
+
+[Timer]
+OnCalendar=*-*-* 10:15:00
+RandomizedDelaySec=20m
+Persistent=true
+Unit=kolodahs-sync@hero-skins.service
+
+[Install]
+WantedBy=timers.target

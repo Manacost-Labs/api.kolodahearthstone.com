@@ -1,0 +1,5 @@
+# Synthetic query-string credential used to verify observability redaction.
+a437a128e8d6ccd374c5e6990e62d6017ec31f28:tests/test_http_observability.py:generic-api-key:24
+
+# Non-secret placeholder from the historical example environment file.
+74871fe096c784c683b9c3d56d1e9f31e899baf6:.env.example:generic-api-key:34

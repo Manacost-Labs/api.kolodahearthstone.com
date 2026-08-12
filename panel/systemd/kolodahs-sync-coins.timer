@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Kolodahs Hearthstone cosmetic coins sync
+
+[Timer]
+OnCalendar=*-*-* 08:45:00
+RandomizedDelaySec=15m
+Persistent=true
+Unit=kolodahs-sync@coins.service
+
+[Install]
+WantedBy=timers.target

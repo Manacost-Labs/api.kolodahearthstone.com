@@ -1,0 +1,11 @@
+[Unit]
+Description=Weekly full Kolodahs wiki metadata refresh
+
+[Timer]
+OnCalendar=Sun *-*-* 05:30:00
+RandomizedDelaySec=45m
+Persistent=true
+Unit=kolodahs-sync@wiki-meta-full.service
+
+[Install]
+WantedBy=timers.target

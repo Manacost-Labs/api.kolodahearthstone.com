@@ -1,0 +1,11 @@
+[Unit]
+Description=Weekly full Kolodahs Timewarped index/page refresh
+
+[Timer]
+OnCalendar=Mon *-*-* 06:20:00
+RandomizedDelaySec=45m
+Persistent=true
+Unit=kolodahs-sync@timewarped-refresh.service
+
+[Install]
+WantedBy=timers.target

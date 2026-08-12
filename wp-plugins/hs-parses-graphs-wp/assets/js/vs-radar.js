@@ -30,7 +30,7 @@
 
     if (!canvas) return;
 
-    var apiUrl = normalizeApiUrl(wrapper.getAttribute('data-api-url') || 'https://api.hs-manacost.ru');
+    var apiUrl = normalizeApiUrl(wrapper.getAttribute('data-api-url') || 'https://api.kolodahearthstone.com');
     var archetypesUrl = wrapper.getAttribute('data-archetypes-url') || '';
     var cardTranslationsUrl = wrapper.getAttribute('data-card-translations-url') || '';
     var startClass = wrapper.getAttribute('data-start-class') || '';

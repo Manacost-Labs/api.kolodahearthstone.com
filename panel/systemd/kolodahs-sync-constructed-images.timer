@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Kolodahs constructed image fallback sync
+
+[Timer]
+OnCalendar=*-*-* 04:05:00
+RandomizedDelaySec=20m
+Persistent=true
+Unit=kolodahs-sync@constructed-images.service
+
+[Install]
+WantedBy=timers.target

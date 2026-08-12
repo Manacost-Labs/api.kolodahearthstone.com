@@ -75,9 +75,9 @@ def orchestrator_api_key() -> str | None:
 
 
 def cors_allowed_origins() -> list[str]:
-    raw = os.environ.get("HS_CORS_ALLOWED_ORIGINS", "https://api.hs-manacost.ru")
+    raw = os.environ.get("HS_CORS_ALLOWED_ORIGINS", "https://api.kolodahearthstone.com")
     origins = [item.strip() for item in raw.split(",") if item.strip()]
-    return origins or ["https://api.hs-manacost.ru"]
+    return origins or ["https://api.kolodahearthstone.com"]
 
 
 def request_delay_seconds() -> float:

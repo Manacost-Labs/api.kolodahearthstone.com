@@ -19,7 +19,7 @@ sudo tar czf /home/debian/backups/hs-data-api-pre-git-$(date +%Y%m%d-%H%M).tar.g
 sudo docker tag hs-data-api:local hs-data-api:pre-phase1
 cd /srv/hs-data-api
 git init -b server-state
-git remote add origin https://github.com/Zulut30/hearthstone-parses
+git remote add origin https://github.com/Manacost-Labs/api.kolodahearthstone.com
 git fetch origin
 # .gitignore берём из репо ДО первого add:
 git show origin/main:.gitignore > .gitignore
@@ -61,7 +61,7 @@ python3 -c "import ast; ast.parse(open('app/fetcher.py').read())"  # синта�
 printf 'pytest>=8\n' > requirements-dev.txt
 $TESTS   # ожидание: НЕ хуже 11F/136P; test_publish_gate + test_source_validators — PASS
 DC build api && DC up -d api
-curl -sk --resolve api.hs-manacost.ru:443:151.80.21.140 https://api.hs-manacost.ru/health
+curl -sk --resolve api.hs-manacost.ru:443:151.80.21.140 https://api.kolodahearthstone.com/health
 DC run --rm api python -m app.cli refresh --source hsreplay_battlegrounds_heroes  # прогон publish-gate пути
 git checkout -b main --track origin/main 2>/dev/null || git branch -f main HEAD
 git push origin HEAD:main
@@ -347,7 +347,7 @@ ETag — на уровне хендлеров, у которых есть fetche
 ### 8.4 Верификация кеша через Cloudflare
 
 ```bash
-curl -sI https://api.hs-manacost.ru/v1/bg/heroes | grep -iE "cf-cache-status|cache-control|etag"
+curl -sI https://api.kolodahearthstone.com/v1/bg/heroes | grep -iE "cf-cache-status|cache-control|etag"
 # второй вызов: cf-cache-status: HIT
 ```
 (CF кеширует JSON только при явных cache-заголовках — ровно то, что добавляем.)

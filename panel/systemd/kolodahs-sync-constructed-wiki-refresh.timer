@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily rolling Kolodahs constructed Standard/Wild wiki metadata refresh
+
+[Timer]
+OnCalendar=*-*-* 06:40:00
+RandomizedDelaySec=45m
+Persistent=true
+Unit=kolodahs-sync@constructed-wiki-refresh.service
+
+[Install]
+WantedBy=timers.target

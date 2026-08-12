@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Kolodahs hero wiki and Blizzard sync
+
+[Timer]
+OnCalendar=*-*-* 03:45:00
+RandomizedDelaySec=30m
+Persistent=true
+Unit=kolodahs-sync@heroes.service
+
+[Install]
+WantedBy=timers.target

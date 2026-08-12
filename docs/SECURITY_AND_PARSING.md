@@ -1,7 +1,7 @@
 # Безопасность и парсинг Hearthstone Data API
 
 Подробное руководство по устройству парсера на сервере, мерам защиты данных и снижению риска блокировок.  
-Репозиторий: [github.com/Zulut30/hearthstone-parses](https://github.com/Zulut30/hearthstone-parses)
+Репозиторий: [github.com/Manacost-Labs/api.kolodahearthstone.com](https://github.com/Manacost-Labs/api.kolodahearthstone.com)
 
 Связанные документы:
 - [DEPLOY.md](../DEPLOY.md) — установка и перенос на другой сервер
@@ -104,9 +104,12 @@ pipeline используется его собственный структур
 
 Любой backend-кандидат проходит через `app.publish_gate.validate_candidate_for_publish()` до сохранения. Gate последовательно применяет backend policy из `app/source_contracts.py`, структурный контракт и semantic validator из `app/source_validators.py`. Минимальные строки, fill-rate критичных полей и regression thresholds имеют один источник истины; `quality.py` остаётся orchestration-фасадом и логирует предупреждения/отказы. Провал даёт `quality_error`, предыдущий успешный dataset сохраняется.
 
-### 2.5. Источники данных (46)
+### 2.5. Источники данных
 
-Реестр содержит 44 scrape-источника и 2 dedicated pipeline (`hsreplay_archetypes`, `hsreplay_battlegrounds_hero_details`). Полный автоматически генерируемый каталог: [SOURCES.md](SOURCES.md). Его синхронизация с `app.sources.SOURCES` проверяется pytest.
+Количество и состав источников меняются вместе с системой. Полный
+автоматически генерируемый каталог: [SOURCES.md](SOURCES.md). Его синхронизация
+с `app.sources.SOURCES` проверяется pytest; этот раздел намеренно не дублирует
+ручное число scrape и dedicated pipeline.
 
 ---
 
@@ -163,7 +166,7 @@ pipeline используется его собственный структур
 
 Если `HS_API_KEY` задан, неверный ключ → `401` на admin-методах.
 
-**Рекомендация для продакшена с публичным доменом** (например `api.hs-manacost.ru`):
+**Рекомендация для продакшена с публичным доменом** (например `api.kolodahearthstone.com`):
 
 1. Вынести admin-пути за VPN или отдельный internal host.
 2. На nginx: rate limiting на `/datasets`, basic auth или API gateway для публичного чтения при необходимости.
@@ -409,6 +412,6 @@ venv/bin/python -m app.cli refresh --source <SOURCE_ID>
 ## 9. Контакты и ответственность
 
 - Оператор сервера отвечает за: хранение `/etc/hs-data-api.env`, ротацию ключей, соблюдение ToS сайтов-источников.
-- Разработчик репозитория: Issues/PR на GitHub `Zulut30/hearthstone-parses`.
+- Разработчик репозитория: Issues/PR на GitHub `Manacost-Labs/api.kolodahearthstone.com`.
 
 **Версия документа:** 2026-07-12 (46 источников; contracts/publish-gate; API v1).

@@ -21,6 +21,8 @@ from .firecrawl_backend import (
 from .hsreplay_auth import hsreplay_cookies_for_fetch
 from .resource_locks import ResourceLocked, ResourceLockSet
 from .sources import Source
+from .source_state import SourceState
+from .storage import save_status
 
 COMPOSITIONS_URL = "https://hsreplay.net/battlegrounds/compositions/"
 SCREENSHOT_SOURCE_ID = "hsreplay_battlegrounds_compositions_screenshot"
@@ -307,7 +309,24 @@ def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
         temporary.unlink(missing_ok=True)
 
 
-async def capture_compositions_screenshot() -> dict[str, Any]:
+def _capture_source_status(payload: dict[str, Any]) -> dict[str, Any]:
+    metadata = payload.get("metadata")
+    backend = metadata.get("backend") if isinstance(metadata, dict) else None
+    return {
+        "source_id": SCREENSHOT_SOURCE_ID,
+        "state": SourceState.OK,
+        "fetched_at": payload.get("captured_at") or _now(),
+        "http_status": payload.get("status_code"),
+        "final_url": payload.get("final_url") or COMPOSITIONS_URL,
+        "content_length": payload.get("image_bytes"),
+        "backend": backend,
+    }
+
+
+async def capture_compositions_screenshot(
+    *,
+    allow_cached_on_failure: bool = False,
+) -> dict[str, Any]:
     locks = ResourceLockSet(
         [SCREENSHOT_SOURCE_ID],
         metadata={"operation": "capture_compositions_screenshot"},
@@ -323,7 +342,46 @@ async def capture_compositions_screenshot() -> dict[str, Any]:
         }
 
     try:
-        return await _capture_compositions_screenshot_unlocked()
+        try:
+            captured = await _capture_compositions_screenshot_unlocked()
+        except Exception:  # noqa: BLE001 - status and scheduled LKG are intentional
+            refreshed_at = _now()
+            cached = latest_compositions_screenshot()
+            if not allow_cached_on_failure or cached is None:
+                save_status(
+                    SCREENSHOT_SOURCE_ID,
+                    {
+                        "source_id": SCREENSHOT_SOURCE_ID,
+                        "state": SourceState.FETCH_ERROR,
+                        "fetched_at": refreshed_at,
+                        "last_refresh_state": SourceState.FETCH_ERROR,
+                        "last_refresh_at": refreshed_at,
+                        "last_refresh_error": "live screenshot capture failed",
+                    },
+                )
+                raise
+            status = _capture_source_status(cached)
+            status.update(
+                {
+                    "state": SourceState.PARTIAL,
+                    "serving_cached_dataset": True,
+                    "last_refresh_state": SourceState.FETCH_ERROR,
+                    "last_refresh_at": refreshed_at,
+                    "last_refresh_error": "live screenshot capture failed",
+                }
+            )
+            save_status(SCREENSHOT_SOURCE_ID, status)
+            return {
+                **cached,
+                "ok": True,
+                "published": False,
+                "serving_cached_dataset": True,
+                "state": SourceState.PARTIAL,
+                "reason": "capture_failed_lkg_preserved",
+                "source_id": SCREENSHOT_SOURCE_ID,
+            }
+        save_status(SCREENSHOT_SOURCE_ID, _capture_source_status(captured))
+        return captured
     finally:
         locks.release()
 

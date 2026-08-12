@@ -187,6 +187,91 @@ def test_capture_failure_preserves_last_known_good_latest(tmp_path: Path) -> Non
     assert loaded["captured_at"] == old_payload["captured_at"]
 
 
+def test_successful_capture_records_an_ok_source_status() -> None:
+    captured = {
+        "ok": True,
+        "source_id": SCREENSHOT_SOURCE_ID,
+        "captured_at": "2026-08-12T12:19:00+00:00",
+        "final_url": "https://hsreplay.net/battlegrounds/compositions/",
+        "status_code": 200,
+        "metadata": {"backend": "scrape_do"},
+        "image_bytes": 240_909,
+        "image_mime": "image/png",
+    }
+    with (
+        patch(
+            "app.hsreplay_bg_screenshots._capture_compositions_screenshot_unlocked",
+            new=AsyncMock(return_value=captured),
+        ),
+        patch("app.hsreplay_bg_screenshots.save_status") as save_status,
+    ):
+        result = asyncio.run(capture_compositions_screenshot())
+
+    assert result == captured
+    save_status.assert_called_once_with(
+        SCREENSHOT_SOURCE_ID,
+        {
+            "source_id": SCREENSHOT_SOURCE_ID,
+            "state": "ok",
+            "fetched_at": "2026-08-12T12:19:00+00:00",
+            "http_status": 200,
+            "final_url": "https://hsreplay.net/battlegrounds/compositions/",
+            "content_length": 240_909,
+            "backend": "scrape_do",
+        },
+    )
+
+
+def test_scheduled_capture_records_cached_failure_status() -> None:
+    cached = {
+        "ok": True,
+        "source_id": SCREENSHOT_SOURCE_ID,
+        "captured_at": "2026-08-12T12:19:00+00:00",
+        "final_url": "https://hsreplay.net/battlegrounds/compositions/",
+        "status_code": 200,
+        "metadata": {"backend": "scrape_do"},
+        "image_bytes": 240_909,
+        "image_mime": "image/png",
+    }
+    with (
+        patch(
+            "app.hsreplay_bg_screenshots._capture_compositions_screenshot_unlocked",
+            new=AsyncMock(side_effect=RuntimeError("transient provider failure")),
+        ),
+        patch(
+            "app.hsreplay_bg_screenshots.latest_compositions_screenshot",
+            return_value=cached,
+        ),
+        patch(
+            "app.hsreplay_bg_screenshots._now",
+            return_value="2026-08-12T15:35:09+00:00",
+        ),
+        patch("app.hsreplay_bg_screenshots.save_status") as save_status,
+    ):
+        result = asyncio.run(
+            capture_compositions_screenshot(allow_cached_on_failure=True)
+        )
+
+    assert result["state"] == "partial"
+    assert result["serving_cached_dataset"] is True
+    save_status.assert_called_once_with(
+        SCREENSHOT_SOURCE_ID,
+        {
+            "source_id": SCREENSHOT_SOURCE_ID,
+            "state": "partial",
+            "fetched_at": "2026-08-12T12:19:00+00:00",
+            "http_status": 200,
+            "final_url": "https://hsreplay.net/battlegrounds/compositions/",
+            "content_length": 240_909,
+            "backend": "scrape_do",
+            "serving_cached_dataset": True,
+            "last_refresh_state": "fetch_error",
+            "last_refresh_at": "2026-08-12T15:35:09+00:00",
+            "last_refresh_error": "live screenshot capture failed",
+        },
+    )
+
+
 def test_capture_returns_honest_skip_when_source_is_locked() -> None:
     lock = MagicMock()
     lock.acquire.side_effect = ResourceLocked(
@@ -249,6 +334,35 @@ def test_capture_cli_treats_a_resource_lock_as_successful_skip(
 
     assert exit_code == 0
     assert json.loads(capsys.readouterr().out) == locked_result
+
+
+def test_scheduled_capture_cli_enables_last_known_good_fallback(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    result = {
+        "ok": True,
+        "published": False,
+        "source_id": SCREENSHOT_SOURCE_ID,
+        "state": "partial",
+        "serving_cached_dataset": True,
+    }
+    capture = AsyncMock(return_value=result)
+    with (
+        patch(
+            "app.parser_control.is_source_scheduled_enabled",
+            return_value=True,
+        ),
+        patch(
+            "app.hsreplay_bg_screenshots.capture_compositions_screenshot",
+            new=capture,
+        ),
+        patch("app.reliability_telemetry.record_terminal_results"),
+    ):
+        exit_code = cli.main(["capture-bg-compositions-screenshot", "--scheduled"])
+
+    assert exit_code == 0
+    capture.assert_awaited_once_with(allow_cached_on_failure=True)
+    assert json.loads(capsys.readouterr().out) == result
 
 
 def test_latest_rejects_a_text_artifact_marked_as_success(tmp_path: Path) -> None:

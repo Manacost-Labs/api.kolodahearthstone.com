@@ -39,7 +39,7 @@ HS_ORCHESTRATOR_API_KEY=<отдельный случайный секрет не
 
 ```env
 TRIGGER_PROJECT_REF=<project ref>
-PARSER_CONTROL_BASE_URL=https://api.hs-manacost.ru
+PARSER_CONTROL_BASE_URL=https://api.kolodahearthstone.com
 PARSER_ORCHESTRATOR_TOKEN=<тот же scoped secret>
 PARSER_RUN_TIMEOUT_SECONDS=4500
 ```

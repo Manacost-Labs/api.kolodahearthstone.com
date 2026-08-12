@@ -1,0 +1,11 @@
+[Unit]
+Description=Kolodahs missing in-pool wiki metadata sync
+
+[Timer]
+OnCalendar=*-*-* 01/12:10:00
+RandomizedDelaySec=30m
+Persistent=true
+Unit=kolodahs-sync@wiki-meta-missing.service
+
+[Install]
+WantedBy=timers.target

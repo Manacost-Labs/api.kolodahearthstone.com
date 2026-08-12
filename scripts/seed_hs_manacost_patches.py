@@ -21,7 +21,7 @@ if str(ROOT) not in sys.path:
 
 from app.patches_db import count_patches, delete_patches_not_in, get_patch, upsert_patch
 
-USER_AGENT = "HSDataAPI/0.1 (+https://api.hs-manacost.ru)"
+USER_AGENT = "HSDataAPI/0.1 (+https://api.kolodahearthstone.com)"
 WIKI_PATCHES_URL = "https://hearthstone.wiki.gg/wiki/Patches"
 OFFICIAL_NEWS_URL = "https://hearthstone.blizzard.com/en-us/news?category=patch-notes"
 HS_MANACOST_SITEMAP_URL = "https://hs-manacost.ru/sitemap.xml"

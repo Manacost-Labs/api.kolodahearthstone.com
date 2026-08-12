@@ -170,7 +170,7 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
                     _load_refresh_checkpoint(target_signature=None, now=now)
                 )
 
-    def test_fetch_html_runs_one_shared_provider_cascade_without_retries(self) -> None:
+    def test_fetch_html_uses_only_scrape_do_without_provider_fallbacks(self) -> None:
         from app import firecrawl_backend
 
         provider_calls: list[str] = []
@@ -234,7 +234,7 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
 
         self.assertEqual(
             provider_calls,
-            ["scrape_do", "firecrawl", "scrapfly"],
+            ["scrape_do"],
         )
 
     def test_fetch_html_uses_ssr_wait_timeout_and_schema_validator(self) -> None:
@@ -255,6 +255,9 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
         options = scrape.await_args.kwargs
         self.assertEqual(options["wait_ms"], ANALYSIS_WAIT_MS)
         self.assertEqual(options["timeout_ms"], ANALYSIS_TIMEOUT_MS)
+        self.assertEqual(
+            options["skip_providers"], {"firecrawl", "brightdata", "scrapfly"}
+        )
         self.assertTrue(options["accept_result"](result))
 
     def test_parses_class_matchups_and_excludes_total(self) -> None:
@@ -838,6 +841,62 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
         self.assertTrue(second["published"])
         self.assertEqual(second["resumed_targets"], 2)
         self.assertEqual(second_calls, 8)
+        save_dataset.assert_called_once()
+
+    def test_checkpoint_combines_components_succeeded_on_separate_attempts(
+        self,
+    ) -> None:
+        targets = [{"format": "wild", "archetype": "Split Success Priest"}]
+
+        async def first_fetch(url: str):
+            if "/archetype/" in url:
+                raise RuntimeError("matchups temporarily unavailable")
+            return CARD_STATS_HTML, {
+                "backend": "scrape_do_super",
+                "request_credits": 25,
+            }
+
+        async def second_fetch(url: str):
+            if "/card-stats" in url:
+                raise RuntimeError("card stats temporarily unavailable")
+            return MATCHUPS_HTML, {
+                "backend": "scrape_do_super",
+                "request_credits": 25,
+            }
+
+        with (
+            patch(
+                "app.hsguru_archetype_analysis._active_archetypes",
+                return_value=targets,
+            ),
+            patch(
+                "app.hsguru_archetype_analysis._previous_analysis",
+                return_value={},
+            ),
+            patch(
+                "app.hsguru_archetype_analysis._previous_negative_cache",
+                return_value={},
+            ),
+            patch("app.hsguru_archetype_analysis.save_dataset") as save_dataset,
+            patch("app.hsguru_archetype_analysis.save_status"),
+        ):
+            first = asyncio.run(
+                refresh_hsguru_archetype_analysis(
+                    concurrency=1,
+                    fetch_html=first_fetch,
+                )
+            )
+            second = asyncio.run(
+                refresh_hsguru_archetype_analysis(
+                    concurrency=1,
+                    fetch_html=second_fetch,
+                )
+            )
+
+        self.assertFalse(first["published"])
+        self.assertEqual(first["targets_completed"], 0)
+        self.assertTrue(second["published"])
+        self.assertEqual(second["targets_completed"], 1)
         save_dataset.assert_called_once()
 
     def test_checkpoint_recovery_skips_when_no_incomplete_checkpoint_exists(

@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Kolodahs Timewarped Tavern sync
+
+[Timer]
+OnCalendar=*-*-* 04:30:00
+RandomizedDelaySec=30m
+Persistent=true
+Unit=kolodahs-sync@timewarped.service
+
+[Install]
+WantedBy=timers.target

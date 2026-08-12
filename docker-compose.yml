@@ -11,6 +11,8 @@ services:
         required: true
       - path: ${HS_OPENROUTER_ENV_FILE:-/home/debian/server/secrets/hs-data-api/openrouter.env}
         required: false
+      - path: ${HS_GRAPHQL_ENV_FILE:-/home/debian/server/secrets/hs-data-api/graphql.env}
+        required: false
     environment:
       HS_API_BIND_HOST: "0.0.0.0"
       HS_API_PORT: "8000"
@@ -37,6 +39,9 @@ services:
       options:
         max-size: "10m"
         max-file: "5"
+    networks:
+      - default
+      - hs-data
 
   flaresolverr:
     image: ghcr.io/flaresolverr/flaresolverr:latest
@@ -57,3 +62,8 @@ services:
     shm_size: "4gb"
     mem_limit: "6g"
     cpus: 4
+
+networks:
+  hs-data:
+    external: true
+    name: hs-data_default

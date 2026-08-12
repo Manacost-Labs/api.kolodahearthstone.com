@@ -993,7 +993,7 @@ async def review_candidate(
         "Content-Type": "application/json",
         "Accept": "application/json",
         "X-OpenRouter-Metadata": "enabled",
-        "HTTP-Referer": "https://api.hs-manacost.ru",
+        "HTTP-Referer": "https://api.kolodahearthstone.com",
         "X-OpenRouter-Title": "Hearthstone Parser Quality Review",
     }
     owns_client = client is None

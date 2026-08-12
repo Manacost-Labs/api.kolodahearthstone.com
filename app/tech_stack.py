@@ -48,7 +48,7 @@ def _stack_rows() -> list[dict[str, Any]]:
         ),
         row(
             "nginx",
-            "TLS и reverse proxy → api.hs-manacost.ru",
+            "TLS и reverse proxy → api.kolodahearthstone.com",
             "infra",
             "production",
             link="https://nginx.org/",

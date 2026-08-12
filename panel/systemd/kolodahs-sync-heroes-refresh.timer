@@ -1,0 +1,11 @@
+[Unit]
+Description=Weekly full Kolodahs hero index/page refresh
+
+[Timer]
+OnCalendar=Mon *-*-* 05:20:00
+RandomizedDelaySec=45m
+Persistent=true
+Unit=kolodahs-sync@heroes-refresh.service
+
+[Install]
+WantedBy=timers.target

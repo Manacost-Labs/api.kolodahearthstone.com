@@ -21,6 +21,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
+from .api_tokens import (
+    ApiTokenError,
+    api_token_http_exception,
+    authenticate_api_token,
+    extract_api_token,
+)
 from .config import (
     api_key,
     cors_allowed_origins,
@@ -29,8 +35,11 @@ from .config import (
 )
 from .demo import build_demo_view, build_overview
 from .fetcher import refresh_sources
+from .graphql_api import graphql_router
+from .graphql_api.repository import close_graphql_repository
 from .http_observability import RequestObservabilityMiddleware, generic_server_error
 from .public_cache import PublicCacheMiddleware
+from .routers.api_tokens import router as api_tokens_router
 from .routers.arena import router as arena_v1_router
 from .routers.bg import router as bg_v1_router
 from .routers.constructed import router as constructed_v1_router
@@ -71,16 +80,29 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_allowed_origins(),
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "PATCH", "OPTIONS"],
-    allow_headers=["Accept", "Content-Type", "X-API-Key", "X-Request-ID"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=[
+        "Accept",
+        "Authorization",
+        "Content-Type",
+        "X-API-Key",
+        "X-Request-ID",
+    ],
     expose_headers=["X-Request-ID"],
 )
 app.add_middleware(PublicCacheMiddleware)
+app.include_router(graphql_router, prefix="/v1", tags=["GraphQL"])
 app.include_router(constructed_v1_router)
 app.include_router(bg_v1_router)
 app.include_router(arena_v1_router)
 app.include_router(system_v1_router)
 app.include_router(hsguru_meta_v1_router)
+app.include_router(api_tokens_router)
+
+
+@app.on_event("shutdown")
+async def close_graphql_database_pool() -> None:
+    await close_graphql_repository()
 
 
 @app.on_event("startup")
@@ -304,7 +326,7 @@ async def no_cache_ui(request: Request, call_next):
                 headers.pop("content-length", None)
                 headers.pop("content-type", None)
                 return Response(status_code=304, headers=headers)
-    if request.url.path.startswith("/admin"):
+    if request.url.path.startswith("/admin") or request.url.path.startswith("/v1/auth"):
         response.headers["Cache-Control"] = "private, no-store"
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
@@ -325,13 +347,22 @@ if WEB_DIR.is_dir():
     app.mount("/ui/assets", StaticFiles(directory=WEB_DIR), name="ui-assets")
 
 
-def require_admin(x_api_key: Annotated[str | None, Header()] = None) -> None:
+def require_admin(
+    x_api_key: Annotated[str | None, Header()] = None,
+    authorization: Annotated[str | None, Header()] = None,
+) -> None:
     expected = api_key()
-    if not expected:
+    if not expected and x_api_key and not x_api_key.startswith("khs_v1_"):
         raise HTTPException(status_code=503, detail="Admin API key is not configured")
-    if x_api_key and secrets.compare_digest(x_api_key, expected):
-        return
-    raise HTTPException(status_code=401, detail="Missing or invalid X-API-Key")
+    try:
+        supplied = extract_api_token(authorization, x_api_key)
+        authenticate_api_token(
+            supplied,
+            required_scope="admin",
+            legacy_key=expected,
+        )
+    except ApiTokenError as error:
+        raise api_token_http_exception(error) from None
 
 
 def require_orchestrator(
