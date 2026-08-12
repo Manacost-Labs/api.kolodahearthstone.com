@@ -1,7 +1,9 @@
 PYTHON := .venv/bin/python
 AI_QUALITY_BIN := /home/debian/server/tools/ai-quality/bin
 
-.PHONY: setup check test panel-check platform-check provider-check docs-check lint-report security
+.PHONY: setup check test panel-check platform-check provider-check docs-check lint-report security benchmark-smoke
+
+API_BENCHMARK_BASE_URL ?= http://127.0.0.1:8000
 
 setup:
 	uv venv --python 3.12 .venv
@@ -51,3 +53,6 @@ lint-report:
 
 security:
 	$(AI_QUALITY_BIN)/ai-security-check quick
+
+benchmark-smoke:
+	$(PYTHON) scripts/benchmark_api.py --base-url $(API_BENCHMARK_BASE_URL) --requests 20 --concurrency 4
