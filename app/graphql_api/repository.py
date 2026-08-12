@@ -24,6 +24,7 @@ class RepositoryValidationError(ValueError):
 class PageResult:
     items: list[dict[str, Any]]
     total: int
+    has_next_page: bool | None = None
 
 
 ALLOWED_DATABASE_SCHEMAS = frozenset({"catalog", "analytics", "raw", "platform", "hub"})
@@ -183,11 +184,15 @@ class PostgresGraphQLRepository:
         collection: str | None,
         card_type: str | None,
         active: bool | None,
+        after: tuple[str, str, str] | None,
         limit: int,
         offset: int,
     ) -> PageResult:
         where: list[str] = []
-        params: dict[str, Any] = {"limit": limit, "offset": offset}
+        params: dict[str, Any] = {
+            "limit": limit + 1 if after else limit,
+            "offset": 0 if after else offset,
+        }
         if search:
             where.append(
                 "(card_id ILIKE %(search)s OR name_ru ILIKE %(search)s OR name_en ILIKE %(search)s)"
@@ -202,12 +207,40 @@ class PostgresGraphQLRepository:
         if active is not None:
             where.append("is_active = %(active)s")
             params["active"] = active
-        count_query, rows_query = self._page_sql(
-            "hub.card_catalog", where, "collection, COALESCE(name_ru, name_en), card_id"
+        predicate = " AND ".join(where) if where else "TRUE"
+        count_query = (
+            f"SELECT count(*)::bigint AS total FROM hub.card_catalog WHERE {predicate}"
         )
-        return await self._fetch_page(
+        rows_where = list(where)
+        if after:
+            rows_where.append(
+                "(collection, COALESCE(name_ru, name_en, ''), card_id) "
+                "> (%(after_collection)s, %(after_name)s, %(after_card_id)s)"
+            )
+            params.update(
+                {
+                    "after_collection": after[0],
+                    "after_name": after[1],
+                    "after_card_id": after[2],
+                }
+            )
+        rows_predicate = " AND ".join(rows_where) if rows_where else "TRUE"
+        rows_query = (
+            "SELECT * FROM hub.card_catalog "
+            f"WHERE {rows_predicate} "
+            "ORDER BY collection, COALESCE(name_ru, name_en, ''), card_id "
+            "LIMIT %(limit)s OFFSET %(offset)s"
+        )
+        result = await self._fetch_page(
             count_query=count_query, rows_query=rows_query, params=params
         )
+        if after:
+            return PageResult(
+                items=result.items[:limit],
+                total=result.total,
+                has_next_page=len(result.items) > limit,
+            )
+        return result
 
     async def card(self, card_id: str, collection: str | None) -> dict[str, Any] | None:
         params: dict[str, Any] = {"card_id": card_id}

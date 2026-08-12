@@ -36,6 +36,20 @@ to the new hostname first and adopt GraphQL separately.
 Every collection returns `items` and `pageInfo`. `limit` defaults to 50 or 100
 and cannot exceed 200. `offset` cannot exceed 100,000.
 
+`cards` additionally supports keyset pagination. Read `pageInfo.nextCursor` and
+pass it as `after` in the next query. Do not combine `after` with a non-zero
+`offset`; keep all filters unchanged between pages. The cursor is opaque and
+must be stored and returned without decoding or editing it.
+
+```graphql
+query NextCardsPage($after: String) {
+  cards(limit: 50, after: $after) {
+    items { cardId nameRu imageUrl }
+    pageInfo { hasNextPage nextCursor }
+  }
+}
+```
+
 ## Example
 
 ```graphql

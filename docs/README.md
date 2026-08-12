@@ -18,6 +18,7 @@
 | Разобраться, как проверяются данные | [Pipeline парсинга](PARSER_PIPELINE.md) |
 | Развернуть или обновить production | [Deployment](../DEPLOY.md) |
 | Найти причину сбоя | [Диагностика](TROUBLESHOOTING.md) |
+| Измерить latency и размер API‑ответов | [Performance baseline](PERFORMANCE.md) |
 | Внести изменение в репозиторий | [Contributing](../CONTRIBUTING.md) |
 
 ## Для пользователя веб‑панели
@@ -51,6 +52,7 @@
 | [SECURITY_AND_PARSING.md](SECURITY_AND_PARSING.md) | Threat model, секреты, premium sessions и hardening |
 | [PARSER_CONTROL_API.md](PARSER_CONTROL_API.md) | Управление секциями, расписанием и durable parser runs |
 | [CURRENT_PATCH_REFRESH.md](CURRENT_PATCH_REFRESH.md) | Безопасная публикация статистики сразу после патча |
+| [PERFORMANCE.md](PERFORMANCE.md) | Безопасный benchmark, метрики latency и начальные бюджеты |
 
 ## Для разработчика проекта
 
