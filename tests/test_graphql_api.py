@@ -190,6 +190,35 @@ def test_graphql_v1_serves_health_and_paginated_cards(monkeypatch: Any) -> None:
     )
 
 
+def test_canonical_graphql_endpoint_matches_legacy_contract(monkeypatch: Any) -> None:
+    fake = FakeRepository()
+    monkeypatch.setattr("app.graphql_api.router.get_graphql_repository", lambda: fake)
+    client = TestClient(app)
+
+    response = client.post(
+        "/v1/graphql",
+        json={"query": "query { health { status sourceCount } }"},
+    )
+    discovery = client.get("/v1/graphql")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "data": {"health": {"status": "ok", "sourceCount": 7}}
+    }
+    assert discovery.status_code == 200
+    assert discovery.json() == {
+        "name": "Koloda Hearthstone GraphQL API",
+        "version": "v1",
+        "status": "ok",
+        "endpoint": "https://api.kolodahearthstone.com/v1/graphql",
+        "method": "POST",
+    }
+
+    paths = client.get("/openapi.json").json()["paths"]
+    assert paths["/v1/graphql"]["post"].get("deprecated") is not True
+    assert paths["/v1/"]["post"]["deprecated"] is True
+
+
 def test_graphql_rejects_unbounded_page(monkeypatch: Any) -> None:
     response = _post(
         "query { cards(limit: 201) { pageInfo { total } } }",

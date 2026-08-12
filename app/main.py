@@ -35,7 +35,7 @@ from .config import (
 )
 from .demo import build_demo_view, build_overview
 from .fetcher import refresh_sources
-from .graphql_api import graphql_router
+from .graphql_api import canonical_graphql_router, graphql_router
 from .graphql_api.repository import close_graphql_repository
 from .http_observability import RequestObservabilityMiddleware, generic_server_error
 from .public_cache import PublicCacheMiddleware
@@ -92,6 +92,11 @@ app.add_middleware(
 )
 app.add_middleware(PublicCacheMiddleware)
 app.include_router(graphql_router, prefix="/v1", tags=["GraphQL"])
+app.include_router(
+    canonical_graphql_router,
+    prefix="/v1/graphql",
+    tags=["GraphQL"],
+)
 app.include_router(constructed_v1_router)
 app.include_router(bg_v1_router)
 app.include_router(arena_v1_router)
