@@ -36,6 +36,7 @@ from .config import (
 from .demo import build_demo_view, build_overview
 from .fetcher import refresh_sources
 from .graphql_api import canonical_graphql_router, graphql_router
+from .graphql_api.governance import GraphQLGovernanceMiddleware
 from .graphql_api.repository import close_graphql_repository
 from .http_observability import RequestObservabilityMiddleware, generic_server_error
 from .public_cache import PublicCacheMiddleware
@@ -79,6 +80,7 @@ app = FastAPI(
     description="Cached API for configured Hearthstone public data sources.",
 )
 
+app.add_middleware(GraphQLGovernanceMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_allowed_origins(),
@@ -91,7 +93,7 @@ app.add_middleware(
         "X-API-Key",
         "X-Request-ID",
     ],
-    expose_headers=["X-Request-ID"],
+    expose_headers=["X-Request-ID", "X-Koloda-Cache", "X-GraphQL-Complexity"],
 )
 app.add_middleware(PublicCacheMiddleware)
 app.include_router(graphql_router, prefix="/v1", tags=["GraphQL"])
