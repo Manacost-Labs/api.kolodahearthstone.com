@@ -56,10 +56,10 @@ freshness/quality gates.
 ## 4. Выполните GraphQL‑запрос
 
 GraphQL принимает `POST` по адресу
-`https://api.kolodahearthstone.com/v1/`:
+`https://api.kolodahearthstone.com/v1/graphql`:
 
 ```bash
-curl -fsS https://api.kolodahearthstone.com/v1/ \
+curl -fsS https://api.kolodahearthstone.com/v1/graphql \
   -H 'Content-Type: application/json' \
   --data '{
     "query": "query { health { status databaseConnected sourceCount latestSyncAt } }"
@@ -69,7 +69,7 @@ curl -fsS https://api.kolodahearthstone.com/v1/ \
 Пример поиска карт:
 
 ```bash
-curl -fsS https://api.kolodahearthstone.com/v1/ \
+curl -fsS https://api.kolodahearthstone.com/v1/graphql \
   -H 'Content-Type: application/json' \
   --data '{
     "query": "query { cards(search: \"Reno\", limit: 10) { items { cardId nameRu nameEn manaCost imageUrl } pageInfo { total hasNextPage } } }"
@@ -102,7 +102,7 @@ curl -fsS https://api.kolodahearthstone.com/v1/auth/token \
 Чтение полной базы:
 
 ```bash
-curl -fsS https://api.kolodahearthstone.com/v1/ \
+curl -fsS https://api.kolodahearthstone.com/v1/graphql \
   -H "Authorization: Bearer ${KHS_API_TOKEN}" \
   -H 'Content-Type: application/json' \
   --data '{

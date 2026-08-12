@@ -5,7 +5,15 @@ from fastapi import APIRouter, Query
 from .models import ApiMeta, BgHeroRow, BgMinionRow, Envelope, freshest_timestamp, timestamp_is_stale
 
 
-router = APIRouter(prefix="/v1/bg", tags=["v1-battlegrounds"])
+router = APIRouter(
+    prefix="/v1/bg",
+    tags=["v1-battlegrounds"],
+    deprecated=True,
+)
+canonical_router = APIRouter(
+    prefix="/v1/battlegrounds",
+    tags=["v1-battlegrounds"],
+)
 
 
 @router.get(
@@ -70,3 +78,19 @@ def minions(
             offset=offset,
         ),
     )
+
+
+canonical_router.add_api_route(
+    "/heroes",
+    heroes,
+    methods=["GET"],
+    response_model=Envelope[list[BgHeroRow]],
+    response_model_exclude_none=True,
+)
+canonical_router.add_api_route(
+    "/minions",
+    minions,
+    methods=["GET"],
+    response_model=Envelope[list[BgMinionRow]],
+    response_model_exclude_none=True,
+)

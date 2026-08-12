@@ -5,7 +5,7 @@
 | Назначение | URL |
 | --- | --- |
 | Production | `https://api.kolodahearthstone.com` |
-| GraphQL | `https://api.kolodahearthstone.com/v1/` |
+| GraphQL | `https://api.kolodahearthstone.com/v1/graphql` |
 | Типизированный REST v1 | `https://api.kolodahearthstone.com/v1` |
 | REST базы карт и библиотек | `https://api.kolodahearthstone.com/api/v1` |
 | Raw datasets | `https://api.kolodahearthstone.com/datasets` |
@@ -44,10 +44,11 @@ Authorization: Bearer khs_v1_<token-id>_<secret>
 
 | Метод | Path | Доступ | Назначение |
 | --- | --- | --- | --- |
-| POST | `/v1/` | Public / `database:read` для полной базы | Выполнение GraphQL query |
+| POST | `/v1/graphql` | Public / `database:read` для полной базы | Канонический GraphQL endpoint |
+| POST | `/v1/` | Public / `database:read` для полной базы | Deprecated GraphQL alias |
 
 ```bash
-curl -fsS https://api.kolodahearthstone.com/v1/ \
+curl -fsS https://api.kolodahearthstone.com/v1/graphql \
   -H 'Content-Type: application/json' \
   --data '{"query":"query { health { status databaseConnected sourceCount latestSyncAt } }"}'
 ```
@@ -80,8 +81,10 @@ GraphQL pagination возвращает `items` и `pageInfo`. Максимал�
 | GET | `/v1/constructed/hsguru-deck` | `archetype` (required), `format_name`, `rank` | Точные HSGuru decks архетипа |
 | GET | `/v1/constructed/decks` | `class_name`, `format_name`, `source_id`, `min_win_rate`, `q`, `limit`, `offset` | Поиск колод |
 | GET | `/v1/constructed/archetypes` | `class_name`, `q`, `rank_range`, `game_type`, `limit`, `offset` | HSReplay archetypes |
-| GET | `/v1/bg/heroes` | `mode`, `q`, `limit`, `offset` | BG‑герои Solo/Duos |
-| GET | `/v1/bg/minions` | `q`, `tavern_tier`, `limit`, `offset` | BG‑существа |
+| GET | `/v1/battlegrounds/heroes` | `mode`, `q`, `limit`, `offset` | BG‑герои Solo/Duos |
+| GET | `/v1/battlegrounds/minions` | `q`, `tavern_tier`, `limit`, `offset` | BG‑существа |
+| GET | `/v1/bg/heroes` | `mode`, `q`, `limit`, `offset` | Deprecated alias BG‑героев |
+| GET | `/v1/bg/minions` | `q`, `tavern_tier`, `limit`, `offset` | Deprecated alias BG‑существ |
 | GET | `/v1/arena/classes` | `source_id`, `limit`, `offset` | Статистика классов Arena |
 
 ## REST v1 — HSGuru
@@ -97,9 +100,12 @@ GraphQL pagination возвращает `items` и `pageInfo`. Максимал�
 
 | Метод | Path | Query parameters | Назначение |
 | --- | --- | --- | --- |
-| GET | `/v1/system/sources` | `site`, `category` | Типизированный реестр источников |
-| GET | `/v1/system/datasets` | — | Типизированный список datasets |
-| GET | `/v1/system/health` | — | Health и freshness summary |
+| GET | `/v1/sources` | `site`, `category` | Канонический реестр источников |
+| GET | `/v1/datasets` | — | Канонический список datasets |
+| GET | `/v1/health` | — | Канонический health и freshness summary |
+| GET | `/v1/system/sources` | `site`, `category` | Deprecated alias реестра источников |
+| GET | `/v1/system/datasets` | — | Deprecated alias списка datasets |
+| GET | `/v1/system/health` | — | Deprecated alias health summary |
 | GET | `/v1/system/parsing-reliability` | — | Reliability за 24h, 7d и 30d |
 | GET | `/v1/auth/token` | — | Identity, scopes и срок текущего токена |
 
@@ -120,7 +126,7 @@ GraphQL pagination возвращает `items` и `pageInfo`. Максимал�
 | GET | `/firecrawl/hsreplay/index` | — | Public | Производный HSReplay index |
 
 `/health` проверяет доступность API, но не гарантирует свежесть всех datasets.
-Для freshness используйте `/sources` или `/v1/system/health`.
+Для freshness используйте `/v1/sources` или `/v1/health`.
 
 ## REST базы — `/api/v1`
 
@@ -344,13 +350,13 @@ GraphQL pagination возвращает `items` и `pageInfo`. Максимал�
 
 ```bash
 # Public REST
-curl -fsS https://api.kolodahearthstone.com/v1/system/sources
+curl -fsS https://api.kolodahearthstone.com/v1/sources
 
 # Public database REST
 curl -fsS 'https://api.kolodahearthstone.com/api/v1/cards?per_page=20&tier=6'
 
 # Private GraphQL database
-curl -fsS https://api.kolodahearthstone.com/v1/ \
+curl -fsS https://api.kolodahearthstone.com/v1/graphql \
   -H "Authorization: Bearer ${KHS_API_TOKEN}" \
   -H 'Content-Type: application/json' \
   --data '{"query":"query { collections(schemaName: \"catalog\", limit: 20) { items { collection estimatedRowCount } pageInfo { total } } }"}'

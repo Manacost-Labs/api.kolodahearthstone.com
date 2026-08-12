@@ -119,7 +119,7 @@ def test_application_cors_allows_and_exposes_request_id() -> None:
 
     client = TestClient(app)
     preflight = client.options(
-        "/v1/system/sources",
+        "/v1/sources",
         headers={
             "Origin": "https://api.kolodahearthstone.com",
             "Access-Control-Request-Method": "GET",
@@ -148,7 +148,7 @@ def test_public_cache_does_not_replay_a_previous_request_id() -> None:
 
     client = TestClient(app)
     first = client.get(
-        "/v1/system/sources",
+        "/v1/sources",
         headers={"X-Request-ID": "cache-request-one"},
     )
     assert first.status_code == 200
@@ -156,7 +156,7 @@ def test_public_cache_does_not_replay_a_previous_request_id() -> None:
     assert first.headers.get("ETag")
 
     not_modified = client.get(
-        "/v1/system/sources",
+        "/v1/sources",
         headers={
             "X-Request-ID": "cache-request-two",
             "If-None-Match": first.headers["ETag"],

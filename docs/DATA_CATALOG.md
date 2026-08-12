@@ -18,14 +18,14 @@ admin/ops endpoints и правила авторизации находятся 
 | Задача | Рекомендуемый endpoint |
 | --- | --- |
 | Получить исходный нормализованный набор конкретного источника | `GET /datasets/{source_id}` |
-| Узнать все доступные source ID | `GET /v1/system/sources` |
-| Проверить наличие cache и состояние всех источников | `GET /v1/system/datasets` |
+| Узнать все доступные source ID | `GET /v1/sources` |
+| Проверить наличие cache и состояние всех источников | `GET /v1/datasets` |
 | Найти колоды разных источников | `GET /v1/constructed/decks` |
 | Получить актуальные HSReplay-архетипы | `GET /v1/constructed/archetypes` |
 | Получить фильтрованный срез меты HSGuru | `GET /v1/hsguru/meta` |
 | Получить актуальные HSGuru-архетипы со сборками | `GET /v1/hsguru/archetypes?min_games=50&has_decks=true` |
-| Получить BG-героев solo/duos | `GET /v1/bg/heroes` |
-| Получить BG-существ и их историю | `GET /v1/bg/minions` и `/api/db/bg/minions/*` |
+| Получить BG-героев solo/duos | `GET /v1/battlegrounds/heroes` |
+| Получить BG-существ и их историю | `GET /v1/battlegrounds/minions` и `/api/db/bg/minions/*` |
 | Получить классы Арены | `GET /v1/arena/classes` |
 | Получить малые/большие BG-аксессуары | `GET /api/bg/trinkets` |
 | Получить Vicious Syndicate radars | `GET /datasets/vicious_syndicate_radars` |
@@ -264,8 +264,8 @@ HSGuru meta-строки находятся в `data.structured.strategies[]`, m
 
 | Endpoint/source | Что доступно |
 | --- | --- |
-| `/v1/bg/heroes?mode=solo` | Пагинированный актуальный список solo-героев. |
-| `/v1/bg/heroes?mode=duos` | Duos tier list. |
+| `/v1/battlegrounds/heroes?mode=solo` | Пагинированный актуальный список solo-героев. |
+| `/v1/battlegrounds/heroes?mode=duos` | Duos tier list. |
 | `/api/bg/heroes/{dbfId}` | Подробности одного героя. |
 | `hsreplay_battlegrounds_heroes` | Premium tier list snapshot (`bg_heroes`). |
 | `hsreplay_battlegrounds_hero_details` | Детальный pipeline snapshot (`bg_hero_details`). |
@@ -283,7 +283,7 @@ HSGuru meta-строки находятся в `data.structured.strategies[]`, m
 
 ### Существа и карты
 
-`GET /v1/bg/minions` поддерживает `q`, `tavern_tier`, `limit`, `offset`.
+`GET /v1/battlegrounds/minions` поддерживает `q`, `tavern_tier`, `limit`, `offset`.
 
 Основные поля: `dbf_id`, `card_id`, `name`, `tavern_tier`, `popularity`,
 `combat_winrate`, `fetched_at`.
@@ -458,11 +458,11 @@ ETag: "..."
 
 ```bash
 etag=$(curl -sD - -o /tmp/sources.json \
-  https://api.kolodahearthstone.com/v1/system/sources \
+  https://api.kolodahearthstone.com/v1/sources \
   | awk 'tolower($1)=="etag:" {print $2}' | tr -d '\r')
 
 curl -i -H "If-None-Match: ${etag}" \
-  https://api.kolodahearthstone.com/v1/system/sources
+  https://api.kolodahearthstone.com/v1/sources
 ```
 
 Если данные не изменились, API отвечает `304 Not Modified` без тела.
@@ -472,7 +472,7 @@ curl -i -H "If-None-Match: ${etag}" \
 Список всех источников HSReplay:
 
 ```bash
-curl -s 'https://api.kolodahearthstone.com/v1/system/sources?site=hsreplay' \
+curl -s 'https://api.kolodahearthstone.com/v1/sources?site=hsreplay' \
   | jq '.data[] | {id, category, dataset_fetched_at}'
 ```
 
@@ -493,14 +493,14 @@ curl -s 'https://api.kolodahearthstone.com/datasets/hsguru_meta_standard_legend'
 Solo BG-герои tier A:
 
 ```bash
-curl -s 'https://api.kolodahearthstone.com/v1/bg/heroes?mode=solo&limit=500' \
+curl -s 'https://api.kolodahearthstone.com/v1/battlegrounds/heroes?mode=solo&limit=500' \
   | jq '[.data[] | select(.tier == "A")]'
 ```
 
 Существа шестой таверны:
 
 ```bash
-curl -s 'https://api.kolodahearthstone.com/v1/bg/minions?tavern_tier=6&limit=500' \
+curl -s 'https://api.kolodahearthstone.com/v1/battlegrounds/minions?tavern_tier=6&limit=500' \
   | jq '.data'
 ```
 

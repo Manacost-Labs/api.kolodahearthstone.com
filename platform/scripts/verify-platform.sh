@@ -56,7 +56,7 @@ test "${legacy_api_status}" = '200'
 graphql_body="$(curl --silent --show-error --fail --max-time 15 \
   -H 'Content-Type: application/json' \
   --data '{"query":"{ health { status } }"}' \
-  https://api.kolodahearthstone.com/v1/)"
+  https://api.kolodahearthstone.com/v1/graphql)"
 grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' <<<"${graphql_body}"
 
 sudo -n docker compose --project-directory "${compose_dir}" -f "${compose_dir}/docker-compose.yml" exec -T postgres \

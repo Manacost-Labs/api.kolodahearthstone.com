@@ -13,7 +13,7 @@ from app.storage import save_dataset
 client = TestClient(app)
 
 
-def test_v1_get_returns_etag_and_conditional_304() -> None:
+def test_canonical_v1_get_returns_etag_and_conditional_304() -> None:
     fetched_at = datetime.now(UTC).isoformat()
     payload = {
         "count": 1,
@@ -22,11 +22,11 @@ def test_v1_get_returns_etag_and_conditional_304() -> None:
     }
     with patch("app.hsreplay_bg_hero_details.list_bg_heroes", return_value=payload):
         first = client.get(
-            "/v1/bg/heroes",
+            "/v1/battlegrounds/heroes",
             headers={"Origin": "https://api.kolodahearthstone.com"},
         )
         second = client.get(
-            "/v1/bg/heroes",
+            "/v1/battlegrounds/heroes",
             headers={
                 "If-None-Match": first.headers["etag"],
                 "Origin": "https://api.kolodahearthstone.com",
@@ -40,6 +40,23 @@ def test_v1_get_returns_etag_and_conditional_304() -> None:
     assert second.content == b""
     assert second.headers["etag"] == first.headers["etag"]
     assert second.headers["access-control-allow-origin"] == "https://api.kolodahearthstone.com"
+
+
+def test_canonical_battlegrounds_uses_dataset_specific_cache_revision() -> None:
+    with (
+        patch(
+            "app.public_cache._dataset_timestamp",
+            return_value="hero-details-revision",
+        ) as dataset_timestamp,
+        patch("app.public_cache._latest_dataset_timestamp") as latest_timestamp,
+    ):
+        revision = cache_revision("/v1/battlegrounds/heroes", b"mode=solo")
+
+    assert revision == "hero-details-revision"
+    dataset_timestamp.assert_called_once_with(
+        "hsreplay_battlegrounds_hero_details"
+    )
+    latest_timestamp.assert_not_called()
 
 
 def test_dataset_etag_changes_with_fetched_at() -> None:

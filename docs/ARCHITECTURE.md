@@ -6,7 +6,8 @@
 - Локальный source checkout может находиться в любом рабочем каталоге; он не
   должен совпадать с production runtime.
 - Production working copy: `/srv/hs-data-api`.
-- Канонический публичный API: `api.kolodahearthstone.com/v1/` (GraphQL).
+- Канонический GraphQL API: `api.kolodahearthstone.com/v1/graphql`.
+- Канонический REST namespace: `api.kolodahearthstone.com/v1/*`.
 - Старые REST-контракты временно доступны на новом домене для поэтапного
   отключения `api.hs-manacost.ru` и `db.kolodahs.ru`.
 - Код сначала меняется и проверяется в каноническом репозитории. Production

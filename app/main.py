@@ -35,15 +35,17 @@ from .config import (
 )
 from .demo import build_demo_view, build_overview
 from .fetcher import refresh_sources
-from .graphql_api import graphql_router
+from .graphql_api import canonical_graphql_router, graphql_router
 from .graphql_api.repository import close_graphql_repository
 from .http_observability import RequestObservabilityMiddleware, generic_server_error
 from .public_cache import PublicCacheMiddleware
 from .routers.api_tokens import router as api_tokens_router
 from .routers.arena import router as arena_v1_router
+from .routers.bg import canonical_router as canonical_bg_v1_router
 from .routers.bg import router as bg_v1_router
 from .routers.constructed import router as constructed_v1_router
 from .routers.hsguru_meta import router as hsguru_meta_v1_router
+from .routers.system import canonical_router as canonical_system_v1_router
 from .routers.system import router as system_v1_router
 from .source_state import SourceState
 from .sources import SOURCE_BY_ID, SOURCES
@@ -92,10 +94,17 @@ app.add_middleware(
 )
 app.add_middleware(PublicCacheMiddleware)
 app.include_router(graphql_router, prefix="/v1", tags=["GraphQL"])
+app.include_router(
+    canonical_graphql_router,
+    prefix="/v1/graphql",
+    tags=["GraphQL"],
+)
 app.include_router(constructed_v1_router)
 app.include_router(bg_v1_router)
+app.include_router(canonical_bg_v1_router)
 app.include_router(arena_v1_router)
 app.include_router(system_v1_router)
+app.include_router(canonical_system_v1_router)
 app.include_router(hsguru_meta_v1_router)
 app.include_router(api_tokens_router)
 

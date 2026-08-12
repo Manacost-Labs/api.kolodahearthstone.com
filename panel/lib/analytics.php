@@ -966,7 +966,7 @@ function analytics_bg_heroes_ratings(array $definition, array $query): array
 {
     $mode = (string)($query['mode'] ?? 'solo');
     if ($mode === 'duos') {
-        $fetch = analytics_fetch_json('/v1/bg/heroes', [
+        $fetch = analytics_fetch_json('/v1/battlegrounds/heroes', [
             'mode' => 'duos',
             'q' => $query['q'] ?? '',
             'limit' => $query['limit'] ?? 200,
@@ -978,7 +978,7 @@ function analytics_bg_heroes_ratings(array $definition, array $query): array
     $rating = (string)($query['rating'] ?? '50');
     $url = 'https://static.zerotoheroes.com/api/bgs/hero-stats/mmr-' . $rating . '/past-three/overview-from-hourly.gz.json';
     $fetch = analytics_fetch_absolute_json($url, (int)$definition['ttl']);
-    $namesFetch = analytics_fetch_json('/v1/bg/heroes', ['mode' => 'solo', 'limit' => 500, 'offset' => 0], (int)$definition['ttl']);
+    $namesFetch = analytics_fetch_json('/v1/battlegrounds/heroes', ['mode' => 'solo', 'limit' => 500, 'offset' => 0], (int)$definition['ttl']);
     $names = [];
     foreach (($namesFetch['payload']['data'] ?? []) as $hero) {
         if (is_array($hero) && !empty($hero['id'])) {
@@ -1047,7 +1047,7 @@ function analytics_card_statistics(array $definition, array $query): array
     $requests = [
         'trends' => ['/api/db/cards/trends', ['card_name' => $name, 'limit' => 100]],
         'minions' => ['/datasets/hsreplay_battlegrounds_minions', []],
-        'heroes' => ['/v1/bg/heroes', ['q' => $name, 'limit' => 20]],
+        'heroes' => ['/v1/battlegrounds/heroes', ['q' => $name, 'limit' => 20]],
     ];
     $responses = [];
     $warnings = [];

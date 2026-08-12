@@ -27,7 +27,7 @@ curl -fsS \
 ## Первый GraphQL‑запрос
 
 ```bash
-curl -fsS https://api.kolodahearthstone.com/v1/ \
+curl -fsS https://api.kolodahearthstone.com/v1/graphql \
   -H 'Content-Type: application/json' \
   --data '{"query":"query { health { status databaseConnected sourceCount latestSyncAt } }"}' \
   | jq .
