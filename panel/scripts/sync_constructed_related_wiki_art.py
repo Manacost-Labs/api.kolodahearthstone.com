@@ -176,7 +176,18 @@ def load_related_cards(
     with conn.cursor() as cursor:
         cursor.execute(
             f"""
-            SELECT card_id, name_en, wiki_full_art_sha1, local_wiki_full_art_url
+            SELECT card_id,
+                   name_en,
+                   wiki_full_art_title,
+                   wiki_full_art_url,
+                   local_wiki_full_art_url,
+                   wiki_full_art_file_page_url,
+                   wiki_full_art_width,
+                   wiki_full_art_height,
+                   wiki_full_art_size,
+                   wiki_full_art_sha1,
+                   wiki_full_art_mime,
+                   wiki_full_art_fetched_at
             FROM constructed_cards
             WHERE card_id IN ({placeholders})
             """,
@@ -332,6 +343,28 @@ def file_sha1(path: Path) -> str:
     return digest.hexdigest()
 
 
+def stored_local_art_is_valid(card: dict[str, Any]) -> bool:
+    local_url = str(card.get("local_wiki_full_art_url") or "")
+    prefix = UPLOAD_URL + "/"
+    if not local_url.startswith(prefix):
+        return False
+    filename = urllib.parse.unquote(local_url.removeprefix(prefix))
+    if not filename or Path(filename).name != filename:
+        return False
+    if Path(filename).suffix.casefold() not in IMAGE_EXTENSIONS:
+        return False
+    expected_sha1 = str(card.get("wiki_full_art_sha1") or "").casefold()
+    if not re.fullmatch(r"[0-9a-f]{40}", expected_sha1):
+        return False
+    destination = UPLOAD_DIR / filename
+    if not destination.is_file():
+        return False
+    expected_size = int(card.get("wiki_full_art_size") or 0)
+    if expected_size > 0 and destination.stat().st_size != expected_size:
+        return False
+    return file_sha1(destination) == expected_sha1
+
+
 def download_original(
     card: dict[str, Any], info: dict[str, Any], dry_run: bool, skip_downloads: bool
 ) -> tuple[str, bool, dict[str, Any]]:
@@ -461,12 +494,24 @@ def main() -> int:
         cards = load_related_cards(conn, args.format, args.parent_card_id)
         if args.limit is not None:
             cards = dict(list(sorted(cards.items()))[: max(0, args.limit)])
-        page_titles = sorted({str(card["page_title"]) for card in cards.values()})
+        already_local = {
+            card_id
+            for card_id, card in cards.items()
+            if stored_local_art_is_valid(card)
+        }
+        pending_cards = {
+            card_id: card
+            for card_id, card in cards.items()
+            if card_id not in already_local
+        }
+        page_titles = sorted(
+            {str(card["page_title"]) for card in pending_cards.values()}
+        )
         page_images, aliases = fetch_page_images(page_titles)
 
         selected: dict[str, str] = {}
         missing: list[str] = []
-        for card_id, card in cards.items():
+        for card_id, card in pending_cards.items():
             resolved = resolve_alias(aliases, str(card["page_title"]))
             file_title = pick_full_art(str(card["page_title"]), page_images.get(resolved, []))
             if not file_title:
@@ -479,9 +524,9 @@ def main() -> int:
             "format": args.format,
             "parent_card_id": args.parent_card_id,
             "requested": len(cards),
-            "discovered": 0,
+            "discovered": len(already_local),
             "downloaded": 0,
-            "already_local": 0,
+            "already_local": len(already_local),
             "missing": missing,
             "errors": [],
             "dry_run": args.dry_run,

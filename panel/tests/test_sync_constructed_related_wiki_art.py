@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import io
+import hashlib
 import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -88,6 +90,25 @@ class ScrapeDoFetchTest(unittest.TestCase):
         self.assertEqual(len(requests), 2)
         self.assertEqual(len(str(requests[0]["titles"]).split("|")), 50)
         self.assertEqual(len(str(requests[1]["titles"]).split("|")), 1)
+
+    def test_valid_stored_art_skips_external_discovery(self) -> None:
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            wiki_art, "UPLOAD_DIR", Path(directory)
+        ):
+            payload = b"valid local image bytes"
+            destination = wiki_art.UPLOAD_DIR / "CARD_001.png"
+            destination.write_bytes(payload)
+            card = {
+                "local_wiki_full_art_url": (
+                    wiki_art.UPLOAD_URL + "/CARD_001.png"
+                ),
+                "wiki_full_art_size": len(payload),
+                "wiki_full_art_sha1": hashlib.sha1(payload).hexdigest(),
+            }
+            self.assertTrue(wiki_art.stored_local_art_is_valid(card))
+
+            destination.write_bytes(payload + b"corrupt")
+            self.assertFalse(wiki_art.stored_local_art_is_valid(card))
 
 
 if __name__ == "__main__":
