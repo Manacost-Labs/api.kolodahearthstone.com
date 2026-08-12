@@ -86,5 +86,14 @@ assert_contains scripts/index-media-assets.php \
 assert_not_contains scripts/verify-platform.sh \
   '/var/www/koloda/data/www/db\.kolodahs\.ru' \
   'health checks must not depend on the retired domain runtime'
+assert_contains scripts/apply-migrations.sh \
+  '006_card_catalog_pagination\.sql' \
+  'the canonical GraphQL cards cursor indexes must be deployed'
+assert_contains sql/006_card_catalog_pagination.sql \
+  'battlegrounds_cards_catalog_cursor_idx' \
+  'Battlegrounds cards must have a keyset pagination index'
+assert_contains sql/006_card_catalog_pagination.sql \
+  'constructed_cards_catalog_cursor_idx' \
+  'constructed cards must have a keyset pagination index'
 
 echo 'OK: migration cutover contract'
