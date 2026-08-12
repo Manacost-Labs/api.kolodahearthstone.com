@@ -43,6 +43,7 @@ provider-check:
 
 docs-check:
 	scripts/check-documentation-links.sh
+	$(PYTHON) scripts/check-readme-endpoints.py
 
 lint-report:
 	ruff check --no-cache app tests scripts

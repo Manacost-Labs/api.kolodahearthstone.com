@@ -1,244 +1,357 @@
-# Koloda Hearthstone Data Platform
+# Koloda Hearthstone API
 
-[![tests](https://github.com/Manacost-Labs/api.kolodahearthstone.com/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/Manacost-Labs/api.kolodahearthstone.com/actions/workflows/tests.yml)
+## Base URLs
 
-Единая платформа данных Hearthstone: сбор и проверка статистики, центральная
-база, REST/GraphQL API и закрытая веб‑панель. Проект объединяет данные
-Constructed, Battlegrounds и Arena и сохраняет последний проверенный срез, если
-внешний источник временно недоступен.
-
-- **Веб‑панель:** <https://api.kolodahearthstone.com/>
-- **GraphQL:** `POST https://api.kolodahearthstone.com/v1/`
-- **REST API:** <https://api.kolodahearthstone.com/health>
-- **Документация:** [docs/README.md](docs/README.md)
-- **Каталог данных:** [docs/DATA_CATALOG.md](docs/DATA_CATALOG.md)
-- **Wiki‑комплект:** [wiki/Home.md](wiki/Home.md)
-
-> Веб‑панель закрыта GitHub OAuth и доступна только разрешённому аккаунту.
-> Публичные read-only endpoints можно использовать без входа; полный доступ к
-> базе и административные операции требуют scoped API‑токен.
-
-## Что входит в платформу
-
-| Слой | Что делает | Где находится |
-| --- | --- | --- |
-| Сбор данных | Получает данные HSReplay, HSGuru, Firestone, HearthArena, MetaStats, Hearthstone-Decks и Vicious Syndicate | `app/`, `systemd/` |
-| Контроль качества | Проверяет структуру, полноту, семантику и регрессии до публикации | `app/publish_gate.py`, `app/source_contracts.py` |
-| API | Отдаёт REST datasets, типизированные `/v1/*` endpoints и GraphQL | `app/main.py`, `app/routers/`, `app/graphql_api/` |
-| Центральная база | Импортирует и нормализует каталоги и статистику в PostgreSQL | `platform/` |
-| Веб‑панель | Показывает карты, героев, мету, архетипы, Arena, BG и состояние источников | `panel/` |
-| Интеграции | Выдаёт scoped API‑токены и сохраняет совместимость со старыми REST‑контрактами | `app/api_tokens.py`, `panel/partials/api-token-manager.php` |
-
-Авторитетный реестр источников генерируется из кода и опубликован в
-[docs/SOURCES.md](docs/SOURCES.md): там всегда указаны актуальное количество,
-тип, категория и freshness policy. Вручную поддерживать список не нужно.
-
-## Какие данные доступны
-
-| Раздел | Примеры |
+| Назначение | URL |
 | --- | --- |
-| Constructed | Карты Standard/Wild, колоды, архетипы, мета, матчапы, история |
-| Battlegrounds | Герои, существа, составы, аксессуары, рейтинговые срезы, изображения |
-| Arena | Карты, классы, легендарные группы, winning decks, tier lists |
-| Система | Источники, время обновления, качество, reliability и состояние jobs |
-| Полная база | Таблицы и представления PostgreSQL через GraphQL `collections` и `records` |
+| Production | `https://api.kolodahearthstone.com` |
+| GraphQL | `https://api.kolodahearthstone.com/v1/` |
+| Типизированный REST v1 | `https://api.kolodahearthstone.com/v1` |
+| REST базы карт и библиотек | `https://api.kolodahearthstone.com/api/v1` |
+| Raw datasets | `https://api.kolodahearthstone.com/datasets` |
+| Изображения | `https://api.kolodahearthstone.com/uploads` |
+| OpenAPI | `https://api.kolodahearthstone.com/openapi.json` |
+| Swagger UI | `https://api.kolodahearthstone.com/docs` |
+| ReDoc | `https://api.kolodahearthstone.com/redoc` |
+| Веб‑панель | `https://api.kolodahearthstone.com/` |
 
-Для выбора готового endpoint используйте [каталог данных](docs/DATA_CATALOG.md).
-Технический реестр всех source ID находится в [каталоге источников](docs/SOURCES.md).
+Все ответы API используют UTF‑8 и JSON, кроме endpoint изображения. Только
+HTTPS считается каноническим transport.
 
-## Попробовать за минуту
+## Авторизация
 
-Проверить доступность API:
-
-```bash
-curl -fsS https://api.kolodahearthstone.com/health | jq .
-```
-
-Посмотреть источники и время их последнего обновления:
-
-```bash
-curl -fsS https://api.kolodahearthstone.com/sources \
-  | jq '.sources[] | {id, site, category, state: (.status.effective_state // .status.state), updated_at: .dataset_fetched_at}'
-```
-
-Получить один dataset:
-
-```bash
-curl -fsS \
-  https://api.kolodahearthstone.com/datasets/hsguru_meta_standard_legend \
-  | jq '.data.structured'
-```
-
-Выполнить GraphQL‑запрос:
-
-```bash
-curl -fsS https://api.kolodahearthstone.com/v1/ \
-  -H 'Content-Type: application/json' \
-  --data '{"query":"query { health { status databaseConnected sourceCount latestSyncAt } }"}' \
-  | jq .
-```
-
-Больше готовых запросов: [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) и
-[docs/INTEGRATION_GUIDE.md](docs/INTEGRATION_GUIDE.md).
-
-## Веб‑панель
-
-После входа на <https://api.kolodahearthstone.com/> доступны:
-
-- каталоги карт BG, героев, скинов, питомцев, монеток и специальных коллекций;
-- раздел **«Обзор и мета»** со всеми источниками, временем обновления и
-  статистикой Constructed, Arena и Battlegrounds;
-- подробные карточки архетипов, существ и героев с исходными полями;
-- поиск, фильтры, сохранение параметров в URL и горизонтальная прокрутка таблиц;
-- lightbox для изображений и отдельные представления обычных/золотых вариантов;
-- раздел **«API‑токены»** для выпуска, просмотра и немедленного отзыва доступа.
-
-Пошаговое руководство: [docs/WEB_PANEL.md](docs/WEB_PANEL.md).
-
-## REST или GraphQL
-
-Используйте REST, когда нужен конкретный готовый набор или обратная
-совместимость. Используйте GraphQL, когда сервису нужны связанные данные,
-точный набор полей или доступ к центральным таблицам.
-
-| Задача | Рекомендуемый интерфейс |
-| --- | --- |
-| Получить готовую таблицу меты | REST `/v1/*` |
-| Получить исходный snapshot парсера | REST `/datasets/{source_id}` |
-| Запросить только нужные поля | GraphQL typed queries |
-| Просмотреть любую таблицу центральной базы | GraphQL `collections` + `records` |
-| Проверить liveness | REST `/health` |
-| Проверить качество и свежесть всей системы | CLI gates + admin `/ops/*` |
-
-Полные контракты: [REST API](docs/API.md),
-[GraphQL](docs/GRAPHQL_API.md), [API‑токены](docs/API_TOKENS.md).
-
-## Авторизация API
-
-Для чтения полной базы передавайте токен со scope `database:read`:
+Публичные `GET` endpoints не требуют токена. Закрытые операции принимают:
 
 ```http
 Authorization: Bearer khs_v1_<token-id>_<secret>
 ```
 
-Токен проще всего выпустить в веб‑панели: **Доступ → API‑токены**. Новый секрет
-показывается один раз. Для каждого сервиса создавайте отдельный токен с
-минимальными правами и ограниченным сроком действия.
+`X-API-Key` временно поддерживается для совместимости. Не отправляйте оба
+заголовка с разными значениями.
 
-| Scope | Назначение |
+| Доступ | Что разрешает |
 | --- | --- |
-| `database:read` | Чтение `collections` и `records` в GraphQL |
-| `admin` | Refresh и закрытые `/admin/*`, `/ops/*` endpoints |
-| `tokens:manage` | Выпуск, список и отзыв токенов |
+| Public | Публичные каталоги, статистика, datasets и typed GraphQL queries |
+| Любой действующий токен | `GET /v1/auth/token` |
+| `database:read` | GraphQL `collections` и `records` |
+| `admin` | `/admin/*`, `/ops/*` и `/health/premium`, кроме управления токенами |
+| `tokens:manage` | Выпуск, список и отзыв API‑токенов |
+| `X-Orchestrator-Key` | Только `/admin/orchestrator/*` |
 
-## Как движутся данные
+## GraphQL
 
-```mermaid
-flowchart LR
-    Sources["Внешние источники"] --> Fetch["API / Scrape.do / browser adapters"]
-    Fetch --> Normalize["Нормализация"]
-    Normalize --> Gate["Schema + semantic + regression gates"]
-    Gate -->|valid| Cache["JSON / SQLite / last-known-good"]
-    Gate -->|rejected| LKG["Сохранить предыдущий проверенный срез"]
-    Cache --> REST["REST API"]
-    Cache --> PG["PostgreSQL shadow + hub views"]
-    PG --> GraphQL["GraphQL"]
-    REST --> Panel["Веб-панель"]
-    GraphQL --> Panel
-```
+### Endpoint
 
-Ключевые гарантии:
-
-- неполный или неверный ответ upstream не заменяет хороший dataset;
-- запись snapshots выполняется атомарно;
-- status отдельно показывает свежий результат, provisional, LKG и ошибку;
-- `/health` проверяет доступность API, но не заменяет freshness/quality gates;
-- секреты, cookies, production datasets и runtime‑кеши не входят в Git.
-
-Подробнее: [архитектура](docs/ARCHITECTURE.md) и
-[pipeline парсинга](docs/PARSER_PIPELINE.md).
-
-## Локальная разработка
-
-Требуются Python 3.12, PHP, Node.js и `actionlint`. Первый запуск:
+| Метод | Path | Доступ | Назначение |
+| --- | --- | --- | --- |
+| POST | `/v1/` | Public / `database:read` для полной базы | Выполнение GraphQL query |
 
 ```bash
-git clone https://github.com/Manacost-Labs/api.kolodahearthstone.com.git
-cd api.kolodahearthstone.com
-make setup
-make check
+curl -fsS https://api.kolodahearthstone.com/v1/ \
+  -H 'Content-Type: application/json' \
+  --data '{"query":"query { health { status databaseConnected sourceCount latestSyncAt } }"}'
 ```
 
-Запуск API с локальным каталогом данных:
+### Query roots
+
+| Query | Доступ | Данные |
+| --- | --- | --- |
+| `health` | Public | Состояние PostgreSQL и синхронизации |
+| `cards`, `card` | Public | Constructed и Battlegrounds cards |
+| `battlegroundHeroes` | Public | BG‑герои, изображения, силы героев и buddies |
+| `statistics` | Public | Нормализованная статистика режимов и сущностей |
+| `archetypes` | Public | Архетипы по формату, рангу и региону |
+| `battlegroundMinions` | Public | BG‑существа по tier, MMR и периоду |
+| `sources` | Public | Источники и состояние синхронизации |
+| `datasets`, `dataset` | Public | Версии и полные snapshots datasets |
+| `collections` | `database:read` | Таблицы/views, колонки и primary keys |
+| `records` | `database:read` | Строки любой разрешённой PostgreSQL collection |
+
+GraphQL pagination возвращает `items` и `pageInfo`. Максимальный `limit` —
+`200`, максимальный `offset` — `100000`. Ошибки находятся в
+`errors[].extensions.code`.
+
+## REST v1 — Constructed, Battlegrounds и Arena
+
+Все endpoints этого раздела публичные.
+
+| Метод | Path | Query parameters | Назначение |
+| --- | --- | --- | --- |
+| GET | `/v1/constructed/hsguru-deck` | `archetype` (required), `format_name`, `rank` | Точные HSGuru decks архетипа |
+| GET | `/v1/constructed/decks` | `class_name`, `format_name`, `source_id`, `min_win_rate`, `q`, `limit`, `offset` | Поиск колод |
+| GET | `/v1/constructed/archetypes` | `class_name`, `q`, `rank_range`, `game_type`, `limit`, `offset` | HSReplay archetypes |
+| GET | `/v1/bg/heroes` | `mode`, `q`, `limit`, `offset` | BG‑герои Solo/Duos |
+| GET | `/v1/bg/minions` | `q`, `tavern_tier`, `limit`, `offset` | BG‑существа |
+| GET | `/v1/arena/classes` | `source_id`, `limit`, `offset` | Статистика классов Arena |
+
+## REST v1 — HSGuru
+
+| Метод | Path | Query parameters | Назначение |
+| --- | --- | --- | --- |
+| GET | `/v1/hsguru/meta` | `format`, `rank`, `period`, `coin`, `min_games` | Meta Standard/Wild |
+| GET | `/v1/hsguru/archetypes` | `format`, `q`, `min_games`, `has_decks`, `sort`, `order`, `limit`, `offset` | Текущий каталог архетипов |
+| GET | `/v1/hsguru/archetypes/history` | `archetype` (required), `format` (required), `limit` | История архетипа |
+| GET | `/v1/hsguru/archetypes/analysis` | `archetype` (required), `format` (required) | Полный анализ архетипа |
+
+## REST v1 — System
+
+| Метод | Path | Query parameters | Назначение |
+| --- | --- | --- | --- |
+| GET | `/v1/system/sources` | `site`, `category` | Типизированный реестр источников |
+| GET | `/v1/system/datasets` | — | Типизированный список datasets |
+| GET | `/v1/system/health` | — | Health и freshness summary |
+| GET | `/v1/system/parsing-reliability` | — | Reliability за 24h, 7d и 30d |
+| GET | `/v1/auth/token` | — | Identity, scopes и срок текущего токена |
+
+## Sources и raw datasets
+
+| Метод | Path | Query parameters | Доступ | Назначение |
+| --- | --- | --- | --- | --- |
+| GET | `/health` | — | Public | Liveness API |
+| GET | `/sources` | `site`, `category` | Public | Все источники и их status |
+| GET | `/sources/{source_id}` | — | Public | Один источник |
+| GET | `/datasets` | — | Public | Наличие datasets по всем источникам |
+| GET | `/datasets/{source_id}` | — | Public | Полный опубликованный dataset |
+| HEAD | `/datasets/{source_id}` | — | Public | Проверка dataset без body |
+| GET | `/demo/overview` | — | Public | Агрегированный обзор источников |
+| GET | `/demo/view/{source_id}` | — | Public | Нормализованное представление dataset |
+| GET | `/system/technologies` | — | Public | Используемые parser technologies |
+| GET | `/firecrawl/hsreplay/map` | — | Public | Сохранённая карта HSReplay URLs |
+| GET | `/firecrawl/hsreplay/index` | — | Public | Производный HSReplay index |
+
+`/health` проверяет доступность API, но не гарантирует свежесть всех datasets.
+Для freshness используйте `/sources` или `/v1/system/health`.
+
+## REST базы — `/api/v1`
+
+Эти endpoints публичные и read-only. Все `GET` маршруты также поддерживают
+`HEAD`; CORS preflight поддерживает `OPTIONS`.
+
+### API index и metadata
+
+| Метод | Path | Назначение |
+| --- | --- | --- |
+| GET | `/api` | Краткий index совместимого API |
+| GET | `/api/v1` | Версия, счётчики и список database endpoints |
+| GET | `/api/v1/meta` | Типы, tiers, библиотеки и общие счётчики |
+
+### Battlegrounds cards
+
+| Метод | Path | Query parameters | Назначение |
+| --- | --- | --- | --- |
+| GET | `/api/v1/cards` | `q`, `tier`, `dbf`, `in_pool`, `duos_only`, `card_type`, `creature_type`, `include`, `include_variants`, `updated_since`, `page`, `per_page` | Список BG cards |
+| GET | `/api/v1/cards/{card_id}` | — | Карта по `card_id` |
+| GET | `/api/v1/cards/{card_id}/wiki` | — | Wiki‑метаданные карты |
+| GET | `/api/v1/cards/by-dbf/{dbf}` | — | Карта по `dbf` |
+| GET | `/api/v1/cards/by-dbf/{dbf}/wiki` | — | Wiki‑метаданные карты по `dbf` |
+
+### Constructed cards
+
+| Метод | Path | Query parameters | Назначение |
+| --- | --- | --- | --- |
+| GET | `/api/v1/constructed-cards` | `q`, `format`, `dbf`, `collectible`, `card_type`, `class`, `set`, `include`, `updated_since`, `page`, `per_page` | Карты Standard/Wild |
+| GET | `/api/v1/constructed-cards/{card_id}` | — | Карта по `card_id` |
+| GET | `/api/v1/constructed-cards/{card_id}/wiki` | — | Wiki‑метаданные карты |
+| GET | `/api/v1/constructed-cards/by-dbf/{dbf}` | — | Карта по `dbf` |
+| GET | `/api/v1/constructed-cards/by-dbf/{dbf}/wiki` | — | Wiki‑метаданные по `dbf` |
+| GET | `/api/v1/diamond-cards` | `q`, `format`, `section`, `has_animated`, `updated_since`, `page`, `per_page` | Алмазные карты |
+| GET | `/api/v1/diamond-cards/{card_id}` | — | Алмазная карта по base/diamond `card_id` |
+
+### Heroes, skins, pets и coins
+
+| Метод | Path | Query parameters | Назначение |
+| --- | --- | --- | --- |
+| GET | `/api/v1/heroes` | `q`, `dbf`, `updated_since`, `page`, `per_page` | BG‑герои |
+| GET | `/api/v1/heroes/{card_id}` | — | Герой по `card_id` |
+| GET | `/api/v1/heroes/by-dbf/{dbf}` | — | Герой по `dbf` |
+| GET | `/api/v1/hero-skins` | `q`, `dbf`, `class`, `category`, `rarity`, `has_animated`, `has_gallery`, `has_sounds`, `view`, `updated_since`, `page`, `per_page` | Скины героев |
+| GET | `/api/v1/hero-skins/{card_id}` | — | Скин по `card_id` |
+| GET | `/api/v1/hero-skins/by-dbf/{dbf}` | — | Скин по `dbf` |
+| GET | `/api/v1/pets` | `q`, `dbf`, `pet_id`, `level`, `has_gallery`, `has_background`, `view`, `updated_since`, `page`, `per_page` | Питомцы |
+| GET | `/api/v1/pets/{card_id}` | — | Питомец по `card_id` |
+| GET | `/api/v1/pets/by-dbf/{dbf}` | — | Питомец по `dbf` |
+| GET | `/api/v1/coins` | `q`, `dbf`, `view`, `updated_since`, `page`, `per_page` | Косметические монетки |
+| GET | `/api/v1/coins/{card_id}` | — | Монетка по `card_id` |
+| GET | `/api/v1/coins/by-dbf/{dbf}` | — | Монетка по `dbf` |
+
+### Timewarped cards
+
+| Метод | Path | Query parameters | Назначение |
+| --- | --- | --- | --- |
+| GET | `/api/v1/timewarped-cards` | `q`, `tier`, `dbf`, `card_type`, `updated_since`, `page`, `per_page` | Хрономальные карты |
+| GET | `/api/v1/timewarped-cards/{card_id}` | — | Карта по `card_id` |
+| GET | `/api/v1/timewarped-cards/by-dbf/{dbf}` | — | Карта по `dbf` |
+| GET | `/api/v1/chronomal-cards` | Те же параметры | Alias списка хрономальных карт |
+| GET | `/api/v1/chronomal-cards/{card_id}` | — | Alias detail по `card_id` |
+| GET | `/api/v1/chronomal-cards/by-dbf/{dbf}` | — | Alias detail по `dbf` |
+
+### Battlegrounds libraries
+
+Допустимые значения `{library}`: `anomaly`, `dark_gift`, `quest`,
+`darkmoon_prize`, `reward`, `trinket` и их plural aliases.
+
+| Метод | Path | Query parameters | Назначение |
+| --- | --- | --- | --- |
+| GET | `/api/v1/libraries/{library}` | `q`, `dbf`, `in_pool`, `status`, `group`, `tier`, `updated_since`, `page`, `per_page` | Список выбранной библиотеки |
+| GET | `/api/v1/libraries/{library}/{card_id}` | — | Запись по `card_id` |
+| GET | `/api/v1/libraries/{library}/by-dbf/{dbf}` | — | Запись по `dbf` |
+| GET | `/api/v1/anomalies` | Library filters | Аномалии |
+| GET | `/api/v1/anomalies/{card_id}` | — | Аномалия по `card_id` |
+| GET | `/api/v1/anomalies/by-dbf/{dbf}` | — | Аномалия по `dbf` |
+| GET | `/api/v1/dark-gifts` | Library filters | Тёмные дары |
+| GET | `/api/v1/dark-gifts/{card_id}` | — | Тёмный дар по `card_id` |
+| GET | `/api/v1/dark-gifts/by-dbf/{dbf}` | — | Тёмный дар по `dbf` |
+| GET | `/api/v1/quests` | Library filters | Квесты |
+| GET | `/api/v1/quests/{card_id}` | — | Квест по `card_id` |
+| GET | `/api/v1/quests/by-dbf/{dbf}` | — | Квест по `dbf` |
+| GET | `/api/v1/darkmoon-prizes` | Library filters | Призы Ярмарки Новолуния |
+| GET | `/api/v1/darkmoon-prizes/{card_id}` | — | Приз по `card_id` |
+| GET | `/api/v1/darkmoon-prizes/by-dbf/{dbf}` | — | Приз по `dbf` |
+| GET | `/api/v1/rewards` | Library filters | Награды |
+| GET | `/api/v1/rewards/{card_id}` | — | Награда по `card_id` |
+| GET | `/api/v1/rewards/by-dbf/{dbf}` | — | Награда по `dbf` |
+| GET | `/api/v1/trinkets` | Library filters | Аксессуары |
+| GET | `/api/v1/trinkets/{card_id}` | — | Аксессуар по `card_id` |
+| GET | `/api/v1/trinkets/by-dbf/{dbf}` | — | Аксессуар по `dbf` |
+
+## Специализированная статистика и базы
+
+Все endpoints этого раздела публичные.
+
+### Decks, archetypes и card trends
+
+| Метод | Path | Query parameters | Назначение |
+| --- | --- | --- | --- |
+| GET | `/api/db/decks` | `class_name`, `format_name`, `source_id`, `min_win_rate`, `q`, `limit`, `offset` | Поиск колод |
+| GET | `/api/db/archetypes` | `class_name`, `q`, `rank_range`, `game_type`, `limit`, `offset` | Список archetype snapshots |
+| GET | `/api/db/archetypes/{archetype_id}` | `rank_range`, `game_type` | Архетип и основная статистика |
+| GET | `/api/db/archetypes/{archetype_id}/mulligan` | `rank_range`, `game_type`, `display_only`, `limit` | Mulligan карты |
+| GET | `/api/db/archetypes/{archetype_id}/matchups` | `rank_range`, `game_type`, `min_games`, `limit` | Matchups |
+| GET | `/api/db/archetypes/{archetype_id}/decks` | `rank_range`, `game_type`, `include_cards`, `limit` | Decks архетипа |
+| GET | `/api/db/archetypes/{archetype_id}/history` | `rank_range`, `game_type` | История архетипа |
+| GET | `/api/db/cards/trends` | `card_name` (required), `source_id`, `class_name`, `limit` | Ranked trends карты |
+| GET | `/api/hsreplay/archetypes` | `hl` | Словарь HSReplay archetypes |
+
+### Battlegrounds minions, heroes и trinkets
+
+| Метод | Path | Query parameters | Назначение |
+| --- | --- | --- | --- |
+| GET | `/api/db/bg/minions` | `q`, `tavern_tier`, `limit`, `offset` | BG minion snapshots |
+| GET | `/api/db/bg/minions/{dbf_id}` | — | Последняя запись существа |
+| GET | `/api/db/bg/minions/{dbf_id}/history` | `limit` | История существа |
+| GET | `/api/bg/heroes` | `mode`, `q`, `mmr` | BG hero statistics |
+| GET | `/api/bg/heroes/duos` | `q` | BG Duos heroes |
+| GET | `/api/bg/heroes/{dbf_id}` | — | Полная запись героя |
+| GET | `/api/bg/heroes/{dbf_id}/tavern-up` | — | Статистика tavern-up |
+| GET | `/api/bg/heroes/{dbf_id}/hero-power` | — | Статистика hero power |
+| GET | `/api/bg/heroes/{dbf_id}/best-composition` | — | Лучшая composition героя |
+| GET | `/api/bg/trinkets` | `trinket_tier`, `active_only`, `mmr`, `timeRange` | Статистика trinkets |
+
+### Patches и compositions
+
+| Метод | Path | Query parameters | Назначение |
+| --- | --- | --- | --- |
+| GET | `/api/patches` | `q`, `match_state`, `include_content`, `limit`, `offset` | Список патчей Hearthstone |
+| GET | `/api/patches/{version}` | `include_content` | Один патч |
+| GET | `/api/bg/compositions/screenshot/latest` | — | Metadata последнего BG screenshot |
+| GET | `/api/bg/compositions/screenshot/latest/image` | — | Файл последнего BG screenshot |
+
+## API‑токены
+
+| Метод | Path | Доступ | Назначение |
+| --- | --- | --- | --- |
+| GET | `/v1/auth/token` | Любой действующий токен | Проверить identity и scopes |
+| POST | `/admin/api-tokens` | `tokens:manage` | Выпустить токен |
+| GET | `/admin/api-tokens` | `tokens:manage` | Список токенов без secrets |
+| DELETE | `/admin/api-tokens/{token_id}` | `tokens:manage` | Немедленно отозвать токен |
+
+## Admin и parser control
+
+Все endpoints этого раздела требуют scope `admin`.
+
+| Метод | Path | Parameters / body | Назначение |
+| --- | --- | --- | --- |
+| GET | `/admin/parser-control` | — | Политика, sections и schedules |
+| PATCH | `/admin/parser-control/policy` | JSON body | Обновить policy |
+| PATCH | `/admin/parser-control/sections` | JSON body | Обновить sections |
+| POST | `/admin/parser-runs` | JSON body | Создать parser run |
+| GET | `/admin/parser-runs` | `limit` | Список parser runs |
+| POST | `/admin/refresh` | `source_id` | Refresh одного или всех sources |
+| POST | `/admin/refresh/hsreplay-archetypes` | `limit`, `rank_range`, `game_type`, `region` | Обновить HSReplay archetype DB |
+| POST | `/admin/refresh/bg-minions-db` | — | Обновить BG minion DB |
+| POST | `/admin/refresh/bg-hero-details` | `limit`, `concurrency`, `mmr`, `time_range` | Обновить BG hero details |
+| POST | `/admin/refresh/hsguru-meta-matrix` | `concurrency` | Обновить HSGuru meta matrix |
+| POST | `/admin/refresh/hsguru-archetype-analysis` | `concurrency`, `limit` | Обновить HSGuru analysis |
+| POST | `/admin/capture/bg-compositions-screenshot` | — | Создать проверенный BG screenshot |
+| GET | `/admin/datasets/{source_id}/quarantine` | `limit` | Карантин кандидатов dataset |
+| POST | `/admin/datasets/{source_id}/publication/rollback` | JSON body | Rollback опубликованного dataset |
+| PUT | `/admin/datasets/{source_id}` | JSON body | Загрузить dataset вручную |
+| GET | `/health/premium` | `live` | Проверить premium authentication |
+
+## Ops
+
+Все endpoints этого раздела требуют scope `admin`.
+
+| Метод | Path | Query parameters | Назначение |
+| --- | --- | --- | --- |
+| GET | `/ops/health` | — | Полная диагностика sources и storage |
+| GET | `/ops/summary` | `since_hours` | Сводка freshness/jobs |
+| GET | `/ops/events` | `limit`, `source_id`, `event`, `action`, `action_group`, `level`, `trace_id`, `run_id`, `since_hours` | Фильтрованные события |
+| GET | `/ops/trace/{trace_id}` | — | События trace |
+| GET | `/ops/run/{run_id}` | — | Состояние job run |
+
+## External orchestrator
+
+Эти endpoints принимают только отдельный header `X-Orchestrator-Key`.
+
+| Метод | Path | Parameters / body | Назначение |
+| --- | --- | --- | --- |
+| POST | `/admin/orchestrator/parser-runs` | JSON body | Идемпотентно создать scoped run |
+| GET | `/admin/orchestrator/parser-runs/{run_id}` | — | Минимальный status конкретного run |
+
+## Служебные и UI endpoints
+
+| Метод | Path | Доступ | Назначение |
+| --- | --- | --- | --- |
+| GET | `/` | GitHub OAuth | Веб‑панель базы |
+| GET | `/ui` | Public | Встроенный dataset viewer |
+| GET | `/ui/logs` | Public UI | Интерфейс событий и логов |
+| GET | `/ui/technologies` | Public UI | Интерфейс parser technologies |
+| GET | `/openapi.json` | Public | OpenAPI 3 schema |
+| GET | `/docs` | Public | Swagger UI |
+| GET | `/docs/oauth2-redirect` | Public | Swagger OAuth redirect |
+| GET | `/redoc` | Public | ReDoc UI |
+| GET | `/uploads/{path}` | Public | Изображения и media assets |
+
+## Общие HTTP статусы
+
+| Status | Значение |
+| ---: | --- |
+| `200` | Успешный ответ |
+| `204` | Успешный `OPTIONS` без body |
+| `304` | Ресурс не изменился по `ETag`/`Last-Modified` |
+| `400` | Неверный запрос или конфликт credentials |
+| `401` | Токен отсутствует, неверен, истёк или отозван |
+| `403` | Недостаточный scope |
+| `404` | Endpoint или сущность не найдены |
+| `409` | Конфликт состояния/публикации |
+| `422` | Ошибка параметров или JSON body |
+| `429` | Rate limit |
+| `502` | Ошибка upstream |
+| `503` | Dataset или центральная база временно недоступны |
+
+## Минимальные примеры
 
 ```bash
-HS_API_DATA_DIR="$PWD/data" \
-HS_API_BIND_HOST="127.0.0.1" \
-.venv/bin/python -m app.server
+# Public REST
+curl -fsS https://api.kolodahearthstone.com/v1/system/sources
+
+# Public database REST
+curl -fsS 'https://api.kolodahearthstone.com/api/v1/cards?per_page=20&tier=6'
+
+# Private GraphQL database
+curl -fsS https://api.kolodahearthstone.com/v1/ \
+  -H "Authorization: Bearer ${KHS_API_TOKEN}" \
+  -H 'Content-Type: application/json' \
+  --data '{"query":"query { collections(schemaName: \"catalog\", limit: 20) { items { collection estimatedRowCount } pageInfo { total } } }"}'
 ```
-
-Docker‑вариант:
-
-```bash
-cp .env.example .env.docker
-chmod 600 .env.docker
-# Заполните только локальные настройки; не коммитьте файл.
-docker compose up --build -d
-curl -fsS http://127.0.0.1:18081/health
-```
-
-Не запускайте `refresh --all`, пока не настроены необходимые proxy/provider
-credentials и browser sessions: такой запуск обращается к внешним источникам и
-может расходовать платные лимиты.
-
-## Основные команды
-
-| Команда | Что проверяет |
-| --- | --- |
-| `make setup` | Создаёт Python‑окружение и ставит dev/panel зависимости |
-| `make check` | Pytest, панель, платформу, PHP/JS/Shell contracts и Actions |
-| `make provider-check` | Короткий regression gate provider‑слоя |
-| `make lint-report` | Текущий Ruff baseline без массового исправления |
-| `make security` | Security baseline проекта |
-| `.venv/bin/python scripts/generate-source-catalog.py --check` | Сверяет `docs/SOURCES.md` с реестром в коде |
-
-Порядок разработки и PR: [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## Структура репозитория
-
-```text
-app/            FastAPI, GraphQL, CLI, парсеры и quality gates
-panel/          закрытая PHP-панель
-platform/       PostgreSQL, миграции, импортеры и hub views
-docs/           подробная документация и runbooks
-wiki/           подготовленные страницы Wiki и навигация
-scripts/        deployment, migration и operational entrypoints
-systemd/        services и timers
-tests/          unit, contract и regression tests
-```
-
-## Карта документации
-
-- [Быстрый старт](docs/GETTING_STARTED.md)
-- [Руководство по веб‑панели](docs/WEB_PANEL.md)
-- [Интеграция внешнего сервиса](docs/INTEGRATION_GUIDE.md)
-- [Каталог данных](docs/DATA_CATALOG.md)
-- [REST API](docs/API.md)
-- [GraphQL API](docs/GRAPHQL_API.md)
-- [API‑токены](docs/API_TOKENS.md)
-- [Архитектура](docs/ARCHITECTURE.md)
-- [Pipeline парсинга](docs/PARSER_PIPELINE.md)
-- [Deployment](DEPLOY.md)
-- [Диагностика](docs/TROUBLESHOOTING.md)
-- [Безопасность](docs/SECURITY_AND_PARSING.md)
-
-## Безопасность
-
-Не добавляйте в Git `.env*`, API‑токены, cookies, storage state, приватные URL,
-дампы и production datasets. Не передавайте секреты через query string,
-браузерный JavaScript или логи. Сообщения о security‑проблемах не публикуйте в
-открытых issues — передавайте владельцу репозитория приватно.
-
-## License
-
-[MIT](LICENSE)
