@@ -15,7 +15,22 @@ services:
       timeout: 5s
       retries: 5
 
+  redis:
+    image: redis:8.2-alpine
+    command: ['redis-server', '--appendonly', 'yes', '--maxmemory-policy', 'allkeys-lru']
+    volumes:
+      - redis_data:/data
+    ports:
+      - '127.0.0.1:16379:6379'
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   postgres_data:
     external: true
     name: nocodb_postgres_data
+  redis_data:

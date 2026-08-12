@@ -65,7 +65,9 @@ curl -sS -X POST https://api.kolodahearthstone.com/admin/api-tokens \
   --data '{
     "name": "WordPress production",
     "scopes": ["database:read"],
-    "expires_in_days": 90
+    "expires_in_days": 90,
+    "rate_limit_per_minute": 600,
+    "monthly_quota": 1000000
   }'
 ```
 
@@ -99,9 +101,23 @@ python -m app.cli api-token list
 python -m app.cli api-token revoke TOKEN_ID
 ```
 
-List responses never include plaintext or token digests. `last_used_at` is
-updated at most once every five minutes to avoid turning read traffic into
-excessive database writes.
+List responses never include plaintext or token digests. Each item contains its
+minute limit, monthly quota and current-month `usage` counters for requests,
+errors and response bytes. `last_used_at` is updated at most once every five
+minutes to avoid turning read traffic into excessive database writes.
+
+Historical monthly usage is available to a token manager:
+
+```bash
+curl -sS \
+  'https://api.kolodahearthstone.com/admin/api-tokens/TOKEN_ID/usage?month=2026-08' \
+  -H "Authorization: Bearer ${TOKEN_MANAGER_KEY}"
+```
+
+Accepted requests return `X-RateLimit-*` and `X-Quota-*` headers. The minute
+counter is shared between API workers through Redis; the monthly reservation is
+committed atomically in durable storage. Exhausted limits return HTTP 429 with
+`RATE_LIMIT_EXCEEDED` or `MONTHLY_QUOTA_EXCEEDED`.
 
 ## Verify a token
 
@@ -125,6 +141,9 @@ Authentication errors use an HTTP status and a stable code in `detail.code`:
 | `401` | `TOKEN_REVOKED` | Token was revoked |
 | `403` | `INSUFFICIENT_SCOPE` | Token is valid but lacks the required scope |
 | `422` | `INVALID_NAME`, `INVALID_SCOPES`, `INVALID_EXPIRY` | Issue request is invalid |
+| `422` | `INVALID_RATE_LIMIT`, `INVALID_MONTHLY_QUOTA` | Token limits are invalid |
+| `429` | `RATE_LIMIT_EXCEEDED` | Minute request budget is exhausted |
+| `429` | `MONTHLY_QUOTA_EXCEEDED` | Current UTC month quota is exhausted |
 
 ## Rotation
 

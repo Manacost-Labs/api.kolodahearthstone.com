@@ -75,6 +75,7 @@ def test_admin_can_issue_list_introspect_and_revoke_a_token(
         assert listed[0]["id"] == issued["id"]
         assert "token" not in listed[0]
         assert "token_hash" not in listed[0]
+        assert listed[0]["usage"]["request_count"] == 0
 
         token_headers = {"Authorization": f"Bearer {issued['token']}"}
         identity = client.get("/v1/auth/token", headers=token_headers)
@@ -84,8 +85,17 @@ def test_admin_can_issue_list_introspect_and_revoke_a_token(
             "name": "Editorial integration",
             "scopes": ["database:read"],
             "expires_at": issued["expires_at"],
+            "rate_limit_per_minute": 600,
+            "monthly_quota": 1_000_000,
             "is_legacy": False,
         }
+
+        usage_response = client.get(
+            f"/admin/api-tokens/{issued['id']}/usage?month=2026-08",
+            headers=bootstrap,
+        )
+        assert usage_response.status_code == 200
+        assert usage_response.json()["data"]["request_count"] == 1
 
         denied_escalation = client.post(
             "/admin/api-tokens",

@@ -61,15 +61,18 @@ curl -fsS https://api.kolodahearthstone.com/v1/graphql \
 | `cards`, `card` | Public | Constructed и Battlegrounds cards |
 | `battlegroundHeroes` | Public | BG‑герои, изображения, силы героев и buddies |
 | `statistics` | Public | Нормализованная статистика режимов и сущностей |
+| `statisticHistory` | Public | История показателей одной сущности по snapshots и патчам |
+| `compareStatisticPatches` | Public | Сравнение метрик сущности между двумя патчами |
 | `archetypes` | Public | Архетипы по формату, рангу и региону |
 | `battlegroundMinions` | Public | BG‑существа по tier, MMR и периоду |
 | `sources` | Public | Источники и состояние синхронизации |
+| `search` | Public | Единый поиск карт, существ, героев, архетипов и источников |
 | `datasets`, `dataset` | Public | Версии и полные snapshots datasets |
 | `collections` | `database:read` | Таблицы/views, колонки и primary keys |
 | `records` | `database:read` | Строки любой разрешённой PostgreSQL collection |
 
 GraphQL pagination возвращает `items` и `pageInfo`. Максимальный `limit` —
-`200`, максимальный `offset` — `100000`. `cards` также возвращает
+`200`, максимальный `offset` — `100000`. Все большие коллекции возвращают
 `pageInfo.nextCursor`, который передаётся в `after` для быстрой глубокой
 пагинации. Ошибки находятся в `errors[].extensions.code`.
 
@@ -270,6 +273,7 @@ GraphQL pagination возвращает `items` и `pageInfo`. Максимал�
 | GET | `/v1/auth/token` | Любой действующий токен | Проверить identity и scopes |
 | POST | `/admin/api-tokens` | `tokens:manage` | Выпустить токен |
 | GET | `/admin/api-tokens` | `tokens:manage` | Список токенов без secrets |
+| GET | `/admin/api-tokens/{token_id}/usage` | `tokens:manage` | Статистика токена за выбранный месяц |
 | DELETE | `/admin/api-tokens/{token_id}` | `tokens:manage` | Немедленно отозвать токен |
 
 ## Admin и parser control

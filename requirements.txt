@@ -14,3 +14,4 @@ playwright-stealth>=2.0.3,<3.0
 hearthstone>=9.0
 strawberry-graphql[fastapi]>=0.324,<0.325
 psycopg[binary,pool]>=3.3,<3.4
+redis>=7.4,<8.0

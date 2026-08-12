@@ -31,6 +31,15 @@ $apiTokens = [
         'expires_at' => '2027-08-12T16:00:00Z',
         'last_used_at' => '2026-08-12T16:50:00Z',
         'revoked_at' => null,
+        'rate_limit_per_minute' => 120,
+        'monthly_quota' => 10000,
+        'usage' => [
+            'month' => '2026-08',
+            'request_count' => 28,
+            'error_count' => 1,
+            'response_bytes' => 12000,
+            'last_request_at' => '2026-08-12T16:50:00Z',
+        ],
     ],
     [
         'id' => 'DemoRead0001',
@@ -40,6 +49,15 @@ $apiTokens = [
         'expires_at' => '2026-11-08T12:00:00Z',
         'last_used_at' => '2026-08-12T16:45:00Z',
         'revoked_at' => null,
+        'rate_limit_per_minute' => 600,
+        'monthly_quota' => 1000000,
+        'usage' => [
+            'month' => '2026-08',
+            'request_count' => 15420,
+            'error_count' => 14,
+            'response_bytes' => 18200000,
+            'last_request_at' => '2026-08-12T16:45:00Z',
+        ],
     ],
 ];
 ?>

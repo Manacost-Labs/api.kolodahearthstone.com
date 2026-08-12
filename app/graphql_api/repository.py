@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -25,6 +26,7 @@ class PageResult:
     items: list[dict[str, Any]]
     total: int
     has_next_page: bool | None = None
+    next_cursor: dict[str, Any] | None = None
 
 
 ALLOWED_DATABASE_SCHEMAS = frozenset({"catalog", "analytics", "raw", "platform", "hub"})
@@ -44,11 +46,15 @@ class GraphQLRepository(Protocol):
 
     async def statistics(self, **filters: Any) -> PageResult: ...
 
+    async def statistic_history(self, **filters: Any) -> PageResult: ...
+
     async def archetypes(self, **filters: Any) -> PageResult: ...
 
     async def battleground_minions(self, **filters: Any) -> PageResult: ...
 
     async def sources(self, **filters: Any) -> PageResult: ...
+
+    async def search(self, **filters: Any) -> PageResult: ...
 
     async def datasets(self, **filters: Any) -> PageResult: ...
 
@@ -144,9 +150,36 @@ class PostgresGraphQLRepository:
             raise RepositoryUnavailable("Central PostgreSQL query failed") from exc
 
     @staticmethod
-    def _page_sql(base: str, where: list[str], order_by: str) -> tuple[str, str]:
+    def _keyset_result(
+        result: PageResult,
+        *,
+        limit: int,
+        cursor: Callable[[dict[str, Any]], dict[str, Any]],
+    ) -> PageResult:
+        items = result.items[:limit]
+        has_next_page = len(result.items) > limit
+        return PageResult(
+            items=items,
+            total=result.total,
+            has_next_page=has_next_page,
+            next_cursor=cursor(items[-1]) if has_next_page and items else None,
+        )
+
+    @staticmethod
+    def _page_sql(
+        base: str,
+        where: list[str],
+        order_by: str,
+        *,
+        count_where: list[str] | None = None,
+    ) -> tuple[str, str]:
         predicate = " AND ".join(where) if where else "TRUE"
-        count_query = f"SELECT count(*)::bigint AS total FROM {base} WHERE {predicate}"
+        count_predicate = " AND ".join(count_where) if count_where else "TRUE"
+        if count_where is None:
+            count_predicate = predicate
+        count_query = (
+            f"SELECT count(*)::bigint AS total FROM {base} WHERE {count_predicate}"
+        )
         rows_query = (
             f"SELECT * FROM {base} WHERE {predicate} ORDER BY {order_by} "
             "LIMIT %(limit)s OFFSET %(offset)s"
@@ -190,7 +223,7 @@ class PostgresGraphQLRepository:
     ) -> PageResult:
         where: list[str] = []
         params: dict[str, Any] = {
-            "limit": limit + 1 if after else limit,
+            "limit": limit + 1,
             "offset": 0 if after else offset,
         }
         if search:
@@ -234,13 +267,17 @@ class PostgresGraphQLRepository:
         result = await self._fetch_page(
             count_query=count_query, rows_query=rows_query, params=params
         )
-        if after:
-            return PageResult(
-                items=result.items[:limit],
-                total=result.total,
-                has_next_page=len(result.items) > limit,
-            )
-        return result
+        return self._keyset_result(
+            result,
+            limit=limit,
+            cursor=lambda row: {
+                "values": [
+                    str(row["collection"]),
+                    str(row.get("name_ru") or row.get("name_en") or ""),
+                    str(row["card_id"]),
+                ]
+            },
+        )
 
     async def card(self, card_id: str, collection: str | None) -> dict[str, Any] | None:
         params: dict[str, Any] = {"card_id": card_id}
@@ -260,11 +297,15 @@ class PostgresGraphQLRepository:
         *,
         search: str | None,
         status: str | None,
+        after: list[Any] | None,
         limit: int,
         offset: int,
     ) -> PageResult:
         where: list[str] = []
-        params: dict[str, Any] = {"limit": limit, "offset": offset}
+        params: dict[str, Any] = {
+            "limit": limit + 1,
+            "offset": 0 if after else offset,
+        }
         if search:
             where.append(
                 "(card_id ILIKE %(search)s OR name_ru ILIKE %(search)s OR name_en ILIKE %(search)s)"
@@ -280,11 +321,33 @@ class PostgresGraphQLRepository:
                    availability_json, status, fetched_at, updated_at
             FROM catalog.battlegrounds_heroes
         ) AS bg_heroes"""
+        count_where = list(where)
+        if after:
+            if len(after) != 2 or not all(isinstance(value, str) for value in after):
+                raise RepositoryValidationError("after is not a valid heroes cursor")
+            where.append(
+                "(COALESCE(name_ru, name_en, ''), card_id) "
+                "> (%(after_name)s, %(after_card_id)s)"
+            )
+            params.update({"after_name": after[0], "after_card_id": after[1]})
         count_query, rows_query = self._page_sql(
-            base, where, "COALESCE(name_ru, name_en), card_id"
+            base,
+            where,
+            "COALESCE(name_ru, name_en, ''), card_id",
+            count_where=count_where,
         )
-        return await self._fetch_page(
+        result = await self._fetch_page(
             count_query=count_query, rows_query=rows_query, params=params
+        )
+        return self._keyset_result(
+            result,
+            limit=limit,
+            cursor=lambda row: {
+                "values": [
+                    str(row.get("name_ru") or row.get("name_en") or ""),
+                    str(row["card_id"]),
+                ]
+            },
         )
 
     async def statistics(
@@ -298,11 +361,15 @@ class PostgresGraphQLRepository:
         rank_range: str | None,
         mode: str | None,
         patch: str | None,
+        after: list[Any] | None,
         limit: int,
         offset: int,
     ) -> PageResult:
         where: list[str] = []
-        params: dict[str, Any] = {"limit": limit, "offset": offset}
+        params: dict[str, Any] = {
+            "limit": limit + 1,
+            "offset": 0 if after else offset,
+        }
         for column, value in (
             ("domain", domain),
             ("entity_type", entity_type),
@@ -321,14 +388,181 @@ class PostgresGraphQLRepository:
                 "OR name ILIKE %(search)s OR name_ru ILIKE %(search)s)"
             )
             params["search"] = f"%{search}%"
+        count_where = list(where)
+        order_columns = (
+            "source_id",
+            "dataset_version",
+            "domain",
+            "snapshot_entity_type",
+            "format_name",
+            "rank_range",
+            "period",
+            "mode",
+            "rating_bracket",
+            "entity_key",
+        )
+        if after:
+            if len(after) != 12 or not isinstance(after[0], bool):
+                raise RepositoryValidationError(
+                    "after is not a valid statistics cursor"
+                )
+            where.append(
+                "(fetched_at IS NULL, COALESCE(-extract(epoch FROM fetched_at), 0), "
+                + ", ".join(order_columns)
+                + ") > (%(after_null)s, %(after_epoch)s, "
+                + ", ".join(f"%(after_{column})s" for column in order_columns)
+                + ")"
+            )
+            params.update({"after_null": after[0], "after_epoch": after[1]})
+            params.update(
+                {
+                    f"after_{column}": after[index + 2]
+                    for index, column in enumerate(order_columns)
+                }
+            )
+        order_by = (
+            "fetched_at IS NULL, COALESCE(-extract(epoch FROM fetched_at), 0), "
+            + ", ".join(order_columns)
+        )
         count_query, rows_query = self._page_sql(
             "hub.game_stat_latest",
             where,
-            "fetched_at DESC NULLS LAST, source_id, entity_key",
+            order_by,
+            count_where=count_where,
         )
-        return await self._fetch_page(
+        result = await self._fetch_page(
             count_query=count_query, rows_query=rows_query, params=params
         )
+
+        def statistic_cursor(row: dict[str, Any]) -> dict[str, Any]:
+            fetched_at = row.get("fetched_at")
+            return {
+                "values": [
+                    fetched_at is None,
+                    -fetched_at.timestamp() if fetched_at is not None else 0,
+                    *(row.get(column) or "" for column in order_columns),
+                ]
+            }
+
+        return self._keyset_result(result, limit=limit, cursor=statistic_cursor)
+
+    async def statistic_history(
+        self,
+        *,
+        entity_key: str,
+        domain: str | None,
+        entity_type: str | None,
+        source_id: str | None,
+        format_name: str | None,
+        rank_range: str | None,
+        mode: str | None,
+        patch: str | None,
+        after: list[Any] | None,
+        limit: int,
+        offset: int,
+    ) -> PageResult:
+        where = ["entity_key = %(entity_key)s"]
+        params: dict[str, Any] = {
+            "entity_key": entity_key,
+            "limit": limit + 1,
+            "offset": 0 if after else offset,
+        }
+        for column, value in (
+            ("domain", domain),
+            ("entity_type", entity_type),
+            ("source_id", source_id),
+            ("format_name", format_name),
+            ("rank_range", rank_range),
+            ("mode", mode),
+            ("patch", patch),
+        ):
+            if value:
+                where.append(f"{column} = %({column})s")
+                params[column] = value
+        count_where = list(where)
+        if after:
+            if (
+                len(after) != 3
+                or not isinstance(after[0], bool)
+                or isinstance(after[1], bool)
+                or not isinstance(after[1], (int, float))
+                or isinstance(after[2], bool)
+                or not isinstance(after[2], int)
+            ):
+                raise RepositoryValidationError(
+                    "after is not a valid statistic history cursor"
+                )
+            where.append(
+                "(fetched_at IS NULL, COALESCE(-extract(epoch FROM fetched_at), 0), "
+                "-snapshot_id) > (%(after_null)s, %(after_epoch)s, %(after_id)s)"
+            )
+            params.update(
+                {
+                    "after_null": after[0],
+                    "after_epoch": after[1],
+                    "after_id": after[2],
+                }
+            )
+        base = """(
+            SELECT
+                snapshot.id AS snapshot_id,
+                snapshot.source_id,
+                snapshot.dataset_version,
+                snapshot.domain,
+                snapshot.entity_type AS snapshot_entity_type,
+                snapshot.format_name,
+                snapshot.rank_range,
+                snapshot.period,
+                snapshot.mode,
+                snapshot.rating_bracket,
+                snapshot.patch,
+                snapshot.source_url AS snapshot_source_url,
+                snapshot.fetched_at,
+                snapshot.metadata,
+                stat.entity_key,
+                stat.entity_type,
+                stat.card_id,
+                stat.dbf_id,
+                stat.name,
+                stat.name_ru,
+                stat.class_name,
+                stat.tier,
+                stat.games,
+                stat.win_rate,
+                stat.popularity,
+                stat.pick_rate,
+                stat.avg_placement,
+                stat.score,
+                stat.image_url,
+                stat.source_url,
+                stat.metrics
+            FROM analytics.game_stat_snapshots AS snapshot
+            JOIN analytics.game_stat_rows AS stat ON stat.snapshot_id = snapshot.id
+        ) AS statistic_history"""
+        count_query, rows_query = self._page_sql(
+            base,
+            where,
+            "fetched_at IS NULL, COALESCE(-extract(epoch FROM fetched_at), 0), "
+            "-snapshot_id",
+            count_where=count_where,
+        )
+        result = await self._fetch_page(
+            count_query=count_query,
+            rows_query=rows_query,
+            params=params,
+        )
+
+        def history_cursor(row: dict[str, Any]) -> dict[str, Any]:
+            fetched_at = row.get("fetched_at")
+            return {
+                "values": [
+                    fetched_at is None,
+                    -fetched_at.timestamp() if fetched_at is not None else 0,
+                    -int(row["snapshot_id"]),
+                ]
+            }
+
+        return self._keyset_result(result, limit=limit, cursor=history_cursor)
 
     async def archetypes(
         self,
@@ -338,11 +572,15 @@ class PostgresGraphQLRepository:
         game_type: str | None,
         rank_range: str | None,
         region: str | None,
+        after: list[Any] | None,
         limit: int,
         offset: int,
     ) -> PageResult:
         where: list[str] = []
-        params: dict[str, Any] = {"limit": limit, "offset": offset}
+        params: dict[str, Any] = {
+            "limit": limit + 1,
+            "offset": 0 if after else offset,
+        }
         if search:
             where.append("name ILIKE %(search)s")
             params["search"] = f"%{search}%"
@@ -355,11 +593,53 @@ class PostgresGraphQLRepository:
             if value:
                 where.append(f"{column} = %({column})s")
                 params[column] = value
+        count_where = list(where)
+        if after:
+            if len(after) != 6 or not isinstance(after[0], bool):
+                raise RepositoryValidationError(
+                    "after is not a valid archetypes cursor"
+                )
+            where.append(
+                "(total_games IS NULL, COALESCE(-total_games, 0), archetype_id, "
+                "game_type, rank_range, region) > "
+                "(%(after_null)s, %(after_games)s, %(after_id)s, "
+                "%(after_game_type)s, %(after_rank)s, %(after_region)s)"
+            )
+            params.update(
+                {
+                    "after_null": after[0],
+                    "after_games": after[1],
+                    "after_id": after[2],
+                    "after_game_type": after[3],
+                    "after_rank": after[4],
+                    "after_region": after[5],
+                }
+            )
         count_query, rows_query = self._page_sql(
-            "hub.archetype_latest", where, "total_games DESC NULLS LAST, archetype_id"
+            "hub.archetype_latest",
+            where,
+            "total_games IS NULL, COALESCE(-total_games, 0), archetype_id, "
+            "game_type, rank_range, region",
+            count_where=count_where,
         )
-        return await self._fetch_page(
+        result = await self._fetch_page(
             count_query=count_query, rows_query=rows_query, params=params
+        )
+        return self._keyset_result(
+            result,
+            limit=limit,
+            cursor=lambda row: {
+                "values": [
+                    row.get("total_games") is None,
+                    -int(row["total_games"])
+                    if row.get("total_games") is not None
+                    else 0,
+                    int(row["archetype_id"]),
+                    str(row["game_type"]),
+                    str(row["rank_range"]),
+                    str(row["region"]),
+                ]
+            },
         )
 
     async def battleground_minions(
@@ -369,11 +649,15 @@ class PostgresGraphQLRepository:
         tavern_tier: int | None,
         mmr_percentile: str | None,
         time_range: str | None,
+        after: list[Any] | None,
         limit: int,
         offset: int,
     ) -> PageResult:
         where: list[str] = []
-        params: dict[str, Any] = {"limit": limit, "offset": offset}
+        params: dict[str, Any] = {
+            "limit": limit + 1,
+            "offset": 0 if after else offset,
+        }
         if search:
             where.append(
                 "(card_id ILIKE %(search)s OR name ILIKE %(search)s OR name_ru ILIKE %(search)s)"
@@ -389,13 +673,51 @@ class PostgresGraphQLRepository:
             if value:
                 where.append(f"{column} = %({column})s")
                 params[column] = value
+        count_where = list(where)
+        if after:
+            if len(after) != 7 or not isinstance(after[0], bool):
+                raise RepositoryValidationError("after is not a valid minions cursor")
+            where.append(
+                "(tavern_tier IS NULL, COALESCE(tavern_tier, 0), impact IS NULL, "
+                "COALESCE(-impact, 0), dbf_id, mmr_percentile, time_range) > "
+                "(%(after_tier_null)s, %(after_tier)s, %(after_impact_null)s, "
+                "%(after_impact)s, %(after_dbf)s, %(after_mmr)s, %(after_time)s)"
+            )
+            params.update(
+                {
+                    "after_tier_null": after[0],
+                    "after_tier": after[1],
+                    "after_impact_null": after[2],
+                    "after_impact": after[3],
+                    "after_dbf": after[4],
+                    "after_mmr": after[5],
+                    "after_time": after[6],
+                }
+            )
         count_query, rows_query = self._page_sql(
             "hub.bg_minion_latest",
             where,
-            "tavern_tier, impact DESC NULLS LAST, dbf_id",
+            "tavern_tier IS NULL, COALESCE(tavern_tier, 0), impact IS NULL, "
+            "COALESCE(-impact, 0), dbf_id, mmr_percentile, time_range",
+            count_where=count_where,
         )
-        return await self._fetch_page(
+        result = await self._fetch_page(
             count_query=count_query, rows_query=rows_query, params=params
+        )
+        return self._keyset_result(
+            result,
+            limit=limit,
+            cursor=lambda row: {
+                "values": [
+                    row.get("tavern_tier") is None,
+                    int(row.get("tavern_tier") or 0),
+                    row.get("impact") is None,
+                    -float(row["impact"]) if row.get("impact") is not None else 0,
+                    int(row["dbf_id"]),
+                    str(row["mmr_percentile"]),
+                    str(row["time_range"]),
+                ]
+            },
         )
 
     async def sources(
@@ -403,11 +725,15 @@ class PostgresGraphQLRepository:
         *,
         enabled: bool | None,
         state: str | None,
+        after: list[Any] | None,
         limit: int,
         offset: int,
     ) -> PageResult:
         where: list[str] = []
-        params: dict[str, Any] = {"limit": limit, "offset": offset}
+        params: dict[str, Any] = {
+            "limit": limit + 1,
+            "offset": 0 if after else offset,
+        }
         if enabled is not None:
             where.append("is_enabled = %(enabled)s")
             params["enabled"] = enabled
@@ -447,9 +773,117 @@ class PostgresGraphQLRepository:
             FROM hub.integration_status AS integration
             FULL OUTER JOIN latest_datasets AS dataset USING (source_id)
         ) AS all_sources"""
-        count_query, rows_query = self._page_sql(base, where, "display_name, source_id")
-        return await self._fetch_page(
+        count_where = list(where)
+        if after:
+            if len(after) != 2 or not all(isinstance(value, str) for value in after):
+                raise RepositoryValidationError("after is not a valid sources cursor")
+            where.append(
+                "(display_name, source_id) > (%(after_name)s, %(after_source)s)"
+            )
+            params.update({"after_name": after[0], "after_source": after[1]})
+        count_query, rows_query = self._page_sql(
+            base,
+            where,
+            "display_name, source_id",
+            count_where=count_where,
+        )
+        result = await self._fetch_page(
             count_query=count_query, rows_query=rows_query, params=params
+        )
+        return self._keyset_result(
+            result,
+            limit=limit,
+            cursor=lambda row: {
+                "values": [str(row["display_name"]), str(row["source_id"])]
+            },
+        )
+
+    async def search(
+        self,
+        *,
+        query: str,
+        kinds: list[str] | None,
+        after: list[Any] | None,
+        limit: int,
+        offset: int,
+    ) -> PageResult:
+        escaped_query = (
+            query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        )
+        params: dict[str, Any] = {
+            "query": query,
+            "prefix": f"{escaped_query}%",
+            "pattern": f"%{escaped_query}%",
+            "limit": limit + 1,
+            "offset": 0 if after else offset,
+        }
+        kind_filter = ""
+        if kinds:
+            kind_filter = "AND kind = ANY(%(kinds)s)"
+            params["kinds"] = kinds
+        base = f"""(
+            SELECT searched.*,
+                   lower(COALESCE(searched.name_ru, searched.name, '')) AS search_name,
+                   CASE
+                       WHEN lower(searched.entity_id) = lower(%(query)s)
+                         OR lower(searched.name) = lower(%(query)s) THEN 0
+                       WHEN searched.entity_id ILIKE %(prefix)s ESCAPE '\\'
+                         OR searched.name ILIKE %(prefix)s ESCAPE '\\'
+                         OR searched.name_ru ILIKE %(prefix)s ESCAPE '\\' THEN 1
+                       ELSE 2
+                   END AS search_rank
+            FROM hub.unified_search AS searched
+            WHERE (
+                searched.entity_id ILIKE %(pattern)s ESCAPE '\\'
+                OR searched.name ILIKE %(pattern)s ESCAPE '\\'
+                OR searched.name_ru ILIKE %(pattern)s ESCAPE '\\'
+                OR searched.subtitle ILIKE %(pattern)s ESCAPE '\\'
+            )
+            {kind_filter}
+        ) AS unified_results"""
+        where: list[str] = []
+        if after:
+            if (
+                len(after) != 4
+                or isinstance(after[0], bool)
+                or not isinstance(after[0], int)
+                or not all(isinstance(value, str) for value in after[1:])
+            ):
+                raise RepositoryValidationError("after is not a valid search cursor")
+            where.append(
+                "(search_rank, kind, search_name, entity_id) > "
+                "(%(after_rank)s, %(after_kind)s, %(after_name)s, %(after_id)s)"
+            )
+            params.update(
+                {
+                    "after_rank": after[0],
+                    "after_kind": after[1],
+                    "after_name": after[2],
+                    "after_id": after[3],
+                }
+            )
+        count_query, rows_query = self._page_sql(
+            base,
+            where,
+            "search_rank, kind, search_name, entity_id",
+            count_where=[],
+        )
+        result = await self._fetch_page(
+            count_query=count_query,
+            rows_query=rows_query,
+            params=params,
+        )
+        return self._keyset_result(
+            result,
+            limit=limit,
+            cursor=lambda row: {
+                "values": [
+                    int(row["search_rank"]),
+                    str(row["kind"]),
+                    str(row["search_name"]),
+                    str(row["entity_id"]),
+                ]
+            },
         )
 
     async def datasets(
@@ -457,11 +891,15 @@ class PostgresGraphQLRepository:
         *,
         source_id: str | None,
         state: str | None,
+        after: list[Any] | None,
         limit: int,
         offset: int,
     ) -> PageResult:
         where: list[str] = []
-        params: dict[str, Any] = {"limit": limit, "offset": offset}
+        params: dict[str, Any] = {
+            "limit": limit + 1,
+            "offset": 0 if after else offset,
+        }
         if source_id:
             where.append("source_id = %(source_id)s")
             params["source_id"] = source_id
@@ -476,12 +914,42 @@ class PostgresGraphQLRepository:
             FROM raw.datasets
             ORDER BY source_id, fetched_at DESC NULLS LAST, imported_at DESC
         ) AS latest_datasets"""
+        count_where = list(where)
+        if after:
+            if len(after) != 3 or not isinstance(after[0], bool):
+                raise RepositoryValidationError("after is not a valid datasets cursor")
+            where.append(
+                "(fetched_at IS NULL, COALESCE(-extract(epoch FROM fetched_at), 0), "
+                "source_id) > (%(after_null)s, %(after_epoch)s, %(after_source)s)"
+            )
+            params.update(
+                {
+                    "after_null": after[0],
+                    "after_epoch": after[1],
+                    "after_source": after[2],
+                }
+            )
         count_query, rows_query = self._page_sql(
-            base, where, "fetched_at DESC NULLS LAST, source_id"
+            base,
+            where,
+            "fetched_at IS NULL, COALESCE(-extract(epoch FROM fetched_at), 0), source_id",
+            count_where=count_where,
         )
-        return await self._fetch_page(
+        result = await self._fetch_page(
             count_query=count_query, rows_query=rows_query, params=params
         )
+
+        def dataset_cursor(row: dict[str, Any]) -> dict[str, Any]:
+            fetched_at = row.get("fetched_at")
+            return {
+                "values": [
+                    fetched_at is None,
+                    -fetched_at.timestamp() if fetched_at is not None else 0,
+                    str(row["source_id"]),
+                ]
+            }
+
+        return self._keyset_result(result, limit=limit, cursor=dataset_cursor)
 
     async def dataset(
         self, source_id: str, dataset_version: str | None
@@ -582,14 +1050,15 @@ class PostgresGraphQLRepository:
         *,
         schema_name: str | None,
         search: str | None,
+        after: list[Any] | None,
         limit: int,
         offset: int,
     ) -> PageResult:
         where = ["table_schema = ANY(%(schemas)s)"]
         params: dict[str, Any] = {
             "schemas": sorted(ALLOWED_DATABASE_SCHEMAS),
-            "limit": limit,
-            "offset": offset,
+            "limit": limit + 1,
+            "offset": 0 if after else offset,
         }
         if schema_name:
             if schema_name not in ALLOWED_DATABASE_SCHEMAS:
@@ -601,10 +1070,20 @@ class PostgresGraphQLRepository:
                 "(table_name ILIKE %(search)s OR table_schema ILIKE %(search)s)"
             )
             params["search"] = f"%{search}%"
+        count_predicate = " AND ".join(where)
+        if after:
+            if len(after) != 2 or not all(isinstance(value, str) for value in after):
+                raise RepositoryValidationError(
+                    "after is not a valid collections cursor"
+                )
+            where.append(
+                "(table_schema, table_name) > (%(after_schema)s, %(after_table)s)"
+            )
+            params.update({"after_schema": after[0], "after_table": after[1]})
         predicate = " AND ".join(where)
         count_query = (
             "SELECT count(*)::bigint AS total FROM information_schema.tables WHERE "
-            + predicate
+            + count_predicate
         )
         rows_query = (
             """
@@ -648,8 +1127,13 @@ class PostgresGraphQLRepository:
             + predicate
             + " ORDER BY tables.table_schema, tables.table_name LIMIT %(limit)s OFFSET %(offset)s"
         )
-        return await self._fetch_page(
+        result = await self._fetch_page(
             count_query=count_query, rows_query=rows_query, params=params
+        )
+        return self._keyset_result(
+            result,
+            limit=limit,
+            cursor=lambda row: {"values": [str(row["schema_name"]), str(row["name"])]},
         )
 
     async def records(
@@ -660,6 +1144,7 @@ class PostgresGraphQLRepository:
         filters: dict[str, Any] | None,
         order_by: str | None,
         descending: bool,
+        after: dict[str, Any] | None,
         limit: int,
         offset: int,
     ) -> PageResult:
@@ -698,7 +1183,7 @@ class PostgresGraphQLRepository:
 
         table_identifier = sql.Identifier(schema_name, table_name)
         predicate = sql.SQL("TRUE")
-        params: dict[str, Any] = {"limit": limit, "offset": offset}
+        params: dict[str, Any] = {"limit": limit + 1, "offset": offset}
         if filters:
             predicate = sql.SQL("to_jsonb(source_row) @> %(filters)s::jsonb")
             params["filters"] = json.dumps(filters, ensure_ascii=False)
@@ -706,26 +1191,108 @@ class PostgresGraphQLRepository:
             sql.Identifier(field) for field in selected_fields
         )
         direction = sql.SQL("DESC") if descending else sql.SQL("ASC")
+        cursor_mode = str(after.get("mode")) if after else None
+        if cursor_mode not in {None, "keyset", "offset"}:
+            raise RepositoryValidationError("after is not a valid records cursor")
+        if cursor_mode == "offset":
+            cursor_offset = after.get("offset") if after else None
+            if not isinstance(cursor_offset, int) or cursor_offset < 0:
+                raise RepositoryValidationError("after is not a valid records cursor")
+            params["offset"] = cursor_offset
+            params["limit"] = limit + 1
+        elif cursor_mode == "keyset":
+            after_sort = after.get("sort") if after else None
+            after_keys = after.get("keys") if after else None
+            if not primary_key or not isinstance(after_keys, list):
+                raise RepositoryValidationError("after is not a valid records cursor")
+            if len(after_keys) != len(primary_key):
+                raise RepositoryValidationError("after is not a valid records cursor")
+            params["after_sort"] = after_sort
+            params["after_sort_null"] = after_sort is None
+            for index, value in enumerate(after_keys):
+                params[f"after_key_{index}"] = value
+            comparison = sql.SQL("<") if descending else sql.SQL(">")
+            key_columns = sql.SQL(", ").join(
+                sql.Identifier(column) for column in primary_key
+            )
+            key_parameters = sql.SQL(", ").join(
+                sql.Placeholder(f"after_key_{index}")
+                for index in range(len(primary_key))
+            )
+            keyset_predicate = sql.SQL(
+                "((NOT %(after_sort_null)s AND ({} {} %(after_sort)s OR {} IS NULL)) "
+                "OR ({} IS NOT DISTINCT FROM %(after_sort)s AND ({}) > ({})))"
+            ).format(
+                sql.Identifier(sort_field),
+                comparison,
+                sql.Identifier(sort_field),
+                sql.Identifier(sort_field),
+                key_columns,
+                key_parameters,
+            )
+            predicate = sql.SQL("({}) AND ({})").format(predicate, keyset_predicate)
+            params["offset"] = 0
+            params["limit"] = limit + 1
         count_query = sql.SQL(
             "SELECT count(*)::bigint AS total FROM {} AS source_row WHERE {}"
-        ).format(table_identifier, predicate)
+        ).format(
+            table_identifier,
+            (
+                sql.SQL("to_jsonb(source_row) @> %(filters)s::jsonb")
+                if filters
+                else sql.SQL("TRUE")
+            ),
+        )
+        cursor_fields = [sort_field, *primary_key]
+        cursor_identifiers = sql.SQL(", ").join(
+            sql.Identifier(field) for field in cursor_fields
+        )
+        tie_breakers = sql.SQL("")
+        if primary_key:
+            tie_breakers = sql.SQL(", ") + sql.SQL(", ").join(
+                sql.Identifier(column) for column in primary_key
+            )
         rows_query = sql.SQL(
-            "SELECT to_jsonb(result_row) AS item FROM ("
-            "SELECT {} FROM {} AS source_row WHERE {} "
-            "ORDER BY {} {} NULLS LAST LIMIT %(limit)s OFFSET %(offset)s"
+            "SELECT to_jsonb(result_row) - '__cursor' AS item, "
+            "result_row.__cursor AS cursor FROM ("
+            "SELECT {}, jsonb_build_array({}) AS __cursor "
+            "FROM {} AS source_row WHERE {} "
+            "ORDER BY {} {} NULLS LAST{} LIMIT %(limit)s OFFSET %(offset)s"
             ") AS result_row"
         ).format(
             selected_identifiers,
+            cursor_identifiers,
             table_identifier,
             predicate,
             sql.Identifier(sort_field),
             direction,
+            tie_breakers,
         )
         result = await self._fetch_page(
             count_query=count_query, rows_query=rows_query, params=params
         )
+        rows = result.items[:limit]
+        items = [dict(row["item"]) for row in rows]
+        has_next_page = len(result.items) > limit
+        next_cursor: dict[str, Any] | None = None
+        if has_next_page and rows:
+            cursor_values = list(rows[-1]["cursor"])
+            if primary_key:
+                next_cursor = {
+                    "mode": "keyset",
+                    "sort": cursor_values[0],
+                    "keys": cursor_values[1:],
+                }
+            else:
+                next_cursor = {
+                    "mode": "offset",
+                    "offset": int(params["offset"]) + limit,
+                }
         return PageResult(
-            items=[dict(row["item"]) for row in result.items], total=result.total
+            items=items,
+            total=result.total,
+            has_next_page=has_next_page,
+            next_cursor=next_cursor,
         )
 
     async def close(self) -> None:

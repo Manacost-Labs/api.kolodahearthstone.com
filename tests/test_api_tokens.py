@@ -38,6 +38,8 @@ def test_issue_returns_secret_once_and_persists_only_a_digest(tmp_path: Path) ->
     assert issued.name == "WordPress production"
     assert issued.scopes == ("database:read",)
     assert issued.expires_at == NOW + timedelta(days=90)
+    assert issued.rate_limit_per_minute == 600
+    assert issued.monthly_quota == 1_000_000
 
     connection = sqlite3.connect(tmp_path / "tokens.sqlite3")
     try:
@@ -109,6 +111,65 @@ def test_malformed_and_ambiguous_credentials_fail_closed(tmp_path: Path) -> None
     with pytest.raises(ApiTokenError) as malformed_token:
         store.authenticate("khs_v1_bad")
     assert malformed_token.value.code == "INVALID_TOKEN"
+
+
+def test_monthly_usage_is_reserved_atomically_and_enforces_quota(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    issued = store.issue(
+        name="Quota consumer",
+        scopes=["database:read"],
+        expires_in_days=30,
+        created_by="test",
+        rate_limit_per_minute=10,
+        monthly_quota=2,
+    )
+
+    first = store.reserve_request(issued.id)
+    second = store.reserve_request(issued.id)
+    store.complete_request(issued.id, status=500, response_bytes=321)
+
+    assert first.request_count == 1
+    assert second.request_count == 2
+    usage = store.usage(issued.id)
+    assert usage.request_count == 2
+    assert usage.error_count == 1
+    assert usage.response_bytes == 321
+    with pytest.raises(ApiTokenError) as exhausted:
+        store.reserve_request(issued.id)
+    assert exhausted.value.code == "MONTHLY_QUOTA_EXCEEDED"
+    assert exhausted.value.status_code == 429
+
+
+@pytest.mark.parametrize(
+    ("rate", "quota", "code"),
+    [
+        (0, 10, "INVALID_RATE_LIMIT"),
+        (100_001, 10, "INVALID_RATE_LIMIT"),
+        (10, 0, "INVALID_MONTHLY_QUOTA"),
+        (10, 1_000_000_001, "INVALID_MONTHLY_QUOTA"),
+    ],
+)
+def test_issue_validates_rate_and_quota(
+    tmp_path: Path,
+    rate: int,
+    quota: int,
+    code: str,
+) -> None:
+    store = _store(tmp_path)
+
+    with pytest.raises(ApiTokenError) as invalid:
+        store.issue(
+            name="Invalid limits",
+            scopes=["database:read"],
+            expires_in_days=30,
+            created_by="test",
+            rate_limit_per_minute=rate,
+            monthly_quota=quota,
+        )
+
+    assert invalid.value.code == code
 
 
 def test_legacy_bootstrap_key_remains_compatible_and_timing_safe(

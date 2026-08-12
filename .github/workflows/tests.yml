@@ -44,6 +44,39 @@ jobs:
           persist-credentials: false
       - run: docker build --no-cache --tag hs-data-api:ci .
 
+  sdk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: sdks/typescript/package-lock.json
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "8.0.x"
+      - run: npm ci --ignore-scripts
+        working-directory: sdks/typescript
+      - run: npm run check
+        working-directory: sdks/typescript
+      - run: npm test
+        working-directory: sdks/typescript
+      - run: npm pack --dry-run
+        working-directory: sdks/typescript
+      - run: npm audit --audit-level=high
+        working-directory: sdks/typescript
+      - run: dotnet format KolodaHearthstone.Api.SmokeTests/KolodaHearthstone.Api.SmokeTests.csproj --verify-no-changes
+        working-directory: sdks/dotnet
+      - run: dotnet build KolodaHearthstone.Api.SmokeTests/KolodaHearthstone.Api.SmokeTests.csproj --configuration Release
+        working-directory: sdks/dotnet
+      - run: dotnet pack KolodaHearthstone.Api/KolodaHearthstone.Api.csproj --configuration Release --no-build --output ${{ runner.temp }}/packages
+        working-directory: sdks/dotnet
+      - run: dotnet run --project KolodaHearthstone.Api.SmokeTests/KolodaHearthstone.Api.SmokeTests.csproj --configuration Release --no-build
+        working-directory: sdks/dotnet
+
   triggerdev-control-plane:
     runs-on: ubuntu-latest
     defaults:

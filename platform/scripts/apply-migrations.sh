@@ -21,7 +21,9 @@ for migration in \
   "${platform_dir}/sql/003_service_roles.sql" \
   "${platform_dir}/sql/004_game_statistics.sql" \
   "${platform_dir}/sql/005_media_assets.sql" \
-  "${platform_dir}/sql/006_card_catalog_pagination.sql"
+  "${platform_dir}/sql/006_card_catalog_pagination.sql" \
+  "${platform_dir}/sql/007_large_collection_pagination.sql" \
+  "${platform_dir}/sql/008_unified_search_and_history.sql"
 do
   sudo -n docker compose --project-directory "${compose_dir}" -f "${compose_dir}/docker-compose.yml" exec -T postgres \
     sh -eu -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d hs_data' \

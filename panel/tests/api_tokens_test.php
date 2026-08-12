@@ -31,6 +31,17 @@ $payload = panel_api_token_normalize_issue_input([
 token_assert_same('telegram-bot', $payload['name'], 'Token names must be trimmed.');
 token_assert_same(['admin', 'database:read'], $payload['scopes'], 'Scopes must be allowlisted, unique and stable.');
 token_assert_same(90, $payload['expires_in_days'], 'Expiry must be normalized to an integer.');
+token_assert_same(600, $payload['rate_limit_per_minute'], 'Default burst limit must be stable.');
+token_assert_same(1000000, $payload['monthly_quota'], 'Default monthly quota must be stable.');
+
+token_assert_throws(static function (): void {
+    panel_api_token_normalize_issue_input([
+        'name' => 'integration',
+        'scopes' => ['database:read'],
+        'expires_in_days' => '90',
+        'rate_limit_per_minute' => '0',
+    ]);
+}, 'Burst limits must be positive.');
 
 token_assert_throws(static function (): void {
     panel_api_token_normalize_issue_input([
