@@ -77,12 +77,15 @@ Authorization: Bearer khs_v1_<token-id>_<secret>
 | --- | --- | --- |
 | `GET` | `/v1/constructed/decks` | SQL-backed колоды с фильтрами legacy endpoint. |
 | `GET` | `/v1/constructed/archetypes` | Последние успешные snapshots архетипов. |
-| `GET` | `/v1/bg/heroes` | Solo/duos герои с пагинацией. |
-| `GET` | `/v1/bg/minions` | Последний успешный snapshot существ. |
+| `GET` | `/v1/battlegrounds/heroes` | Solo/duos герои с пагинацией. |
+| `GET` | `/v1/battlegrounds/minions` | Последний успешный snapshot существ. |
 | `GET` | `/v1/arena/classes` | Классы арены из выбранного кешированного источника. |
-| `GET` | `/v1/system/sources` | Типизированный каталог источников. |
-| `GET` | `/v1/system/datasets` | Состояние кешей всех источников. |
-| `GET` | `/v1/system/health` | Диагностика в v1-конверте; не кешируется. |
+| `GET` | `/v1/sources` | Типизированный каталог источников. |
+| `GET` | `/v1/datasets` | Состояние кешей всех источников. |
+| `GET` | `/v1/health` | Диагностика в v1-конверте; не кешируется. |
+
+Старые `/v1/bg/*` и `/v1/system/{sources,datasets,health}` остаются
+deprecated aliases и возвращают тот же JSON.
 
 Все v1-ответы используют конверт:
 
@@ -107,7 +110,7 @@ Cache-Control: public, max-age=300, stale-while-revalidate=600
 ETag: "..."
 ```
 
-`ETag` учитывает путь, query string и время актуального snapshot/dataset. Условный запрос с `If-None-Match` возвращает `304` без тела. `/health`, `/v1/system/health`, `/ops`, `/admin` и `/ui` исключены из публичного кеша.
+`ETag` учитывает путь, query string и время актуального snapshot/dataset. Условный запрос с `If-None-Match` возвращает `304` без тела. `/health`, `/v1/health`, `/v1/system/health`, `/ops`, `/admin` и `/ui` исключены из публичного кеша.
 
 ### `GET /health`
 

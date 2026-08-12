@@ -8,7 +8,7 @@
 
 | Интерфейс | Адрес |
 | --- | --- |
-| GraphQL | `POST https://api.kolodahearthstone.com/v1/` |
+| GraphQL | `POST https://api.kolodahearthstone.com/v1/graphql` |
 | Типизированный REST | `https://api.kolodahearthstone.com/v1/...` |
 | Raw datasets | `https://api.kolodahearthstone.com/datasets/{source_id}` |
 | Состояние источников | `https://api.kolodahearthstone.com/sources` |
@@ -100,7 +100,7 @@ query ConstructedCards {
 HTTP:
 
 ```bash
-curl -fsS https://api.kolodahearthstone.com/v1/ \
+curl -fsS https://api.kolodahearthstone.com/v1/graphql \
   -H "Authorization: Bearer ${KHS_API_TOKEN}" \
   -H 'Content-Type: application/json' \
   --data-binary @request.json
@@ -152,7 +152,8 @@ Dataset endpoint может поддерживать `ETag`; отправляй�
 
 - новые интеграции используют `api.kolodahearthstone.com`;
 - `/v1/*` — основной namespace типизированных REST endpoints;
-- `POST /v1/` — GraphQL;
+- `POST /v1/graphql` — канонический GraphQL endpoint;
+- `POST /v1/` — deprecated GraphQL alias на время миграции;
 - legacy REST paths временно сохранены на новом host для миграции;
 - raw `dataset` полезен для совместимости, typed fields предпочтительнее для
   долгоживущего контракта.

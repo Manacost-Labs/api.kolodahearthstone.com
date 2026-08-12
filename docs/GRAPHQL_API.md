@@ -3,7 +3,7 @@
 The public read-only endpoint is:
 
 ```text
-POST https://api.kolodahearthstone.com/v1/
+POST https://api.kolodahearthstone.com/v1/graphql
 Content-Type: application/json
 ```
 
@@ -12,8 +12,10 @@ not call `db.kolodahs.ru` or `api.hs-manacost.ru`, so those domains can be
 retired after every client has moved.
 
 During cutover, the new host also serves the existing REST paths (for example
-`/v1/bg/heroes` and `/v1/system/sources`). Existing clients can therefore move
+`/v1/battlegrounds/heroes` and `/v1/sources`). Existing clients can therefore move
 to the new hostname first and adopt GraphQL separately.
+
+`POST /v1/` remains a deprecated compatibility alias during migration.
 
 ## Query roots
 

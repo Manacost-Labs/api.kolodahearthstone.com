@@ -21,7 +21,7 @@ GET /sources/{source_id}
 GET /datasets
 GET /datasets/{source_id}
 GET /v1/constructed/*
-GET /v1/bg/*
+GET /v1/battlegrounds/*
 GET /v1/arena/*
 GET /v1/system/*
 ```
@@ -39,7 +39,7 @@ curl -fsS \
 Endpoint:
 
 ```text
-POST https://api.kolodahearthstone.com/v1/
+POST https://api.kolodahearthstone.com/v1/graphql
 Content-Type: application/json
 ```
 

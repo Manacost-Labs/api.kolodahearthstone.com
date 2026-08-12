@@ -21,12 +21,12 @@ def test_documented_v1_paths_exist_in_openapi() -> None:
     expected = {
         "/v1/constructed/decks",
         "/v1/constructed/archetypes",
-        "/v1/bg/heroes",
-        "/v1/bg/minions",
+        "/v1/battlegrounds/heroes",
+        "/v1/battlegrounds/minions",
         "/v1/arena/classes",
-        "/v1/system/sources",
-        "/v1/system/datasets",
-        "/v1/system/health",
+        "/v1/sources",
+        "/v1/datasets",
+        "/v1/health",
     }
     assert expected <= openapi_paths
     assert all(path in api_docs for path in expected)
