@@ -66,6 +66,16 @@ DEFAULT_RUN_DEADLINE_SECONDS = 60 * 60
 CHECKPOINT_SCHEMA_VERSION = 1
 CHECKPOINT_LABEL = "refresh_checkpoint_v1"
 CHECKPOINT_TTL = timedelta(hours=2)
+EMPTY_BASE_SLICE_ALLOWLIST = frozenset(
+    (format_name, rank, period)
+    for format_name in FORMATS
+    for rank in ("top_500", "top_100")
+    for period in ("past_day", "past_3_days")
+)
+CRITICAL_BASE_SLICE_SOURCE_IDS = {
+    "standard": "hsguru_meta_standard_legend",
+    "wild": "hsguru_meta_wild_legend",
+}
 
 _FORMAT_QUERY = {"standard": "2", "wild": "1"}
 _REQUIRED_HEADERS = {
@@ -173,6 +183,11 @@ def _parse_checkpoint_time(value: Any) -> datetime | None:
     return parsed.astimezone(UTC)
 
 
+def _empty_base_slice_allowed(spec: SliceSpec) -> bool:
+    """Allow an empty table only for documented low-sample rank windows."""
+    return (spec.format, spec.rank, spec.period) in EMPTY_BASE_SLICE_ALLOWLIST
+
+
 def _load_refresh_checkpoint(
     *,
     specs: tuple[SliceSpec, ...],
@@ -222,7 +237,7 @@ def _load_refresh_checkpoint(
             or item.get("period") != spec.period
             or item.get("coin") != spec.coin
             or item.get("source_url") != spec.url
-            or not isinstance(item.get("rows"), list)
+            or not _checkpoint_matrix_slice_is_valid(item, spec)
         ):
             continue
         seen_slice_keys.add(key)
@@ -239,14 +254,11 @@ def _load_refresh_checkpoint(
         if (
             format_name not in FORMATS
             or format_name in seen_formats
-            or not isinstance(rows, list)
-            or not rows
-            or not isinstance(acquisition, dict)
-            or any(
-                not isinstance(row, dict)
-                or row.get("format") != format_name
-                or row.get("period") != current_period
-                for row in rows
+            or not _checkpoint_current_catalog_is_valid(
+                format_name=format_name,
+                current_period=current_period,
+                rows=rows,
+                acquisition=acquisition,
             )
         ):
             continue
@@ -344,19 +356,131 @@ def _archetype_class(cell: Any) -> str:
 
 
 def _validate_row(row: dict[str, Any]) -> bool:
+    try:
+        return (
+            bool(str(row["archetype"]).strip())
+            and isinstance(row["games"], int)
+            and row["games"] >= 0
+            and row["winrate"] is not None
+            and 0 <= row["winrate"] <= 100
+            and row["popularity"] is not None
+            and 0 <= row["popularity"] <= 100
+            and row["turns"] is not None
+            and row["turns"] >= 0
+            and row["duration_minutes"] is not None
+            and row["duration_minutes"] >= 0
+            and row["climbing_speed"] is not None
+        )
+    except (KeyError, TypeError):
+        return False
+
+
+def _checkpoint_matrix_slice_is_valid(
+    item: dict[str, Any],
+    spec: SliceSpec,
+) -> bool:
+    rows = item.get("rows")
+    if not isinstance(rows, list):
+        return False
+    if not rows and not _empty_base_slice_allowed(spec):
+        return False
+    if any(not isinstance(row, dict) or not _validate_row(row) for row in rows):
+        return False
+    archetypes = [str(row["archetype"]).strip().casefold() for row in rows]
+    if len(archetypes) != len(set(archetypes)):
+        return False
+
+    expected_counts = {
+        str(min_games): sum(1 for row in rows if int(row["games"]) >= min_games)
+        for min_games in MIN_GAMES
+    }
+    if item.get("row_counts") != expected_counts:
+        return False
+    quality = item.get("quality")
+    if not isinstance(quality, dict):
+        return False
+    duplicate_rows_merged = quality.get("duplicate_rows_merged")
+    duplicate_groups = quality.get("duplicate_groups")
     return (
-        bool(row["archetype"])
-        and isinstance(row["games"], int)
-        and row["games"] >= 0
-        and row["winrate"] is not None
-        and 0 <= row["winrate"] <= 100
-        and row["popularity"] is not None
-        and 0 <= row["popularity"] <= 100
-        and row["turns"] is not None
-        and row["turns"] >= 0
-        and row["duration_minutes"] is not None
-        and row["duration_minutes"] >= 0
-        and row["climbing_speed"] is not None
+        _parse_checkpoint_time(item.get("fetched_at")) is not None
+        and bool(str(item.get("backend") or "").strip())
+        and isinstance(duplicate_rows_merged, int)
+        and duplicate_rows_merged >= 0
+        and isinstance(duplicate_groups, list)
+        and all(isinstance(group, dict) for group in duplicate_groups)
+    )
+
+
+def _checkpoint_current_row_is_valid(
+    row: dict[str, Any],
+    *,
+    format_name: str,
+    current_period: str,
+) -> bool:
+    expected_format_id = int(_FORMAT_QUERY[format_name])
+    try:
+        return (
+            row["format"] == format_name
+            and row["format_id"] == expected_format_id
+            and bool(str(row["archetype"]).strip())
+            and isinstance(row["games"], int)
+            and row["games"] >= CURRENT_MIN_GAMES
+            and row["winrate"] is not None
+            and 0 <= row["winrate"] <= 100
+            and row["popularity_pct"] is not None
+            and 0 <= row["popularity_pct"] <= 100
+            and row["avg_turns"] is not None
+            and row["avg_turns"] >= 0
+            and row["avg_duration_minutes"] is not None
+            and row["avg_duration_minutes"] >= 0
+            and row["climbing_speed_stars_per_hour"] is not None
+            and row["period"] == current_period
+            and row["rank"] == "all"
+            and bool(str(row["source_url"]).strip())
+            and bool(str(row["archetype_url"]).strip())
+            and bool(str(row["decks_url"]).strip())
+            and isinstance(row["decks"], list)
+        )
+    except (KeyError, TypeError):
+        return False
+
+
+def _checkpoint_current_catalog_is_valid(
+    *,
+    format_name: str,
+    current_period: str,
+    rows: Any,
+    acquisition: Any,
+) -> bool:
+    if (
+        not isinstance(rows, list)
+        or not rows
+        or any(
+            not isinstance(row, dict)
+            or not _checkpoint_current_row_is_valid(
+                row,
+                format_name=format_name,
+                current_period=current_period,
+            )
+            for row in rows
+        )
+        or not isinstance(acquisition, dict)
+    ):
+        return False
+    acquisition_rows = acquisition.get("rows")
+    duplicate_rows_merged = acquisition.get("duplicate_rows_merged")
+    duplicate_groups = acquisition.get("duplicate_groups")
+    return (
+        acquisition.get("format") == format_name
+        and bool(str(acquisition.get("backend") or "").strip())
+        and isinstance(acquisition.get("request_credits"), (int, float))
+        and acquisition["request_credits"] >= 0
+        and isinstance(acquisition_rows, int)
+        and acquisition_rows >= len(rows)
+        and isinstance(duplicate_rows_merged, int)
+        and duplicate_rows_merged >= 0
+        and isinstance(duplicate_groups, list)
+        and all(isinstance(group, dict) for group in duplicate_groups)
     )
 
 
@@ -514,6 +638,62 @@ def parse_meta_table(page_html: str) -> MetaTableParseResult:
 
 def parse_meta_rows(page_html: str) -> list[dict[str, Any]]:
     return parse_meta_table(page_html).rows
+
+
+def _critical_slice_regression(
+    *,
+    spec: SliceSpec,
+    rows: list[dict[str, Any]],
+    cached_dataset: dict[str, Any] | None,
+    current_period: str,
+) -> str | None:
+    source_id = CRITICAL_BASE_SLICE_SOURCE_IDS.get(spec.format)
+    if source_id is None or spec.rank != "legend" or spec.period != "past_week":
+        return None
+
+    cached_structured = ((cached_dataset or {}).get("data") or {}).get(
+        "structured"
+    ) or {}
+    cached_current_period = str(
+        ((cached_structured.get("current_catalog") or {}).get("criteria") or {}).get(
+            "period"
+        )
+        or ""
+    )
+    if cached_current_period != current_period:
+        return None
+    previous = next(
+        (
+            item
+            for item in cached_structured.get("slices") or []
+            if isinstance(item, dict) and item.get("key") == spec.key
+        ),
+        None,
+    )
+    previous_rows = (previous or {}).get("rows")
+    if not isinstance(previous_rows, list) or not previous_rows:
+        return None
+
+    from .dataset_regression import check_dataset_regression
+
+    source = Source(
+        id=source_id,
+        url=spec.url,
+        site="hsguru",
+        category="meta",
+    )
+    regression, message, _extra = check_dataset_regression(
+        source,
+        previous_data={
+            "url": spec.url,
+            "structured": {"type": "meta", "strategies": previous_rows},
+        },
+        new_data={
+            "url": spec.url,
+            "structured": {"type": "meta", "strategies": rows},
+        },
+    )
+    return message if regression else None
 
 
 def _carry_forward_missing_slices(
@@ -1172,8 +1352,18 @@ async def _refresh_hsguru_meta_matrix_unlocked(
                     }
                 )
                 parsed = parse_meta_table(result.html)
-                # Sparse premium ranks (Top-100/Top-500) can legitimately return an
-                # empty table for short periods; still publish the slice.
+                if not parsed.rows and not _empty_base_slice_allowed(spec):
+                    raise HSGuruMetaSchemaError(
+                        f"HSGuru meta empty table is not allowed for {spec.key}"
+                    )
+                regression = _critical_slice_regression(
+                    spec=spec,
+                    rows=parsed.rows,
+                    cached_dataset=cached_dataset,
+                    current_period=current_period,
+                )
+                if regression:
+                    raise HSGuruMetaDataError(regression)
                 item = {
                     "key": spec.key,
                     "format": spec.format,
@@ -1406,7 +1596,12 @@ async def _refresh_hsguru_meta_matrix_unlocked(
     run.heartbeat(phase="finalizing")
     if run.deadline_reached():
         run.mark_timed_out()
-    publishable = len(slices) == len(specs) and current_complete and not run.timed_out
+    publishable = (
+        len(slices) == len(specs)
+        and cached_slice_count == 0
+        and current_complete
+        and not run.timed_out
+    )
     complete = publishable and cached_slice_count == 0 and not errors
     refresh_window_id = _refresh_window_id(fetched_at)
     failure_reason_code = (
@@ -1591,9 +1786,36 @@ async def _refresh_hsguru_meta_matrix_unlocked(
     }
 
 
+def _checkpoint_window_start_for_hard_timeout() -> str | None:
+    """Recover the logical refresh start saved by the cancelled coroutine."""
+    try:
+        checkpoint = load_baseline(SOURCE_ID, CHECKPOINT_LABEL) or {}
+    except Exception:  # noqa: BLE001 - timeout reporting must remain fail-open
+        return None
+    if (
+        checkpoint.get("state") != "in_progress"
+        or checkpoint.get("schema_version") != CHECKPOINT_SCHEMA_VERSION
+    ):
+        return None
+    saved_at = _parse_checkpoint_time(checkpoint.get("saved_at"))
+    started_at = _parse_checkpoint_time(checkpoint.get("started_at"))
+    now = datetime.now(UTC)
+    if (
+        saved_at is None
+        or started_at is None
+        or now - saved_at > CHECKPOINT_TTL
+        or saved_at - now > timedelta(minutes=5)
+        or started_at > saved_at
+    ):
+        return None
+    return started_at.isoformat()
+
+
 def _hard_timeout_outcome(run: JobRunContext) -> dict[str, Any]:
     """Record a terminal timeout without publishing an incomplete dataset."""
-    fetched_at = run.started_at.isoformat()
+    fetched_at = (
+        _checkpoint_window_start_for_hard_timeout() or run.started_at.isoformat()
+    )
     refresh_window_id = _refresh_window_id(fetched_at)
     cached_dataset = load_dataset(SOURCE_ID)
     cached_structured: dict[str, Any] = {}

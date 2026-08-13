@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -25,6 +25,64 @@ HSGURU_TABLE = """
   </tbody>
 </table></body></html>
 """
+
+EMPTY_HSGURU_TABLE = """
+<html><body><table>
+  <thead><tr>
+    <th>Archetype</th><th>Winrate</th><th>Popularity</th>
+    <th>Turns</th><th>Duration</th><th>Climbing Speed</th>
+  </tr></thead>
+  <tbody></tbody>
+</table></body></html>
+"""
+
+
+def _valid_meta_row(archetype: str = "Quest Mage", games: int = 742) -> dict:
+    return {
+        "archetype": archetype,
+        "winrate": 51.1,
+        "popularity": 0.8,
+        "games": games,
+        "turns": 9.1,
+        "duration_minutes": 8.0,
+        "climbing_speed": 0.4,
+    }
+
+
+def _valid_current_row(format_name: str, period: str) -> dict:
+    format_id = 2 if format_name == "standard" else 1
+    source_url = (
+        "https://www.hsguru.com/meta?"
+        f"format={format_id}&rank=all&period={period}&min_games=50"
+    )
+    return {
+        "format": format_name,
+        "format_id": format_id,
+        "archetype": f"Current {format_name}",
+        "games": 100,
+        "winrate": 51.1,
+        "popularity_pct": 0.8,
+        "avg_turns": 9.1,
+        "avg_duration_minutes": 8.0,
+        "climbing_speed_stars_per_hour": 0.4,
+        "period": period,
+        "rank": "all",
+        "source_url": source_url,
+        "archetype_url": f"https://www.hsguru.com/archetype/Current-{format_name}",
+        "decks_url": f"https://www.hsguru.com/decks?format={format_id}",
+        "decks": [],
+    }
+
+
+def _valid_current_acquisition(format_name: str, rows: int = 1) -> dict:
+    return {
+        "format": format_name,
+        "backend": "firecrawl",
+        "request_credits": 1,
+        "rows": rows,
+        "duplicate_rows_merged": 0,
+        "duplicate_groups": [],
+    }
 
 
 def test_matrix_has_108_remote_slices_and_six_local_min_game_filters() -> None:
@@ -207,6 +265,35 @@ def test_hsguru_table_parser_distinguishes_missing_from_empty_table() -> None:
     </tr></thead><tbody></tbody></table>
     """
     assert parse_meta_rows(empty) == []
+
+
+@pytest.mark.parametrize(
+    ("rank", "period", "expected"),
+    [
+        ("top_100", "past_day", True),
+        ("top_500", "past_3_days", True),
+        ("top_100", "past_week", False),
+        ("top_legend", "past_day", False),
+        ("legend", "past_week", False),
+    ],
+)
+def test_empty_base_slice_policy_is_an_explicit_sparse_rank_allowlist(
+    rank: str,
+    period: str,
+    expected: bool,
+) -> None:
+    from app.hsguru_meta_matrix import SliceSpec, _empty_base_slice_allowed
+
+    spec = SliceSpec(
+        "standard",
+        rank,
+        period,
+        "any_player",
+        f"standard|{rank}|{period}|any_player",
+        "https://www.hsguru.com/meta",
+    )
+
+    assert _empty_base_slice_allowed(spec) is expected
 
 
 def test_current_archetypes_reuse_cached_deck_catalog_without_scraping() -> None:
@@ -616,21 +703,9 @@ def test_refresh_does_not_retry_data_errors_and_counts_failed_parse_request() ->
         )
 
     async def scrape_current(format_name, period):
-        return [
-            {
-                "format": format_name,
-                "archetype": f"Current {format_name}",
-                "games": 100,
-                "period": period,
-                "rank": "all",
-                "decks": [],
-            }
-        ], {
-            "format": format_name,
-            "backend": "firecrawl",
-            "request_credits": 1,
-            "rows": 1,
-        }
+        return [_valid_current_row(format_name, period)], _valid_current_acquisition(
+            format_name
+        )
 
     async def discover_patch(_cached):
         return "patch_36.0.3", None
@@ -662,6 +737,180 @@ def test_refresh_does_not_retry_data_errors_and_counts_failed_parse_request() ->
     status = save_status.call_args.args[1]
     assert status["firecrawl_requests"] == 4
     assert "conflicting identities" in status["errors"][0]["error"]
+
+
+@pytest.mark.parametrize(("format_name", "format_id"), [("standard", 2), ("wild", 1)])
+def test_empty_critical_legend_week_slice_preserves_lkg_without_publishing(
+    format_name: str,
+    format_id: int,
+) -> None:
+    from app.firecrawl_backend import FirecrawlScrape
+    from app.hsguru_meta_matrix import MIN_GAMES, SliceSpec, refresh_hsguru_meta_matrix
+
+    spec = SliceSpec(
+        format_name,
+        "legend",
+        "past_week",
+        "any_player",
+        f"{format_name}|legend|past_week|any_player",
+        (
+            "https://www.hsguru.com/meta?"
+            f"format={format_id}&rank=legend&period=past_week&min_games=100"
+        ),
+    )
+    cached_item = {
+        "key": spec.key,
+        "format": spec.format,
+        "rank": spec.rank,
+        "period": spec.period,
+        "coin": spec.coin,
+        "source_url": spec.url,
+        "fetched_at": "2026-08-12T12:00:00+00:00",
+        "rows": [_valid_meta_row()],
+        "row_counts": {str(value): int(742 >= value) for value in MIN_GAMES},
+        "backend": "firecrawl",
+        "quality": {"duplicate_rows_merged": 0, "duplicate_groups": []},
+    }
+    cached = {
+        "source_id": "hsguru_meta_matrix",
+        "fetched_at": "2026-08-12T12:00:00+00:00",
+        "data": {
+            "structured": {
+                "slices": [cached_item],
+                "current_catalog": {"criteria": {"period": "patch_36.2.0"}},
+            }
+        },
+    }
+
+    async def scrape(_spec):
+        return FirecrawlScrape(
+            html=EMPTY_HSGURU_TABLE,
+            markdown="",
+            screenshot=None,
+            metadata={"creditsUsed": 1},
+            status_code=200,
+            final_url=spec.url,
+        )
+
+    async def scrape_current(current_format, period):
+        return [_valid_current_row(current_format, period)], _valid_current_acquisition(
+            current_format
+        )
+
+    async def discover_patch(_cached):
+        return "patch_36.2.0", None
+
+    with (
+        patch("app.hsguru_meta_matrix.iter_slice_specs", return_value=(spec,)),
+        patch("app.hsguru_meta_matrix.load_dataset", return_value=cached),
+        patch("app.hsguru_meta_matrix.load_baseline", return_value=None),
+        patch("app.hsguru_meta_matrix.save_baseline"),
+        patch("app.hsguru_meta_matrix.enrich_current_rows_with_cached_decks"),
+        patch("app.hsguru_meta_matrix._record_current_history") as record_history,
+        patch("app.hsguru_meta_matrix.save_dataset") as save_dataset,
+        patch("app.hsguru_meta_matrix.save_status"),
+    ):
+        result = asyncio.run(
+            refresh_hsguru_meta_matrix(
+                attempts=1,
+                scrape=scrape,
+                scrape_current=scrape_current,
+                discover_patch=discover_patch,
+            )
+        )
+
+    assert result["complete"] is False
+    assert result["published"] is False
+    assert result["cached_base_slices"] == 1
+    assert "empty table is not allowed" in result["errors"][0]["error"]
+    save_dataset.assert_not_called()
+    record_history.assert_not_called()
+
+
+def test_critical_legend_week_regression_preserves_same_patch_lkg() -> None:
+    from app.firecrawl_backend import FirecrawlScrape
+    from app.hsguru_meta_matrix import MIN_GAMES, SliceSpec, refresh_hsguru_meta_matrix
+
+    spec = SliceSpec(
+        "standard",
+        "legend",
+        "past_week",
+        "any_player",
+        "standard|legend|past_week|any_player",
+        "https://www.hsguru.com/meta?format=2&rank=legend&period=past_week&min_games=100",
+    )
+    previous_rows = [_valid_meta_row(f"Archetype {index}") for index in range(20)]
+    cached_item = {
+        "key": spec.key,
+        "format": spec.format,
+        "rank": spec.rank,
+        "period": spec.period,
+        "coin": spec.coin,
+        "source_url": spec.url,
+        "fetched_at": "2026-08-12T12:00:00+00:00",
+        "rows": previous_rows,
+        "row_counts": {
+            str(value): sum(int(row["games"]) >= value for row in previous_rows)
+            for value in MIN_GAMES
+        },
+        "backend": "firecrawl",
+        "quality": {"duplicate_rows_merged": 0, "duplicate_groups": []},
+    }
+    cached = {
+        "source_id": "hsguru_meta_matrix",
+        "fetched_at": "2026-08-12T12:00:00+00:00",
+        "data": {
+            "structured": {
+                "slices": [cached_item],
+                "current_catalog": {"criteria": {"period": "patch_36.2.0"}},
+            }
+        },
+    }
+
+    async def scrape(_spec):
+        return FirecrawlScrape(
+            html=HSGURU_TABLE,
+            markdown="",
+            screenshot=None,
+            metadata={"creditsUsed": 1},
+            status_code=200,
+            final_url=spec.url,
+        )
+
+    async def scrape_current(format_name, period):
+        return [_valid_current_row(format_name, period)], _valid_current_acquisition(
+            format_name
+        )
+
+    async def discover_patch(_cached):
+        return "patch_36.2.0", None
+
+    with (
+        patch("app.hsguru_meta_matrix.iter_slice_specs", return_value=(spec,)),
+        patch("app.hsguru_meta_matrix.load_dataset", return_value=cached),
+        patch("app.hsguru_meta_matrix.load_baseline", return_value=None),
+        patch("app.hsguru_meta_matrix.save_baseline"),
+        patch("app.hsguru_meta_matrix.enrich_current_rows_with_cached_decks"),
+        patch("app.hsguru_meta_matrix._record_current_history") as record_history,
+        patch("app.hsguru_meta_matrix.save_dataset") as save_dataset,
+        patch("app.hsguru_meta_matrix.save_status"),
+        patch("app.dataset_regression.policy_for", return_value=None),
+    ):
+        result = asyncio.run(
+            refresh_hsguru_meta_matrix(
+                attempts=1,
+                scrape=scrape,
+                scrape_current=scrape_current,
+                discover_patch=discover_patch,
+            )
+        )
+
+    assert result["complete"] is False
+    assert result["published"] is False
+    assert result["cached_base_slices"] == 1
+    assert "Dataset regression" in result["errors"][0]["error"]
+    save_dataset.assert_not_called()
+    record_history.assert_not_called()
 
 
 def test_refresh_timeout_stops_new_slices_and_preserves_last_known_good() -> None:
@@ -827,6 +1076,133 @@ def test_refresh_timeout_stops_new_slices_and_preserves_last_known_good() -> Non
     assert heartbeat_snapshots[-1] == result["job_run"]
 
 
+@pytest.mark.parametrize("corruption", ["row", "row_counts", "quality"])
+def test_checkpoint_loader_discards_semantically_invalid_matrix_slices(
+    corruption: str,
+) -> None:
+    from app.hsguru_meta_matrix import (
+        CHECKPOINT_SCHEMA_VERSION,
+        MIN_GAMES,
+        SliceSpec,
+        _checkpoint_target_signature,
+        _checkpoint_targets,
+        _load_refresh_checkpoint,
+    )
+
+    now = datetime(2026, 8, 13, 12, 0, tzinfo=UTC)
+    spec = SliceSpec(
+        "standard",
+        "legend",
+        "past_week",
+        "any_player",
+        "standard|legend|past_week|any_player",
+        "https://www.hsguru.com/meta?format=2&rank=legend&period=past_week&min_games=100",
+    )
+    row = _valid_meta_row()
+    item = {
+        "key": spec.key,
+        "format": spec.format,
+        "rank": spec.rank,
+        "period": spec.period,
+        "coin": spec.coin,
+        "source_url": spec.url,
+        "fetched_at": now.isoformat(),
+        "rows": [row],
+        "row_counts": {str(value): int(row["games"] >= value) for value in MIN_GAMES},
+        "backend": "firecrawl",
+        "quality": {"duplicate_rows_merged": 0, "duplicate_groups": []},
+    }
+    if corruption == "row":
+        del row["winrate"]
+    elif corruption == "row_counts":
+        item["row_counts"]["100"] = 0
+    else:
+        del item["quality"]
+    checkpoint = {
+        "state": "in_progress",
+        "schema_version": CHECKPOINT_SCHEMA_VERSION,
+        "current_period": "patch_36.2.0",
+        "started_at": now.isoformat(),
+        "saved_at": now.isoformat(),
+        "target_signature": _checkpoint_target_signature(
+            (spec,),
+            "patch_36.2.0",
+        ),
+        "targets": _checkpoint_targets((spec,)),
+        "matrix_slices": [item],
+        "current_catalog": [],
+    }
+
+    with patch("app.hsguru_meta_matrix.load_baseline", return_value=checkpoint):
+        loaded = _load_refresh_checkpoint(
+            specs=(spec,),
+            current_period="patch_36.2.0",
+            now=now,
+        )
+
+    assert loaded is not None
+    assert loaded["matrix_slices"] == []
+
+
+@pytest.mark.parametrize("corruption", ["row", "acquisition"])
+def test_checkpoint_loader_discards_semantically_invalid_current_catalog(
+    corruption: str,
+) -> None:
+    from app.hsguru_meta_matrix import (
+        CHECKPOINT_SCHEMA_VERSION,
+        SliceSpec,
+        _checkpoint_target_signature,
+        _checkpoint_targets,
+        _load_refresh_checkpoint,
+    )
+
+    now = datetime(2026, 8, 13, 12, 0, tzinfo=UTC)
+    spec = SliceSpec(
+        "standard",
+        "legend",
+        "past_week",
+        "any_player",
+        "standard|legend|past_week|any_player",
+        "https://www.hsguru.com/meta?format=2&rank=legend&period=past_week&min_games=100",
+    )
+    row = _valid_current_row("standard", "patch_36.2.0")
+    acquisition = _valid_current_acquisition("standard")
+    if corruption == "row":
+        del row["games"]
+    else:
+        del acquisition["backend"]
+    checkpoint = {
+        "state": "in_progress",
+        "schema_version": CHECKPOINT_SCHEMA_VERSION,
+        "current_period": "patch_36.2.0",
+        "started_at": now.isoformat(),
+        "saved_at": now.isoformat(),
+        "target_signature": _checkpoint_target_signature(
+            (spec,),
+            "patch_36.2.0",
+        ),
+        "targets": _checkpoint_targets((spec,)),
+        "matrix_slices": [],
+        "current_catalog": [
+            {
+                "format": "standard",
+                "rows": [row],
+                "acquisition": acquisition,
+            }
+        ],
+    }
+
+    with patch("app.hsguru_meta_matrix.load_baseline", return_value=checkpoint):
+        loaded = _load_refresh_checkpoint(
+            specs=(spec,),
+            current_period="patch_36.2.0",
+            now=now,
+        )
+
+    assert loaded is not None
+    assert loaded["current_catalog"] == []
+
+
 def test_refresh_resumes_successful_slices_from_timeout_checkpoint() -> None:
     from datetime import timedelta
 
@@ -905,6 +1281,13 @@ def test_refresh_resumes_successful_slices_from_timeout_checkpoint() -> None:
             "rows": 1,
         }
 
+    provider_started = asyncio.Event()
+
+    async def blocked_scrape(spec):
+        slice_calls.append(spec.key)
+        provider_started.set()
+        await asyncio.Future()
+
     async def discover_patch(_cached):
         return "patch_36.2.0", None
 
@@ -948,31 +1331,54 @@ def test_refresh_resumes_successful_slices_from_timeout_checkpoint() -> None:
         assert slice_calls == [specs[0].key]
         assert checkpoint["state"] == "in_progress"
         assert [item["key"] for item in checkpoint["matrix_slices"]] == [specs[0].key]
+        checkpoint_started_at = checkpoint["started_at"]
         save_dataset.assert_not_called()
 
         slice_calls.clear()
         second_run = JobRunContext.start(
-            run_id="matrix-checkpoint-resume",
-            timeout_seconds=30,
+            run_id="matrix-checkpoint-hard-timeout",
+            timeout_seconds=0.03,
             total_slices=0,
-            clock=clock,
         )
         second = asyncio.run(
             refresh_hsguru_meta_matrix(
                 concurrency=1,
                 attempts=1,
-                scrape=scrape,
+                scrape=blocked_scrape,
                 scrape_current=scrape_current,
                 discover_patch=discover_patch,
                 run_context=second_run,
             )
         )
 
+        assert provider_started.is_set()
+        assert second["timed_out"] is True
+        assert second["refresh_window_id"] == first_refresh_window_id
+        assert checkpoint["started_at"] == checkpoint_started_at
+        save_dataset.assert_not_called()
+
+        slice_calls.clear()
+        third_run = JobRunContext.start(
+            run_id="matrix-checkpoint-success",
+            timeout_seconds=30,
+            total_slices=0,
+        )
+        third = asyncio.run(
+            refresh_hsguru_meta_matrix(
+                concurrency=1,
+                attempts=1,
+                scrape=scrape,
+                scrape_current=scrape_current,
+                discover_patch=discover_patch,
+                run_context=third_run,
+            )
+        )
+
     assert slice_calls == [specs[1].key]
-    assert second["ok"] is True
-    assert second["complete"] is True
-    assert second["resumed_base_slices"] == 1
-    assert second["refresh_window_id"] == first_refresh_window_id
+    assert third["ok"] is True
+    assert third["complete"] is True
+    assert third["resumed_base_slices"] == 1
+    assert third["refresh_window_id"] == first_refresh_window_id
     assert checkpoint["state"] == "complete"
     dataset = save_dataset.call_args.args[1]
     assert [item["key"] for item in dataset["data"]["structured"]["slices"]] == sorted(
@@ -1145,6 +1551,39 @@ def test_hard_deadline_cancels_blocked_provider_and_preserves_lkg(tmp_path) -> N
     # The application-level timeout must release the cross-process lock too.
     with ResourceLockSet([SOURCE_ID], lock_dir=tmp_path / ".locks"):
         pass
+
+
+def test_hard_timeout_reuses_active_checkpoint_refresh_window() -> None:
+    from app.hsguru_meta_matrix import (
+        CHECKPOINT_SCHEMA_VERSION,
+        _hard_timeout_outcome,
+        _refresh_window_id,
+    )
+    from app.job_run import JobRunContext
+
+    now = datetime.now(UTC)
+    checkpoint_started_at = (now - timedelta(minutes=20)).isoformat()
+    checkpoint = {
+        "state": "in_progress",
+        "schema_version": CHECKPOINT_SCHEMA_VERSION,
+        "started_at": checkpoint_started_at,
+        "saved_at": now.isoformat(),
+    }
+    run = JobRunContext.start(
+        run_id="hard-timeout-window",
+        timeout_seconds=60,
+        total_slices=1,
+    )
+
+    with (
+        patch("app.hsguru_meta_matrix.load_baseline", return_value=checkpoint),
+        patch("app.hsguru_meta_matrix.load_dataset", return_value=None),
+        patch("app.hsguru_meta_matrix.save_status"),
+    ):
+        result = _hard_timeout_outcome(run)
+
+    assert result["fetched_at"] == checkpoint_started_at
+    assert result["refresh_window_id"] == _refresh_window_id(checkpoint_started_at)
 
 
 def test_heartbeat_failure_cannot_replace_result_or_leak_lock() -> None:
