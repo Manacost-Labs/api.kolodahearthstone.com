@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import re
 from collections.abc import Awaitable, Callable
 from copy import deepcopy
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from itertools import product
 from typing import Any
 from urllib.parse import parse_qs, parse_qsl, quote, urlencode, urljoin, urlparse
@@ -25,7 +26,13 @@ from .job_run import (
 from .resource_locks import ResourceLocked, ResourceLockSet
 from .source_state import SourceState
 from .sources import Source
-from .storage import load_dataset, save_dataset, save_status
+from .storage import (
+    load_baseline,
+    load_dataset,
+    save_baseline,
+    save_dataset,
+    save_status,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +63,9 @@ COINS = ("any_player",)
 MIN_GAMES = (100, 250, 500, 1000, 2500, 5000)
 CURRENT_MIN_GAMES = 50
 DEFAULT_RUN_DEADLINE_SECONDS = 60 * 60
+CHECKPOINT_SCHEMA_VERSION = 1
+CHECKPOINT_LABEL = "refresh_checkpoint_v1"
+CHECKPOINT_TTL = timedelta(hours=2)
 
 _FORMAT_QUERY = {"standard": "2", "wild": "1"}
 _REQUIRED_HEADERS = {
@@ -110,6 +120,139 @@ class MetaTableParseResult:
     rows: list[dict[str, Any]]
     duplicate_groups: list[dict[str, Any]]
     duplicate_rows_merged: int
+
+
+def _checkpoint_targets(specs: tuple[SliceSpec, ...]) -> list[dict[str, str]]:
+    return [
+        {
+            "key": spec.key,
+            "format": spec.format,
+            "rank": spec.rank,
+            "period": spec.period,
+            "coin": spec.coin,
+            "url": spec.url,
+        }
+        for spec in specs
+    ]
+
+
+def _checkpoint_target_signature(
+    specs: tuple[SliceSpec, ...],
+    current_period: str,
+) -> str:
+    targets = _checkpoint_targets(specs)
+    tokens = [current_period]
+    tokens.extend(
+        "\0".join(
+            (
+                target["key"],
+                target["format"],
+                target["rank"],
+                target["period"],
+                target["coin"],
+                target["url"],
+            )
+        )
+        for target in targets
+    )
+    return hashlib.sha256("\n".join(tokens).encode("utf-8")).hexdigest()
+
+
+def _parse_checkpoint_time(value: Any) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(str(value or ""))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _load_refresh_checkpoint(
+    *,
+    specs: tuple[SliceSpec, ...],
+    current_period: str,
+    now: datetime,
+) -> dict[str, Any] | None:
+    try:
+        checkpoint = load_baseline(SOURCE_ID, CHECKPOINT_LABEL) or {}
+    except Exception as exc:  # noqa: BLE001 - checkpoint recovery is fail-open
+        logger.warning(
+            "HSGuru matrix checkpoint could not be loaded after %s",
+            type(exc).__name__,
+        )
+        return None
+    expected_targets = _checkpoint_targets(specs)
+    if (
+        checkpoint.get("state") != "in_progress"
+        or checkpoint.get("schema_version") != CHECKPOINT_SCHEMA_VERSION
+        or checkpoint.get("current_period") != current_period
+        or checkpoint.get("targets") != expected_targets
+        or checkpoint.get("target_signature")
+        != _checkpoint_target_signature(specs, current_period)
+    ):
+        return None
+    saved_at = _parse_checkpoint_time(checkpoint.get("saved_at"))
+    if saved_at is None:
+        return None
+    age = now - saved_at
+    if age < -timedelta(minutes=5) or age > CHECKPOINT_TTL:
+        return None
+
+    specs_by_key = {spec.key: spec for spec in specs}
+    if len(specs_by_key) != len(specs):
+        return None
+    matrix_slices: list[dict[str, Any]] = []
+    seen_slice_keys: set[str] = set()
+    for item in checkpoint.get("matrix_slices") or []:
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get("key") or "")
+        spec = specs_by_key.get(key)
+        if (
+            spec is None
+            or key in seen_slice_keys
+            or item.get("format") != spec.format
+            or item.get("rank") != spec.rank
+            or item.get("period") != spec.period
+            or item.get("coin") != spec.coin
+            or item.get("source_url") != spec.url
+            or not isinstance(item.get("rows"), list)
+        ):
+            continue
+        seen_slice_keys.add(key)
+        matrix_slices.append(deepcopy(item))
+
+    current_catalog: list[dict[str, Any]] = []
+    seen_formats: set[str] = set()
+    for item in checkpoint.get("current_catalog") or []:
+        if not isinstance(item, dict):
+            continue
+        format_name = str(item.get("format") or "")
+        rows = item.get("rows")
+        acquisition = item.get("acquisition")
+        if (
+            format_name not in FORMATS
+            or format_name in seen_formats
+            or not isinstance(rows, list)
+            or not rows
+            or not isinstance(acquisition, dict)
+            or any(
+                not isinstance(row, dict)
+                or row.get("format") != format_name
+                or row.get("period") != current_period
+                for row in rows
+            )
+        ):
+            continue
+        seen_formats.add(format_name)
+        current_catalog.append(deepcopy(item))
+
+    return {
+        **checkpoint,
+        "matrix_slices": matrix_slices,
+        "current_catalog": current_catalog,
+    }
 
 
 def matrix_periods(current_patch_period: str) -> tuple[str, ...]:
@@ -909,11 +1052,83 @@ async def _refresh_hsguru_meta_matrix_unlocked(
         )
     periods = matrix_periods(current_period)
     specs = iter_slice_specs(periods)
-    run.set_total_slices(len(specs) + len(FORMATS))
+    checkpoint = _load_refresh_checkpoint(
+        specs=specs,
+        current_period=current_period,
+        now=datetime.now(UTC),
+    )
+    checkpoint_started_at = _parse_checkpoint_time((checkpoint or {}).get("started_at"))
+    if checkpoint_started_at is not None:
+        fetched_at = checkpoint_started_at.isoformat()
+
+    matrix_slices_by_key = {
+        str(item["key"]): deepcopy(item)
+        for item in (checkpoint or {}).get("matrix_slices") or []
+    }
+    resumed_slice_keys = set(matrix_slices_by_key)
+    current_results_by_format = {
+        str(item["format"]): (
+            deepcopy(item["rows"]),
+            deepcopy(item["acquisition"]),
+        )
+        for item in (checkpoint or {}).get("current_catalog") or []
+    }
+    resumed_current_formats = set(current_results_by_format)
+    pending_specs = tuple(
+        spec for spec in specs if spec.key not in matrix_slices_by_key
+    )
+    pending_current_formats = tuple(
+        format_name
+        for format_name in FORMATS
+        if format_name not in current_results_by_format
+    )
+    run.set_total_slices(len(pending_specs) + len(pending_current_formats))
     run.heartbeat(phase="matrix_slices")
     semaphore = asyncio.Semaphore(max(1, min(concurrency, 5)))
     errors: list[dict[str, str]] = list(discovery_errors)
     slice_acquisition: list[dict[str, Any]] = []
+    checkpoint_save_failed = False
+
+    def save_progress_checkpoint(*, state: str = "in_progress") -> None:
+        nonlocal checkpoint_save_failed
+        if checkpoint_save_failed:
+            return
+        payload = {
+            "state": state,
+            "schema_version": CHECKPOINT_SCHEMA_VERSION,
+            "current_period": current_period,
+            "started_at": fetched_at,
+            "saved_at": datetime.now(UTC).isoformat(),
+            "target_signature": _checkpoint_target_signature(
+                specs,
+                current_period,
+            ),
+            "targets": _checkpoint_targets(specs),
+            "matrix_slices": sorted(
+                (deepcopy(item) for item in matrix_slices_by_key.values()),
+                key=lambda item: str(item.get("key") or ""),
+            ),
+            "current_catalog": [
+                {
+                    "format": format_name,
+                    "rows": deepcopy(rows),
+                    "acquisition": deepcopy(acquisition),
+                }
+                for format_name, (rows, acquisition) in sorted(
+                    current_results_by_format.items()
+                )
+            ],
+        }
+        try:
+            save_baseline(SOURCE_ID, CHECKPOINT_LABEL, payload)
+        except Exception as exc:  # noqa: BLE001 - checkpointing is fail-open
+            checkpoint_save_failed = True
+            logger.warning(
+                "HSGuru matrix checkpoint persistence stopped after %s",
+                type(exc).__name__,
+            )
+
+    save_progress_checkpoint()
 
     async def fetch_one(spec: SliceSpec) -> dict[str, Any] | None:
         last_error: Exception | None = None
@@ -975,7 +1190,9 @@ async def _refresh_hsguru_meta_matrix_unlocked(
                         "duplicate_groups": parsed.duplicate_groups,
                     },
                 }
+                matrix_slices_by_key[spec.key] = item
                 run.finish_slice(succeeded=True)
+                save_progress_checkpoint()
                 return item
             except HSGuruMetaDataError as exc:
                 last_error = exc
@@ -999,11 +1216,8 @@ async def _refresh_hsguru_meta_matrix_unlocked(
             run.finish_slice(succeeded=False)
         return None
 
-    fresh_slices = [
-        item
-        for item in await asyncio.gather(*(fetch_one(spec) for spec in specs))
-        if item
-    ]
+    await asyncio.gather(*(fetch_one(spec) for spec in pending_specs))
+    fresh_slices = list(matrix_slices_by_key.values())
     fresh_slices.sort(key=lambda item: item["key"])
     slices, cached_slice_count = _carry_forward_missing_slices(
         specs=specs,
@@ -1042,16 +1256,22 @@ async def _refresh_hsguru_meta_matrix_unlocked(
         except BaseException:
             run.finish_slice(succeeded=False)
             raise
+        current_results_by_format[format_name] = deepcopy(result)
         run.finish_slice(succeeded=True)
+        save_progress_checkpoint()
         return result
 
     run.heartbeat(phase="current_catalog")
     try:
         current_results = await asyncio.gather(
-            *(fetch_current(format_name) for format_name in FORMATS),
+            *(fetch_current(format_name) for format_name in pending_current_formats),
             return_exceptions=True,
         )
-        for format_name, result in zip(FORMATS, current_results, strict=True):
+        for format_name, result in zip(
+            pending_current_formats,
+            current_results,
+            strict=True,
+        ):
             if result is None:
                 continue
             if isinstance(result, Exception):
@@ -1062,9 +1282,6 @@ async def _refresh_hsguru_meta_matrix_unlocked(
                     }
                 )
                 continue
-            rows, acquisition = result
-            current_rows.extend(rows)
-            current_acquisition.append(acquisition)
     except Exception as exc:
         errors.append(
             {
@@ -1072,6 +1289,16 @@ async def _refresh_hsguru_meta_matrix_unlocked(
                 "error": f"{type(exc).__name__}: {str(exc)[:300]}",
             }
         )
+    for format_name in FORMATS:
+        result = current_results_by_format.get(format_name)
+        if result is None:
+            continue
+        rows, acquisition = result
+        current_rows.extend(deepcopy(rows))
+        acquisition_row = deepcopy(acquisition)
+        if format_name in resumed_current_formats:
+            acquisition_row["resumed_from_checkpoint"] = True
+        current_acquisition.append(acquisition_row)
     current_rows, current_acquisition, cached_current_formats = (
         _carry_forward_current_catalog(
             current_period=current_period,
@@ -1121,11 +1348,13 @@ async def _refresh_hsguru_meta_matrix_unlocked(
         float(item.get("request_credits") or 0)
         for item in current_acquisition
         if item.get("backend") == "firecrawl"
+        and not item.get("resumed_from_checkpoint")
     )
     scrape_do_credits_used += sum(
         int(item.get("request_credits") or 0)
         for item in current_acquisition
         if str(item.get("backend") or "").startswith("scrape_do")
+        and not item.get("resumed_from_checkpoint")
     )
     if patch_discovery_acquisition:
         backend = str(patch_discovery_acquisition.get("backend") or "")
@@ -1136,7 +1365,12 @@ async def _refresh_hsguru_meta_matrix_unlocked(
             scrape_do_credits_used += request_credits
     firecrawl_requests = sum(
         1 for item in slice_acquisition if item.get("backend") == "firecrawl"
-    ) + sum(1 for item in current_acquisition if item.get("backend") == "firecrawl")
+    ) + sum(
+        1
+        for item in current_acquisition
+        if item.get("backend") == "firecrawl"
+        and not item.get("resumed_from_checkpoint")
+    )
     if (
         patch_discovery_acquisition
         and patch_discovery_acquisition.get("backend") == "firecrawl"
@@ -1150,6 +1384,7 @@ async def _refresh_hsguru_meta_matrix_unlocked(
         1
         for item in current_acquisition
         if str(item.get("backend") or "").startswith("scrape_do")
+        and not item.get("resumed_from_checkpoint")
     )
     if patch_discovery_acquisition and str(
         patch_discovery_acquisition.get("backend") or ""
@@ -1157,7 +1392,7 @@ async def _refresh_hsguru_meta_matrix_unlocked(
         scrape_do_requests += 1
     active_backends = {
         str(item.get("backend"))
-        for item in [*slice_acquisition, *current_acquisition]
+        for item in [*slice_acquisition, *current_acquisition, *fresh_slices]
         if item.get("backend")
     }
     if patch_discovery_acquisition and patch_discovery_acquisition.get("backend"):
@@ -1209,6 +1444,8 @@ async def _refresh_hsguru_meta_matrix_unlocked(
             "duplicate_groups": duplicate_groups,
             "cached_slices": cached_slice_count,
             "cached_current_formats": cached_current_formats,
+            "resumed_base_slices": len(resumed_slice_keys),
+            "resumed_current_formats": sorted(resumed_current_formats),
             "errors": errors,
         },
         "patch_discovery": patch_discovery_acquisition,
@@ -1252,6 +1489,7 @@ async def _refresh_hsguru_meta_matrix_unlocked(
         ]
         _record_current_history(fresh_current_rows, fetched_at)
         save_dataset(SOURCE_ID, dataset)
+    save_progress_checkpoint(state="complete" if complete else "in_progress")
     terminal_phase = (
         str(SourceState.TIMED_OUT)
         if run.timed_out
@@ -1301,9 +1539,11 @@ async def _refresh_hsguru_meta_matrix_unlocked(
             "rows_total": len(slices) * len(MIN_GAMES),
             "base_slices": len(slices),
             "fresh_base_slices": len(fresh_slices),
+            "resumed_base_slices": len(resumed_slice_keys),
             "cached_base_slices": cached_slice_count,
             "cached_slices": cached_slice_count,
             "cached_current_formats": cached_current_formats,
+            "resumed_current_formats": sorted(resumed_current_formats),
             "published": publishable,
             "current_catalog_archetypes": len(current_rows),
             "current_catalog_period": current_period,
@@ -1321,8 +1561,10 @@ async def _refresh_hsguru_meta_matrix_unlocked(
         "fetched_at": fetched_at,
         "base_slices": len(slices),
         "fresh_base_slices": len(fresh_slices),
+        "resumed_base_slices": len(resumed_slice_keys),
         "cached_base_slices": cached_slice_count,
         "cached_current_formats": cached_current_formats,
+        "resumed_current_formats": sorted(resumed_current_formats),
         "logical_slices": len(slices) * len(MIN_GAMES),
         "current_catalog_archetypes": len(current_rows),
         "current_catalog_period": current_period,

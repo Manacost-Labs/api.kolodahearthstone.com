@@ -825,6 +825,157 @@ def test_refresh_timeout_stops_new_slices_and_preserves_last_known_good() -> Non
     assert heartbeat_snapshots[-1] == result["job_run"]
 
 
+def test_refresh_resumes_successful_slices_from_timeout_checkpoint() -> None:
+    from datetime import timedelta
+
+    from app.firecrawl_backend import FirecrawlScrape
+    from app.hsguru_meta_matrix import SliceSpec, refresh_hsguru_meta_matrix
+    from app.job_run import JobRunContext
+
+    started_at = datetime(2026, 8, 13, 10, 0, tzinfo=UTC)
+
+    class MutableClock:
+        def __init__(self) -> None:
+            self.value = started_at
+
+        def __call__(self) -> datetime:
+            return self.value
+
+        def advance(self, seconds: float) -> None:
+            self.value += timedelta(seconds=seconds)
+
+    specs = (
+        SliceSpec(
+            "standard",
+            "all",
+            "past_week",
+            "any_player",
+            "standard|all|past_week|any_player",
+            "https://www.hsguru.com/meta?format=2&rank=all&period=past_week&min_games=100",
+        ),
+        SliceSpec(
+            "wild",
+            "all",
+            "past_week",
+            "any_player",
+            "wild|all|past_week|any_player",
+            "https://www.hsguru.com/meta?format=1&rank=all&period=past_week&min_games=100",
+        ),
+    )
+    clock = MutableClock()
+    checkpoint: dict[str, object] = {}
+    slice_calls: list[str] = []
+
+    def load_checkpoint(_source_id, _label):
+        return checkpoint or None
+
+    def save_checkpoint(_source_id, _label, payload):
+        checkpoint.clear()
+        checkpoint.update(payload)
+
+    async def scrape(spec):
+        slice_calls.append(spec.key)
+        if spec == specs[0] and len(slice_calls) == 1:
+            clock.advance(2)
+        return FirecrawlScrape(
+            html=HSGURU_TABLE,
+            markdown="",
+            screenshot=None,
+            metadata={"creditsUsed": 1},
+            status_code=200,
+            final_url=spec.url,
+        )
+
+    async def scrape_current(format_name, period):
+        return [
+            {
+                "format": format_name,
+                "archetype": f"Current {format_name}",
+                "games": 100,
+                "period": period,
+                "rank": "all",
+                "decks": [],
+            }
+        ], {
+            "format": format_name,
+            "backend": "firecrawl",
+            "request_credits": 1,
+            "rows": 1,
+        }
+
+    async def discover_patch(_cached):
+        return "patch_36.2.0", None
+
+    first_run = JobRunContext.start(
+        run_id="matrix-checkpoint-timeout",
+        timeout_seconds=1,
+        total_slices=0,
+        clock=clock,
+    )
+    with (
+        patch("app.hsguru_meta_matrix.iter_slice_specs", return_value=specs),
+        patch("app.hsguru_meta_matrix.load_dataset", return_value=None),
+        patch(
+            "app.hsguru_meta_matrix.load_baseline",
+            side_effect=load_checkpoint,
+            create=True,
+        ),
+        patch(
+            "app.hsguru_meta_matrix.save_baseline",
+            side_effect=save_checkpoint,
+            create=True,
+        ),
+        patch("app.hsguru_meta_matrix.enrich_current_rows_with_cached_decks"),
+        patch("app.hsguru_meta_matrix._record_current_history"),
+        patch("app.hsguru_meta_matrix.save_dataset") as save_dataset,
+        patch("app.hsguru_meta_matrix.save_status"),
+    ):
+        first = asyncio.run(
+            refresh_hsguru_meta_matrix(
+                concurrency=1,
+                attempts=1,
+                scrape=scrape,
+                scrape_current=scrape_current,
+                discover_patch=discover_patch,
+                run_context=first_run,
+            )
+        )
+
+        assert first["timed_out"] is True
+        assert slice_calls == [specs[0].key]
+        assert checkpoint["state"] == "in_progress"
+        assert [item["key"] for item in checkpoint["matrix_slices"]] == [specs[0].key]
+        save_dataset.assert_not_called()
+
+        slice_calls.clear()
+        second_run = JobRunContext.start(
+            run_id="matrix-checkpoint-resume",
+            timeout_seconds=30,
+            total_slices=0,
+            clock=clock,
+        )
+        second = asyncio.run(
+            refresh_hsguru_meta_matrix(
+                concurrency=1,
+                attempts=1,
+                scrape=scrape,
+                scrape_current=scrape_current,
+                discover_patch=discover_patch,
+                run_context=second_run,
+            )
+        )
+
+    assert slice_calls == [specs[1].key]
+    assert second["ok"] is True
+    assert second["complete"] is True
+    assert second["resumed_base_slices"] == 1
+    assert checkpoint["state"] == "complete"
+    dataset = save_dataset.call_args.args[1]
+    assert [item["key"] for item in dataset["data"]["structured"]["slices"]] == sorted(
+        spec.key for spec in specs
+    )
+
+
 def test_last_current_slice_finishing_after_deadline_is_not_published() -> None:
     from datetime import timedelta
 
