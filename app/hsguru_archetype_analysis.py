@@ -473,6 +473,36 @@ def _checkpoint_saved_at(checkpoint: dict[str, Any]) -> datetime | None:
     return None
 
 
+def _refresh_window_id(started_at: str) -> str:
+    digest = hashlib.sha256(f"{SOURCE_ID}\0{started_at}".encode()).hexdigest()[:24]
+    return f"{SOURCE_ID}:{digest}"
+
+
+def _pipeline_failure_reason_code(
+    errors: list[dict[str, str]],
+    provider_circuit_reason: str | None,
+) -> str:
+    signal = (
+        f"{provider_circuit_reason or ''} "
+        f"{json.dumps(errors, ensure_ascii=True, sort_keys=True)}"
+    ).casefold()
+    if any(marker in signal for marker in ("http 502", "http 503", "http 504")):
+        return "upstream_5xx"
+    if "429" in signal or "rate limit" in signal:
+        return "rate_limited"
+    if "timeout" in signal or "timed out" in signal:
+        return "timeout"
+    if any(marker in signal for marker in ("401", "unauthorized", "authentication")):
+        return "authentication"
+    if any(marker in signal for marker in ("403", "challenge", "blocked")):
+        return "access_blocked"
+    if any(marker in signal for marker in ("content validation", "parse", "schema")):
+        return "contract"
+    if any(marker in signal for marker in ("connect", "dns", "tls", "transport")):
+        return "transport"
+    return "unknown"
+
+
 def _retry_is_pending(entry: dict[str, Any] | None, now: datetime) -> bool:
     if not entry or entry.get("state") not in {
         "source_no_data",
@@ -714,6 +744,8 @@ async def _refresh_hsguru_archetype_analysis_unlocked(
             if isinstance(entry, dict)
         }
         negative_cache = cached_negative
+
+    refresh_window_id = _refresh_window_id(started_at)
 
     resumed_keys = {
         key
@@ -1195,11 +1227,17 @@ async def _refresh_hsguru_archetype_analysis_unlocked(
         failure_state = (
             SourceState.PARTIAL if cached_rows else SourceState.FETCH_ERROR
         )
+        failure_reason_code = _pipeline_failure_reason_code(
+            errors,
+            provider_circuit_reason,
+        )
         status = {
             "source_id": SOURCE_ID,
             "site": "hsguru",
             "category": "archetype_analysis",
             "state": failure_state,
+            "failure_reason_code": failure_reason_code,
+            "refresh_window_id": refresh_window_id,
             "fetched_at": started_at,
             "http_status": None,
             "backend": backend,
@@ -1241,6 +1279,8 @@ async def _refresh_hsguru_archetype_analysis_unlocked(
             "published": False,
             "retryable": True,
             "state": failure_state,
+            "failure_reason_code": failure_reason_code,
+            "refresh_window_id": refresh_window_id,
             "serving_cached_dataset": bool(cached_rows),
             "source_id": SOURCE_ID,
             "targets": len(targets),
@@ -1330,6 +1370,7 @@ async def _refresh_hsguru_archetype_analysis_unlocked(
         "site": "hsguru",
         "category": "archetype_analysis",
         "state": payload["state"],
+        "refresh_window_id": refresh_window_id,
         "fetched_at": started_at,
         "http_status": 200,
         "backend": payload["backend"],
@@ -1362,6 +1403,7 @@ async def _refresh_hsguru_archetype_analysis_unlocked(
         "published": True,
         "serving_cached_dataset": False,
         "state": payload["state"],
+        "refresh_window_id": refresh_window_id,
         "source_id": SOURCE_ID,
         "targets": len(targets),
         "targets_completed": len(completed_keys),

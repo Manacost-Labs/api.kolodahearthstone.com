@@ -829,7 +829,7 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
             nonlocal first_calls
             first_calls += 1
             if first_calls > 4:
-                raise RuntimeError("temporary provider outage")
+                raise RuntimeError("Scrape.do HTTP 502 ErrorCode 90 ROTATION_FAILED")
             if "/archetype/" in url:
                 return MATCHUPS_HTML, {
                     "backend": "scrape_do_super",
@@ -885,8 +885,10 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
             )
 
         self.assertFalse(first["published"])
+        self.assertEqual(first["failure_reason_code"], "upstream_5xx")
         self.assertEqual(first["targets_completed"], 2)
         self.assertTrue(second["published"])
+        self.assertEqual(first["refresh_window_id"], second["refresh_window_id"])
         self.assertEqual(second["resumed_targets"], 2)
         self.assertEqual(second_calls, 8)
         save_dataset.assert_called_once()
