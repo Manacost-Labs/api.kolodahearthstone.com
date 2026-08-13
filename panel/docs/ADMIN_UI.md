@@ -5,8 +5,9 @@
 `api.kolodahearthstone.com` is an operational catalogue for Hearthstone data. Its UI is
 optimized for fast scanning and maintenance rather than for public browsing.
 The server-rendered page remains intentionally dependency-free: PHP renders the
-catalogues, CSS provides the responsive design system, and a small inline script
-handles themes, automatic filters, previews, the mobile menu, and shortcuts.
+catalogues, CSS provides the responsive design system, and dependency-free
+JavaScript handles themes, automatic filters, previews, the mobile menu, and
+shortcuts.
 
 The trinket catalogue has a dedicated **Full art** column. It shows the local
 square original without a card frame and opens it through the shared lightbox.
@@ -25,6 +26,11 @@ The import and API contracts are documented in `LIBRARY_FULL_ART.md`.
   `analytics_module_registry()` and normalized before reaching the browser.
 - `assets/analytics.js` — URL-backed statistics state and generic table
   rendering. It never receives internal API credentials or arbitrary URLs.
+- `assets/panel-ui.js` — shared command palette, mobile navigation behavior and
+  persistent per-table column visibility. Labels are always derived through
+  `textContent`; preferences contain column indexes only.
+- `partials/command-palette.php` — allowlisted quick navigation available from
+  every authenticated page through `Ctrl/⌘ K`.
 - `assets/parsing-reliability.js` — dependency-free view model for observed and
   collecting parser-reliability states; the same pure logic is exercised in
   Node tests.
@@ -49,6 +55,9 @@ The import and API contracts are documented in `LIBRARY_FULL_ART.md`.
   DBFs are also searchable.
 - The action column remains sticky during horizontal table scrolling.
 - Catalogue and statistics tables provide a persistent compact-density option.
+- Large catalogue, analytics, parser, and token tables expose a shared column
+  picker. The first identity column and final action column stay visible; each
+  module stores only its hidden column indexes in local browser storage.
 - The parser workspace prioritizes error/partial sources, keeps source and
   action columns sticky, and exposes schedules, published row counts and recent
   run progress without loading raw operational logs into the initial view.

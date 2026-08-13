@@ -67,7 +67,8 @@ $apiTokens = [
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>API-токены · UI fixture</title>
-    <link rel="stylesheet" href="/assets/style.css?v=28">
+    <link rel="stylesheet" href="/assets/style.css?v=30">
+    <script src="/assets/panel-ui.js?v=1" defer></script>
 </head>
 <body>
 <main class="workspace">

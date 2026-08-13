@@ -45,6 +45,10 @@ declare(strict_types=1);
                 <button class="parser-density-button" type="button" data-parser-density aria-pressed="false">
                     Компактно
                 </button>
+                <details class="table-column-picker" data-column-picker data-table-target=".parser-source-table" data-storage-key="parser-sources">
+                    <summary>Колонки</summary>
+                    <div class="column-picker-menu" data-column-picker-menu></div>
+                </details>
                 <button class="button" type="button" data-run-section hidden>Запустить раздел</button>
             </div>
         </div>

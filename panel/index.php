@@ -1658,6 +1658,11 @@ $workspaceTitle = $action === 'parsers'
             : ($editCard
                 ? 'Редактировать карту'
                 : ($showHeroSkins ? 'Скины героев' : ($showPets ? 'Питомцы' : ($showCoins ? 'Монетки' : ($showHeroes ? 'Герои' : ($showTimewarped ? 'Хрономальные карты' : ($showConstructed ? 'Стандартные и вольные карты' : ($showLibrary ? library_type_label($libraryType) : 'Карты Полей сражений'))))))))))));
+$workspaceSection = $showApiTokens
+    ? 'Доступ'
+    : ($showParserControl
+        ? 'Операции'
+        : ($showAnalyticsDashboard ? 'Аналитика' : 'База данных'));
 ?>
 <!doctype html>
 <html lang="ru" data-theme="dark">
@@ -1667,13 +1672,14 @@ $workspaceTitle = $action === 'parsers'
     <meta name="robots" content="noindex,nofollow">
     <title>HS Data · Управление базой Hearthstone</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232563eb'/%3E%3Ctext x='32' y='40' text-anchor='middle' font-family='system-ui,sans-serif' font-size='25' font-weight='800' fill='white'%3EHS%3C/text%3E%3C/svg%3E">
-    <link rel="stylesheet" href="/assets/style.css?v=29">
+    <link rel="stylesheet" href="/assets/style.css?v=30">
+    <script src="/assets/panel-ui.js?v=1" defer></script>
     <script src="/assets/parsing-reliability.js?v=1" defer></script>
     <script src="/assets/analytics.js?v=4" defer></script>
     <script src="/assets/parser-control-view.js?v=1" defer></script>
     <script src="/assets/parser-control.js?v=1" defer></script>
 </head>
-<body>
+<body data-page="<?= h($action) ?>">
 <main class="shell">
     <aside class="sidebar" aria-label="Навигация по базе">
         <div class="sidebar-brand">
@@ -1683,7 +1689,7 @@ $workspaceTitle = $action === 'parsers'
                 </svg>
             </span>
             <div>
-                <h1>HS Data</h1>
+                <strong>HS Data</strong>
                 <p>центр управления данными</p>
             </div>
             <button class="sidebar-toggle" type="button" aria-controls="sidebarNav" aria-expanded="false" data-sidebar-toggle>
@@ -1773,17 +1779,27 @@ $workspaceTitle = $action === 'parsers'
     <section class="workspace">
         <header class="topbar">
             <div class="topbar-copy">
-                <h1><?= h($workspaceTitle) ?></h1>
-                <?php if ($action === 'list'): ?>
-                    <span class="result-range"><?= $pageFrom ?>–<?= $pageTo ?> из <?= $filteredTotal ?></span>
-                <?php endif; ?>
+                <span class="topbar-context"><?= h($workspaceSection) ?></span>
+                <div>
+                    <h1><?= h($workspaceTitle) ?></h1>
+                    <?php if ($action === 'list'): ?>
+                        <span class="result-range"><?= $pageFrom ?>–<?= $pageTo ?> из <?= $filteredTotal ?></span>
+                    <?php endif; ?>
+                </div>
             </div>
-            <div class="panel-account" aria-label="Аккаунт администратора">
-                <span class="panel-account-name"><i aria-hidden="true"></i>GitHub · <?= h($panelUser['login']) ?></span>
-                <form action="/auth/logout" method="post">
-                    <input type="hidden" name="csrf" value="<?= h(panel_logout_csrf_token()) ?>">
-                    <button class="panel-logout" type="submit">Выйти</button>
-                </form>
+            <div class="topbar-actions">
+                <button class="topbar-command" type="button" data-command-open aria-haspopup="dialog" aria-keyshortcuts="Control+K Meta+K">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m20 20-4.3-4.3m2.3-5.2a7.5 7.5 0 1 1-15 0 7.5 7.5 0 0 1 15 0Z"/></svg>
+                    <span>Быстрый переход</span>
+                    <kbd>⌘ K</kbd>
+                </button>
+                <div class="panel-account" aria-label="Аккаунт администратора">
+                    <span class="panel-account-name"><i aria-hidden="true"></i>GitHub · <?= h($panelUser['login']) ?></span>
+                    <form action="/auth/logout" method="post">
+                        <input type="hidden" name="csrf" value="<?= h(panel_logout_csrf_token()) ?>">
+                        <button class="panel-logout" type="submit">Выйти</button>
+                    </form>
+                </div>
             </div>
         </header>
 
@@ -2113,6 +2129,10 @@ $workspaceTitle = $action === 'parsers'
                 <button class="button" type="submit">Найти</button>
                 <a class="button ghost" href="<?= h($resetUrl) ?>">Сброс</a>
                 <button class="table-density-toggle" type="button" data-table-density aria-pressed="false">Компактно</button>
+                <details class="table-column-picker" data-column-picker data-table-target=".cards-table > table" data-storage-key="catalogue-<?= h($cardType !== '' ? $cardType : 'battlegrounds') ?>">
+                    <summary>Колонки</summary>
+                    <div class="column-picker-menu" data-column-picker-menu></div>
+                </details>
                 </div>
             </form>
             <?php if ($activeFilters): ?>
@@ -4150,5 +4170,6 @@ $workspaceTitle = $action === 'parsers'
     });
 })();
 </script>
+<?php require __DIR__ . '/partials/command-palette.php'; ?>
 </body>
 </html>

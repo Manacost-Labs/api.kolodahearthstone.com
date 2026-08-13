@@ -22,7 +22,7 @@ function panel_parser_control_csrf_token(): string
 <body>
 <main class="shell">
     <aside class="sidebar">
-        <div class="sidebar-brand"><span class="brand-mark">HS</span><div><h1>HS Data</h1><p>центр управления данными</p></div></div>
+        <div class="sidebar-brand"><span class="brand-mark">HS</span><div><strong>HS Data</strong><p>центр управления данными</p></div></div>
         <nav class="side-nav">
             <section class="side-section"><h2>Основное</h2><a class="side-link" href="#"><span>Карты BG</span><b>1240</b></a><a class="side-link" href="#"><span>Герои</span><b>105</b></a></section>
             <section class="side-section"><h2>Операции</h2><a class="side-link active" href="#"><span>Парсеры</span><b>Live</b></a></section>
@@ -60,5 +60,6 @@ window.fetch = async () => ({ok:true,status:200,json:async()=>({ok:true,data:fix
 </script>
 <script src="/assets/parser-control-view.js"></script>
 <script src="/assets/parser-control.js"></script>
+<script src="/assets/panel-ui.js"></script>
 </body>
 </html>
