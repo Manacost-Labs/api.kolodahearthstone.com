@@ -34,7 +34,7 @@ WINDOWS = (
     ("7d", timedelta(days=7)),
     ("30d", timedelta(days=30)),
 )
-METHODOLOGY_VERSION = "logical-source-observed-v7"
+METHODOLOGY_VERSION = "logical-source-observed-v8"
 SLO_TARGET_RATE_PCT = 99.0
 PIPELINE_SCHEDULE_LEDGER_READY = False
 COVERAGE_BUCKET_SECONDS = 24 * 60 * 60
@@ -288,11 +288,15 @@ def record_terminal_results(
     path: Path | None = None,
     coverage_scope: str = "partial",
     expected_source_count: int | None = None,
+    refresh_window_id: str | None = None,
 ) -> int:
     """Persist terminal source results atomically and idempotently.
 
     A deterministic key for ``run_id + source_id`` prevents a telemetry retry
-    from inflating the denominator. Only bounded operational fields are stored.
+    from creating a duplicate physical attempt. When retries share an explicit
+    ``refresh_window_id``, reports use their latest non-skipped terminal result
+    as one logical SLO outcome while retaining every row for cost accounting.
+    Only bounded operational fields are stored.
     """
 
     completed_at = _as_utc(finished_at or datetime.now(UTC))
@@ -313,6 +317,11 @@ def record_terminal_results(
         reason_code = classify_failure_reason(result)
         ai_fields = _ai_terminal_fields(result)
         terminal_state = _bounded_terminal_state(result.get("state"))
+        result_refresh_window_id = _bounded_refresh_window_id(
+            refresh_window_id
+            if refresh_window_id is not None
+            else result.get("refresh_window_id")
+        )
         attempt_id = hashlib.sha256(
             f"{normalized_run_id}\0{source_id}".encode()
         ).hexdigest()
@@ -320,6 +329,7 @@ def record_terminal_results(
             (
                 attempt_id,
                 normalized_run_id,
+                result_refresh_window_id,
                 source_id,
                 completed_epoch,
                 outcome,
@@ -337,7 +347,7 @@ def record_terminal_results(
     cohort_hash = (
         canonical_scrape_cohort_hash() or "" if normalized_scope == "full" else ""
     )
-    observed_sources = sum(1 for row in rows if row[4] != "skipped")
+    observed_sources = sum(1 for row in rows if row[5] != "skipped")
     try:
         expected_sources = (
             max(0, int(expected_source_count))
@@ -359,6 +369,7 @@ def record_terminal_results(
                 INSERT OR IGNORE INTO source_attempts (
                     attempt_id,
                     run_id,
+                    refresh_window_id,
                     source_id,
                     finished_at,
                     outcome,
@@ -371,7 +382,7 @@ def record_terminal_results(
                     ai_diagnosis_domain,
                     ai_quarantined,
                     recorded_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 row,
             )
@@ -560,6 +571,7 @@ def _schema_is_current(connection: sqlite3.Connection) -> bool:
     return {
         "attempt_id",
         "run_id",
+        "refresh_window_id",
         "source_id",
         "finished_at",
         "outcome",
@@ -605,6 +617,7 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
                 CREATE TABLE IF NOT EXISTS source_attempts (
                     attempt_id TEXT PRIMARY KEY,
                     run_id TEXT NOT NULL,
+                    refresh_window_id TEXT NOT NULL DEFAULT '',
                     source_id TEXT NOT NULL,
                     finished_at REAL NOT NULL,
                     outcome TEXT NOT NULL CHECK (
@@ -634,6 +647,7 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
                 for row in connection.execute("PRAGMA table_info(source_attempts)")
             }
             migrations = {
+                "refresh_window_id": "TEXT NOT NULL DEFAULT ''",
                 "reason_code": "TEXT NOT NULL DEFAULT 'unknown'",
                 "ai_review_state": "TEXT NOT NULL DEFAULT 'not_run'",
                 "ai_review_verdict": "TEXT NOT NULL DEFAULT 'not_run'",
@@ -651,6 +665,12 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
                 """
                 CREATE INDEX IF NOT EXISTS source_attempts_finished_at_idx
                 ON source_attempts (finished_at)
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS source_attempts_refresh_window_idx
+                ON source_attempts (refresh_window_id, source_id, finished_at)
                 """
             )
             connection.execute(
@@ -704,9 +724,30 @@ def _query_window(
     from_at = report_at - duration
     rows = connection.execute(
         """
+        WITH ranked_attempts AS (
+            SELECT
+                attempt_id,
+                outcome,
+                ROW_NUMBER() OVER (
+                    PARTITION BY
+                        source_id,
+                        CASE
+                            WHEN refresh_window_id != ''
+                                THEN 'window:' || refresh_window_id
+                            ELSE 'attempt:' || attempt_id
+                        END
+                    ORDER BY
+                        CASE WHEN outcome = 'skipped' THEN 1 ELSE 0 END,
+                        finished_at DESC,
+                        recorded_at DESC,
+                        attempt_id DESC
+                ) AS logical_rank
+            FROM source_attempts
+            WHERE finished_at >= ? AND finished_at <= ?
+        )
         SELECT outcome, COUNT(*)
-        FROM source_attempts
-        WHERE finished_at >= ? AND finished_at <= ?
+        FROM ranked_attempts
+        WHERE logical_rank = 1
         GROUP BY outcome
         """,
         (from_at.timestamp(), report_at.timestamp()),
@@ -718,9 +759,31 @@ def _query_window(
 
     reason_rows = connection.execute(
         """
+        WITH ranked_attempts AS (
+            SELECT
+                attempt_id,
+                outcome,
+                reason_code,
+                ROW_NUMBER() OVER (
+                    PARTITION BY
+                        source_id,
+                        CASE
+                            WHEN refresh_window_id != ''
+                                THEN 'window:' || refresh_window_id
+                            ELSE 'attempt:' || attempt_id
+                        END
+                    ORDER BY
+                        CASE WHEN outcome = 'skipped' THEN 1 ELSE 0 END,
+                        finished_at DESC,
+                        recorded_at DESC,
+                        attempt_id DESC
+                ) AS logical_rank
+            FROM source_attempts
+            WHERE finished_at >= ? AND finished_at <= ?
+        )
         SELECT COALESCE(reason_code, 'unknown'), COUNT(*)
-        FROM source_attempts
-        WHERE finished_at >= ? AND finished_at <= ?
+        FROM ranked_attempts
+        WHERE logical_rank = 1
           AND outcome IN ('lkg_served', 'failed', 'timed_out')
         GROUP BY COALESCE(reason_code, 'unknown')
         """,
@@ -731,6 +794,16 @@ def _query_window(
         bounded_reason = str(reason) if reason in failure_reasons else "unknown"
         failure_reasons[bounded_reason] += int(count)
 
+    physical_attempts = int(
+        connection.execute(
+            """
+            SELECT COUNT(*)
+            FROM source_attempts
+            WHERE finished_at >= ? AND finished_at <= ?
+            """,
+            (from_at.timestamp(), report_at.timestamp()),
+        ).fetchone()[0]
+    )
     total_attempts = sum(counts.values())
     eligible_attempts = sum(counts[outcome] for outcome in ELIGIBLE_OUTCOMES)
     full_fresh = counts["fresh_published"]
@@ -755,6 +828,7 @@ def _query_window(
         "to_at": report_at.isoformat(),
         "measurement_status": "observed" if measurement_complete else "collecting",
         "coverage_ratio": coverage_ratio,
+        "physical_attempts": physical_attempts,
         "total_attempts": total_attempts,
         "eligible_attempts": eligible_attempts,
         "counts": counts,
@@ -789,6 +863,7 @@ def _empty_report(report_at: datetime) -> dict[str, Any]:
                 "to_at": report_at.isoformat(),
                 "measurement_status": "collecting",
                 "coverage_ratio": 0.0,
+                "physical_attempts": 0,
                 "total_attempts": 0,
                 "eligible_attempts": 0,
                 "counts": {outcome: 0 for outcome in OUTCOMES},
@@ -816,7 +891,10 @@ def _empty_report(report_at: datetime) -> dict[str, Any]:
 def _methodology() -> dict[str, Any]:
     return {
         "version": METHODOLOGY_VERSION,
-        "unit": "one terminal outcome per source in a refresh run",
+        "unit": (
+            "one final terminal outcome per source in an explicit refresh window; "
+            "otherwise one outcome per refresh run"
+        ),
         "scope": "observed_scrape_and_pipeline_sources",
         "completeness": "observed_attempts_only",
         "limitations": [
@@ -836,6 +914,7 @@ def _methodology() -> dict[str, Any]:
         "excluded_outcomes": ["skipped"],
         "slo_target_rate_pct": SLO_TARGET_RATE_PCT,
         "failure_reason_values": list(FAILURE_REASONS),
+        "physical_attempts_method": "all persisted source attempts before window folding",
         "ai_accuracy_method": "human_labels_required",
     }
 
@@ -1017,6 +1096,19 @@ def _failure_signal(status: Mapping[str, object]) -> str:
         status.get("detail"),
     )
     return " ".join(str(value).casefold()[:1000] for value in values if value)[:4000]
+
+
+def _bounded_refresh_window_id(value: object) -> str:
+    """Keep a useful correlation ID without persisting arbitrary secret text."""
+
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    if len(raw) <= 160 and all(
+        character.isalnum() or character in {":", ".", "_", "-"} for character in raw
+    ):
+        return raw
+    return f"sha256:{hashlib.sha256(raw.encode()).hexdigest()}"
 
 
 def _bounded_http_status(value: object) -> int | None:

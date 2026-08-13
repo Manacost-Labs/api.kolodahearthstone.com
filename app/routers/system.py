@@ -157,6 +157,7 @@ class ReliabilityWindow(BaseModel):
     to_at: str
     measurement_status: Literal["collecting", "observed"]
     coverage_ratio: float = Field(ge=0.0, le=1.0)
+    physical_attempts: int | None = Field(default=None, ge=0)
     total_attempts: int = Field(ge=0)
     eligible_attempts: int = Field(ge=0)
     counts: ReliabilityCounts
@@ -187,6 +188,7 @@ class ReliabilityMethodology(BaseModel):
     excluded_outcomes: list[str]
     slo_target_rate_pct: float = Field(ge=0.0, le=100.0)
     failure_reason_values: list[str]
+    physical_attempts_method: str | None = None
     ai_accuracy_method: Literal["human_labels_required"]
 
 

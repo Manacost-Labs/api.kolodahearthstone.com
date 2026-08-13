@@ -39,6 +39,7 @@ def _run_pipeline_command_with_telemetry(
     operation: Callable[[], dict[str, object]],
     *,
     diagnostic: bool = False,
+    refresh_window_id: str | None = None,
 ) -> dict[str, object]:
     """Run one dedicated pipeline and persist its terminal outcome best-effort.
 
@@ -56,7 +57,14 @@ def _run_pipeline_command_with_telemetry(
             source = SOURCE_BY_ID.get(source_id)
             if source is None or source.kind != "pipeline":
                 raise ValueError(f"Unregistered pipeline source: {source_id}")
-            record_terminal_results(run_id, [status])
+            if refresh_window_id is None:
+                record_terminal_results(run_id, [status])
+            else:
+                record_terminal_results(
+                    run_id,
+                    [status],
+                    refresh_window_id=refresh_window_id,
+                )
         except Exception as telemetry_exc:  # noqa: BLE001 - telemetry is best-effort
             logger.warning(
                 "Pipeline reliability telemetry write failed for %s: %s",

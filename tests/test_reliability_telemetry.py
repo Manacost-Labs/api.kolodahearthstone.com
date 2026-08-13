@@ -115,6 +115,102 @@ def test_failure_reasons_are_bounded(status: dict[str, object], reason: str) -> 
     assert classify_failure_reason(status) == reason
 
 
+def test_recovery_attempts_share_one_final_refresh_window_slo_outcome(
+    tmp_path: Path,
+) -> None:
+    now = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
+    path = tmp_path / "reliability.sqlite3"
+    window_id = "hsguru-analysis:2026-08-11"
+    record_terminal_results(
+        "scheduled-run",
+        [
+            _status(
+                "pipeline-source",
+                state="fetch_error",
+                failure_reason_code="upstream_5xx",
+            )
+        ],
+        finished_at=now - timedelta(hours=2),
+        path=path,
+        refresh_window_id=window_id,
+    )
+    record_terminal_results(
+        "recovery-run",
+        [_status("pipeline-source")],
+        finished_at=now - timedelta(hours=1),
+        path=path,
+        refresh_window_id=window_id,
+    )
+
+    day = build_reliability_report(now=now, path=path)["windows"][0]
+
+    assert day["physical_attempts"] == 2
+    assert day["total_attempts"] == 1
+    assert day["eligible_attempts"] == 1
+    assert day["counts"]["fresh_published"] == 1
+    assert day["counts"]["failed"] == 0
+    assert day["failure_reasons"]["upstream_5xx"] == 0
+    with sqlite3.connect(path) as connection:
+        stored = connection.execute(
+            "SELECT COUNT(*), COUNT(DISTINCT refresh_window_id) FROM source_attempts"
+        ).fetchone()
+    assert stored == (2, 1)
+
+
+def test_skipped_recovery_does_not_erase_a_refresh_window_failure(
+    tmp_path: Path,
+) -> None:
+    now = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
+    path = tmp_path / "reliability.sqlite3"
+    record_terminal_results(
+        "failed-run",
+        [
+            _status(
+                "pipeline-source",
+                state="timed_out",
+                failure_reason_code="timeout",
+            )
+        ],
+        finished_at=now - timedelta(hours=2),
+        path=path,
+        refresh_window_id="pipeline:2026-08-11",
+    )
+    record_terminal_results(
+        "locked-recovery",
+        [_status("pipeline-source", state="locked", skipped=True)],
+        finished_at=now - timedelta(hours=1),
+        path=path,
+        refresh_window_id="pipeline:2026-08-11",
+    )
+
+    day = build_reliability_report(now=now, path=path)["windows"][0]
+
+    assert day["physical_attempts"] == 2
+    assert day["total_attempts"] == 1
+    assert day["eligible_attempts"] == 1
+    assert day["counts"]["timed_out"] == 1
+    assert day["counts"]["skipped"] == 0
+    assert day["failure_reasons"]["timeout"] == 1
+
+
+def test_attempts_without_refresh_window_remain_independent(tmp_path: Path) -> None:
+    now = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
+    path = tmp_path / "reliability.sqlite3"
+    for index in range(2):
+        record_terminal_results(
+            f"legacy-run-{index}",
+            [_status("same-source")],
+            finished_at=now - timedelta(minutes=index),
+            path=path,
+        )
+
+    day = build_reliability_report(now=now, path=path)["windows"][0]
+
+    assert day["physical_attempts"] == 2
+    assert day["total_attempts"] == 2
+    assert day["counts"]["fresh_published"] == 2
+
+
 def test_report_uses_one_logical_attempt_and_excludes_skips(tmp_path: Path) -> None:
     now = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
     path = tmp_path / "reliability.sqlite3"
@@ -514,6 +610,17 @@ def test_schema_migrates_existing_database_without_losing_rows(tmp_path: Path) -
     assert day["counts"]["lkg_served"] == 2
     assert day["failure_reasons"]["proxy_payment"] == 1
     assert day["failure_reasons"]["unknown"] == 1
+    assert day["physical_attempts"] == 2
+    with sqlite3.connect(path) as connection:
+        columns = {
+            str(row[1])
+            for row in connection.execute("PRAGMA table_info(source_attempts)")
+        }
+        legacy_window = connection.execute(
+            "SELECT refresh_window_id FROM source_attempts WHERE attempt_id = 'old'"
+        ).fetchone()
+    assert "refresh_window_id" in columns
+    assert legacy_window == ("",)
 
 
 def test_schema_migration_is_serialized_across_processes(tmp_path: Path) -> None:

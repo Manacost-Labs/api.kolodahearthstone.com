@@ -12,6 +12,7 @@ from app.cli import _run_pipeline_command_with_telemetry
 from app.parser_control import _run_pipeline_source
 from app.reliability_telemetry import (
     build_reliability_report,
+    classify_failure_reason,
     classify_terminal_status,
 )
 
@@ -198,6 +199,37 @@ def test_pipeline_exception_is_recorded_and_then_re_raised() -> None:
         "failure_reason_code": "contract",
     }
     assert classify_terminal_status(status) == "failed"
+
+
+@pytest.mark.parametrize("reason", ["upstream_5xx", "timeout", "contract"])
+def test_dedicated_pipeline_preserves_explicit_bounded_failure_reason(
+    reason: str,
+) -> None:
+    result: dict[str, object] = {
+        "ok": False,
+        "state": "fetch_error",
+        "failure_reason_code": reason,
+    }
+
+    with patch("app.reliability_telemetry.record_terminal_results") as record:
+        _run_pipeline_command_with_telemetry("hsguru_fun_decks", lambda: result)
+
+    status = record.call_args.args[1][0]
+    assert status["failure_reason_code"] == reason
+    assert classify_failure_reason(status) == reason
+
+
+def test_dedicated_pipeline_forwards_logical_refresh_window() -> None:
+    with patch("app.reliability_telemetry.record_terminal_results") as record:
+        _run_pipeline_command_with_telemetry(
+            "hsguru_fun_decks",
+            lambda: {"ok": True, "published": True},
+            refresh_window_id="hsguru-fun-decks:2026-08-11",
+        )
+
+    assert record.call_args.kwargs == {
+        "refresh_window_id": "hsguru-fun-decks:2026-08-11"
+    }
 
 
 @pytest.mark.parametrize(

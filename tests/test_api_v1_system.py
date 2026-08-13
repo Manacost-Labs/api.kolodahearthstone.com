@@ -108,6 +108,7 @@ def test_v1_parsing_reliability_returns_sanitized_public_contract() -> None:
                 "to_at": "2026-08-11T12:00:00+00:00",
                 "measurement_status": "collecting",
                 "coverage_ratio": 1.0,
+                "physical_attempts": 12,
                 "total_attempts": 10,
                 "eligible_attempts": 10,
                 "counts": {
