@@ -11,9 +11,10 @@ from urllib.parse import parse_qs, quote, urlencode, urlparse
 from bs4 import BeautifulSoup, Tag
 
 from .firecrawl_backend import scrape_source_with_options
+from .publish_gate import validate_candidate_for_publish
 from .resource_locks import ResourceLocked, ResourceLockSet
 from .source_state import SourceState
-from .sources import Source
+from .sources import SOURCE_BY_ID, Source
 from .storage import (
     load_baseline,
     load_dataset,
@@ -1328,6 +1329,8 @@ async def _refresh_hsguru_archetype_analysis_unlocked(
             "upstream_card_stats_min_drawn_count": 0,
         },
         "coverage": coverage,
+        "expected_targets": target_descriptors,
+        "expected_targets_total": len(target_descriptors),
         "negative_cache": negative_rows,
         "archetypes": rows,
     }
@@ -1349,6 +1352,49 @@ async def _refresh_hsguru_archetype_analysis_unlocked(
             },
         },
     }
+    gate = validate_candidate_for_publish(
+        SOURCE_BY_ID[SOURCE_ID],
+        payload["data"],
+        backend=backend,
+    )
+    if not gate.ok:
+        failure = {
+            "ok": False,
+            "published": False,
+            "retryable": True,
+            "state": SourceState.QUALITY_ERROR,
+            "failure_reason_code": "contract",
+            "refresh_window_id": refresh_window_id,
+            "serving_cached_dataset": bool(cached_rows),
+            "source_id": SOURCE_ID,
+            "targets": len(targets),
+            "targets_completed": len(completed_keys),
+            "targets_remaining": 0,
+            "resumed_targets": len(resumed_keys),
+            "archetypes": len(cached_rows),
+            "coverage": coverage_for(cached_rows),
+            "errors": [{"kind": "publication_gate", "error": gate.reason}],
+            "errors_total": 1,
+            "recovery": checkpoint_recovery,
+            "negative_cache_entries": len(negative_rows),
+            "card_stats_requests_skipped": card_stats_requests_skipped,
+            "firecrawl_credits_used": firecrawl_credits,
+            "scrape_do_credits_used": scrape_do_credits,
+        }
+        save_status(
+            SOURCE_ID,
+            {
+                **failure,
+                "site": "hsguru",
+                "category": "archetype_analysis",
+                "fetched_at": started_at,
+                "backend": backend,
+                "rows_total": len(cached_rows),
+                "last_refresh_state": SourceState.QUALITY_ERROR,
+                "last_refresh_at": _now(),
+            },
+        )
+        return failure
     save_dataset(SOURCE_ID, payload)
     if checkpoint_enabled:
         save_baseline(

@@ -490,6 +490,23 @@ CONTRACTS[HSGURU_STREAMER_ROLLING_SOURCE_ID] = SourceContract(
     min_html_bytes=8_000,
 )
 
+CONTRACTS["hsguru_archetype_analysis"] = SourceContract(
+    source_id="hsguru_archetype_analysis",
+    structured_type="hsguru_archetype_analysis",
+    allow_browser_fallback=True,
+    min_rows=1,
+    critical_fields=("format", "archetype"),
+    min_field_fill_rate=1.0,
+    regression_drop_ratio=0.30,
+    volatility="daily",
+    fallback_policy="preserve_previous_good",
+    recommendation=(
+        "Publish only an exact, semantically validated target set; incomplete "
+        "provider runs must preserve the previous good snapshot."
+    ),
+    min_html_bytes=2_000,
+)
+
 for _sid in (
     "hsguru_streamer_decks_legend_1000",
     "hsguru_meta_standard_legend",
@@ -628,6 +645,12 @@ def _rows_for_structured(structured: dict[str, Any]) -> list[dict[str, Any]]:
         return [row for row in (structured.get("matchups") or []) if isinstance(row, dict)]
     if stype == "streamer_decks":
         return [row for row in (structured.get("rows") or []) if isinstance(row, dict)]
+    if stype == "hsguru_archetype_analysis":
+        return [
+            row
+            for row in (structured.get("archetypes") or [])
+            if isinstance(row, dict)
+        ]
     if stype == "bg_card_stats":
         return [
             row

@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlparse
 
+from .hsguru_archetype_contract import validate_hsguru_archetype_analysis
 from .hsreplay_card_periods import (
     HSREPLAY_CARD_PERIOD_SOURCE_IDS,
     STANDARD_HSREPLAY_CARD_PERIOD_SOURCE_IDS,
@@ -1771,6 +1772,18 @@ def _validate_firestone_standard(
     return report
 
 
+def _validate_hsguru_archetype_analysis(
+    _source_id: str,
+    structured: dict[str, Any],
+) -> ValidationReport:
+    contract_result = validate_hsguru_archetype_analysis(structured)
+    report = ValidationReport(score=contract_result.score)
+    report.metrics.update(contract_result.metrics)
+    for issue in contract_result.issues:
+        report.add_issue(issue.code, issue.message, field=issue.field)
+    return report
+
+
 _VALIDATORS: dict[str, Callable[[str, dict[str, Any]], ValidationReport]] = {
     "bg_heroes": _validate_bg_heroes,
     "vicious_live": _validate_vicious_live,
@@ -1794,6 +1807,7 @@ _VALIDATORS: dict[str, Callable[[str, dict[str, Any]], ValidationReport]] = {
     "matchups": _validate_hsguru_matchups,
     "hearthstone_decks": _validate_hearthstone_decks,
     "firestone_standard": _validate_firestone_standard,
+    "hsguru_archetype_analysis": _validate_hsguru_archetype_analysis,
 }
 
 

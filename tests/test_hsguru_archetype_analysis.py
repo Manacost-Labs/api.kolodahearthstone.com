@@ -531,7 +531,9 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
             saved["payload"]["data"]["structured"]["negative_cache"], []
         )
 
-    def test_refresh_skips_card_stats_while_negative_cache_is_fresh(self) -> None:
+    def test_cached_negative_gap_is_not_published_as_a_fresh_complete_result(
+        self,
+    ) -> None:
         now = datetime(2026, 7, 24, 12, 0, tzinfo=UTC)
         calls: list[str] = []
 
@@ -590,10 +592,9 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
         self.assertIn("/archetype/", calls[0])
         self.assertEqual(result["card_stats_requests_skipped"], 1)
         self.assertEqual(result["firecrawl_credits_used"], 1)
-        self.assertEqual(
-            saved["payload"]["data"]["structured"]["negative_cache"],
-            [cached_gap],
-        )
+        self.assertFalse(result["published"])
+        self.assertEqual(result["failure_reason_code"], "contract")
+        self.assertEqual(saved, {})
 
     def test_refresh_retries_negative_cache_from_stricter_card_filters(self) -> None:
         now = datetime(2026, 7, 24, 12, 0, tzinfo=UTC)
@@ -1297,6 +1298,47 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
                 checkpoint["target_signature"],
                 _target_signature(expected_targets),
             )
+
+    def test_complete_refresh_rejects_a_candidate_that_fails_the_publish_gate(
+        self,
+    ) -> None:
+        targets = [{"format": "standard", "archetype": "Contract Mage"}]
+
+        async def fetch_html(url: str):
+            html = MATCHUPS_HTML if "/archetype/" in url else CARD_STATS_HTML
+            return html, {"backend": "scrape_do_super", "request_credits": 25}
+
+        with (
+            patch(
+                "app.hsguru_archetype_analysis._active_archetypes",
+                return_value=targets,
+            ),
+            patch(
+                "app.hsguru_archetype_analysis._previous_analysis",
+                return_value={},
+            ),
+            patch(
+                "app.hsguru_archetype_analysis._previous_negative_cache",
+                return_value={},
+            ),
+            patch(
+                "app.hsguru_archetype_analysis.validate_candidate_for_publish",
+                return_value=SimpleNamespace(ok=False, reason="contract mismatch"),
+                create=True,
+            ),
+            patch("app.hsguru_archetype_analysis.save_dataset") as save_dataset,
+            patch("app.hsguru_archetype_analysis.save_status"),
+        ):
+            result = asyncio.run(
+                refresh_hsguru_archetype_analysis(
+                    concurrency=1,
+                    fetch_html=fetch_html,
+                )
+            )
+
+        self.assertFalse(result["published"])
+        self.assertEqual(result["failure_reason_code"], "contract")
+        save_dataset.assert_not_called()
 
     def test_expired_checkpoint_gap_is_retried_and_stale_unavailable_is_cleared(
         self,
