@@ -16,7 +16,7 @@ SECOND_AFTER_CMD=()
 THIRD_AFTER_CMD=()
 
 usage() {
-  echo "Usage: $0 {cards|libraries|hero-skins|hero-skins-refresh|pets|coins|heroes|heroes-refresh|timewarped|timewarped-refresh|wiki-meta-missing|wiki-meta-full|constructed-cards|constructed-images|constructed-related|constructed-related-wiki-art|constructed-wiki-missing|constructed-wiki-refresh|diamond-cards}" >&2
+  echo "Usage: $0 {cards|libraries|hero-skins|hero-skins-refresh|pets|coins|heroes|heroes-refresh|timewarped|timewarped-refresh|wiki-meta-missing|wiki-meta-full|constructed-cards|constructed-images|constructed-related|constructed-related-wiki-art|constructed-wiki-missing|constructed-wiki-refresh|diamond-cards|horizontal-art}" >&2
 }
 
 if [[ -z "$JOB" ]]; then
@@ -116,6 +116,10 @@ case "$JOB" in
   diamond-cards)
     CMD=("$PYTHON" "$APP_ROOT/scripts/sync_diamond_cards.py")
     SMOKE_URLS=("$API_BASE/diamond-cards?per_page=1" "$API_BASE/constructed-cards?media=diamond&per_page=1" "$API_BASE/meta")
+    ;;
+  horizontal-art)
+    CMD=("$PYTHON" "$APP_ROOT/scripts/sync_horizontal_art.py")
+    SMOKE_URLS=("$API_BASE/cards?per_page=1" "$API_BASE/constructed-cards?per_page=1" "$API_BASE/heroes?per_page=1")
     ;;
   *)
     usage

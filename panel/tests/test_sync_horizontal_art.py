@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -59,6 +60,65 @@ class HorizontalArtTest(unittest.TestCase):
             self.create_source(source, "243x64")
             with self.assertRaisesRegex(ValueError, "Unsupported source kind"):
                 horizontal.render_horizontal_art(source, target, "unknown")
+
+    def test_process_local_candidate_is_idempotent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            uploads = root / "uploads"
+            source = uploads / "art" / "TEST_CARD.jpg"
+            source.parent.mkdir(parents=True)
+            self.create_source(source, "900x1200")
+            candidate = horizontal.Candidate(
+                "battleground_card",
+                "TEST_CARD",
+                123,
+                "/uploads/art/TEST_CARD.jpg",
+                "art",
+            )
+            with (
+                mock.patch.object(horizontal, "APP_ROOT", root),
+                mock.patch.object(horizontal, "UPLOAD_ROOT", uploads),
+            ):
+                generated = horizontal.process_candidate(
+                    candidate,
+                    None,
+                    force=False,
+                    dry_run=False,
+                )
+                self.assertEqual(generated["action"], "generated")
+                target = horizontal.local_upload_path(generated["public_path"])
+                self.assertEqual(horizontal.identify_size(target), (320, 64))
+                unchanged = horizontal.process_candidate(
+                    candidate,
+                    {
+                        "status": "ready",
+                        "source_signature": generated["source_signature"],
+                        "recipe_version": horizontal.RECIPE_VERSION,
+                    },
+                    force=False,
+                    dry_run=False,
+                )
+                self.assertEqual(unchanged["action"], "unchanged")
+
+    def test_local_upload_path_rejects_escape(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            uploads = root / "uploads"
+            uploads.mkdir()
+            with (
+                mock.patch.object(horizontal, "APP_ROOT", root),
+                mock.patch.object(horizontal, "UPLOAD_ROOT", uploads),
+            ):
+                with self.assertRaisesRegex(ValueError, "escapes media root"):
+                    horizontal.local_upload_path("/uploads/../outside.webp")
+
+    def test_job_and_timer_are_wired(self) -> None:
+        runner = (ROOT / "scripts" / "run_sync_job.sh").read_text(encoding="utf-8")
+        timer = ROOT / "systemd" / "kolodahs-sync-horizontal-art.timer"
+        self.assertIn("horizontal-art)", runner)
+        self.assertIn('sync_horizontal_art.py"', runner)
+        self.assertTrue(timer.is_file())
+        self.assertIn("kolodahs-sync@horizontal-art.service", timer.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":
