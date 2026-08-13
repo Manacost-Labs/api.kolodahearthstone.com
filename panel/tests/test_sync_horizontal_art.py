@@ -96,6 +96,63 @@ class HorizontalArtTest(unittest.TestCase):
             ).stdout
             self.assertNotIn("255,255,255", pixel)
 
+    def test_wide_crop_source_white_edge_is_repaired(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            source = root / "crop.jpg"
+            target = root / "horizontal.webp"
+            subprocess.run(
+                [
+                    "convert",
+                    "-size",
+                    "213x64",
+                    "gradient:#153755-#ed782f",
+                    "-size",
+                    "30x64",
+                    "xc:white",
+                    "+append",
+                    str(source),
+                ],
+                check=True,
+            )
+            horizontal.render_horizontal_art(source, target, "crop")
+            pixel = subprocess.run(
+                ["identify", "-format", "%[pixel:p{319,32}]", str(target)],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout
+            self.assertNotIn("255,255,255", pixel)
+
+    def test_blank_primary_crop_uses_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            uploads = root / "uploads"
+            blank = uploads / "blank.jpg"
+            fallback = uploads / "fallback.jpg"
+            uploads.mkdir()
+            subprocess.run(
+                ["convert", "-size", "243x64", "xc:white", str(blank)], check=True
+            )
+            self.create_source(fallback, "900x1200")
+            candidate = horizontal.Candidate(
+                "hero",
+                "BLANK_HERO",
+                None,
+                "/uploads/blank.jpg",
+                "crop",
+                (("/uploads/fallback.jpg", "art"),),
+            )
+            with (
+                mock.patch.object(horizontal, "APP_ROOT", root),
+                mock.patch.object(horizontal, "UPLOAD_ROOT", uploads),
+            ):
+                result = horizontal.process_candidate(
+                    candidate, None, force=False, dry_run=False
+                )
+            self.assertEqual(result["action"], "generated")
+            self.assertEqual(result["source_url"], "/uploads/fallback.jpg")
+
     def test_process_candidate_uses_fallback_art(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

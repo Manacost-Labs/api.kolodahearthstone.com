@@ -34,7 +34,7 @@ VISIBLE_CROP_X = 52
 VISIBLE_CROP_WIDTH = SOURCE_CROP_WIDTH - VISIBLE_CROP_X
 ART_X = OUTPUT_WIDTH - VISIBLE_CROP_WIDTH
 FADE_WIDTH = 70
-RECIPE_VERSION = "2-soft-black-no-light-edges"
+RECIPE_VERSION = "3-soft-black-no-light-edges"
 USER_AGENT = "db.kolodahs.ru-horizontal-art/1.0"
 SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 
@@ -436,28 +436,32 @@ def remove_uniform_light_right_edge(path: Path) -> None:
         [
             "convert",
             str(path),
-            "-bordercolor",
-            "white",
-            "-border",
-            "1",
-            "-fuzz",
-            "4%",
-            "-trim",
-            "-format",
-            "%@",
-            "info:",
+            "-colorspace",
+            "gray",
+            "-threshold",
+            "95%",
+            "-scale",
+            f"{SOURCE_CROP_WIDTH}x1!",
+            "-depth",
+            "8",
+            "gray:-",
         ],
         check=True,
         capture_output=True,
-        text=True,
     )
-    match = re.fullmatch(r"(\d+)x(\d+)\+(\d+)\+(\d+)", result.stdout.strip())
-    if match is None:
-        return
-    trimmed_width = int(match.group(1))
-    trimmed_x = int(match.group(3))
-    content_right = trimmed_x + trimmed_width - 1
-    if content_right >= SOURCE_CROP_WIDTH - 2 or content_right < SOURCE_CROP_WIDTH // 2:
+    columns = list(result.stdout)
+    if len(columns) != SOURCE_CROP_WIDTH:
+        raise RuntimeError("Unable to inspect normalized crop edges")
+    if all(value >= 250 for value in columns):
+        raise RuntimeError("Normalized crop is blank")
+
+    light_edge_width = 0
+    for value in reversed(columns):
+        if value < 190:
+            break
+        light_edge_width += 1
+    content_right = SOURCE_CROP_WIDTH - light_edge_width
+    if light_edge_width <= 2 or content_right < SOURCE_CROP_WIDTH // 2:
         return
 
     temporary = path.with_suffix(".edge-fixed.png")
