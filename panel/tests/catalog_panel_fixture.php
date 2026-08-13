@@ -6,6 +6,7 @@ function h($value): string
     return htmlspecialchars((string)$value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 }
 $fixtureEmpty = isset($_GET['empty']);
+$horizontalArtUrl = 'https://api.kolodahearthstone.com/uploads/horizontal-art/battleground_card/BG28_897.webp';
 ?>
 <!doctype html>
 <html lang="ru" data-theme="dark">
@@ -13,7 +14,8 @@ $fixtureEmpty = isset($_GET['empty']);
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Каталог · UI fixture</title>
-    <link rel="stylesheet" href="/assets/style.css?v=31">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232563eb'/%3E%3C/svg%3E">
+    <link rel="stylesheet" href="/assets/style.css?v=32">
     <script src="/assets/panel-ui.js?v=2" defer></script>
 </head>
 <body>
@@ -52,10 +54,10 @@ $fixtureEmpty = isset($_GET['empty']);
             <?php $tableNavigationTarget = '.cards-table'; $tableNavigationLabel = 'Широкая таблица'; require __DIR__ . '/../partials/table-navigation.php'; ?>
             <div class="cards-table">
                 <table>
-                    <thead><tr><th>Карта</th><th>Тип</th><th>Таверна</th><th>Характеристики</th><th>Механики</th><th>Пул</th><th>Обновлено</th><th>Действия</th></tr></thead>
+                    <thead><tr><th>Карта</th><th>Crop</th><th>Тип</th><th>Таверна</th><th>Характеристики</th><th>Механики</th><th>Пул</th><th>Обновлено</th><th>Действия</th></tr></thead>
                     <tbody>
                     <?php foreach ([['Мурлок-разведчик','Существо','1','2 / 3','Боевой клич','В пуле'],['Золотой дракон','Существо','4','6 / 8','Божественный щит','В пуле'],['Призыв таверны','Заклинание','3','—','Обновление','В пуле'],['Ночной охотник','Существо','5','8 / 7','Предсмертный хрип','Не в пуле']] as $index => $row): ?>
-                        <tr><td class="card-name"><span class="variant-preview"></span><div><strong><?= h($row[0]) ?></strong><small>BG_FIXTURE_<?= $index + 1 ?></small></div></td><td><?= h($row[1]) ?></td><td><?= h($row[2]) ?></td><td><?= h($row[3]) ?></td><td><?= h($row[4]) ?></td><td><span class="badge"><?= h($row[5]) ?></span></td><td>13 авг., 00:18</td><td class="row-actions"><button class="button ghost">Подробнее</button></td></tr>
+                        <tr><td class="card-name"><span class="variant-preview"></span><div><strong><?= h($row[0]) ?></strong><small>BG_FIXTURE_<?= $index + 1 ?></small></div></td><td><figure class="horizontal-art-preview"><button type="button" class="horizontal-art-button" data-preview="<?= h($horizontalArtUrl) ?>" data-tooltip="<?= h($row[0] . "\nГоризонтальный crop · 320×64 WebP") ?>" aria-label="Открыть горизонтальный crop: <?= h($row[0]) ?>"><img src="<?= h($horizontalArtUrl) ?>" alt="" loading="lazy" decoding="async" width="160" height="32"></button><figcaption><span>Crop 320×64</span><a href="<?= h($horizontalArtUrl) ?>" target="_blank" rel="noopener">URL</a></figcaption></figure></td><td><?= h($row[1]) ?></td><td><?= h($row[2]) ?></td><td><?= h($row[3]) ?></td><td><?= h($row[4]) ?></td><td><span class="badge"><?= h($row[5]) ?></span></td><td>13 авг., 00:18</td><td class="row-actions"><button class="button ghost">Подробнее</button></td></tr>
                     <?php endforeach; ?>
                     </tbody>
                 </table>

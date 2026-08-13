@@ -59,6 +59,11 @@ query NextCardsPage($after: String) {
 rows and horizontal card containers. It is separate from the original artwork and
 can be `null` when an object has no suitable source art.
 
+The REST database endpoints expose the same asset as `images.horizontal`, for
+example in `/api/v1/cards`, `/api/v1/constructed-cards`, `/api/v1/heroes`,
+`/api/v1/hero-skins`, `/api/v1/pets`, `/api/v1/coins`,
+`/api/v1/timewarped-cards` and every `/api/v1/libraries/*` collection.
+
 Unified search:
 
 ```graphql

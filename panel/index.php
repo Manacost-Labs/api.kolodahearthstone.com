@@ -76,6 +76,99 @@ function versioned_asset($url, $updatedAt = null): string
     return $url . (strpos($url, '?') === false ? '?' : '&') . 'v=' . $version;
 }
 
+function panel_absolute_asset_url($url, $version = null): ?string
+{
+    $url = trim((string)$url);
+    if ($url === '') {
+        return null;
+    }
+    if (!preg_match('~^https?://~i', $url)) {
+        $url = 'https://api.kolodahearthstone.com/' . ltrim($url, '/');
+    }
+
+    $version = trim((string)$version);
+    if ($version !== '') {
+        $url .= (strpos($url, '?') === false ? '?' : '&') . 'v=' . rawurlencode($version);
+    }
+
+    return $url;
+}
+
+function panel_attach_horizontal_art(PDO $pdo, array $rows, string $entityType, callable $entityId): array
+{
+    if (!$rows) {
+        return [];
+    }
+
+    $ids = [];
+    foreach ($rows as $row) {
+        $id = trim((string)$entityId($row));
+        if ($id !== '') {
+            $ids[$id] = true;
+        }
+    }
+    if (!$ids) {
+        return $rows;
+    }
+
+    $params = ['entity_type' => $entityType];
+    $placeholders = [];
+    foreach (array_keys($ids) as $index => $id) {
+        $name = 'horizontal_panel_id_' . $index;
+        $placeholders[] = ':' . $name;
+        $params[$name] = $id;
+    }
+
+    try {
+        $stmt = $pdo->prepare(
+            'SELECT entity_id, local_image_url, generated_at '
+            . 'FROM horizontal_art_assets '
+            . "WHERE status = 'ready' AND entity_type = :entity_type "
+            . 'AND entity_id IN (' . implode(',', $placeholders) . ')'
+        );
+        $stmt->execute($params);
+        $assets = [];
+        foreach ($stmt->fetchAll() as $asset) {
+            $assets[(string)$asset['entity_id']] = panel_absolute_asset_url(
+                $asset['local_image_url'] ?? null,
+                $asset['generated_at'] ?? null
+            );
+        }
+    } catch (Throwable $e) {
+        // The catalogue remains usable while an older database is being migrated.
+        $assets = [];
+    }
+
+    foreach ($rows as &$row) {
+        $id = trim((string)$entityId($row));
+        $row['horizontal_image_url'] = $assets[$id] ?? null;
+    }
+    unset($row);
+
+    return $rows;
+}
+
+function horizontal_art_preview($url, string $label): string
+{
+    $url = trim((string)$url);
+    if ($url === '') {
+        return '';
+    }
+
+    $safeUrl = h($url);
+    $safeLabel = h($label);
+    $tooltip = h($label . "\nГоризонтальный crop · 320×64 WebP");
+
+    return '<figure class="horizontal-art-preview">'
+        . '<button type="button" class="horizontal-art-button" data-preview="' . $safeUrl . '" '
+        . 'data-tooltip="' . $tooltip . '" aria-label="Открыть горизонтальный crop: ' . $safeLabel . '">'
+        . '<img src="' . $safeUrl . '" alt="" loading="lazy" decoding="async" width="160" height="32">'
+        . '</button><figcaption><span>Crop 320×64</span>'
+        . '<a href="' . $safeUrl . '" target="_blank" rel="noopener" '
+        . 'aria-label="Открыть URL горизонтального crop: ' . $safeLabel . '">URL</a>'
+        . '</figcaption></figure>';
+}
+
 function csrf(): string
 {
     if (empty($_SESSION['csrf'])) {
@@ -1367,6 +1460,12 @@ if ($showHeroSkins) {
     $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
     $stmt->execute();
     $heroSkins = $stmt->fetchAll();
+    $heroSkins = panel_attach_horizontal_art(
+        $pdo,
+        $heroSkins,
+        'hero_skin',
+        static fn(array $row): string => (string)$row['card_id']
+    );
 } elseif ($showPets) {
     $countStmt = $pdo->prepare('SELECT COUNT(*) FROM hearthstone_pets' . $whereSql);
     bind_statement_params($countStmt, $params);
@@ -1386,6 +1485,12 @@ if ($showHeroSkins) {
     $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
     $stmt->execute();
     $pets = $stmt->fetchAll();
+    $pets = panel_attach_horizontal_art(
+        $pdo,
+        $pets,
+        'pet',
+        static fn(array $row): string => (string)($row['card_id'] ?: 'variant:' . $row['variant_id'])
+    );
 } elseif ($showCoins) {
     $countStmt = $pdo->prepare('SELECT COUNT(*) FROM hearthstone_coins' . $whereSql);
     bind_statement_params($countStmt, $params);
@@ -1405,6 +1510,12 @@ if ($showHeroSkins) {
     $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
     $stmt->execute();
     $coins = $stmt->fetchAll();
+    $coins = panel_attach_horizontal_art(
+        $pdo,
+        $coins,
+        'coin',
+        static fn(array $row): string => (string)$row['card_id']
+    );
 } elseif ($showHeroes) {
     $countStmt = $pdo->prepare('SELECT COUNT(*) FROM battlegrounds_heroes' . $whereSql);
     bind_statement_params($countStmt, $params);
@@ -1424,6 +1535,12 @@ if ($showHeroSkins) {
     $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
     $stmt->execute();
     $heroes = $stmt->fetchAll();
+    $heroes = panel_attach_horizontal_art(
+        $pdo,
+        $heroes,
+        'hero',
+        static fn(array $row): string => (string)$row['card_id']
+    );
 } elseif ($showTimewarped) {
     $countStmt = $pdo->prepare('SELECT COUNT(*) FROM battlegrounds_timewarped_cards' . $whereSql);
     bind_statement_params($countStmt, $params);
@@ -1443,6 +1560,12 @@ if ($showHeroSkins) {
     $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
     $stmt->execute();
     $timewarpedCards = $stmt->fetchAll();
+    $timewarpedCards = panel_attach_horizontal_art(
+        $pdo,
+        $timewarpedCards,
+        'timewarped_card',
+        static fn(array $row): string => (string)$row['card_id']
+    );
 } elseif ($showConstructed) {
     $fromSql = ' FROM constructed_cards c';
     $countStmt = $pdo->prepare('SELECT COUNT(*)' . $fromSql . $whereSql);
@@ -1473,6 +1596,12 @@ if ($showHeroSkins) {
     $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
     $stmt->execute();
     $constructedCards = $stmt->fetchAll();
+    $constructedCards = panel_attach_horizontal_art(
+        $pdo,
+        $constructedCards,
+        'constructed_card',
+        static fn(array $row): string => (string)$row['card_id']
+    );
     $constructedWikiMetaMap = load_constructed_wiki_meta_map($pdo, $constructedCards);
     $constructedRelatedCardMap = load_constructed_related_card_map($pdo, $constructedWikiMetaMap);
 } elseif ($showLibrary) {
@@ -1494,6 +1623,12 @@ if ($showHeroSkins) {
     $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
     $stmt->execute();
     $libraryCards = $stmt->fetchAll();
+    $libraryCards = panel_attach_horizontal_art(
+        $pdo,
+        $libraryCards,
+        'library_card',
+        static fn(array $row): string => (string)$row['library'] . ':' . (string)$row['card_id']
+    );
 } else {
     $countStmt = $pdo->prepare('SELECT COUNT(*) FROM battlegrounds_cards' . $whereSql);
     bind_statement_params($countStmt, $params);
@@ -1513,6 +1648,12 @@ if ($showHeroSkins) {
     $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
     $stmt->execute();
     $cards = $stmt->fetchAll();
+    $cards = panel_attach_horizontal_art(
+        $pdo,
+        $cards,
+        'battleground_card',
+        static fn(array $row): string => (string)$row['card_id']
+    );
     $goldenVariantMap = load_golden_variant_map($pdo, $cards);
     $wikiMetaMap = load_wiki_meta_map($pdo, $cards);
 }
@@ -1672,7 +1813,7 @@ $workspaceSection = $showApiTokens
     <meta name="robots" content="noindex,nofollow">
     <title>HS Data · Управление базой Hearthstone</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232563eb'/%3E%3Ctext x='32' y='40' text-anchor='middle' font-family='system-ui,sans-serif' font-size='25' font-weight='800' fill='white'%3EHS%3C/text%3E%3C/svg%3E">
-    <link rel="stylesheet" href="/assets/style.css?v=31">
+    <link rel="stylesheet" href="/assets/style.css?v=32">
     <script src="/assets/panel-ui.js?v=2" defer></script>
     <script src="/assets/parsing-reliability.js?v=1" defer></script>
     <script src="/assets/analytics.js?v=4" defer></script>
@@ -2259,6 +2400,7 @@ $workspaceSection = $showApiTokens
                 <tr>
                     <th>Карта RU</th>
                     <th>Card EN</th>
+                    <th>Crop</th>
                     <th>Форматы</th>
                     <th>Set</th>
                     <th>Тип</th>
@@ -2333,6 +2475,7 @@ $workspaceSection = $showApiTokens
                             <code><?= h($card['card_id']) ?></code>
                             <span class="muted-dash">dbf <?= h($card['dbf'] ?: '—') ?></span>
                         </td>
+                        <td><?= horizontal_art_preview($card['horizontal_image_url'] ?? null, (string)($card['name_ru'] ?: $card['name_en'])) ?: '<span class="muted-dash">—</span>' ?></td>
                         <td>
                             <div class="wiki-tags compact-tags">
                                 <?php foreach ($formatSlugs as $formatSlug): ?>
@@ -2560,7 +2703,7 @@ $workspaceSection = $showApiTokens
                     </tr>
                 <?php endforeach; ?>
                 <?php if (!$constructedCards): ?>
-                    <tr><td colspan="12" class="empty">Карты Standard/Wild пока не загружены.</td></tr>
+                    <tr><td colspan="13" class="empty">Карты Standard/Wild пока не загружены.</td></tr>
                 <?php endif; ?>
                 </tbody>
             </table>
@@ -2570,6 +2713,7 @@ $workspaceSection = $showApiTokens
                 <tr>
                     <th>Карта RU</th>
                     <?php if ($libraryType === 'trinket'): ?><th>Full art</th><?php endif; ?>
+                    <th>Crop</th>
                     <th>Описание</th>
                     <th>card_id</th>
                     <th>dbf</th>
@@ -2636,6 +2780,7 @@ $workspaceSection = $showApiTokens
                                 <span class="missing-card-image">Нет</span>
                             <?php endif; ?>
                         </td><?php endif; ?>
+                        <td><?= horizontal_art_preview($card['horizontal_image_url'] ?? null, (string)$card['name_ru']) ?: '<span class="muted-dash">—</span>' ?></td>
                         <td class="name-en">
                             <?php if (!empty($card['text_ru'])): ?>
                                 <span class="subtext"><?= h(strip_tags((string)$card['text_ru'])) ?></span>
@@ -2670,7 +2815,7 @@ $workspaceSection = $showApiTokens
                     </tr>
                 <?php endforeach; ?>
                 <?php if (!$libraryCards): ?>
-                    <tr><td colspan="<?= $libraryType === 'trinket' ? 11 : 10 ?>" class="empty">Записей библиотеки пока нет.</td></tr>
+                    <tr><td colspan="<?= $libraryType === 'trinket' ? 12 : 11 ?>" class="empty">Записей библиотеки пока нет.</td></tr>
                 <?php endif; ?>
                 </tbody>
             </table>
@@ -2680,6 +2825,7 @@ $workspaceSection = $showApiTokens
                 <tr>
                     <th>Карта</th>
                     <th>Card EN</th>
+                    <th>Crop</th>
                     <th>CARD_ID</th>
                     <th>DBF</th>
                     <th>Тип</th>
@@ -2740,6 +2886,7 @@ $workspaceSection = $showApiTokens
                                 <span class="subtext"><?= h(strip_tags((string)($card['text_ru'] ?: $card['text_en']))) ?></span>
                             <?php endif; ?>
                         </td>
+                        <td><?= horizontal_art_preview($card['horizontal_image_url'] ?? null, (string)($card['name_ru'] ?: $card['name_en'])) ?: '<span class="muted-dash">—</span>' ?></td>
                         <td><code><?= h($card['card_id']) ?></code></td>
                         <td><?= h($card['dbf']) ?></td>
                         <td><span class="type-badge <?= h($card['card_type'] ?? '') ?>"><?= h(timewarped_type_label($card['card_type'] ?? '')) ?></span></td>
@@ -2863,7 +3010,7 @@ $workspaceSection = $showApiTokens
                     </tr>
                 <?php endforeach; ?>
                 <?php if (!$timewarpedCards): ?>
-                    <tr><td colspan="11" class="empty">Хрономальные карты пока не загружены.</td></tr>
+                    <tr><td colspan="12" class="empty">Хрономальные карты пока не загружены.</td></tr>
                 <?php endif; ?>
                 </tbody>
             </table>
@@ -2898,6 +3045,7 @@ $workspaceSection = $showApiTokens
                                     <button type="button" data-preview="<?= h($petBackground) ?>" data-tooltip="End screen background">End screen</button>
                                 <?php endif; ?>
                             </div>
+                            <?= horizontal_art_preview($pet['horizontal_image_url'] ?? null, (string)$pet['variant_name']) ?>
                         </div>
                         <div class="skin-card-body">
                             <div class="skin-card-head">
@@ -2975,6 +3123,7 @@ $workspaceSection = $showApiTokens
                                     <button type="button" data-preview="<?= h($coinCrop) ?>" data-tooltip="Crop art">Crop</button>
                                 <?php endif; ?>
                             </div>
+                            <?= horizontal_art_preview($coin['horizontal_image_url'] ?? null, (string)$coin['coin_name_en']) ?>
                         </div>
                         <div class="skin-card-body">
                             <div class="skin-card-head">
@@ -3070,6 +3219,7 @@ $workspaceSection = $showApiTokens
                                     <button type="button" data-preview="<?= h($skinFullArt) ?>" data-tooltip="Full art">Full art</button>
                                 <?php endif; ?>
                             </div>
+                            <?= horizontal_art_preview($skin['horizontal_image_url'] ?? null, (string)$skin['name_en']) ?>
                         </div>
                         <div class="skin-card-body">
                             <div class="skin-card-head">
@@ -3151,6 +3301,7 @@ $workspaceSection = $showApiTokens
                 <thead>
                 <tr>
                     <th>Герой</th>
+                    <th>Crop</th>
                     <th>RU</th>
                     <th>card_id</th>
                     <th>dbf</th>
@@ -3226,6 +3377,7 @@ $workspaceSection = $showApiTokens
                                 <a class="card-stats-link" href="/?action=analytics&amp;stats=card&amp;stats_q=<?= rawurlencode((string)$hero['name_en']) ?>#statistics">Статистика</a>
                             </span>
                         </td>
+                        <td><?= horizontal_art_preview($hero['horizontal_image_url'] ?? null, (string)($hero['name_ru'] ?: $hero['name_en'])) ?: '<span class="muted-dash">—</span>' ?></td>
                         <td><?= h($hero['name_ru'] ?: '—') ?></td>
                         <td><code><?= h($hero['card_id']) ?></code></td>
                         <td><?= h($hero['dbf']) ?></td>
@@ -3497,7 +3649,7 @@ $workspaceSection = $showApiTokens
                     </tr>
                 <?php endforeach; ?>
                 <?php if (!$heroes): ?>
-                    <tr><td colspan="11" class="empty">Герои пока не загружены.</td></tr>
+                    <tr><td colspan="12" class="empty">Герои пока не загружены.</td></tr>
                 <?php endif; ?>
                 </tbody>
             </table>
@@ -3507,6 +3659,7 @@ $workspaceSection = $showApiTokens
                 <tr>
                     <th>Карта</th>
                     <th>Card EN</th>
+                    <th>Crop</th>
                     <th>CARD_ID</th>
                     <th>DBF</th>
                     <th>Категория</th>
@@ -3586,6 +3739,7 @@ $workspaceSection = $showApiTokens
                             </span>
                         </td>
                         <td class="name-en"><?= h($card['name_en'] ?: '—') ?></td>
+                        <td><?= horizontal_art_preview($card['horizontal_image_url'] ?? null, (string)$card['name']) ?: '<span class="muted-dash">—</span>' ?></td>
                         <td><code><?= h($card['card_id']) ?></code></td>
                         <td><?= h($card['dbf']) ?></td>
                         <td><span class="type-badge <?= h($card['card_type'] ?? 'minion') ?>"><?= h(card_type_label($card['card_type'] ?? 'minion')) ?></span></td>
@@ -3820,7 +3974,7 @@ $workspaceSection = $showApiTokens
                     </tr>
                 <?php endforeach; ?>
                 <?php if (!$cards): ?>
-                    <tr><td colspan="17" class="empty">Карт пока нет.</td></tr>
+                    <tr><td colspan="18" class="empty">Карт пока нет.</td></tr>
                 <?php endif; ?>
                 </tbody>
             </table>

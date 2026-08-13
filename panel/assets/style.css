@@ -2771,6 +2771,63 @@ tbody tr:hover {
     font-variant-numeric: tabular-nums;
 }
 
+.horizontal-art-preview {
+    display: grid;
+    width: 160px;
+    margin: 0;
+    gap: 5px;
+}
+
+.horizontal-art-button {
+    display: block;
+    width: 160px;
+    height: 32px;
+    padding: 0;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--accent), var(--line) 62%);
+    border-radius: 6px;
+    background: #05070a;
+    box-shadow: 0 3px 12px color-mix(in srgb, black, transparent 68%);
+    cursor: zoom-in;
+    transition: border-color .16s ease, filter .16s ease, transform .16s ease;
+}
+
+.horizontal-art-button img {
+    display: block;
+    width: 160px;
+    height: 32px;
+    object-fit: cover;
+}
+
+.horizontal-art-button:hover,
+.horizontal-art-button:focus-visible {
+    border-color: var(--accent);
+    filter: brightness(1.06);
+    outline: none;
+    transform: translateY(-1px);
+}
+
+.horizontal-art-preview figcaption {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    color: var(--muted);
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+}
+
+.horizontal-art-preview figcaption a {
+    color: var(--accent);
+    font-weight: 800;
+    text-decoration: none;
+}
+
+.horizontal-art-preview figcaption a:hover,
+.horizontal-art-preview figcaption a:focus-visible {
+    text-decoration: underline;
+}
+
 .pool-badge,
 .type-badge,
 .mechanic-badge,
@@ -4391,6 +4448,21 @@ body.analytics-detail-open {
 .analytics-hub.is-compact-table .analytics-image-button img {
     width: 30px;
     height: 45px;
+}
+
+.data-panel.is-compact-table .horizontal-art-preview,
+.data-panel.is-compact-table .horizontal-art-button,
+.data-panel.is-compact-table .horizontal-art-button img {
+    width: 120px;
+}
+
+.data-panel.is-compact-table .horizontal-art-button,
+.data-panel.is-compact-table .horizontal-art-button img {
+    height: 24px;
+}
+
+.data-panel.is-compact-table .horizontal-art-preview figcaption {
+    display: none;
 }
 
 .data-panel.is-compact-table .subtext,

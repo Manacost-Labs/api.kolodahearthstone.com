@@ -278,6 +278,26 @@ class HorizontalArtTest(unittest.TestCase):
         ):
             self.assertIn(f"'{entity_type}'", api)
 
+    def test_web_panel_displays_horizontal_art_for_supported_entities(self) -> None:
+        panel = (ROOT / "index.php").read_text(encoding="utf-8")
+        styles = (ROOT / "assets" / "style.css").read_text(encoding="utf-8")
+        self.assertIn("function panel_attach_horizontal_art(", panel)
+        self.assertIn("function horizontal_art_preview(", panel)
+        self.assertGreaterEqual(panel.count("horizontal_art_preview("), 9)
+        self.assertIn('class="horizontal-art-button"', panel)
+        self.assertIn(".horizontal-art-preview", styles)
+        for entity_type in (
+            "battleground_card",
+            "constructed_card",
+            "hero",
+            "hero_skin",
+            "pet",
+            "coin",
+            "timewarped_card",
+            "library_card",
+        ):
+            self.assertIn(f"'{entity_type}'", panel)
+
 
 if __name__ == "__main__":
     unittest.main()
