@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import gzip
 import json
 import os
 import unittest
@@ -274,6 +275,29 @@ class AIReviewTest(unittest.TestCase):
         self.assertTrue(payload["provider"]["zdr"])
         self.assertTrue(payload["provider"]["require_parameters"])
         self.assertTrue(payload["provider"]["allow_fallbacks"])
+
+    def test_gzip_response_is_not_decoded_twice_after_bounded_streaming(self) -> None:
+        encoded_response = gzip.compress(
+            json.dumps(_openrouter_response()).encode("utf-8")
+        )
+
+        def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                content=encoded_response,
+                headers={
+                    "cOnTeNt-EnCoDiNg": "gzip",
+                    "CONTENT-LENGTH": str(len(encoded_response)),
+                    "transfer-ENCODING": "chunked",
+                },
+            )
+
+        with patch.dict(os.environ, _environment(), clear=False):
+            result = asyncio.run(_review_with_transport(handler))
+
+        self.assertEqual(result.state, "ok")
+        self.assertEqual(result.verdict.verdict, "pass")  # type: ignore[union-attr]
+        self.assertEqual(result.provider, "DeepInfra")
 
     def test_failure_diagnosis_uses_separate_strict_schema_and_never_quarantines(
         self,

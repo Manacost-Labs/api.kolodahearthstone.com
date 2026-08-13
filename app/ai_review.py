@@ -565,9 +565,16 @@ async def _post_bounded(
                 if len(content) + len(chunk) > _MAX_RESPONSE_BYTES:
                     raise _AIResponseTooLarge
                 content.extend(chunk)
+            response_headers = httpx.Headers(streamed.headers)
+            for decoded_body_header in (
+                "Content-Encoding",
+                "Content-Length",
+                "Transfer-Encoding",
+            ):
+                response_headers.pop(decoded_body_header, None)
             return httpx.Response(
                 streamed.status_code,
-                headers=streamed.headers,
+                headers=response_headers,
                 content=bytes(content),
                 request=streamed.request,
                 extensions=dict(streamed.extensions),
