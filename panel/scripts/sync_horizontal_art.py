@@ -19,11 +19,11 @@ from pathlib import Path
 from typing import Any
 
 import pymysql
-
 from backfill_constructed_images import connect_db, load_php_config
 
-
-APP_ROOT = Path(os.environ.get("KOLODAHS_APP_ROOT") or Path(__file__).resolve().parents[1])
+APP_ROOT = Path(
+    os.environ.get("KOLODAHS_APP_ROOT") or Path(__file__).resolve().parents[1]
+)
 UPLOAD_ROOT = APP_ROOT / "uploads"
 OUTPUT_DIRNAME = "horizontal-art"
 OUTPUT_WIDTH = 320
@@ -164,12 +164,18 @@ def collect_candidates(conn, blizzard_crops: dict[int, str]) -> list[Candidate]:
         """,
     ):
         dbf = int(row["dbf"]) if row.get("dbf") is not None else None
-        source = (blizzard_crops[dbf], "crop") if dbf in blizzard_crops else first_source(
-            row,
-            [("art_image", "art"), ("card_image", "card")],
+        source = (
+            (blizzard_crops[dbf], "crop")
+            if dbf in blizzard_crops
+            else first_source(
+                row,
+                [("art_image", "art"), ("card_image", "card")],
+            )
         )
         if source:
-            candidates.append(Candidate("battleground_card", str(row["card_id"]), dbf, *source))
+            candidates.append(
+                Candidate("battleground_card", str(row["card_id"]), dbf, *source)
+            )
 
     for row in query_rows(
         conn,
@@ -194,7 +200,9 @@ def collect_candidates(conn, blizzard_crops: dict[int, str]) -> list[Candidate]:
         )
         if source:
             dbf = int(row["dbf"]) if row.get("dbf") is not None else None
-            candidates.append(Candidate("constructed_card", str(row["card_id"]), dbf, *source))
+            candidates.append(
+                Candidate("constructed_card", str(row["card_id"]), dbf, *source)
+            )
 
     for row in query_rows(
         conn,
@@ -228,9 +236,13 @@ def collect_candidates(conn, blizzard_crops: dict[int, str]) -> list[Candidate]:
         """,
     ):
         dbf = int(row["dbf"]) if row.get("dbf") is not None else None
-        source = (blizzard_crops[dbf], "crop") if dbf in blizzard_crops else first_source(
-            row,
-            [("hero_full_art_url", "art"), ("hero_image_url", "card")],
+        source = (
+            (blizzard_crops[dbf], "crop")
+            if dbf in blizzard_crops
+            else first_source(
+                row,
+                [("hero_full_art_url", "art"), ("hero_image_url", "card")],
+            )
         )
         if source:
             candidates.append(Candidate("hero", str(row["card_id"]), dbf, *source))
@@ -238,29 +250,45 @@ def collect_candidates(conn, blizzard_crops: dict[int, str]) -> list[Candidate]:
     query_specs = [
         (
             "hero_skin",
-            "SELECT card_id AS entity_id, dbf, full_art_url, static_image_url FROM hero_skins "
-            "WHERE COALESCE(full_art_url, static_image_url, '') <> ''",
+            (
+                "SELECT card_id AS entity_id, dbf, full_art_url, static_image_url "
+                "FROM hero_skins "
+                "WHERE COALESCE(full_art_url, static_image_url, '') <> ''"
+            ),
             [("full_art_url", "art"), ("static_image_url", "card")],
             lambda row: str(row["entity_id"]),
         ),
         (
             "pet",
-            "SELECT variant_id, card_id, dbf, end_screen_background_url, card_image_url "
-            "FROM hearthstone_pets WHERE COALESCE(end_screen_background_url, card_image_url, '') <> ''",
+            (
+                "SELECT variant_id, card_id, dbf, end_screen_background_url, "
+                "card_image_url FROM hearthstone_pets "
+                "WHERE COALESCE(end_screen_background_url, card_image_url, '') <> ''"
+            ),
             [("end_screen_background_url", "art"), ("card_image_url", "card")],
             lambda row: str(row.get("card_id") or f"variant:{row['variant_id']}"),
         ),
         (
             "coin",
-            "SELECT card_id AS entity_id, dbf, crop_image_url, wiki_image_url, image_url "
-            "FROM hearthstone_coins WHERE COALESCE(crop_image_url, wiki_image_url, image_url, '') <> ''",
-            [("crop_image_url", "crop"), ("wiki_image_url", "art"), ("image_url", "card")],
+            (
+                "SELECT card_id AS entity_id, dbf, crop_image_url, wiki_image_url, "
+                "image_url FROM hearthstone_coins "
+                "WHERE COALESCE(crop_image_url, wiki_image_url, image_url, '') <> ''"
+            ),
+            [
+                ("crop_image_url", "crop"),
+                ("wiki_image_url", "art"),
+                ("image_url", "card"),
+            ],
             lambda row: str(row["entity_id"]),
         ),
         (
             "timewarped_card",
-            "SELECT card_id AS entity_id, dbf, art_image_url, card_image_url "
-            "FROM battlegrounds_timewarped_cards WHERE COALESCE(art_image_url, card_image_url, '') <> ''",
+            (
+                "SELECT card_id AS entity_id, dbf, art_image_url, card_image_url "
+                "FROM battlegrounds_timewarped_cards "
+                "WHERE COALESCE(art_image_url, card_image_url, '') <> ''"
+            ),
             [("art_image_url", "art"), ("card_image_url", "card")],
             lambda row: str(row["entity_id"]),
         ),
@@ -270,10 +298,14 @@ def collect_candidates(conn, blizzard_crops: dict[int, str]) -> list[Candidate]:
             source = first_source(row, source_fields)
             if source:
                 dbf = int(row["dbf"]) if row.get("dbf") is not None else None
-                candidates.append(Candidate(entity_type, entity_id_for(row), dbf, *source))
+                candidates.append(
+                    Candidate(entity_type, entity_id_for(row), dbf, *source)
+                )
 
     deduplicated = {(item.entity_type, item.entity_id): item for item in candidates}
-    return sorted(deduplicated.values(), key=lambda item: (item.entity_type, item.entity_id))
+    return sorted(
+        deduplicated.values(), key=lambda item: (item.entity_type, item.entity_id)
+    )
 
 
 def utc_now() -> str:
@@ -330,7 +362,10 @@ def normalized_crop(source: Path, target: Path, source_kind: str) -> None:
         crop_height = max(1, round(crop_width * SOURCE_CROP_HEIGHT / SOURCE_CROP_WIDTH))
         if crop_height > height:
             crop_height = height
-            crop_width = min(width, max(1, round(crop_height * SOURCE_CROP_WIDTH / SOURCE_CROP_HEIGHT)))
+            crop_width = min(
+                width,
+                max(1, round(crop_height * SOURCE_CROP_WIDTH / SOURCE_CROP_HEIGHT)),
+            )
 
         if height * 100 >= width * 115:
             focus_percent = 29
@@ -467,21 +502,33 @@ def source_signature(candidate: Candidate) -> str:
         stat = local.stat()
         value = f"local:{local}:{stat.st_size}:{stat.st_mtime_ns}:{candidate.source_kind}:{RECIPE_VERSION}"
     else:
-        value = f"remote:{candidate.source_url}:{candidate.source_kind}:{RECIPE_VERSION}"
+        value = (
+            f"remote:{candidate.source_url}:{candidate.source_kind}:{RECIPE_VERSION}"
+        )
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
-def download_source(source_url: str, target: Path, max_bytes: int = 32 * 1024 * 1024) -> None:
+def download_source(
+    source_url: str, target: Path, max_bytes: int = 32 * 1024 * 1024
+) -> None:
     parsed = urllib.parse.urlparse(source_url)
     if parsed.scheme not in {"http", "https"}:
         raise ValueError("Remote image URL must use http or https")
     request = urllib.request.Request(
         source_url,
-        headers={"User-Agent": USER_AGENT, "Accept": "image/avif,image/webp,image/png,image/jpeg,image/*"},
+        headers={
+            "User-Agent": USER_AGENT,
+            "Accept": "image/avif,image/webp,image/png,image/jpeg,image/*",
+        },
     )
     total = 0
-    with urllib.request.urlopen(request, timeout=90) as response, target.open("wb") as handle:
-        content_type = str(response.headers.get("Content-Type") or "").split(";", 1)[0].lower()
+    with (
+        urllib.request.urlopen(request, timeout=90) as response,
+        target.open("wb") as handle,
+    ):
+        content_type = (
+            str(response.headers.get("Content-Type") or "").split(";", 1)[0].lower()
+        )
         if content_type and not content_type.startswith("image/"):
             raise RuntimeError(f"Unexpected source content type: {content_type}")
         while chunk := response.read(1024 * 1024):
@@ -558,11 +605,13 @@ def process_candidate(
             "public_path": public_path,
             "image_sha256": sha256_file(target),
         }
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 -- isolate one broken source from the batch
         return {"action": "error", "candidate": candidate, "error": str(exc)}
 
 
-def persist_result(conn, result: dict[str, Any], existing: dict[str, Any] | None) -> None:
+def persist_result(
+    conn, result: dict[str, Any], existing: dict[str, Any] | None
+) -> None:
     action = str(result["action"])
     candidate: Candidate = result["candidate"]
     if action == "generated":
@@ -638,7 +687,9 @@ def persist_result(conn, result: dict[str, Any], existing: dict[str, Any] | None
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Build horizontal artwork variants for database entities.")
+    parser = argparse.ArgumentParser(
+        description="Build horizontal artwork variants for database entities."
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--limit", type=int)
@@ -651,7 +702,12 @@ def main() -> int:
         try:
             blizzard_crops = fetch_blizzard_crop_urls()
             blizzard_error = None
-        except (OSError, urllib.error.URLError, urllib.error.HTTPError, RuntimeError) as exc:
+        except (
+            OSError,
+            urllib.error.URLError,
+            urllib.error.HTTPError,
+            RuntimeError,
+        ) as exc:
             blizzard_crops = {}
             blizzard_error = str(exc)
 
@@ -660,7 +716,9 @@ def main() -> int:
             candidates = candidates[: max(0, args.limit)]
         existing_assets = load_existing_assets(conn)
         results: list[dict[str, Any]] = []
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, args.workers)) as executor:
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=max(1, args.workers)
+        ) as executor:
             futures = [
                 executor.submit(
                     process_candidate,

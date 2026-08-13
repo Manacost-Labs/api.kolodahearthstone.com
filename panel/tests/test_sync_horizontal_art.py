@@ -7,11 +7,10 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-import sync_horizontal_art as horizontal  # noqa: E402
+import sync_horizontal_art as horizontal
 
 
 class HorizontalArtTest(unittest.TestCase):
@@ -108,9 +107,9 @@ class HorizontalArtTest(unittest.TestCase):
             with (
                 mock.patch.object(horizontal, "APP_ROOT", root),
                 mock.patch.object(horizontal, "UPLOAD_ROOT", uploads),
+                self.assertRaisesRegex(ValueError, "escapes media root"),
             ):
-                with self.assertRaisesRegex(ValueError, "escapes media root"):
-                    horizontal.local_upload_path("/uploads/../outside.webp")
+                horizontal.local_upload_path("/uploads/../outside.webp")
 
     def test_job_and_timer_are_wired(self) -> None:
         runner = (ROOT / "scripts" / "run_sync_job.sh").read_text(encoding="utf-8")
@@ -118,7 +117,25 @@ class HorizontalArtTest(unittest.TestCase):
         self.assertIn("horizontal-art)", runner)
         self.assertIn('sync_horizontal_art.py"', runner)
         self.assertTrue(timer.is_file())
-        self.assertIn("kolodahs-sync@horizontal-art.service", timer.read_text(encoding="utf-8"))
+        self.assertIn(
+            "kolodahs-sync@horizontal-art.service", timer.read_text(encoding="utf-8")
+        )
+
+    def test_rest_api_exposes_horizontal_art_for_supported_entities(self) -> None:
+        api = (ROOT / "api" / "index.php").read_text(encoding="utf-8")
+        self.assertIn("function attach_horizontal_art(", api)
+        self.assertIn("'horizontal' =>", api)
+        for entity_type in (
+            "battleground_card",
+            "constructed_card",
+            "hero",
+            "hero_skin",
+            "pet",
+            "coin",
+            "timewarped_card",
+            "library_card",
+        ):
+            self.assertIn(f"'{entity_type}'", api)
 
 
 if __name__ == "__main__":

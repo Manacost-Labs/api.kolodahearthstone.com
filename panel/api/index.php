@@ -4,7 +4,7 @@ declare(strict_types=1);
 $config = require __DIR__ . '/../config.php';
 
 const API_BASE_URL = 'https://api.kolodahearthstone.com';
-const API_VERSION = '1.13.1';
+const API_VERSION = '1.14.0';
 const DEFAULT_PER_PAGE = 50;
 const MAX_PER_PAGE = 200;
 
@@ -312,6 +312,64 @@ function absolute_url(?string $url, ?string $version = null): ?string
     return $absolute . (strpos($absolute, '?') === false ? '?' : '&') . 'v=' . rawurlencode($version);
 }
 
+function attach_horizontal_art(PDO $pdo, array $rows, string $entityType, callable $entityId): array
+{
+    if (!$rows) {
+        return [];
+    }
+
+    $ids = [];
+    foreach ($rows as $row) {
+        $id = trim((string)$entityId($row));
+        if ($id !== '') {
+            $ids[$id] = true;
+        }
+    }
+    if (!$ids) {
+        return $rows;
+    }
+
+    $params = ['entity_type' => $entityType];
+    $placeholders = [];
+    foreach (array_keys($ids) as $index => $id) {
+        $name = 'horizontal_id_' . $index;
+        $placeholders[] = ':' . $name;
+        $params[$name] = $id;
+    }
+
+    try {
+        $stmt = $pdo->prepare(
+            'SELECT entity_id, local_image_url, generated_at '
+            . 'FROM horizontal_art_assets '
+            . "WHERE status = 'ready' AND entity_type = :entity_type "
+            . 'AND entity_id IN (' . implode(',', $placeholders) . ')'
+        );
+        $stmt->execute($params);
+        $assets = [];
+        foreach ($stmt->fetchAll() as $asset) {
+            $assets[(string)$asset['entity_id']] = absolute_url(
+                (string)$asset['local_image_url'],
+                $asset['generated_at'] ?? null
+            );
+        }
+    } catch (Throwable $e) {
+        $assets = [];
+    }
+
+    foreach ($rows as &$row) {
+        $id = trim((string)$entityId($row));
+        $row['horizontal_image_url'] = $assets[$id] ?? null;
+    }
+    unset($row);
+
+    return $rows;
+}
+
+function attach_horizontal_art_one(PDO $pdo, array $row, string $entityType, callable $entityId): array
+{
+    return attach_horizontal_art($pdo, [$row], $entityType, $entityId)[0];
+}
+
 function json_field($value, array $default = []): array
 {
     if ($value === null || $value === '') {
@@ -518,6 +576,7 @@ function golden_variant_to_api(array $card): array
             'card' => absolute_url($card['card_image'] ?? null, $imageVersion),
             'art' => absolute_url($card['art_image'] ?? null, $imageVersion),
             'framed' => absolute_url($card['framed_image'] ?? null, $imageVersion),
+            'horizontal' => $card['horizontal_image_url'] ?? null,
         ],
         'updated_at' => (string)$card['updated_at'],
     ];
@@ -542,8 +601,14 @@ function load_golden_variant_map(PDO $pdo, array $cards): array
     );
     $stmt->execute($baseDbfs);
 
+    $variants = attach_horizontal_art(
+        $pdo,
+        $stmt->fetchAll(),
+        'battleground_card',
+        static fn(array $row): string => (string)$row['card_id']
+    );
     $map = [];
-    foreach ($stmt->fetchAll() as $row) {
+    foreach ($variants as $row) {
         $map[(int)$row['base_dbf']] = $row;
     }
     return $map;
@@ -594,6 +659,7 @@ function card_to_api(
             'golden' => absolute_url($card['golden_image'] ?? null, $imageVersion),
             'art' => absolute_url($card['art_image'] ?? null, $imageVersion),
             'framed' => absolute_url($card['framed_image'] ?? null, $imageVersion),
+            'horizontal' => $card['horizontal_image_url'] ?? null,
         ],
         'wiki_page' => $wikiMeta ? [
             'title' => $wikiMeta['wiki_page_title'] !== null && $wikiMeta['wiki_page_title'] !== '' ? (string)$wikiMeta['wiki_page_title'] : null,
@@ -758,6 +824,7 @@ function constructed_card_to_api(
             'signature' => $card['image_signature_url'] !== null && $card['image_signature_url'] !== '' ? (string)$card['image_signature_url'] : null,
             'diamond' => $card['image_diamond_url'] !== null && $card['image_diamond_url'] !== '' ? (string)$card['image_diamond_url'] : null,
             'crop' => $cropImage,
+            'horizontal' => $card['horizontal_image_url'] ?? null,
             'animated' => [
                 'golden' => $card['animated_gold_url'] !== null && $card['animated_gold_url'] !== '' ? (string)$card['animated_gold_url'] : null,
                 'signature' => $card['animated_signature_url'] !== null && $card['animated_signature_url'] !== '' ? (string)$card['animated_signature_url'] : null,
@@ -1064,6 +1131,7 @@ function hero_to_api(array $hero): array
         'images' => [
             'hero' => $hero['hero_image_url'] !== null && $hero['hero_image_url'] !== '' ? (string)$hero['hero_image_url'] : null,
             'full_art' => $hero['hero_full_art_url'] !== null && $hero['hero_full_art_url'] !== '' ? (string)$hero['hero_full_art_url'] : null,
+            'horizontal' => $hero['horizontal_image_url'] ?? null,
         ],
         'hero_power' => [
             'dbf' => $hero['hero_power_dbf'] !== null ? (int)$hero['hero_power_dbf'] : null,
@@ -1129,6 +1197,7 @@ function hero_skin_to_api(array $skin): array
             'animated' => $skin['animated_image_url'] !== null && $skin['animated_image_url'] !== '' ? (string)$skin['animated_image_url'] : null,
             'animated_assets' => json_field($skin['animated_asset_json'] ?? null),
             'full_art' => $skin['full_art_url'] !== null && $skin['full_art_url'] !== '' ? (string)$skin['full_art_url'] : null,
+            'horizontal' => $skin['horizontal_image_url'] ?? null,
         ],
         'gallery' => json_field($skin['gallery_json'] ?? null),
         'sounds' => json_field($skin['sounds_json'] ?? null),
@@ -1184,6 +1253,7 @@ function pet_to_api(array $pet): array
         'images' => [
             'card' => $pet['card_image_url'] !== null && $pet['card_image_url'] !== '' ? (string)$pet['card_image_url'] : null,
             'end_screen_background' => $pet['end_screen_background_url'] !== null && $pet['end_screen_background_url'] !== '' ? (string)$pet['end_screen_background_url'] : null,
+            'horizontal' => $pet['horizontal_image_url'] ?? null,
         ],
         'gallery' => json_field($pet['gallery_json'] ?? null),
         'wiki_page' => [
@@ -1266,6 +1336,7 @@ function timewarped_card_to_api(array $card, array $termTranslations = []): arra
             'card' => $card['card_image_url'] !== null && $card['card_image_url'] !== '' ? (string)$card['card_image_url'] : null,
             'golden' => $card['golden_image_url'] !== null && $card['golden_image_url'] !== '' ? (string)$card['golden_image_url'] : null,
             'art' => $card['art_image_url'] !== null && $card['art_image_url'] !== '' ? (string)$card['art_image_url'] : null,
+            'horizontal' => $card['horizontal_image_url'] ?? null,
         ],
         'golden' => [
             'card_id' => $card['golden_card_id'] !== null && $card['golden_card_id'] !== '' ? (string)$card['golden_card_id'] : null,
@@ -1376,6 +1447,7 @@ function library_card_to_api(array $card): array
             'full_art_source' => isset($card['full_art_source_url']) && $card['full_art_source_url'] !== null && $card['full_art_source_url'] !== ''
                 ? (string)$card['full_art_source_url']
                 : null,
+            'horizontal' => $card['horizontal_image_url'] ?? null,
         ],
         'full_art' => [
             'source' => isset($card['full_art_source']) && $card['full_art_source'] !== null && $card['full_art_source'] !== '' ? (string)$card['full_art_source'] : null,
@@ -1437,6 +1509,7 @@ function coin_to_api(array $coin): array
             'golden' => $coin['image_gold_url'] !== null && $coin['image_gold_url'] !== '' ? (string)$coin['image_gold_url'] : null,
             'crop' => $coin['crop_image_url'] !== null && $coin['crop_image_url'] !== '' ? (string)$coin['crop_image_url'] : null,
             'wiki' => $coin['wiki_image_url'] !== null && $coin['wiki_image_url'] !== '' ? (string)$coin['wiki_image_url'] : null,
+            'horizontal' => $coin['horizontal_image_url'] ?? null,
         ],
         'cosmetic_sort_order' => $coin['cosmetic_sort_order'] !== null ? (int)$coin['cosmetic_sort_order'] : null,
         'generated_by_card_ids' => json_field($coin['generated_by_card_ids_json'] ?? null),
@@ -1748,6 +1821,12 @@ function api_cards(PDO $pdo): void
     $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
     $stmt->execute();
     $cards = $stmt->fetchAll();
+    $cards = attach_horizontal_art(
+        $pdo,
+        $cards,
+        'battleground_card',
+        static fn(array $row): string => (string)$row['card_id']
+    );
     $goldenVariantMap = load_golden_variant_map($pdo, $cards);
     $wikiMap = load_wiki_meta_map($pdo, array_column($cards, 'card_id'));
     $termTranslations = $includeWiki ? load_wiki_term_translations($pdo) : [];
@@ -1796,6 +1875,12 @@ function api_card(PDO $pdo, string $cardId): void
     if (!$card) {
         respond_error('not_found', 'Карта не найдена.', 404);
     }
+    $card = attach_horizontal_art_one(
+        $pdo,
+        $card,
+        'battleground_card',
+        static fn(array $row): string => (string)$row['card_id']
+    );
 
     $wikiMeta = load_wiki_meta($pdo, (string)$card['card_id']);
     $lastUpdated = (string)$card['updated_at'];
@@ -1825,6 +1910,12 @@ function api_card_by_dbf(PDO $pdo, string $dbf): void
     if (!$card) {
         respond_error('not_found', 'Карта с таким dbf не найдена.', 404);
     }
+    $card = attach_horizontal_art_one(
+        $pdo,
+        $card,
+        'battleground_card',
+        static fn(array $row): string => (string)$row['card_id']
+    );
 
     $wikiMeta = load_wiki_meta($pdo, (string)$card['card_id']);
     $lastUpdated = (string)$card['updated_at'];
@@ -1967,6 +2058,12 @@ function api_constructed_cards(PDO $pdo): void
     $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
     $stmt->execute();
     $cards = $stmt->fetchAll();
+    $cards = attach_horizontal_art(
+        $pdo,
+        $cards,
+        'constructed_card',
+        static fn(array $row): string => (string)$row['card_id']
+    );
     $wikiMap = $includeWiki ? load_constructed_wiki_meta_map($pdo, array_column($cards, 'card_id')) : [];
     $termTranslations = $includeWiki ? load_wiki_term_translations($pdo) : [];
 
@@ -2006,7 +2103,12 @@ function load_constructed_card(PDO $pdo, string $whereSql, array $params): ?arra
     $stmt->execute($params);
     $card = $stmt->fetch();
 
-    return $card ?: null;
+    return $card ? attach_horizontal_art_one(
+        $pdo,
+        $card,
+        'constructed_card',
+        static fn(array $row): string => (string)$row['card_id']
+    ) : null;
 }
 
 function api_constructed_card(PDO $pdo, string $cardId): void
@@ -2255,6 +2357,12 @@ function api_heroes(PDO $pdo): void
     $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
     $stmt->execute();
     $heroes = $stmt->fetchAll();
+    $heroes = attach_horizontal_art(
+        $pdo,
+        $heroes,
+        'hero',
+        static fn(array $row): string => (string)$row['card_id']
+    );
 
     respond_cached([
         'data' => array_map(static fn(array $hero): array => hero_to_api($hero), $heroes),
@@ -2282,6 +2390,12 @@ function api_hero(PDO $pdo, string $cardId): void
     if (!$hero) {
         respond_error('not_found', 'Герой не найден или еще не синхронизирован.', 404);
     }
+    $hero = attach_horizontal_art_one(
+        $pdo,
+        $hero,
+        'hero',
+        static fn(array $row): string => (string)$row['card_id']
+    );
 
     respond_cached(['data' => hero_to_api($hero)], (string)$hero['updated_at']);
 }
@@ -2298,6 +2412,12 @@ function api_hero_by_dbf(PDO $pdo, string $dbf): void
     if (!$hero) {
         respond_error('not_found', 'Герой с таким dbf не найден или еще не синхронизирован.', 404);
     }
+    $hero = attach_horizontal_art_one(
+        $pdo,
+        $hero,
+        'hero',
+        static fn(array $row): string => (string)$row['card_id']
+    );
 
     respond_cached(['data' => hero_to_api($hero)], (string)$hero['updated_at']);
 }
@@ -2389,6 +2509,12 @@ function api_hero_skins(PDO $pdo): void
     $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
     $stmt->execute();
     $skins = $stmt->fetchAll();
+    $skins = attach_horizontal_art(
+        $pdo,
+        $skins,
+        'hero_skin',
+        static fn(array $row): string => (string)$row['card_id']
+    );
 
     respond_cached([
         'data' => array_map(
@@ -2421,6 +2547,12 @@ function api_hero_skin(PDO $pdo, string $cardId): void
     if (!$skin) {
         respond_error('not_found', 'Скин героя не найден или еще не синхронизирован.', 404);
     }
+    $skin = attach_horizontal_art_one(
+        $pdo,
+        $skin,
+        'hero_skin',
+        static fn(array $row): string => (string)$row['card_id']
+    );
 
     respond_cached(['data' => hero_skin_to_api($skin)], (string)$skin['updated_at']);
 }
@@ -2437,6 +2569,12 @@ function api_hero_skin_by_dbf(PDO $pdo, string $dbf): void
     if (!$skin) {
         respond_error('not_found', 'Скин героя с таким dbf не найден или еще не синхронизирован.', 404);
     }
+    $skin = attach_horizontal_art_one(
+        $pdo,
+        $skin,
+        'hero_skin',
+        static fn(array $row): string => (string)$row['card_id']
+    );
 
     respond_cached(['data' => hero_skin_to_api($skin)], (string)$skin['updated_at']);
 }
@@ -2508,6 +2646,8 @@ function api_pets(PDO $pdo): void
     $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
     $stmt->execute();
     $pets = $stmt->fetchAll();
+    $petEntityId = static fn(array $row): string => (string)($row['card_id'] ?: 'variant:' . $row['variant_id']);
+    $pets = attach_horizontal_art($pdo, $pets, 'pet', $petEntityId);
 
     respond_cached([
         'data' => array_map(
@@ -2539,6 +2679,12 @@ function api_pet(PDO $pdo, string $cardId): void
     if (!$pet) {
         respond_error('not_found', 'Питомец не найден или еще не синхронизирован.', 404);
     }
+    $pet = attach_horizontal_art_one(
+        $pdo,
+        $pet,
+        'pet',
+        static fn(array $row): string => (string)($row['card_id'] ?: 'variant:' . $row['variant_id'])
+    );
     respond_cached(['data' => pet_to_api($pet)], (string)$pet['updated_at']);
 }
 
@@ -2553,6 +2699,12 @@ function api_pet_by_dbf(PDO $pdo, string $dbf): void
     if (!$pet) {
         respond_error('not_found', 'Питомец с таким dbf не найден или еще не синхронизирован.', 404);
     }
+    $pet = attach_horizontal_art_one(
+        $pdo,
+        $pet,
+        'pet',
+        static fn(array $row): string => (string)($row['card_id'] ?: 'variant:' . $row['variant_id'])
+    );
     respond_cached(['data' => pet_to_api($pet)], (string)$pet['updated_at']);
 }
 
@@ -2601,6 +2753,12 @@ function api_coins(PDO $pdo): void
     $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
     $stmt->execute();
     $coins = $stmt->fetchAll();
+    $coins = attach_horizontal_art(
+        $pdo,
+        $coins,
+        'coin',
+        static fn(array $row): string => (string)$row['card_id']
+    );
 
     $relationRow = $pdo->query('SELECT generated_by_card_ids_json, related_card_ids_json, generated_by_cards_json, related_cards_json FROM hearthstone_coins ORDER BY cosmetic_sort_order ASC LIMIT 1')->fetch();
 
@@ -2640,6 +2798,12 @@ function api_coin(PDO $pdo, string $cardId): void
     if (!$coin) {
         respond_error('not_found', 'Монетка не найдена или еще не синхронизирована.', 404);
     }
+    $coin = attach_horizontal_art_one(
+        $pdo,
+        $coin,
+        'coin',
+        static fn(array $row): string => (string)$row['card_id']
+    );
     respond_cached(['data' => coin_to_api($coin)], (string)$coin['updated_at']);
 }
 
@@ -2654,6 +2818,12 @@ function api_coin_by_dbf(PDO $pdo, string $dbf): void
     if (!$coin) {
         respond_error('not_found', 'Монетка с таким dbf не найдена или еще не синхронизирована.', 404);
     }
+    $coin = attach_horizontal_art_one(
+        $pdo,
+        $coin,
+        'coin',
+        static fn(array $row): string => (string)$row['card_id']
+    );
     respond_cached(['data' => coin_to_api($coin)], (string)$coin['updated_at']);
 }
 
@@ -2718,6 +2888,12 @@ function api_timewarped_cards(PDO $pdo): void
     $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
     $stmt->execute();
     $cards = $stmt->fetchAll();
+    $cards = attach_horizontal_art(
+        $pdo,
+        $cards,
+        'timewarped_card',
+        static fn(array $row): string => (string)$row['card_id']
+    );
     $translations = load_wiki_term_translations($pdo);
 
     respond_cached([
@@ -2746,6 +2922,12 @@ function api_timewarped_card(PDO $pdo, string $cardId): void
     if (!$card) {
         respond_error('not_found', 'Хрономальная карта не найдена или еще не синхронизирована.', 404);
     }
+    $card = attach_horizontal_art_one(
+        $pdo,
+        $card,
+        'timewarped_card',
+        static fn(array $row): string => (string)$row['card_id']
+    );
 
     respond_cached(['data' => timewarped_card_to_api($card, load_wiki_term_translations($pdo))], (string)$card['updated_at']);
 }
@@ -2762,6 +2944,12 @@ function api_timewarped_card_by_dbf(PDO $pdo, string $dbf): void
     if (!$card) {
         respond_error('not_found', 'Хрономальная карта с таким dbf не найдена или еще не синхронизирована.', 404);
     }
+    $card = attach_horizontal_art_one(
+        $pdo,
+        $card,
+        'timewarped_card',
+        static fn(array $row): string => (string)$row['card_id']
+    );
 
     respond_cached(['data' => timewarped_card_to_api($card, load_wiki_term_translations($pdo))], (string)$card['updated_at']);
 }
@@ -2843,6 +3031,8 @@ function api_library_cards(PDO $pdo, string $library): void
     $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
     $stmt->execute();
     $cards = $stmt->fetchAll();
+    $libraryEntityId = static fn(array $row): string => (string)$row['library'] . ':' . (string)$row['card_id'];
+    $cards = attach_horizontal_art($pdo, $cards, 'library_card', $libraryEntityId);
 
     respond_cached([
         'data' => array_map(static fn(array $card): array => library_card_to_api($card), $cards),
@@ -2870,6 +3060,12 @@ function api_library_card(PDO $pdo, string $library, string $cardId): void
     if (!$card) {
         respond_error('not_found', 'Запись библиотеки не найдена.', 404);
     }
+    $card = attach_horizontal_art_one(
+        $pdo,
+        $card,
+        'library_card',
+        static fn(array $row): string => (string)$row['library'] . ':' . (string)$row['card_id']
+    );
 
     respond_cached(['data' => library_card_to_api($card)], (string)$card['updated_at']);
 }
@@ -2886,6 +3082,12 @@ function api_library_card_by_dbf(PDO $pdo, string $library, string $dbf): void
     if (!$card) {
         respond_error('not_found', 'Запись библиотеки с таким dbf не найдена.', 404);
     }
+    $card = attach_horizontal_art_one(
+        $pdo,
+        $card,
+        'library_card',
+        static fn(array $row): string => (string)$row['library'] . ':' . (string)$row['card_id']
+    );
 
     respond_cached(['data' => library_card_to_api($card)], (string)$card['updated_at']);
 }
