@@ -392,6 +392,157 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
             )
         )
 
+    def test_fetch_html_keeps_primary_provider_precedence(self) -> None:
+        primary = AsyncMock(
+            return_value=SimpleNamespace(
+                html=MATCHUPS_HTML,
+                backend="scrape_do",
+                request_credits=1,
+                final_url="https://www.hsguru.com/archetype/example",
+            )
+        )
+        local_solver = AsyncMock()
+
+        with (
+            patch(
+                "app.hsguru_archetype_analysis.scrape_source_with_options",
+                new=primary,
+            ),
+            patch(
+                "app.hsguru_archetype_analysis.fetch_via_flaresolverr",
+                new=local_solver,
+                create=True,
+            ),
+        ):
+            html, metadata = asyncio.run(
+                _fetch_html("https://www.hsguru.com/archetype/example")
+            )
+
+        self.assertEqual(html, MATCHUPS_HTML)
+        self.assertEqual(metadata["backend"], "scrape_do")
+        local_solver.assert_not_awaited()
+
+    def test_fetch_html_uses_local_solver_only_after_provider_failure(self) -> None:
+        primary = AsyncMock(side_effect=RuntimeError("remote providers unavailable"))
+        local_solver = AsyncMock(
+            return_value=SimpleNamespace(
+                html=MATCHUPS_HTML,
+                backend="flaresolverr",
+                http_status=200,
+                final_url="https://www.hsguru.com/archetype/example",
+            )
+        )
+
+        with (
+            patch(
+                "app.hsguru_archetype_analysis.scrape_source_with_options",
+                new=primary,
+            ),
+            patch(
+                "app.hsguru_archetype_analysis.fetch_via_flaresolverr",
+                new=local_solver,
+                create=True,
+            ),
+        ):
+            html, metadata = asyncio.run(
+                _fetch_html("https://www.hsguru.com/archetype/example")
+            )
+
+        self.assertEqual(html, MATCHUPS_HTML)
+        self.assertEqual(
+            metadata,
+            {
+                "backend": "flaresolverr",
+                "route": "local_emergency",
+                "request_credits": 0,
+                "final_url": "https://www.hsguru.com/archetype/example",
+                "primary_error_type": "RuntimeError",
+            },
+        )
+        source = local_solver.await_args.args[0]
+        self.assertEqual(source.id, "hsguru_archetype_analysis:page")
+        self.assertEqual(source.site, "hsguru")
+        local_solver.assert_awaited_once_with(source, wait_ms=ANALYSIS_WAIT_MS)
+
+    def test_fetch_html_rejects_invalid_local_solver_html_with_both_errors(
+        self,
+    ) -> None:
+        primary = AsyncMock(side_effect=TimeoutError("primary timed out"))
+        local_solver = AsyncMock(
+            return_value=SimpleNamespace(
+                html="<html><body>Cloudflare challenge</body></html>",
+                backend="flaresolverr",
+                http_status=200,
+                final_url="https://www.hsguru.com/archetype/example",
+            )
+        )
+
+        with (
+            patch(
+                "app.hsguru_archetype_analysis.scrape_source_with_options",
+                new=primary,
+            ),
+            patch(
+                "app.hsguru_archetype_analysis.fetch_via_flaresolverr",
+                new=local_solver,
+                create=True,
+            ),
+            self.assertRaisesRegex(
+                RuntimeError,
+                "primary=TimeoutError.*local=RuntimeError/content_validation",
+            ),
+        ):
+            asyncio.run(_fetch_html("https://www.hsguru.com/archetype/example"))
+
+    def test_fetch_html_rejects_semantic_local_html_with_http_403(self) -> None:
+        primary = AsyncMock(side_effect=TimeoutError("primary timed out"))
+        local_solver = AsyncMock(
+            return_value=SimpleNamespace(
+                html=MATCHUPS_HTML,
+                backend="flaresolverr",
+                http_status=403,
+                final_url="https://www.hsguru.com/archetype/example",
+            )
+        )
+
+        with (
+            patch(
+                "app.hsguru_archetype_analysis.scrape_source_with_options",
+                new=primary,
+            ),
+            patch(
+                "app.hsguru_archetype_analysis.fetch_via_flaresolverr",
+                new=local_solver,
+                create=True,
+            ),
+            self.assertRaisesRegex(
+                RuntimeError,
+                "primary=TimeoutError.*local=RuntimeError/http_status_403",
+            ),
+        ):
+            asyncio.run(_fetch_html("https://www.hsguru.com/archetype/example"))
+
+    def test_fetch_html_reports_primary_and_local_solver_failures(self) -> None:
+        primary = AsyncMock(side_effect=TimeoutError("primary timed out"))
+        local_solver = AsyncMock(side_effect=ConnectionError("solver unavailable"))
+
+        with (
+            patch(
+                "app.hsguru_archetype_analysis.scrape_source_with_options",
+                new=primary,
+            ),
+            patch(
+                "app.hsguru_archetype_analysis.fetch_via_flaresolverr",
+                new=local_solver,
+                create=True,
+            ),
+            self.assertRaisesRegex(
+                RuntimeError,
+                "primary=TimeoutError.*local=ConnectionError",
+            ),
+        ):
+            asyncio.run(_fetch_html("https://www.hsguru.com/archetype/example"))
+
     def test_parses_class_matchups_and_excludes_total(self) -> None:
         rows = parse_class_matchups_html(MATCHUPS_HTML)
 

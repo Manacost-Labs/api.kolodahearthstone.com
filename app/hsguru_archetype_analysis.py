@@ -14,6 +14,7 @@ from bs4 import BeautifulSoup, Tag
 from .firecrawl_backend import scrape_source_with_options
 from .publish_gate import validate_candidate_for_publish
 from .resource_locks import ResourceLocked, ResourceLockSet
+from .scrapers.flaresolverr import fetch_via_flaresolverr
 from .source_state import SourceState
 from .sources import SOURCE_BY_ID, Source
 from .storage import (
@@ -712,6 +713,18 @@ def _analysis_html_is_valid(url: str, html: str) -> bool:
     return table is not None
 
 
+def _bounded_acquisition_error(exc: Exception) -> str:
+    error_type = type(exc).__name__[:80]
+    error_code = str(exc).strip()
+    if re.fullmatch(
+        r"(?:content_validation|http_status_[1-5]\d{2})"
+        r"(?:\+(?:content_validation|http_status_[1-5]\d{2}))*",
+        error_code,
+    ):
+        return f"{error_type}/{error_code}"
+    return error_type
+
+
 async def _fetch_html(url: str) -> tuple[str, dict[str, Any]]:
     source = Source(
         id=f"{SOURCE_ID}:page",
@@ -720,20 +733,53 @@ async def _fetch_html(url: str) -> tuple[str, dict[str, Any]]:
         category="archetype_analysis",
         kind="pipeline",
     )
-    result = await scrape_source_with_options(
-        source,
-        formats=["html"],
-        only_main_content=True,
-        headers=_firecrawl_headers(),
-        max_age_ms=0,
-        wait_ms=ANALYSIS_WAIT_MS,
-        timeout_ms=ANALYSIS_TIMEOUT_MS,
-        skip_providers={"scrapfly"},
-        brightdata_accept_html=lambda html: _analysis_html_is_valid(url, html),
-        brightdata_render=False,
-        brightdata_anonymous_fallback=True,
-        accept_result=lambda scraped: _analysis_html_is_valid(url, scraped.html),
-    )
+    try:
+        result = await scrape_source_with_options(
+            source,
+            formats=["html"],
+            only_main_content=True,
+            headers=_firecrawl_headers(),
+            max_age_ms=0,
+            wait_ms=ANALYSIS_WAIT_MS,
+            timeout_ms=ANALYSIS_TIMEOUT_MS,
+            skip_providers={"scrapfly"},
+            brightdata_accept_html=lambda html: _analysis_html_is_valid(url, html),
+            brightdata_render=False,
+            brightdata_anonymous_fallback=True,
+            accept_result=lambda scraped: _analysis_html_is_valid(url, scraped.html),
+        )
+        if not _analysis_html_is_valid(url, result.html):
+            raise RuntimeError("content_validation")
+    except Exception as primary_exc:  # noqa: BLE001 - isolated provider boundary
+        try:
+            # HSGuru is explicitly direct in the FlareSolverr proxy policy, so this
+            # last-resort local request cannot consume the residential proxy.
+            local_result = await fetch_via_flaresolverr(
+                source,
+                wait_ms=ANALYSIS_WAIT_MS,
+            )
+            local_html = str(getattr(local_result, "html", "") or "")
+            local_status = int(getattr(local_result, "http_status", 200) or 0)
+            local_error_parts: list[str] = []
+            if not 200 <= local_status <= 299:
+                local_error_parts.append(f"http_status_{local_status}")
+            if not _analysis_html_is_valid(url, local_html):
+                local_error_parts.append("content_validation")
+            if local_error_parts:
+                raise RuntimeError("+".join(local_error_parts))
+        except Exception as local_exc:
+            raise RuntimeError(
+                "HSGuru analysis acquisition failed: "
+                f"primary={_bounded_acquisition_error(primary_exc)}; "
+                f"local={_bounded_acquisition_error(local_exc)}"
+            ) from local_exc
+        return local_html, {
+            "backend": "flaresolverr",
+            "route": "local_emergency",
+            "request_credits": 0,
+            "final_url": str(getattr(local_result, "final_url", url) or url)[:500],
+            "primary_error_type": type(primary_exc).__name__[:80],
+        }
     return result.html, {
         "backend": result.backend,
         "request_credits": result.request_credits,
