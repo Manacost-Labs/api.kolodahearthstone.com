@@ -54,12 +54,12 @@ def test_v1_system_paths_do_not_replace_legacy_paths() -> None:
 def test_v1_parsing_reliability_returns_sanitized_public_contract() -> None:
     report = {
         "methodology": {
-            "version": "logical-source-observed-v7",
+            "version": "logical-source-observed-v9",
             "unit": "one terminal outcome per source in a refresh run",
             "scope": "observed_scrape_and_pipeline_sources",
-            "completeness": "observed_attempts_only",
+            "completeness": "observed_attempts_plus_recorded_run_deficits",
             "limitations": [
-                "missing_scheduled_pipeline_windows_not_detectable_until_ledger",
+                "entirely_missing_scheduled_runs_not_detectable_until_ledger",
                 "best_effort_write_gaps_not_detectable",
             ],
             "coverage_method": "complete_generic_refresh_per_24h_bucket",
@@ -96,6 +96,9 @@ def test_v1_parsing_reliability_returns_sanitized_public_contract() -> None:
                 "dependency",
                 "unknown",
             ],
+            "missing_terminal_method": (
+                "sum_positive_expected_minus_distinct_terminal_rows_per_recorded_logical_refresh"
+            ),
             "ai_accuracy_method": "human_labels_required",
         },
         "generated_at": "2026-08-11T12:00:00+00:00",
@@ -110,7 +113,9 @@ def test_v1_parsing_reliability_returns_sanitized_public_contract() -> None:
                 "coverage_ratio": 1.0,
                 "physical_attempts": 12,
                 "total_attempts": 10,
-                "eligible_attempts": 10,
+                "observed_eligible_attempts": 10,
+                "missing_terminal_windows": 2,
+                "eligible_attempts": 12,
                 "counts": {
                     "fresh_published": 8,
                     "provisional": 1,
@@ -139,28 +144,28 @@ def test_v1_parsing_reliability_returns_sanitized_public_contract() -> None:
                     "dependency": 0,
                     "unknown": 1,
                 },
-                "full_fresh_rate_pct": 80.0,
-                "accepted_fresh_rate_pct": 90.0,
-                "data_available_rate_pct": 90.0,
+                "full_fresh_rate_pct": 66.67,
+                "accepted_fresh_rate_pct": 75.0,
+                "data_available_rate_pct": 75.0,
                 "freshness_slo": {
                     "target_rate_pct": 99.0,
                     "objective_status": "collecting",
                     "good_attempts": 8,
-                    "bad_attempts": 2,
-                    "allowed_bad_attempts": 0.1,
-                    "bad_attempts_over_budget": 2,
-                    "error_budget_remaining_attempts": -1.9,
-                    "error_budget_consumed_pct": 2000.0,
+                    "bad_attempts": 4,
+                    "allowed_bad_attempts": 0.12,
+                    "bad_attempts_over_budget": 4,
+                    "error_budget_remaining_attempts": -3.88,
+                    "error_budget_consumed_pct": 3333.33,
                 },
                 "availability_slo": {
                     "target_rate_pct": 99.0,
                     "objective_status": "collecting",
                     "good_attempts": 9,
-                    "bad_attempts": 1,
-                    "allowed_bad_attempts": 0.1,
-                    "bad_attempts_over_budget": 1,
-                    "error_budget_remaining_attempts": -0.9,
-                    "error_budget_consumed_pct": 1000.0,
+                    "bad_attempts": 3,
+                    "allowed_bad_attempts": 0.12,
+                    "bad_attempts_over_budget": 3,
+                    "error_budget_remaining_attempts": -2.88,
+                    "error_budget_consumed_pct": 2500.0,
                 },
                 "ai_quality": {
                     "candidate_review": {
@@ -221,5 +226,5 @@ def test_v1_parsing_reliability_returns_sanitized_public_contract() -> None:
         "source_id": "parser_reliability",
         "fetched_at": "2026-08-11T12:00:00+00:00",
         "stale": False,
-        "count": 10,
+        "count": 12,
     }

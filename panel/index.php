@@ -1815,8 +1815,8 @@ $workspaceSection = $showApiTokens
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232563eb'/%3E%3Ctext x='32' y='40' text-anchor='middle' font-family='system-ui,sans-serif' font-size='25' font-weight='800' fill='white'%3EHS%3C/text%3E%3C/svg%3E">
     <link rel="stylesheet" href="/assets/style.css?v=33">
     <script src="/assets/panel-ui.js?v=2" defer></script>
-    <script src="/assets/parsing-reliability.js?v=2" defer></script>
-    <script src="/assets/analytics.js?v=5" defer></script>
+    <script src="/assets/parsing-reliability.js?v=3" defer></script>
+    <script src="/assets/analytics.js?v=6" defer></script>
     <script src="/assets/parser-control-view.js?v=1" defer></script>
     <script src="/assets/parser-control.js?v=1" defer></script>
 </head>

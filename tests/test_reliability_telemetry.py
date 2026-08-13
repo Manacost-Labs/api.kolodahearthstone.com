@@ -146,6 +146,8 @@ def test_recovery_attempts_share_one_final_refresh_window_slo_outcome(
 
     assert day["physical_attempts"] == 2
     assert day["total_attempts"] == 1
+    assert day["observed_eligible_attempts"] == 1
+    assert day["missing_terminal_windows"] == 0
     assert day["eligible_attempts"] == 1
     assert day["counts"]["fresh_published"] == 1
     assert day["counts"]["failed"] == 0
@@ -155,6 +157,136 @@ def test_recovery_attempts_share_one_final_refresh_window_slo_outcome(
             "SELECT COUNT(*), COUNT(DISTINCT refresh_window_id) FROM source_attempts"
         ).fetchone()
     assert stored == (2, 1)
+
+
+def test_incomplete_run_adds_only_its_absent_terminal_to_slo_denominator(
+    tmp_path: Path,
+) -> None:
+    now = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
+    path = tmp_path / "reliability.sqlite3"
+    record_terminal_results(
+        "incomplete-run",
+        [_status("fresh")],
+        finished_at=now - timedelta(hours=1),
+        path=path,
+        coverage_scope="full",
+        expected_source_count=2,
+    )
+
+    day = build_reliability_report(now=now, path=path)["windows"][0]
+
+    assert day["physical_attempts"] == 1
+    assert day["total_attempts"] == 1
+    assert day["observed_eligible_attempts"] == 1
+    assert day["missing_terminal_windows"] == 1
+    assert day["eligible_attempts"] == 2
+    assert day["full_fresh_rate_pct"] == 50.0
+    assert day["data_available_rate_pct"] == 50.0
+    assert day["freshness_slo"]["bad_attempts"] == 1
+    assert day["availability_slo"]["bad_attempts"] == 1
+    assert day["coverage_ratio"] == 0.0
+
+
+def test_cross_run_recovery_fills_missing_source_in_same_refresh_window(
+    tmp_path: Path,
+) -> None:
+    now = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
+    path = tmp_path / "reliability.sqlite3"
+    window_id = "pipeline:2026-08-11"
+    record_terminal_results(
+        "scheduled-incomplete",
+        [_status("source-a")],
+        finished_at=now - timedelta(hours=2),
+        path=path,
+        expected_source_count=2,
+        refresh_window_id=window_id,
+    )
+    record_terminal_results(
+        "targeted-recovery",
+        [_status("source-b")],
+        finished_at=now - timedelta(hours=1),
+        path=path,
+        refresh_window_id=window_id,
+    )
+
+    day = build_reliability_report(now=now, path=path)["windows"][0]
+
+    assert day["physical_attempts"] == 2
+    assert day["total_attempts"] == 2
+    assert day["observed_eligible_attempts"] == 2
+    assert day["missing_terminal_windows"] == 0
+    assert day["eligible_attempts"] == 2
+    assert day["full_fresh_rate_pct"] == 100.0
+    with sqlite3.connect(path) as connection:
+        stored = connection.execute(
+            "SELECT refresh_window_id FROM refresh_runs ORDER BY run_id"
+        ).fetchall()
+    assert stored == [(window_id,), (window_id,)]
+
+
+def test_skipped_terminal_is_excluded_but_not_misclassified_as_missing(
+    tmp_path: Path,
+) -> None:
+    now = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
+    path = tmp_path / "reliability.sqlite3"
+    record_terminal_results(
+        "skipped-helper-run",
+        [_status("helper", state="locked", skipped=True)],
+        finished_at=now - timedelta(hours=1),
+        path=path,
+        expected_source_count=1,
+    )
+
+    day = build_reliability_report(now=now, path=path)["windows"][0]
+
+    assert day["counts"]["skipped"] == 1
+    assert day["observed_eligible_attempts"] == 0
+    assert day["missing_terminal_windows"] == 0
+    assert day["eligible_attempts"] == 0
+    assert day["full_fresh_rate_pct"] is None
+
+
+def test_missing_terminal_windows_are_scoped_to_every_report_window(
+    tmp_path: Path,
+) -> None:
+    now = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
+    path = tmp_path / "reliability.sqlite3"
+    record_terminal_results(
+        "schema-seed",
+        [_status("seed", state="locked", skipped=True)],
+        finished_at=now - timedelta(days=31),
+        path=path,
+    )
+    connection = sqlite3.connect(path)
+    for run_id, age in (
+        ("missing-day", timedelta(hours=2)),
+        ("missing-week", timedelta(days=2)),
+        ("missing-month", timedelta(days=10)),
+    ):
+        finished_at = (now - age).timestamp()
+        connection.execute(
+            """
+            INSERT INTO refresh_runs (
+                run_id,
+                finished_at,
+                scope,
+                cohort_hash,
+                expected_sources,
+                observed_sources,
+                recorded_at
+            ) VALUES (?, ?, 'partial', '', 1, 0, ?)
+            """,
+            (run_id, finished_at, finished_at),
+        )
+    connection.commit()
+    connection.close()
+
+    windows = build_reliability_report(now=now, path=path)["windows"]
+
+    assert [window["observed_eligible_attempts"] for window in windows] == [0, 0, 0]
+    assert [window["missing_terminal_windows"] for window in windows] == [1, 2, 3]
+    assert [window["eligible_attempts"] for window in windows] == [1, 2, 3]
+    assert [window["full_fresh_rate_pct"] for window in windows] == [0.0, 0.0, 0.0]
 
 
 def test_skipped_recovery_does_not_erase_a_refresh_window_failure(
@@ -321,9 +453,12 @@ def test_sparse_attempt_history_never_claims_complete_window_coverage(
     assert report["windows"][1]["measurement_status"] == "collecting"
     assert report["windows"][2]["measurement_status"] == "collecting"
     assert report["methodology"]["scope"] == "observed_scrape_and_pipeline_sources"
-    assert report["methodology"]["completeness"] == "observed_attempts_only"
     assert (
-        "missing_scheduled_pipeline_windows_not_detectable_until_ledger"
+        report["methodology"]["completeness"]
+        == "observed_attempts_plus_recorded_run_deficits"
+    )
+    assert (
+        "entirely_missing_scheduled_runs_not_detectable_until_ledger"
         in report["methodology"]["limitations"]
     )
     assert report["coverage_started_at"] is None
@@ -541,7 +676,12 @@ def test_same_run_retry_can_complete_observed_sources_without_moving_time(
     after = build_reliability_report(now=now, path=path)["windows"][0]
 
     assert before["coverage_ratio"] == 0.0
+    assert before["observed_eligible_attempts"] == 1
+    assert before["missing_terminal_windows"] == 1
+    assert before["eligible_attempts"] == 2
     assert after["coverage_ratio"] == 1.0
+    assert after["observed_eligible_attempts"] == 2
+    assert after["missing_terminal_windows"] == 0
     assert after["eligible_attempts"] == 2
 
 
@@ -552,6 +692,8 @@ def test_empty_report_never_claims_one_hundred_percent(tmp_path: Path) -> None:
 
     assert report["coverage_started_at"] is None
     for window in report["windows"]:
+        assert window["observed_eligible_attempts"] == 0
+        assert window["missing_terminal_windows"] == 0
         assert window["eligible_attempts"] == 0
         assert window["full_fresh_rate_pct"] is None
         assert window["accepted_fresh_rate_pct"] is None
@@ -621,6 +763,70 @@ def test_schema_migrates_existing_database_without_losing_rows(tmp_path: Path) -
         ).fetchone()
     assert "refresh_window_id" in columns
     assert legacy_window == ("",)
+
+
+def test_schema_migration_backfills_refresh_run_window_from_attempts(
+    tmp_path: Path,
+) -> None:
+    now = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
+    path = tmp_path / "reliability.sqlite3"
+    window_id = "pipeline:2026-08-11"
+    connection = sqlite3.connect(path)
+    connection.execute(
+        """
+        CREATE TABLE source_attempts (
+            attempt_id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            refresh_window_id TEXT NOT NULL DEFAULT '',
+            source_id TEXT NOT NULL,
+            finished_at REAL NOT NULL,
+            outcome TEXT NOT NULL,
+            terminal_state TEXT NOT NULL,
+            recorded_at REAL NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        "INSERT INTO source_attempts VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            "old-attempt",
+            "old-run",
+            window_id,
+            "old-source",
+            now.timestamp(),
+            "fresh_published",
+            "ok",
+            now.timestamp(),
+        ),
+    )
+    connection.execute(
+        """
+        CREATE TABLE refresh_runs (
+            run_id TEXT PRIMARY KEY,
+            finished_at REAL NOT NULL,
+            scope TEXT NOT NULL,
+            cohort_hash TEXT NOT NULL DEFAULT '',
+            expected_sources INTEGER NOT NULL,
+            observed_sources INTEGER NOT NULL,
+            recorded_at REAL NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        "INSERT INTO refresh_runs VALUES (?, ?, 'partial', '', 1, 1, ?)",
+        ("old-run", now.timestamp(), now.timestamp()),
+    )
+    connection.commit()
+    connection.close()
+
+    day = build_reliability_report(now=now, path=path)["windows"][0]
+
+    assert day["missing_terminal_windows"] == 0
+    with sqlite3.connect(path) as connection:
+        stored = connection.execute(
+            "SELECT refresh_window_id FROM refresh_runs WHERE run_id = 'old-run'"
+        ).fetchone()
+    assert stored == (window_id,)
 
 
 def test_schema_migration_is_serialized_across_processes(tmp_path: Path) -> None:

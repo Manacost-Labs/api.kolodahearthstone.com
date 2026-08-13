@@ -12,6 +12,8 @@ const observedWindow = {
     rates_observed: true,
     rates_available: true,
     coverage_ratio: 1,
+    observed_eligible_attempts: 98,
+    missing_terminal_windows: 2,
     eligible_attempts: 100,
     total_attempts: 105,
     counts: {
@@ -42,6 +44,8 @@ test('uses the observed weekly window for honest headline rates', () => {
     assert.equal(model.counts.lkg, 5);
     assert.equal(model.counts.failed, 2);
     assert.equal(model.counts.timedOut, 1);
+    assert.equal(model.observedEligibleAttempts, 98);
+    assert.equal(model.missingTerminalWindows, 2);
 });
 
 test('renders consistent collecting rates as an explicitly preliminary slice', () => {

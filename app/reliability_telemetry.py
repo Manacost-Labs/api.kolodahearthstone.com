@@ -34,7 +34,7 @@ WINDOWS = (
     ("7d", timedelta(days=7)),
     ("30d", timedelta(days=30)),
 )
-METHODOLOGY_VERSION = "logical-source-observed-v8"
+METHODOLOGY_VERSION = "logical-source-observed-v9"
 SLO_TARGET_RATE_PCT = 99.0
 PIPELINE_SCHEDULE_LEDGER_READY = False
 COVERAGE_BUCKET_SECONDS = 24 * 60 * 60
@@ -356,6 +356,10 @@ def record_terminal_results(
         )
     except (TypeError, ValueError, OverflowError):
         expected_sources = len(rows)
+    row_refresh_windows = {str(row[2]) for row in rows if row[2]}
+    run_refresh_window_id = (
+        next(iter(row_refresh_windows)) if len(row_refresh_windows) == 1 else ""
+    )
 
     resolved_path = path or telemetry_db_path()
     connection = _connect(resolved_path)
@@ -391,25 +395,28 @@ def record_terminal_results(
             """
             INSERT OR IGNORE INTO refresh_runs (
                 run_id,
+                refresh_window_id,
                 finished_at,
                 scope,
                 cohort_hash,
                 expected_sources,
                 observed_sources,
                 recorded_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(run_id) DO UPDATE SET
                 observed_sources = MAX(
                     refresh_runs.observed_sources,
                     excluded.observed_sources
                 )
             WHERE refresh_runs.finished_at = excluded.finished_at
+              AND refresh_runs.refresh_window_id = excluded.refresh_window_id
               AND refresh_runs.scope = excluded.scope
               AND refresh_runs.cohort_hash = excluded.cohort_hash
               AND refresh_runs.expected_sources = excluded.expected_sources
             """,
             (
                 normalized_run_id,
+                run_refresh_window_id,
                 completed_epoch,
                 normalized_scope,
                 cohort_hash,
@@ -586,6 +593,7 @@ def _schema_is_current(connection: sqlite3.Connection) -> bool:
         "recorded_at",
     }.issubset(source_columns) and {
         "run_id",
+        "refresh_window_id",
         "finished_at",
         "scope",
         "cohort_hash",
@@ -677,6 +685,7 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
                 """
                 CREATE TABLE IF NOT EXISTS refresh_runs (
                     run_id TEXT PRIMARY KEY,
+                    refresh_window_id TEXT NOT NULL DEFAULT '',
                     finished_at REAL NOT NULL,
                     scope TEXT NOT NULL CHECK (scope IN ('full', 'partial')),
                     cohort_hash TEXT NOT NULL DEFAULT '',
@@ -695,6 +704,34 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
                     "ALTER TABLE refresh_runs "
                     "ADD COLUMN cohort_hash TEXT NOT NULL DEFAULT ''"
                 )
+            if "refresh_window_id" not in run_columns:
+                connection.execute(
+                    "ALTER TABLE refresh_runs "
+                    "ADD COLUMN refresh_window_id TEXT NOT NULL DEFAULT ''"
+                )
+                connection.execute(
+                    """
+                    UPDATE refresh_runs
+                    SET refresh_window_id = COALESCE(
+                        (
+                            SELECT CASE
+                                WHEN COUNT(DISTINCT NULLIF(
+                                    source_attempts.refresh_window_id,
+                                    ''
+                                )) = 1
+                                THEN MAX(NULLIF(
+                                    source_attempts.refresh_window_id,
+                                    ''
+                                ))
+                                ELSE ''
+                            END
+                            FROM source_attempts
+                            WHERE source_attempts.run_id = refresh_runs.run_id
+                        ),
+                        ''
+                    )
+                    """
+                )
             connection.execute(
                 """
                 CREATE INDEX IF NOT EXISTS refresh_runs_coverage_idx
@@ -705,6 +742,12 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
                 """
                 CREATE INDEX IF NOT EXISTS refresh_runs_cohort_coverage_idx
                 ON refresh_runs (cohort_hash, scope, finished_at)
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS refresh_runs_window_idx
+                ON refresh_runs (refresh_window_id, finished_at)
                 """
             )
             connection.commit()
@@ -805,7 +848,13 @@ def _query_window(
         ).fetchone()[0]
     )
     total_attempts = sum(counts.values())
-    eligible_attempts = sum(counts[outcome] for outcome in ELIGIBLE_OUTCOMES)
+    observed_eligible_attempts = sum(counts[outcome] for outcome in ELIGIBLE_OUTCOMES)
+    missing_terminal_windows = _missing_terminal_windows(
+        connection,
+        from_epoch=from_at.timestamp(),
+        to_epoch=report_at.timestamp(),
+    )
+    eligible_attempts = observed_eligible_attempts + missing_terminal_windows
     full_fresh = counts["fresh_published"]
     accepted_fresh = full_fresh + counts["provisional"]
     data_available = accepted_fresh + counts["lkg_served"]
@@ -830,6 +879,8 @@ def _query_window(
         "coverage_ratio": coverage_ratio,
         "physical_attempts": physical_attempts,
         "total_attempts": total_attempts,
+        "observed_eligible_attempts": observed_eligible_attempts,
+        "missing_terminal_windows": missing_terminal_windows,
         "eligible_attempts": eligible_attempts,
         "counts": counts,
         "failure_reasons": failure_reasons,
@@ -865,6 +916,8 @@ def _empty_report(report_at: datetime) -> dict[str, Any]:
                 "coverage_ratio": 0.0,
                 "physical_attempts": 0,
                 "total_attempts": 0,
+                "observed_eligible_attempts": 0,
+                "missing_terminal_windows": 0,
                 "eligible_attempts": 0,
                 "counts": {outcome: 0 for outcome in OUTCOMES},
                 "failure_reasons": {reason: 0 for reason in FAILURE_REASONS},
@@ -893,12 +946,13 @@ def _methodology() -> dict[str, Any]:
         "version": METHODOLOGY_VERSION,
         "unit": (
             "one final terminal outcome per source in an explicit refresh window; "
-            "otherwise one outcome per refresh run"
+            "otherwise one outcome per refresh run; absent expected terminal rows "
+            "in recorded runs count as missing terminal windows"
         ),
         "scope": "observed_scrape_and_pipeline_sources",
-        "completeness": "observed_attempts_only",
+        "completeness": "observed_attempts_plus_recorded_run_deficits",
         "limitations": [
-            "missing_scheduled_pipeline_windows_not_detectable_until_ledger",
+            "entirely_missing_scheduled_runs_not_detectable_until_ledger",
             "best_effort_write_gaps_not_detectable",
         ],
         "coverage_method": "complete_generic_refresh_per_24h_bucket",
@@ -915,6 +969,9 @@ def _methodology() -> dict[str, Any]:
         "slo_target_rate_pct": SLO_TARGET_RATE_PCT,
         "failure_reason_values": list(FAILURE_REASONS),
         "physical_attempts_method": "all persisted source attempts before window folding",
+        "missing_terminal_method": (
+            "sum_positive_expected_minus_distinct_terminal_rows_per_recorded_logical_refresh"
+        ),
         "ai_accuracy_method": "human_labels_required",
     }
 
@@ -1146,6 +1203,72 @@ def _slo_budget(
             round((bad_attempts / allowed_bad) * 100.0, 2) if allowed_bad > 0 else None
         ),
     }
+
+
+def _missing_terminal_windows(
+    connection: sqlite3.Connection,
+    *,
+    from_epoch: float,
+    to_epoch: float,
+) -> int:
+    """Count expected source terminals absent from logical refreshes.
+
+    ``observed_sources`` deliberately excludes skipped outcomes, so it cannot
+    distinguish a recorded helper/lock skip from a telemetry write gap. Count
+    distinct persisted source terminals instead; skipped rows remain visible
+    in ``counts.skipped`` but never become false SLO failures. Runs sharing an
+    explicit refresh window are one logical refresh, so a targeted recovery can
+    fill an earlier missing source without inflating the denominator.
+    """
+
+    row = connection.execute(
+        """
+        WITH window_runs AS (
+            SELECT
+                run_id,
+                CASE
+                    WHEN refresh_window_id != ''
+                    THEN 'window:' || refresh_window_id
+                    ELSE 'run:' || run_id
+                END AS logical_refresh_id,
+                expected_sources
+            FROM refresh_runs
+            WHERE finished_at >= ?
+              AND finished_at <= ?
+        ),
+        logical_expectations AS (
+            SELECT
+                logical_refresh_id,
+                MAX(expected_sources) AS expected_sources
+            FROM window_runs
+            GROUP BY logical_refresh_id
+        ),
+        logical_terminal_counts AS (
+            SELECT
+                window_runs.logical_refresh_id,
+                COUNT(DISTINCT source_attempts.source_id) AS terminal_sources
+            FROM window_runs
+            LEFT JOIN source_attempts USING (run_id)
+            GROUP BY window_runs.logical_refresh_id
+        )
+        SELECT COALESCE(
+            SUM(
+                CASE
+                    WHEN logical_expectations.expected_sources
+                         > COALESCE(logical_terminal_counts.terminal_sources, 0)
+                    THEN logical_expectations.expected_sources
+                         - COALESCE(logical_terminal_counts.terminal_sources, 0)
+                    ELSE 0
+                END
+            ),
+            0
+        )
+        FROM logical_expectations
+        LEFT JOIN logical_terminal_counts USING (logical_refresh_id)
+        """,
+        (from_epoch, to_epoch),
+    ).fetchone()
+    return max(0, int(row[0] if row is not None and row[0] is not None else 0))
 
 
 def _coverage_ratio(

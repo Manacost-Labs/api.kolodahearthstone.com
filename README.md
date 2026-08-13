@@ -113,6 +113,16 @@ GraphQL pagination возвращает `items` и `pageInfo`. Максимал�
 | GET | `/v1/system/parsing-reliability` | — | Reliability за 24h, 7d и 30d |
 | GET | `/v1/auth/token` | — | Identity, scopes и срок текущего токена |
 
+В reliability-окнах `eligible_attempts` равен сумме
+`observed_eligible_attempts + missing_terminal_windows`. Missing terminal
+учитывается только когда в уже записанном логическом refresh ожидаемых sources
+больше, чем distinct terminal rows. Runs с одинаковым `refresh_window_id`
+сворачиваются вместе, поэтому успешный recovery не удваивает знаменатель.
+Записанный `skipped` остаётся в `counts.skipped`, исключается из SLO и не
+считается потерянным terminal.
+Полностью не записанный scheduler run останется невидимым до отдельного
+schedule ledger, поэтому такие окна продолжают иметь статус `collecting`.
+
 ## Sources и raw datasets
 
 | Метод | Path | Query parameters | Доступ | Назначение |

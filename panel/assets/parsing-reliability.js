@@ -58,6 +58,8 @@
             availability: ratesAvailable ? percentage(window.data_available_rate_pct) : '—',
             acceptedFresh: ratesAvailable ? percentage(window.accepted_fresh_rate_pct) : '—',
             coverage: window ? percentage(Number(window.coverage_ratio) * 100) : '—',
+            observedEligibleAttempts: window ? nonNegativeCount(window.observed_eligible_attempts) : null,
+            missingTerminalWindows: window ? nonNegativeCount(window.missing_terminal_windows) : null,
             eligibleAttempts: window ? nonNegativeCount(window.eligible_attempts) : null,
             totalAttempts: window ? nonNegativeCount(window.total_attempts) : null,
             counts: {

@@ -368,9 +368,10 @@ function analytics_normalize_parsing_reliability(
         || $rawWindows === null
         || trim((string)($methodology['version'] ?? '')) === ''
         || ($methodology['scope'] ?? '') !== 'observed_scrape_and_pipeline_sources'
-        || ($methodology['completeness'] ?? '') !== 'observed_attempts_only'
-        || !in_array('missing_scheduled_pipeline_windows_not_detectable_until_ledger', $limitations, true)
+        || ($methodology['completeness'] ?? '') !== 'observed_attempts_plus_recorded_run_deficits'
+        || !in_array('entirely_missing_scheduled_runs_not_detectable_until_ledger', $limitations, true)
         || !in_array('best_effort_write_gaps_not_detectable', $limitations, true)
+        || ($methodology['missing_terminal_method'] ?? '') !== 'sum_positive_expected_minus_distinct_terminal_rows_per_recorded_logical_refresh'
         || ($methodology['coverage_method'] ?? '') !== 'complete_generic_refresh_per_24h_bucket'
         || ($methodology['coverage_scope'] ?? '') !== 'generic_scrape_sources_only'
         || ($methodology['coverage_cohort_method'] ?? '') !== 'current_canonical_scrape_registry_hash'
@@ -401,10 +402,18 @@ function analytics_normalize_parsing_reliability(
             $counts[$key] = analytics_reliability_count($rawCounts[$key] ?? 0);
         }
         $totalAttempts = analytics_reliability_count($rawWindow['total_attempts'] ?? 0);
+        $observedEligibleAttempts = analytics_reliability_count(
+            $rawWindow['observed_eligible_attempts'] ?? 0
+        );
+        $missingTerminalWindows = analytics_reliability_count(
+            $rawWindow['missing_terminal_windows'] ?? 0
+        );
         $eligibleAttempts = analytics_reliability_count($rawWindow['eligible_attempts'] ?? 0);
         $countedTotal = array_sum($counts);
         $countedEligible = $countedTotal - $counts['skipped'];
-        $countsConsistent = $totalAttempts === $countedTotal && $eligibleAttempts === $countedEligible;
+        $countsConsistent = $totalAttempts === $countedTotal
+            && $observedEligibleAttempts === $countedEligible
+            && $eligibleAttempts === $observedEligibleAttempts + $missingTerminalWindows;
 
         $coverageRatio = is_numeric($rawWindow['coverage_ratio'] ?? null)
             ? (float)$rawWindow['coverage_ratio']
@@ -436,6 +445,8 @@ function analytics_normalize_parsing_reliability(
             'measurement_status' => $measurementStatus,
             'coverage_ratio' => $coverageRatio,
             'total_attempts' => $totalAttempts,
+            'observed_eligible_attempts' => $observedEligibleAttempts,
+            'missing_terminal_windows' => $missingTerminalWindows,
             'eligible_attempts' => $eligibleAttempts,
             'counts' => $counts,
             'full_fresh_rate_pct' => $fullFresh,
@@ -469,6 +480,7 @@ function analytics_normalize_parsing_reliability(
             'combined_slo_readiness' => $combinedSloReadiness,
             'eligible_outcomes' => $eligibleOutcomes,
             'excluded_outcomes' => $excludedOutcomes,
+            'missing_terminal_method' => (string)$methodology['missing_terminal_method'],
         ],
         'cached' => $cached,
         'stale_cache' => $staleCache,

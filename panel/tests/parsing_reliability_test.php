@@ -15,12 +15,12 @@ function assert_same($expected, $actual, string $message): void
 $envelope = [
     'data' => [
         'methodology' => [
-            'version' => 'logical-source-observed-v7',
+            'version' => 'logical-source-observed-v9',
             'unit' => 'one terminal outcome per source in a refresh run',
             'scope' => 'observed_scrape_and_pipeline_sources',
-            'completeness' => 'observed_attempts_only',
+            'completeness' => 'observed_attempts_plus_recorded_run_deficits',
             'limitations' => [
-                'missing_scheduled_pipeline_windows_not_detectable_until_ledger',
+                'entirely_missing_scheduled_runs_not_detectable_until_ledger',
                 'best_effort_write_gaps_not_detectable',
             ],
             'coverage_method' => 'complete_generic_refresh_per_24h_bucket',
@@ -29,6 +29,7 @@ $envelope = [
             'combined_slo_readiness' => 'collecting_pipeline_schedule_ledger',
             'eligible_outcomes' => ['fresh_published', 'provisional', 'lkg_served', 'failed', 'timed_out'],
             'excluded_outcomes' => ['skipped'],
+            'missing_terminal_method' => 'sum_positive_expected_minus_distinct_terminal_rows_per_recorded_logical_refresh',
         ],
         'generated_at' => '2026-08-11T03:30:00+00:00',
         'coverage_started_at' => '2026-08-01T00:00:00+00:00',
@@ -40,7 +41,9 @@ $envelope = [
                 'measurement_status' => 'collecting',
                 'coverage_ratio' => 0.25,
                 'total_attempts' => 8,
-                'eligible_attempts' => 7,
+                'observed_eligible_attempts' => 7,
+                'missing_terminal_windows' => 2,
+                'eligible_attempts' => 9,
                 'counts' => [
                     'fresh_published' => 7,
                     'provisional' => 0,
@@ -49,9 +52,9 @@ $envelope = [
                     'timed_out' => 0,
                     'skipped' => 1,
                 ],
-                'full_fresh_rate_pct' => 100.0,
-                'accepted_fresh_rate_pct' => 100.0,
-                'data_available_rate_pct' => 100.0,
+                'full_fresh_rate_pct' => 77.78,
+                'accepted_fresh_rate_pct' => 77.78,
+                'data_available_rate_pct' => 77.78,
             ],
             [
                 'window' => '7d',
@@ -60,6 +63,8 @@ $envelope = [
                 'measurement_status' => 'observed',
                 'coverage_ratio' => 1.0,
                 'total_attempts' => 105,
+                'observed_eligible_attempts' => 100,
+                'missing_terminal_windows' => 0,
                 'eligible_attempts' => 100,
                 'counts' => [
                     'fresh_published' => 88,
@@ -85,7 +90,10 @@ assert_same('24h', $normalized['default_window'], 'The complete daily window mus
 assert_same(2, count($normalized['windows']), 'Known windows must be retained.');
 assert_same(false, $normalized['windows'][0]['rates_observed'], 'Collecting rates must never be presented as observed.');
 assert_same(true, $normalized['windows'][0]['rates_available'], 'Consistent collecting rates may be presented as preliminary.');
-assert_same(100.0, $normalized['windows'][0]['full_fresh_rate_pct'], 'The observed value may be retained for diagnostics.');
+assert_same(77.78, $normalized['windows'][0]['full_fresh_rate_pct'], 'Missing terminals must reduce the honest fresh rate.');
+assert_same(7, $normalized['windows'][0]['observed_eligible_attempts'], 'Observed eligible outcomes must remain explicit.');
+assert_same(2, $normalized['windows'][0]['missing_terminal_windows'], 'Missing terminal outcomes must reach the UI.');
+assert_same(9, $normalized['windows'][0]['eligible_attempts'], 'Missing terminals must be included in the denominator.');
 assert_same(true, $normalized['windows'][1]['rates_observed'], 'An observed window with consistent attempts may show rates.');
 assert_same(true, $normalized['windows'][1]['rates_available'], 'Observed rates must also be available.');
 assert_same(5, $normalized['windows'][1]['counts']['lkg_served'], 'LKG must remain a separate count.');
@@ -95,7 +103,7 @@ assert_same(
     'The UI must retain the combined observed-source scope.'
 );
 assert_same(
-    ['missing_scheduled_pipeline_windows_not_detectable_until_ledger', 'best_effort_write_gaps_not_detectable'],
+    ['entirely_missing_scheduled_runs_not_detectable_until_ledger', 'best_effort_write_gaps_not_detectable'],
     $normalized['methodology']['limitations'],
     'The public UI must retain methodology limitations.'
 );
@@ -147,7 +155,7 @@ assert_same([], $missingScope['windows'], 'Telemetry without scope must not expo
 
 $missingLimitationEnvelope = $envelope;
 $missingLimitationEnvelope['data']['methodology']['limitations'] = [
-    'missing_scheduled_pipeline_windows_not_detectable_until_ledger',
+    'entirely_missing_scheduled_runs_not_detectable_until_ledger',
 ];
 $missingLimitation = analytics_normalize_parsing_reliability($missingLimitationEnvelope);
 assert_same(

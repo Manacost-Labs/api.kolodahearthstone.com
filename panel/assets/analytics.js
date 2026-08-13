@@ -395,6 +395,8 @@
             model.preliminary ? 'статус: предварительный' : null,
             `покрытие окна: ${model.coverage}`,
             `eligible попыток: ${model.eligibleAttempts ?? '—'}`,
+            `наблюдаемых eligible: ${model.observedEligibleAttempts ?? '—'}`,
+            `нет terminal: ${model.missingTerminalWindows ?? '—'}`,
             `всего исходов: ${model.totalAttempts ?? '—'}`,
             `skipped: ${model.counts.skipped ?? '—'}`,
         ].filter(Boolean);

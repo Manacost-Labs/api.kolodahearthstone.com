@@ -159,6 +159,8 @@ class ReliabilityWindow(BaseModel):
     coverage_ratio: float = Field(ge=0.0, le=1.0)
     physical_attempts: int | None = Field(default=None, ge=0)
     total_attempts: int = Field(ge=0)
+    observed_eligible_attempts: int = Field(ge=0)
+    missing_terminal_windows: int = Field(ge=0)
     eligible_attempts: int = Field(ge=0)
     counts: ReliabilityCounts
     failure_reasons: ReliabilityFailureReasons
@@ -174,7 +176,7 @@ class ReliabilityMethodology(BaseModel):
     version: str
     unit: str
     scope: Literal["observed_scrape_and_pipeline_sources"]
-    completeness: Literal["observed_attempts_only"]
+    completeness: Literal["observed_attempts_plus_recorded_run_deficits"]
     limitations: list[str]
     coverage_method: Literal["complete_generic_refresh_per_24h_bucket"]
     coverage_scope: Literal["generic_scrape_sources_only"]
@@ -189,6 +191,9 @@ class ReliabilityMethodology(BaseModel):
     slo_target_rate_pct: float = Field(ge=0.0, le=100.0)
     failure_reason_values: list[str]
     physical_attempts_method: str | None = None
+    missing_terminal_method: Literal[
+        "sum_positive_expected_minus_distinct_terminal_rows_per_recorded_logical_refresh"
+    ]
     ai_accuracy_method: Literal["human_labels_required"]
 
 
