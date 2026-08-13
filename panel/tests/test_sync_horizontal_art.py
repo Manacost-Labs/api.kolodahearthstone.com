@@ -60,6 +60,38 @@ class HorizontalArtTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Unsupported source kind"):
                 horizontal.render_horizontal_art(source, target, "unknown")
 
+    def test_accepts_generic_binary_image_content_type(self) -> None:
+        self.assertTrue(
+            horizontal.allowed_image_content_type("application/octet-stream")
+        )
+        self.assertTrue(horizontal.allowed_image_content_type("image/webp"))
+        self.assertFalse(horizontal.allowed_image_content_type("text/html"))
+
+    def test_process_candidate_uses_fallback_art(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            uploads = root / "uploads"
+            fallback = uploads / "art" / "fallback.jpg"
+            fallback.parent.mkdir(parents=True)
+            self.create_source(fallback, "900x1200")
+            candidate = horizontal.Candidate(
+                "hero",
+                "TEST_HERO",
+                456,
+                "ftp://invalid.test/primary.jpg",
+                "art",
+                (("/uploads/art/fallback.jpg", "art"),),
+            )
+            with (
+                mock.patch.object(horizontal, "APP_ROOT", root),
+                mock.patch.object(horizontal, "UPLOAD_ROOT", uploads),
+            ):
+                result = horizontal.process_candidate(
+                    candidate, None, force=False, dry_run=False
+                )
+            self.assertEqual(result["action"], "generated")
+            self.assertEqual(result["source_url"], "/uploads/art/fallback.jpg")
+
     def test_process_local_candidate_is_idempotent(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

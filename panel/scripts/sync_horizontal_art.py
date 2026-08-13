@@ -46,6 +46,7 @@ class Candidate:
     dbf: int | None
     source_url: str
     source_kind: str
+    fallback_sources: tuple[tuple[str, str], ...] = ()
 
 
 def ensure_schema(conn) -> None:
@@ -95,6 +96,37 @@ def first_source(
         if value:
             return value, source_kind
     return None
+
+
+def available_sources(
+    row: dict[str, Any], candidates: list[tuple[str, str]]
+) -> list[tuple[str, str]]:
+    result: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for column, source_kind in candidates:
+        value = str(row.get(column) or "").strip()
+        if value and value not in seen:
+            seen.add(value)
+            result.append((value, source_kind))
+    return result
+
+
+def candidate_from_sources(
+    entity_type: str,
+    entity_id: str,
+    dbf: int | None,
+    sources: list[tuple[str, str]],
+) -> Candidate | None:
+    if not sources:
+        return None
+    return Candidate(
+        entity_type,
+        entity_id,
+        dbf,
+        sources[0][0],
+        sources[0][1],
+        tuple(sources[1:]),
+    )
 
 
 def fetch_blizzard_crop_urls() -> dict[int, str]:
@@ -164,18 +196,17 @@ def collect_candidates(conn, blizzard_crops: dict[int, str]) -> list[Candidate]:
         """,
     ):
         dbf = int(row["dbf"]) if row.get("dbf") is not None else None
-        source = (
-            (blizzard_crops[dbf], "crop")
-            if dbf in blizzard_crops
-            else first_source(
-                row,
-                [("art_image", "art"), ("card_image", "card")],
-            )
+        sources = available_sources(
+            row,
+            [("art_image", "art"), ("card_image", "card")],
         )
-        if source:
-            candidates.append(
-                Candidate("battleground_card", str(row["card_id"]), dbf, *source)
-            )
+        if dbf in blizzard_crops:
+            sources.insert(0, (blizzard_crops[dbf], "crop"))
+        candidate = candidate_from_sources(
+            "battleground_card", str(row["card_id"]), dbf, sources
+        )
+        if candidate:
+            candidates.append(candidate)
 
     for row in query_rows(
         conn,
@@ -187,7 +218,7 @@ def collect_candidates(conn, blizzard_crops: dict[int, str]) -> list[Candidate]:
                         wiki_full_art_url, local_image_url, image_url, '') <> ''
         """,
     ):
-        source = first_source(
+        sources = available_sources(
             row,
             [
                 ("local_crop_image_url", "crop"),
@@ -198,11 +229,12 @@ def collect_candidates(conn, blizzard_crops: dict[int, str]) -> list[Candidate]:
                 ("image_url", "card"),
             ],
         )
-        if source:
-            dbf = int(row["dbf"]) if row.get("dbf") is not None else None
-            candidates.append(
-                Candidate("constructed_card", str(row["card_id"]), dbf, *source)
-            )
+        dbf = int(row["dbf"]) if row.get("dbf") is not None else None
+        candidate = candidate_from_sources(
+            "constructed_card", str(row["card_id"]), dbf, sources
+        )
+        if candidate:
+            candidates.append(candidate)
 
     for row in query_rows(
         conn,
@@ -213,7 +245,7 @@ def collect_candidates(conn, blizzard_crops: dict[int, str]) -> list[Candidate]:
          WHERE COALESCE(crop_image_url, local_full_art_url, full_art_source_url, image_url, '') <> ''
         """,
     ):
-        source = first_source(
+        sources = available_sources(
             row,
             [
                 ("crop_image_url", "crop"),
@@ -222,10 +254,11 @@ def collect_candidates(conn, blizzard_crops: dict[int, str]) -> list[Candidate]:
                 ("image_url", "card"),
             ],
         )
-        if source:
-            dbf = int(row["dbf"]) if row.get("dbf") is not None else None
-            entity_id = f"{row['library']}:{row['card_id']}"
-            candidates.append(Candidate("library_card", entity_id, dbf, *source))
+        dbf = int(row["dbf"]) if row.get("dbf") is not None else None
+        entity_id = f"{row['library']}:{row['card_id']}"
+        candidate = candidate_from_sources("library_card", entity_id, dbf, sources)
+        if candidate:
+            candidates.append(candidate)
 
     for row in query_rows(
         conn,
@@ -236,16 +269,15 @@ def collect_candidates(conn, blizzard_crops: dict[int, str]) -> list[Candidate]:
         """,
     ):
         dbf = int(row["dbf"]) if row.get("dbf") is not None else None
-        source = (
-            (blizzard_crops[dbf], "crop")
-            if dbf in blizzard_crops
-            else first_source(
-                row,
-                [("hero_full_art_url", "art"), ("hero_image_url", "card")],
-            )
+        sources = available_sources(
+            row,
+            [("hero_full_art_url", "art"), ("hero_image_url", "card")],
         )
-        if source:
-            candidates.append(Candidate("hero", str(row["card_id"]), dbf, *source))
+        if dbf in blizzard_crops:
+            sources.insert(0, (blizzard_crops[dbf], "crop"))
+        candidate = candidate_from_sources("hero", str(row["card_id"]), dbf, sources)
+        if candidate:
+            candidates.append(candidate)
 
     query_specs = [
         (
@@ -295,12 +327,13 @@ def collect_candidates(conn, blizzard_crops: dict[int, str]) -> list[Candidate]:
     ]
     for entity_type, sql, source_fields, entity_id_for in query_specs:
         for row in query_rows(conn, sql):
-            source = first_source(row, source_fields)
-            if source:
-                dbf = int(row["dbf"]) if row.get("dbf") is not None else None
-                candidates.append(
-                    Candidate(entity_type, entity_id_for(row), dbf, *source)
-                )
+            sources = available_sources(row, source_fields)
+            dbf = int(row["dbf"]) if row.get("dbf") is not None else None
+            candidate = candidate_from_sources(
+                entity_type, entity_id_for(row), dbf, sources
+            )
+            if candidate:
+                candidates.append(candidate)
 
     deduplicated = {(item.entity_type, item.entity_id): item for item in candidates}
     return sorted(
@@ -497,15 +530,29 @@ def local_source_path(source_url: str) -> Path | None:
 
 
 def source_signature(candidate: Candidate) -> str:
-    local = local_source_path(candidate.source_url)
-    if local is not None:
-        stat = local.stat()
-        value = f"local:{local}:{stat.st_size}:{stat.st_mtime_ns}:{candidate.source_kind}:{RECIPE_VERSION}"
-    else:
-        value = (
-            f"remote:{candidate.source_url}:{candidate.source_kind}:{RECIPE_VERSION}"
-        )
+    source_values = []
+    for source_url, source_kind in (
+        (candidate.source_url, candidate.source_kind),
+        *candidate.fallback_sources,
+    ):
+        local = local_source_path(source_url)
+        if local is not None:
+            stat = local.stat()
+            source_values.append(
+                f"local:{local}:{stat.st_size}:{stat.st_mtime_ns}:{source_kind}"
+            )
+        else:
+            source_values.append(f"remote:{source_url}:{source_kind}")
+    value = "|".join((*source_values, RECIPE_VERSION))
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def allowed_image_content_type(content_type: str) -> bool:
+    return (
+        content_type == ""
+        or content_type.startswith("image/")
+        or content_type == "application/octet-stream"
+    )
 
 
 def download_source(
@@ -529,7 +576,7 @@ def download_source(
         content_type = (
             str(response.headers.get("Content-Type") or "").split(";", 1)[0].lower()
         )
-        if content_type and not content_type.startswith("image/"):
+        if not allowed_image_content_type(content_type):
             raise RuntimeError(f"Unexpected source content type: {content_type}")
         while chunk := response.read(1024 * 1024):
             total += len(chunk)
@@ -588,25 +635,39 @@ def process_candidate(
 
     target.parent.mkdir(parents=True, exist_ok=True)
     target.parent.chmod(0o755)
-    local_source = local_source_path(candidate.source_url)
-    try:
-        if local_source is not None:
-            render_horizontal_art(local_source, target, candidate.source_kind)
-        else:
-            with tempfile.TemporaryDirectory(prefix="horizontal-source-") as tmp_dir:
-                downloaded = Path(tmp_dir) / "source"
-                download_source(candidate.source_url, downloaded)
-                render_horizontal_art(downloaded, target, candidate.source_kind)
-        target.chmod(0o644)
-        return {
-            "action": "generated",
-            "candidate": candidate,
-            "source_signature": signature,
-            "public_path": public_path,
-            "image_sha256": sha256_file(target),
-        }
-    except Exception as exc:  # noqa: BLE001 -- isolate one broken source from the batch
-        return {"action": "error", "candidate": candidate, "error": str(exc)}
+    failures = []
+    for source_url, source_kind in (
+        (candidate.source_url, candidate.source_kind),
+        *candidate.fallback_sources,
+    ):
+        local_source = local_source_path(source_url)
+        try:
+            if local_source is not None:
+                render_horizontal_art(local_source, target, source_kind)
+            else:
+                with tempfile.TemporaryDirectory(
+                    prefix="horizontal-source-"
+                ) as tmp_dir:
+                    downloaded = Path(tmp_dir) / "source"
+                    download_source(source_url, downloaded)
+                    render_horizontal_art(downloaded, target, source_kind)
+            target.chmod(0o644)
+            return {
+                "action": "generated",
+                "candidate": candidate,
+                "source_url": source_url,
+                "source_kind": source_kind,
+                "source_signature": signature,
+                "public_path": public_path,
+                "image_sha256": sha256_file(target),
+            }
+        except Exception as exc:  # noqa: BLE001 -- try the next trusted art source
+            failures.append(f"{source_url}: {exc}")
+    return {
+        "action": "error",
+        "candidate": candidate,
+        "error": " | ".join(failures),
+    }
 
 
 def persist_result(
@@ -637,8 +698,8 @@ def persist_result(
                 (
                     candidate.entity_type,
                     candidate.entity_id,
-                    candidate.source_url,
-                    candidate.source_kind,
+                    result["source_url"],
+                    result["source_kind"],
                     result["source_signature"],
                     result["public_path"],
                     result["image_sha256"],
