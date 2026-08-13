@@ -68,6 +68,34 @@ class HorizontalArtTest(unittest.TestCase):
         self.assertTrue(horizontal.allowed_image_content_type("image/webp"))
         self.assertFalse(horizontal.allowed_image_content_type("text/html"))
 
+    def test_square_crop_source_and_white_edge_are_repaired(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            source = root / "square.jpg"
+            target = root / "horizontal.webp"
+            subprocess.run(
+                [
+                    "convert",
+                    "-size",
+                    "410x512",
+                    "gradient:#153755-#ed782f",
+                    "-size",
+                    "102x512",
+                    "xc:white",
+                    "+append",
+                    str(source),
+                ],
+                check=True,
+            )
+            horizontal.render_horizontal_art(source, target, "crop")
+            pixel = subprocess.run(
+                ["identify", "-format", "%[pixel:p{319,32}]", str(target)],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout
+            self.assertNotIn("255,255,255", pixel)
+
     def test_process_candidate_uses_fallback_art(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

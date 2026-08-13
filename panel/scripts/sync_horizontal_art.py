@@ -34,7 +34,7 @@ VISIBLE_CROP_X = 52
 VISIBLE_CROP_WIDTH = SOURCE_CROP_WIDTH - VISIBLE_CROP_X
 ART_X = OUTPUT_WIDTH - VISIBLE_CROP_WIDTH
 FADE_WIDTH = 70
-RECIPE_VERSION = "1-official-crop-soft-black"
+RECIPE_VERSION = "2-soft-black-no-light-edges"
 USER_AGENT = "db.kolodahs.ru-horizontal-art/1.0"
 SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 
@@ -361,6 +361,9 @@ def normalized_crop(source: Path, target: Path, source_kind: str) -> None:
     if width < 2 or height < 2:
         raise RuntimeError(f"Source image is too small: {width}x{height}")
 
+    if source_kind == "crop" and width * 100 < height * 250:
+        source_kind = "art"
+
     if source_kind == "crop":
         command = [
             "convert",
@@ -425,6 +428,55 @@ def normalized_crop(source: Path, target: Path, source_kind: str) -> None:
     subprocess.run(command, check=True, capture_output=True, text=True)
     if identify_size(target) != (SOURCE_CROP_WIDTH, SOURCE_CROP_HEIGHT):
         raise RuntimeError("Normalized crop has unexpected dimensions")
+    remove_uniform_light_right_edge(target)
+
+
+def remove_uniform_light_right_edge(path: Path) -> None:
+    result = subprocess.run(
+        [
+            "convert",
+            str(path),
+            "-bordercolor",
+            "white",
+            "-border",
+            "1",
+            "-fuzz",
+            "4%",
+            "-trim",
+            "-format",
+            "%@",
+            "info:",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    match = re.fullmatch(r"(\d+)x(\d+)\+(\d+)\+(\d+)", result.stdout.strip())
+    if match is None:
+        return
+    trimmed_width = int(match.group(1))
+    trimmed_x = int(match.group(3))
+    content_right = trimmed_x + trimmed_width - 1
+    if content_right >= SOURCE_CROP_WIDTH - 2 or content_right < SOURCE_CROP_WIDTH // 2:
+        return
+
+    temporary = path.with_suffix(".edge-fixed.png")
+    subprocess.run(
+        [
+            "convert",
+            str(path),
+            "-crop",
+            f"{content_right}x{SOURCE_CROP_HEIGHT}+0+0",
+            "+repage",
+            "-resize",
+            f"{SOURCE_CROP_WIDTH}x{SOURCE_CROP_HEIGHT}!",
+            str(temporary),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    os.replace(temporary, path)
 
 
 def render_horizontal_art(source: Path, target: Path, source_kind: str) -> None:
