@@ -240,7 +240,7 @@ BEGIN
              WHERE table_schema = target_schema
                AND table_name = table_record.table_name
                AND NOT (column_name = ANY(primary_keys));
-            SELECT string_agg(format('target.%1$I IS NOT DISTINCT FROM source.%1$I', key_name), ' AND ' ORDER BY key_position)
+            SELECT string_agg(format('target.%1$I = source.%1$I', key_name), ' AND ' ORDER BY key_position)
               INTO key_condition
               FROM unnest(primary_keys) WITH ORDINALITY AS keys(key_name, key_position);
 

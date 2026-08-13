@@ -56,6 +56,12 @@ assert_contains scripts/sync-shadow.php \
 assert_contains scripts/sync-shadow.php \
   'DROP SCHEMA IF EXISTS analytics_stage CASCADE' \
   'each synchronization must remove stale analytics staging tables'
+assert_contains scripts/sync-shadow.php \
+  "target\.%1\\\$I = source\.%1\\\$I" \
+  'shadow cleanup must use indexable primary-key equality'
+assert_not_contains scripts/sync-shadow.php \
+  'IS NOT DISTINCT FROM source' \
+  'shadow cleanup must not disable primary-key index lookups'
 assert_contains scripts/verify-platform.sh \
   "test .*public_status.* = '302'" \
   'the protected panel root must be monitored as a GitHub OAuth redirect'
