@@ -122,6 +122,11 @@ class MetaTableParseResult:
     duplicate_rows_merged: int
 
 
+def _refresh_window_id(fetched_at: str) -> str:
+    digest = hashlib.sha256(f"{SOURCE_ID}\0{fetched_at}".encode()).hexdigest()[:24]
+    return f"{SOURCE_ID}:{digest}"
+
+
 def _checkpoint_targets(specs: tuple[SliceSpec, ...]) -> list[dict[str, str]]:
     return [
         {
@@ -1403,6 +1408,10 @@ async def _refresh_hsguru_meta_matrix_unlocked(
         run.mark_timed_out()
     publishable = len(slices) == len(specs) and current_complete and not run.timed_out
     complete = publishable and cached_slice_count == 0 and not errors
+    refresh_window_id = _refresh_window_id(fetched_at)
+    failure_reason_code = (
+        "timeout" if run.timed_out else "contract" if not complete else None
+    )
     run_state = (
         SourceState.TIMED_OUT
         if run.timed_out
@@ -1506,6 +1515,8 @@ async def _refresh_hsguru_meta_matrix_unlocked(
             "category": "meta_matrix",
             "url": HSGURU_META_URL,
             "state": run_state,
+            "failure_reason_code": failure_reason_code,
+            "refresh_window_id": refresh_window_id,
             "fetched_at": fetched_at,
             "http_status": 200 if complete else None,
             "backend": dataset_backend,
@@ -1554,6 +1565,9 @@ async def _refresh_hsguru_meta_matrix_unlocked(
         "published": publishable,
         "complete": complete,
         "state": run_state,
+        "failure_reason_code": failure_reason_code,
+        "refresh_window_id": refresh_window_id,
+        "retryable": not complete,
         "timed_out": run.timed_out,
         "job_run": run.snapshot(),
         "serving_cached_dataset": bool(cached_dataset) and not complete,
@@ -1579,7 +1593,8 @@ async def _refresh_hsguru_meta_matrix_unlocked(
 
 def _hard_timeout_outcome(run: JobRunContext) -> dict[str, Any]:
     """Record a terminal timeout without publishing an incomplete dataset."""
-    fetched_at = datetime.now(UTC).isoformat()
+    fetched_at = run.started_at.isoformat()
+    refresh_window_id = _refresh_window_id(fetched_at)
     cached_dataset = load_dataset(SOURCE_ID)
     cached_structured: dict[str, Any] = {}
     if isinstance(cached_dataset, dict):
@@ -1625,6 +1640,8 @@ def _hard_timeout_outcome(run: JobRunContext) -> dict[str, Any]:
         "category": "meta_matrix",
         "url": HSGURU_META_URL,
         "state": SourceState.TIMED_OUT,
+        "failure_reason_code": "timeout",
+        "refresh_window_id": refresh_window_id,
         "fetched_at": fetched_at,
         "http_status": None,
         "backend": "cache" if serving_cached else None,
@@ -1658,6 +1675,9 @@ def _hard_timeout_outcome(run: JobRunContext) -> dict[str, Any]:
         "published": False,
         "complete": False,
         "state": SourceState.TIMED_OUT,
+        "failure_reason_code": "timeout",
+        "refresh_window_id": refresh_window_id,
+        "retryable": True,
         "timed_out": True,
         "timeout_kind": "hard",
         "job_run": snapshot,

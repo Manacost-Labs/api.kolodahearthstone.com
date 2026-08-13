@@ -979,6 +979,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(json.dumps(result, ensure_ascii=False, indent=2))
         if args.scheduled:
+            if result.get("retryable"):
+                return int(ExitCode.ERROR)
             if result.get("serving_cached_dataset") or result.get("state") == "locked":
                 return int(ExitCode.DEGRADED)
             if result.get("ok") and (

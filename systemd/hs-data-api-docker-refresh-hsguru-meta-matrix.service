@@ -2,6 +2,8 @@
 Description=Refresh the unified HSGuru meta matrix with provider fallback
 Requires=hs-data-api-docker.service
 After=hs-data-api-docker.service network-online.target
+StartLimitIntervalSec=3h
+StartLimitBurst=3
 
 [Service]
 Type=oneshot
@@ -10,3 +12,5 @@ WorkingDirectory=/srv/hs-data-api
 ExecStart=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm api python -m app.cli refresh-hsguru-meta-matrix --scheduled --concurrency 2
 TimeoutStartSec=65min
 TimeoutStopSec=30s
+Restart=on-failure
+RestartSec=10min

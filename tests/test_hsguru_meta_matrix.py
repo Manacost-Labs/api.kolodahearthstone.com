@@ -798,6 +798,8 @@ def test_refresh_timeout_stops_new_slices_and_preserves_last_known_good() -> Non
     assert result["published"] is False
     assert result["state"] == "timed_out"
     assert result["timed_out"] is True
+    assert result["retryable"] is True
+    assert result["failure_reason_code"] == "timeout"
     assert result["serving_cached_dataset"] is True
     assert result["job_run"] == {
         "run_id": "matrix-timeout-run",
@@ -942,6 +944,7 @@ def test_refresh_resumes_successful_slices_from_timeout_checkpoint() -> None:
         )
 
         assert first["timed_out"] is True
+        first_refresh_window_id = first["refresh_window_id"]
         assert slice_calls == [specs[0].key]
         assert checkpoint["state"] == "in_progress"
         assert [item["key"] for item in checkpoint["matrix_slices"]] == [specs[0].key]
@@ -969,6 +972,7 @@ def test_refresh_resumes_successful_slices_from_timeout_checkpoint() -> None:
     assert second["ok"] is True
     assert second["complete"] is True
     assert second["resumed_base_slices"] == 1
+    assert second["refresh_window_id"] == first_refresh_window_id
     assert checkpoint["state"] == "complete"
     dataset = save_dataset.call_args.args[1]
     assert [item["key"] for item in dataset["data"]["structured"]["slices"]] == sorted(
@@ -1184,6 +1188,8 @@ def test_hsguru_matrix_systemd_unit_has_outer_hard_timeout() -> None:
 
     assert "TimeoutStartSec=65min" in unit
     assert "TimeoutStopSec=30s" in unit
+    assert "Restart=on-failure" in unit
+    assert "RestartSec=10min" in unit
 
 
 def test_missing_slice_can_be_carried_forward_from_last_stable_dataset() -> None:

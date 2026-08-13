@@ -180,6 +180,24 @@ class CliTest(unittest.TestCase):
 
         self.assertEqual(exit_code, 10)
 
+    def test_scheduled_retryable_matrix_failure_requests_restart(self) -> None:
+        result = {
+            "ok": False,
+            "state": "timed_out",
+            "serving_cached_dataset": True,
+            "retryable": True,
+        }
+        with (
+            patch("app.parser_control.is_source_scheduled_enabled", return_value=True),
+            patch(
+                "app.hsguru_meta_matrix.refresh_hsguru_meta_matrix",
+                new=AsyncMock(return_value=result),
+            ),
+        ):
+            exit_code = cli.main(["refresh-hsguru-meta-matrix", "--scheduled"])
+
+        self.assertEqual(exit_code, 1)
+
     def test_scheduled_archetype_partial_with_rows_is_handled_degradation(self) -> None:
         result = {
             "ok": False,
