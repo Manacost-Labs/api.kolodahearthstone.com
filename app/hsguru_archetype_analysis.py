@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import re
+from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import parse_qs, quote, urlencode, urlparse
@@ -1352,28 +1353,30 @@ async def _refresh_hsguru_archetype_analysis_unlocked(
             },
         },
     }
-    gate = validate_candidate_for_publish(
-        SOURCE_BY_ID[SOURCE_ID],
-        payload["data"],
-        backend=backend,
-    )
-    if not gate.ok:
+
+    def reject_publication(
+        *,
+        reason: str,
+        failure_reason_code: str,
+        error_kind: str,
+    ) -> dict[str, Any]:
         failure = {
             "ok": False,
             "published": False,
             "retryable": True,
             "state": SourceState.QUALITY_ERROR,
-            "failure_reason_code": "contract",
+            "failure_reason_code": failure_reason_code,
             "refresh_window_id": refresh_window_id,
             "serving_cached_dataset": bool(cached_rows),
             "source_id": SOURCE_ID,
+            "reason": reason,
             "targets": len(targets),
             "targets_completed": len(completed_keys),
             "targets_remaining": 0,
             "resumed_targets": len(resumed_keys),
             "archetypes": len(cached_rows),
             "coverage": coverage_for(cached_rows),
-            "errors": [{"kind": "publication_gate", "error": gate.reason}],
+            "errors": [{"kind": error_kind, "error": reason}],
             "errors_total": 1,
             "recovery": checkpoint_recovery,
             "negative_cache_entries": len(negative_rows),
@@ -1395,7 +1398,48 @@ async def _refresh_hsguru_archetype_analysis_unlocked(
             },
         )
         return failure
-    save_dataset(SOURCE_ID, payload)
+
+    publication_guard = (
+        ResourceLockSet(
+            ["hsguru_meta_matrix"],
+            metadata={"operation": "publish_hsguru_archetype_analysis"},
+        )
+        if checkpoint_enabled
+        else nullcontext()
+    )
+    try:
+        with publication_guard:
+            if checkpoint_enabled:
+                current_targets = list(
+                    {
+                        _target_key(target): target
+                        for target in _active_archetypes()
+                    }.values()
+                )
+                if _target_signature(current_targets) != signature:
+                    return reject_publication(
+                        reason="target_matrix_changed",
+                        failure_reason_code="dependency",
+                        error_kind="target_matrix",
+                    )
+            gate = validate_candidate_for_publish(
+                SOURCE_BY_ID[SOURCE_ID],
+                payload["data"],
+                backend=backend,
+            )
+            if not gate.ok:
+                return reject_publication(
+                    reason=gate.reason,
+                    failure_reason_code="contract",
+                    error_kind="publication_gate",
+                )
+            save_dataset(SOURCE_ID, payload)
+    except ResourceLocked:
+        return reject_publication(
+            reason="target_matrix_locked",
+            failure_reason_code="dependency",
+            error_kind="target_matrix",
+        )
     if checkpoint_enabled:
         save_baseline(
             SOURCE_ID,

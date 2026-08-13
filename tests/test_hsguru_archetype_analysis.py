@@ -1340,6 +1340,49 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
         self.assertEqual(result["failure_reason_code"], "contract")
         save_dataset.assert_not_called()
 
+    def test_complete_refresh_rejects_targets_from_a_changed_meta_matrix(
+        self,
+    ) -> None:
+        initial_targets = [
+            {"format": "standard", "archetype": "Old Matrix Mage"}
+        ]
+        changed_targets = [
+            {"format": "standard", "archetype": "New Matrix Warrior"}
+        ]
+
+        async def fetch_html(url: str):
+            html = MATCHUPS_HTML if "/archetype/" in url else CARD_STATS_HTML
+            return html, {"backend": "scrape_do_super", "request_credits": 25}
+
+        with (
+            patch(
+                "app.hsguru_archetype_analysis._active_archetypes",
+                side_effect=[initial_targets, changed_targets],
+            ),
+            patch(
+                "app.hsguru_archetype_analysis._previous_analysis",
+                return_value={},
+            ),
+            patch(
+                "app.hsguru_archetype_analysis._previous_negative_cache",
+                return_value={},
+            ),
+            patch("app.hsguru_archetype_analysis.save_dataset") as save_dataset,
+            patch("app.hsguru_archetype_analysis.save_status"),
+        ):
+            result = asyncio.run(
+                refresh_hsguru_archetype_analysis(
+                    concurrency=1,
+                    fetch_html=fetch_html,
+                )
+            )
+
+        self.assertFalse(result["published"])
+        self.assertTrue(result["retryable"])
+        self.assertEqual(result["failure_reason_code"], "dependency")
+        self.assertEqual(result["reason"], "target_matrix_changed")
+        save_dataset.assert_not_called()
+
     def test_expired_checkpoint_gap_is_retried_and_stale_unavailable_is_cleared(
         self,
     ) -> None:
