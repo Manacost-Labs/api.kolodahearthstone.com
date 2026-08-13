@@ -34,6 +34,10 @@ CARD_STATS_MIN_DRAWN_COUNT = 25
 FORMAT_IDS = {"standard": 2, "wild": 1}
 CARD_STATS_UNAVAILABLE_RETRY = timedelta(hours=1)
 CARD_STATS_NEGATIVE_CACHE_VERSION = 2
+PUBLISHABLE_CARD_GAP_STATES = {
+    "source_no_data",
+    "upstream_card_tallies_missing",
+}
 ANALYSIS_WAIT_MS = 0
 ANALYSIS_TIMEOUT_MS = 45_000
 PROVIDER_CIRCUIT_FAILURE_THRESHOLD = 3
@@ -506,11 +510,7 @@ def _pipeline_failure_reason_code(
 
 
 def _retry_is_pending(entry: dict[str, Any] | None, now: datetime) -> bool:
-    if not entry or entry.get("state") not in {
-        "source_no_data",
-        "upstream_card_tallies_missing",
-        "upstream_unavailable",
-    }:
+    if not entry or entry.get("state") not in PUBLISHABLE_CARD_GAP_STATES:
         return False
     if (
         entry.get("cache_version") != CARD_STATS_NEGATIVE_CACHE_VERSION
@@ -557,6 +557,19 @@ def _component_was_refreshed_in_checkpoint(
     return str(entry.get(state_field) or "") in accepted_empty_states
 
 
+def _timestamp_is_in_refresh_window(value: Any, *, started_at: str) -> bool:
+    try:
+        timestamp = datetime.fromisoformat(str(value or ""))
+        refresh_started_at = datetime.fromisoformat(started_at)
+    except ValueError:
+        return False
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=UTC)
+    if refresh_started_at.tzinfo is None:
+        refresh_started_at = refresh_started_at.replace(tzinfo=UTC)
+    return timestamp >= refresh_started_at
+
+
 def _checkpoint_matchups_are_reusable(
     entry: dict[str, Any],
     *,
@@ -567,11 +580,85 @@ def _checkpoint_matchups_are_reusable(
         entry.get("matchups_state") == "complete"
         and isinstance(matchups, list)
         and bool(matchups)
-        and _component_was_refreshed_in_checkpoint(
-            entry,
-            kind="matchups",
+        and _timestamp_is_in_refresh_window(
+            entry.get("matchups_checked_at"),
             started_at=started_at,
         )
+        and _timestamp_is_in_refresh_window(
+            entry.get("matchups_updated_at"),
+            started_at=started_at,
+        )
+    )
+
+
+def _checkpoint_card_stats_are_reusable(
+    entry: dict[str, Any],
+    *,
+    negative_gap: dict[str, Any] | None,
+    started_at: str,
+    now: datetime,
+) -> bool:
+    state = str(entry.get("card_stats_state") or "")
+    rows = entry.get("card_stats")
+    checked_is_fresh = _timestamp_is_in_refresh_window(
+        entry.get("card_stats_checked_at"),
+        started_at=started_at,
+    )
+    updated_is_fresh = _timestamp_is_in_refresh_window(
+        entry.get("card_stats_updated_at"),
+        started_at=started_at,
+    )
+    if state == "complete":
+        return bool(
+            negative_gap is None
+            and isinstance(rows, list)
+            and rows
+            and checked_is_fresh
+            and updated_is_fresh
+        )
+    if state == "sparse_valid":
+        return bool(
+            negative_gap is None
+            and isinstance(rows, list)
+            and not rows
+            and checked_is_fresh
+            and updated_is_fresh
+        )
+    if state not in PUBLISHABLE_CARD_GAP_STATES:
+        return False
+    if not isinstance(rows, list) or rows or not checked_is_fresh:
+        return False
+    if state == "source_no_data" and not updated_is_fresh:
+        return False
+    if entry.get("card_stats_updated_at") is not None and not updated_is_fresh:
+        return False
+    if not negative_gap or not _retry_is_pending(negative_gap, now):
+        return False
+    return bool(
+        negative_gap.get("format") == entry.get("format")
+        and str(negative_gap.get("archetype") or "").casefold()
+        == str(entry.get("archetype") or "").casefold()
+        and negative_gap.get("kind") == "card_stats"
+        and negative_gap.get("state") == state
+        and negative_gap.get("checked_at") == entry.get("card_stats_checked_at")
+    )
+
+
+def _checkpoint_row_is_reusable(
+    entry: dict[str, Any],
+    *,
+    negative_gap: dict[str, Any] | None,
+    started_at: str,
+    now: datetime,
+) -> bool:
+    return _checkpoint_matchups_are_reusable(
+        entry,
+        started_at=started_at,
+    ) and _checkpoint_card_stats_are_reusable(
+        entry,
+        negative_gap=negative_gap,
+        started_at=started_at,
+        now=now,
     )
 
 
@@ -770,13 +857,11 @@ async def _refresh_hsguru_archetype_analysis_unlocked(
     resumed_keys = {
         key
         for key in resumed_keys
-        if _checkpoint_matchups_are_reusable(
+        if _checkpoint_row_is_reusable(
             checkpoint_rows[key],
+            negative_gap=negative_cache.get((*key, "card_stats")),
             started_at=started_at,
-        )
-        and (
-            (gap := negative_cache.get((*key, "card_stats"))) is None
-            or _retry_is_pending(gap, started)
+            now=started,
         )
     }
 
@@ -1078,7 +1163,12 @@ async def _refresh_hsguru_archetype_analysis_unlocked(
                 "updated_at": entry.get("card_stats_updated_at"),
             },
         }
-        if not _checkpoint_matchups_are_reusable(entry, started_at=started_at):
+        if not _checkpoint_row_is_reusable(
+            entry,
+            negative_gap=negative_cache.get(card_stats_cache_key),
+            started_at=started_at,
+            now=started,
+        ):
             reusable = False
         return entry, reusable
 

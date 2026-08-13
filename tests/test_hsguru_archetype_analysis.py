@@ -12,7 +12,7 @@ from app.hsguru_archetype_analysis import (
     ANALYSIS_WAIT_MS,
     CHECKPOINT_SCHEMA_VERSION,
     _active_archetypes,
-    _checkpoint_matchups_are_reusable,
+    _checkpoint_row_is_reusable,
     _fetch_html,
     _load_refresh_checkpoint,
     _target_signature,
@@ -96,35 +96,88 @@ CARD_STATS_SPARSE_HTML = (
 
 
 class HSGuruArchetypeAnalysisTest(unittest.TestCase):
-    def test_checkpoint_matchups_require_complete_rows_from_current_window(
+    def test_checkpoint_row_requires_publishable_components_from_current_window(
         self,
     ) -> None:
         started_at = "2026-08-12T10:00:00+00:00"
+        now = datetime.fromisoformat(started_at)
         valid = {
+            "format": "standard",
+            "archetype": "Checkpoint Mage",
             "class_matchups": [{"class_key": "mage"}],
+            "card_stats": [{"card_id": "TEST"}],
             "matchups_state": "complete",
+            "card_stats_state": "complete",
+            "matchups_checked_at": started_at,
             "matchups_updated_at": started_at,
+            "card_stats_checked_at": started_at,
+            "card_stats_updated_at": started_at,
         }
 
         self.assertTrue(
-            _checkpoint_matchups_are_reusable(valid, started_at=started_at)
+            _checkpoint_row_is_reusable(
+                valid,
+                negative_gap=None,
+                started_at=started_at,
+                now=now,
+            )
         )
         invalid_entries = {
             "empty_rows": {**valid, "class_matchups": []},
             "incomplete_state": {**valid, "matchups_state": "source_no_data"},
-            "stale_timestamp": {
+            "stale_matchup_timestamp": {
                 **valid,
                 "matchups_updated_at": "2026-08-12T09:59:59+00:00",
+            },
+            "empty_complete_card_stats": {**valid, "card_stats": []},
+            "stale_card_timestamp": {
+                **valid,
+                "card_stats_checked_at": "2026-08-12T09:59:59+00:00",
             },
         }
         for label, entry in invalid_entries.items():
             with self.subTest(label=label):
                 self.assertFalse(
-                    _checkpoint_matchups_are_reusable(
+                    _checkpoint_row_is_reusable(
                         entry,
+                        negative_gap=None,
                         started_at=started_at,
+                        now=now,
                     )
                 )
+
+        verified_gap_entry = {
+            **valid,
+            "card_stats": [],
+            "card_stats_state": "source_no_data",
+        }
+        verified_gap = {
+            "format": "standard",
+            "archetype": "Checkpoint Mage",
+            "kind": "card_stats",
+            "state": "source_no_data",
+            "cache_version": 2,
+            "min_mull_count": 25,
+            "min_drawn_count": 25,
+            "checked_at": started_at,
+            "retry_after": "2026-08-12T11:00:00+00:00",
+        }
+        self.assertTrue(
+            _checkpoint_row_is_reusable(
+                verified_gap_entry,
+                negative_gap=verified_gap,
+                started_at=started_at,
+                now=now,
+            )
+        )
+        self.assertFalse(
+            _checkpoint_row_is_reusable(
+                verified_gap_entry,
+                negative_gap={**verified_gap, "state": "upstream_unavailable"},
+                started_at=started_at,
+                now=now,
+            )
+        )
 
     def test_checkpoint_loader_uses_the_requested_recovery_ttl(self) -> None:
         now = datetime(2026, 8, 12, 12, 0, tzinfo=UTC)
@@ -562,15 +615,14 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
             saved["payload"]["data"]["structured"]["negative_cache"], []
         )
 
-    def test_cached_negative_gap_is_not_published_as_a_fresh_complete_result(
-        self,
-    ) -> None:
+    def test_cached_upstream_unavailable_gap_is_retried(self) -> None:
         now = datetime(2026, 7, 24, 12, 0, tzinfo=UTC)
         calls: list[str] = []
 
         async def fetch_html(url: str):
             calls.append(url)
-            return MATCHUPS_HTML, {"backend": "firecrawl", "request_credits": 1}
+            html = MATCHUPS_HTML if "/archetype/" in url else CARD_STATS_HTML
+            return html, {"backend": "firecrawl", "request_credits": 1}
 
         cached_gap = {
             "format": "wild",
@@ -619,13 +671,15 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
                 )
             )
 
-        self.assertEqual(len(calls), 1)
-        self.assertIn("/archetype/", calls[0])
-        self.assertEqual(result["card_stats_requests_skipped"], 1)
-        self.assertEqual(result["firecrawl_credits_used"], 1)
-        self.assertFalse(result["published"])
-        self.assertEqual(result["failure_reason_code"], "contract")
-        self.assertEqual(saved, {})
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(any("/card-stats" in url for url in calls))
+        self.assertEqual(result["card_stats_requests_skipped"], 0)
+        self.assertEqual(result["firecrawl_credits_used"], 2)
+        self.assertTrue(result["published"])
+        self.assertEqual(
+            saved["payload"]["data"]["structured"]["negative_cache"],
+            [],
+        )
 
     def test_refresh_retries_negative_cache_from_stricter_card_filters(self) -> None:
         now = datetime(2026, 7, 24, 12, 0, tzinfo=UTC)
@@ -1069,7 +1123,11 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
                 "class_matchups": [{"class_key": "mage"}],
                 "card_stats": [{"card_id": "TEST"}],
                 "matchups_state": "complete",
+                "card_stats_state": "complete",
+                "matchups_checked_at": checkpoint_started_at,
                 "matchups_updated_at": checkpoint_started_at,
+                "card_stats_checked_at": checkpoint_started_at,
+                "card_stats_updated_at": checkpoint_started_at,
             }
             for target in completed
         ]
@@ -1278,6 +1336,111 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
         self.assertEqual(result["resumed_targets"], 0)
         self.assertEqual(len(calls), 2)
         self.assertTrue(any("/archetype/" in url for url in calls))
+        save_dataset.assert_called_once()
+
+    def test_checkpoint_recovery_retries_pending_upstream_unavailable_gap(
+        self,
+    ) -> None:
+        now = datetime(2026, 8, 12, 12, 0, tzinfo=UTC)
+        target = {"format": "standard", "archetype": "Recovered Cards Mage"}
+        started_at = (now - timedelta(hours=2)).isoformat()
+        unavailable_gap = {
+            **target,
+            "kind": "card_stats",
+            "state": "upstream_unavailable",
+            "cache_version": 2,
+            "min_mull_count": 25,
+            "min_drawn_count": 25,
+            "checked_at": started_at,
+            "retry_after": (now + timedelta(hours=1)).isoformat(),
+            "reason": "provider transport failed",
+        }
+        checkpoint = {
+            "state": "in_progress",
+            "schema_version": CHECKPOINT_SCHEMA_VERSION,
+            "rank": "legend",
+            "period": "past_week",
+            "started_at": started_at,
+            "saved_at": (now - timedelta(hours=1)).isoformat(),
+            "target_signature": _target_signature([target]),
+            "targets_total": 1,
+            "targets": [target],
+            "completed": [target],
+            "rows": [
+                {
+                    **target,
+                    "rank": "legend",
+                    "period": "past_week",
+                    "state": "partial",
+                    "class_matchups": [{"class_key": "mage"}],
+                    "card_stats": [],
+                    "matchups_state": "complete",
+                    "card_stats_state": "upstream_unavailable",
+                    "matchups_updated_at": started_at,
+                    "matchups_checked_at": started_at,
+                    "card_stats_updated_at": None,
+                    "card_stats_checked_at": started_at,
+                    "updated_at": started_at,
+                    "checked_at": started_at,
+                    "components": {
+                        "matchups": {
+                            "state": "complete",
+                            "checked_at": started_at,
+                            "updated_at": started_at,
+                        },
+                        "card_stats": {
+                            "state": "upstream_unavailable",
+                            "checked_at": started_at,
+                            "updated_at": None,
+                        },
+                    },
+                }
+            ],
+            "negative_cache": [unavailable_gap],
+            "unavailable": [unavailable_gap],
+        }
+        calls: list[str] = []
+
+        async def fetch_html(url: str):
+            calls.append(url)
+            html = MATCHUPS_HTML if "/archetype/" in url else CARD_STATS_HTML
+            return html, {"backend": "scrape_do_super", "request_credits": 25}
+
+        with (
+            patch(
+                "app.hsguru_archetype_analysis._load_refresh_checkpoint",
+                return_value=checkpoint,
+            ),
+            patch(
+                "app.hsguru_archetype_analysis._active_archetypes",
+                return_value=[target],
+            ),
+            patch(
+                "app.hsguru_archetype_analysis._previous_analysis",
+                return_value={},
+            ),
+            patch(
+                "app.hsguru_archetype_analysis._previous_negative_cache",
+                return_value={},
+            ),
+            patch("app.hsguru_archetype_analysis._utc_now", return_value=now),
+            patch("app.hsguru_archetype_analysis.save_baseline"),
+            patch("app.hsguru_archetype_analysis.save_dataset") as save_dataset,
+            patch("app.hsguru_archetype_analysis.save_status"),
+        ):
+            result = asyncio.run(
+                refresh_hsguru_archetype_analysis(
+                    concurrency=1,
+                    checkpoint_recovery=True,
+                    fetch_html=fetch_html,
+                )
+            )
+
+        self.assertTrue(result["published"])
+        self.assertEqual(result["resumed_targets"], 0)
+        self.assertEqual(result["card_stats_requests_skipped"], 0)
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(any("/card-stats" in url for url in calls))
         save_dataset.assert_called_once()
 
     def test_checkpoint_recovery_has_a_per_run_provider_failure_budget(self) -> None:
