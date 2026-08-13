@@ -60,6 +60,7 @@ assert_contains index.php 'data-command-open' 'shared panel shell must expose th
 assert_contains partials/command-palette.php 'data-command-palette' 'quick navigation dialog must be present'
 assert_contains index.php 'data-column-picker' 'catalogue tables must expose column visibility controls'
 assert_contains index.php 'data-table-navigation' 'wide catalogues must expose explicit horizontal navigation'
+assert_contains index.php 'class="catalog-empty"' 'empty catalogues must explain the next useful action'
 assert_contains partials/analytics-dashboard.php 'data-column-picker' 'analytics tables must expose column visibility controls'
 assert_contains partials/parser-control.php 'data-column-picker' 'parser tables must expose column visibility controls'
 assert_contains partials/api-token-manager.php 'data-column-picker' 'token tables must expose column visibility controls'

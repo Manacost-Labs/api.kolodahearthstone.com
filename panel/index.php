@@ -2195,6 +2195,22 @@ $workspaceSection = $showApiTokens
             </div>
         <?php endif; ?>
 
+        <?php if ($filteredTotal === 0): ?>
+            <section class="catalog-empty" role="status" aria-labelledby="catalogEmptyTitle">
+                <span class="catalog-empty-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24"><path d="m20 20-4.3-4.3m2.3-5.2a7.5 7.5 0 1 1-15 0 7.5 7.5 0 0 1 15 0Z"/></svg>
+                </span>
+                <div>
+                    <h2 id="catalogEmptyTitle"><?= $activeFilters || $q !== '' ? 'По этим условиям ничего не найдено' : 'В разделе пока нет данных' ?></h2>
+                    <p><?= $activeFilters || $q !== '' ? 'Сбросьте часть фильтров или измените поисковый запрос.' : 'Проверьте источник и последний успешный запуск в операционном центре.' ?></p>
+                </div>
+                <?php if ($activeFilters || $q !== ''): ?>
+                    <a class="button secondary" href="<?= h($resetUrl) ?>">Сбросить фильтры</a>
+                <?php else: ?>
+                    <a class="button secondary" href="/?action=parsers">Проверить парсеры</a>
+                <?php endif; ?>
+            </section>
+        <?php else: ?>
         <?php if ($totalPages > 1): ?>
             <nav class="pagination" aria-label="Страницы карт">
                 <?php if ($page > 1): ?>
@@ -3861,6 +3877,7 @@ $workspaceSection = $showApiTokens
                 <?php endif; ?>
                 <span class="page-summary">Страница <?= $page ?> из <?= $totalPages ?></span>
             </nav>
+        <?php endif; ?>
         <?php endif; ?>
     </section>
     <?php endif; ?>

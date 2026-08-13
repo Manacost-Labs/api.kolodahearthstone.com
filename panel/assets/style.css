@@ -6582,6 +6582,55 @@ td {
     stroke-width: 2;
 }
 
+.catalog-empty {
+    min-height: 280px;
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr) auto;
+    gap: 14px;
+    align-items: center;
+    padding: 32px clamp(18px, 4vw, 48px);
+    background: var(--panel);
+}
+
+.catalog-empty-icon {
+    width: 44px;
+    height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--panel-soft);
+    color: var(--muted);
+}
+
+.catalog-empty-icon svg {
+    width: 20px;
+    height: 20px;
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-width: 1.8;
+}
+
+.catalog-empty h2 {
+    margin: 0;
+    font-size: 16px;
+    letter-spacing: -.01em;
+}
+
+.catalog-empty p {
+    max-width: 620px;
+    margin: 5px 0 0;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.catalog-empty .button {
+    white-space: nowrap;
+}
+
 .table-column-picker > summary {
     min-height: 38px;
     display: inline-flex;
@@ -6842,6 +6891,24 @@ td {
         min-height: 42px;
         padding-right: 8px;
         padding-left: 10px;
+    }
+
+    .catalog-empty {
+        min-height: 260px;
+        grid-template-columns: 40px minmax(0, 1fr);
+        align-content: center;
+        padding: 24px 16px;
+    }
+
+    .catalog-empty-icon {
+        width: 40px;
+        height: 40px;
+    }
+
+    .catalog-empty .button {
+        width: 100%;
+        grid-column: 1 / -1;
+        margin-top: 4px;
     }
 }
 
