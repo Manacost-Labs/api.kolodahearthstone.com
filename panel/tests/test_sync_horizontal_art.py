@@ -8,6 +8,8 @@ import urllib.error
 from pathlib import Path
 from unittest import mock
 
+from PIL import Image, ImageDraw
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
@@ -45,6 +47,106 @@ class HorizontalArtTest(unittest.TestCase):
                     horizontal.render_horizontal_art(source, target, source_kind)
                     self.assertEqual(horizontal.identify_size(target), (320, 64))
                     self.assertGreater(target.stat().st_size, 0)
+
+    def test_subject_focus_prefers_detailed_character_area(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            source = Path(tmp_dir) / "subject.png"
+            image = Image.new("RGB", (600, 800), "#253443")
+            draw = ImageDraw.Draw(image)
+            draw.ellipse((390, 190, 510, 310), fill="#d99b75")
+            for offset in range(0, 96, 12):
+                draw.line(
+                    (402 + offset, 205, 402, 290 - offset),
+                    fill="#17202a",
+                    width=5,
+                )
+            draw.ellipse((420, 235, 435, 250), fill="#ffffff")
+            draw.ellipse((465, 235, 480, 250), fill="#ffffff")
+            image.save(source)
+
+            focus_x, focus_y = horizontal.subject_focus(source)
+
+            self.assertGreater(focus_x, 0.50)
+            self.assertLess(focus_x, 0.62)
+            self.assertGreater(focus_y, 0.20)
+            self.assertLess(focus_y, 0.48)
+
+    def test_subject_focus_ignores_detailed_outer_border(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            source = Path(tmp_dir) / "border.png"
+            image = Image.new("RGB", (600, 800), "#263748")
+            draw = ImageDraw.Draw(image)
+            for inset in range(0, 45, 5):
+                draw.rectangle(
+                    (inset, inset, 599 - inset, 799 - inset),
+                    outline="#f7ca5d",
+                    width=2,
+                )
+            draw.ellipse((245, 210, 355, 320), fill="#b77b62")
+            draw.line((260, 230, 340, 300), fill="#18212b", width=8)
+            draw.line((340, 230, 260, 300), fill="#18212b", width=8)
+            image.save(source)
+
+            focus_x, focus_y = horizontal.subject_focus(source)
+
+            self.assertGreater(focus_x, 0.38)
+            self.assertLess(focus_x, 0.62)
+            self.assertGreater(focus_y, 0.20)
+            self.assertLess(focus_y, 0.50)
+
+    def test_portrait_character_face_remains_visible_in_horizontal_art(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            source = root / "portrait.png"
+            target = root / "horizontal.webp"
+            image = Image.new("RGB", (600, 800), "#21384a")
+            draw = ImageDraw.Draw(image)
+            draw.ellipse((365, 155, 515, 315), fill="#d99b75")
+            draw.ellipse((400, 215, 420, 235), fill="#ffffff")
+            draw.ellipse((460, 215, 480, 235), fill="#ffffff")
+            draw.arc((405, 225, 475, 280), 10, 170, fill="#4a211a", width=6)
+            image.save(source)
+
+            horizontal.render_horizontal_art(source, target, "art")
+
+            rendered = Image.open(target).convert("RGB")
+            face_pixels = [
+                (x, y)
+                for y in range(rendered.height)
+                for x in range(185, rendered.width)
+                if rendered.getpixel((x, y))[0] > 150
+                and rendered.getpixel((x, y))[1] > 75
+                and rendered.getpixel((x, y))[2] < 155
+            ]
+            self.assertGreater(len(face_pixels), 450)
+            self.assertGreater(
+                max(y for _, y in face_pixels) - min(y for _, y in face_pixels), 28
+            )
+
+    def test_curated_crop_keeps_left_side_character_visible(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            source = root / "curated-crop.png"
+            target = root / "horizontal.webp"
+            image = Image.new("RGB", (243, 64), "#132839")
+            draw = ImageDraw.Draw(image)
+            draw.ellipse((18, 3, 82, 63), fill="#d99b75")
+            draw.ellipse((34, 22, 43, 31), fill="#ffffff")
+            draw.ellipse((57, 22, 66, 31), fill="#ffffff")
+            draw.line((35, 45, 65, 45), fill="#4a211a", width=4)
+            image.save(source)
+
+            horizontal.render_horizontal_art(source, target, "crop")
+
+            rendered = Image.open(target).convert("RGB")
+            visible_face_pixels = sum(
+                1
+                for y in range(rendered.height)
+                for x in range(150, rendered.width)
+                if rendered.getpixel((x, y))[0] > 135
+                and rendered.getpixel((x, y))[1] > 65
+            )
+            self.assertGreater(visible_face_pixels, 300)
 
     def test_output_filename_is_stable_and_collision_safe(self) -> None:
         self.assertEqual(horizontal.output_filename("BG_TEST_001"), "BG_TEST_001.webp")

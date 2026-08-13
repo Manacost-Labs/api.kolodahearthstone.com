@@ -34,7 +34,7 @@ VISIBLE_CROP_X = 52
 VISIBLE_CROP_WIDTH = SOURCE_CROP_WIDTH - VISIBLE_CROP_X
 ART_X = OUTPUT_WIDTH - VISIBLE_CROP_WIDTH
 FADE_WIDTH = 70
-RECIPE_VERSION = "3-soft-black-no-light-edges"
+RECIPE_VERSION = "4-subject-aware-focus"
 USER_AGENT = "db.kolodahs.ru-horizontal-art/1.0"
 SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 
@@ -356,6 +356,106 @@ def identify_size(path: Path) -> tuple[int, int]:
     return int(width), int(height)
 
 
+def subject_focus(source: Path) -> tuple[float, float]:
+    """Find a deterministic high-detail subject area without an ML model."""
+    sample_size = 96
+    result = subprocess.run(
+        [
+            "convert",
+            str(source),
+            "-auto-orient",
+            "-resize",
+            f"{sample_size}x{sample_size}!",
+            "-colorspace",
+            "sRGB",
+            "-depth",
+            "8",
+            "rgb:-",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    expected_bytes = sample_size * sample_size * 3
+    if len(result.stdout) != expected_bytes:
+        raise RuntimeError("Unable to sample source artwork")
+
+    pixels = list(result.stdout)
+    luminance = [0.0] * (sample_size * sample_size)
+    colorfulness = [0.0] * (sample_size * sample_size)
+    skin_likelihood = [0.0] * (sample_size * sample_size)
+    skin_target = (0.44, 0.32, 0.24)
+    for index in range(sample_size * sample_size):
+        red, green, blue = pixels[index * 3 : index * 3 + 3]
+        luminance[index] = red * 0.299 + green * 0.587 + blue * 0.114
+        colorfulness[index] = max(red, green, blue) - min(red, green, blue)
+        channel_total = max(1, red + green + blue)
+        normalized = (
+            red / channel_total,
+            green / channel_total,
+            blue / channel_total,
+        )
+        brightness = luminance[index]
+        if 45 <= brightness <= 245 and colorfulness[index] >= 12:
+            distance = sum(
+                (normalized[channel] - skin_target[channel]) ** 2
+                for channel in range(3)
+            ) ** 0.5
+            skin_likelihood[index] = max(0.0, 1.0 - distance / 0.19)
+
+    detail = [0.0] * (sample_size * sample_size)
+    for y in range(1, sample_size - 1):
+        row = y * sample_size
+        for x in range(1, sample_size - 1):
+            index = row + x
+            horizontal = abs(luminance[index + 1] - luminance[index - 1])
+            vertical = abs(
+                luminance[index + sample_size] - luminance[index - sample_size]
+            )
+            edge_strength = horizontal + vertical
+            detail[index] = (
+                edge_strength
+                + colorfulness[index] * 0.10
+                + skin_likelihood[index] * min(1.0, edge_strength / 28.0) * 240.0
+            )
+
+    source_width, source_height = identify_size(source)
+    expected_y = 0.31 if source_height >= source_width else 0.44
+    radius_x = 8
+    radius_y = 8
+    best_score = -1.0
+    best_x = sample_size // 2
+    best_y = round(expected_y * (sample_size - 1))
+    maximum_center_y = 36 if source_height >= source_width else 70
+    for center_y in range(12, maximum_center_y, 2):
+        for center_x in range(12, 84, 2):
+            score = 0.0
+            for y in range(center_y - radius_y, center_y + radius_y + 1):
+                y_weight = radius_y + 1 - abs(y - center_y)
+                row = y * sample_size
+                for x in range(center_x - radius_x, center_x + radius_x + 1):
+                    x_weight = radius_x + 1 - abs(x - center_x)
+                    score += detail[row + x] * x_weight * y_weight
+
+            normalized_y = center_y / (sample_size - 1)
+            y_prior = max(0.48, 1.0 - abs(normalized_y - expected_y) * 1.22)
+            normalized_x = center_x / (sample_size - 1)
+            x_prior = max(0.88, 1.0 - abs(normalized_x - 0.5) * 0.16)
+            score *= y_prior * x_prior
+            if score > best_score:
+                best_score = score
+                best_x = center_x
+                best_y = center_y
+
+    focus_x = best_x / (sample_size - 1)
+    focus_y = best_y / (sample_size - 1)
+    if source_height >= source_width:
+        # Portrait Hearthstone art normally keeps the face in the upper torso.
+        # Salient weapons, hands and spell effects below it must not steal focus.
+        focus_x = max(0.30, min(0.58, focus_x))
+        focus_y = max(0.18, min(0.32, focus_y))
+    return focus_x, focus_y
+
+
 def normalized_crop(source: Path, target: Path, source_kind: str) -> None:
     width, height = identify_size(source)
     if width < 2 or height < 2:
@@ -394,6 +494,7 @@ def normalized_crop(source: Path, target: Path, source_kind: str) -> None:
             str(target),
         ]
     elif source_kind == "art":
+        focus_x, focus_y = subject_focus(source)
         crop_width = min(width, max(1, width * 25 // 32))
         crop_height = max(1, round(crop_width * SOURCE_CROP_HEIGHT / SOURCE_CROP_WIDTH))
         if crop_height > height:
@@ -403,20 +504,20 @@ def normalized_crop(source: Path, target: Path, source_kind: str) -> None:
                 max(1, round(crop_height * SOURCE_CROP_WIDTH / SOURCE_CROP_HEIGHT)),
             )
 
-        if height * 100 >= width * 115:
-            focus_percent = 29
-        elif height * 100 >= width * 104:
-            focus_percent = 34
-        else:
-            focus_percent = 42
-        focus_y = height * focus_percent // 100
-        crop_y = max(0, min(height - crop_height, focus_y - crop_height // 2))
+        crop_x = max(
+            0,
+            min(width - crop_width, round(focus_x * width - crop_width * 0.5)),
+        )
+        crop_y = max(
+            0,
+            min(height - crop_height, round(focus_y * height - crop_height * 0.5)),
+        )
         command = [
             "convert",
             str(source),
             "-auto-orient",
             "-crop",
-            f"{crop_width}x{crop_height}+0+{crop_y}",
+            f"{crop_width}x{crop_height}+{crop_x}+{crop_y}",
             "+repage",
             "-resize",
             f"{SOURCE_CROP_WIDTH}x{SOURCE_CROP_HEIGHT}!",
@@ -488,6 +589,15 @@ def render_horizontal_art(source: Path, target: Path, source_kind: str) -> None:
     with tempfile.TemporaryDirectory(prefix="horizontal-art-") as tmp_dir:
         normalized = Path(tmp_dir) / "normalized.png"
         normalized_crop(source, normalized, source_kind)
+        if source_kind == "art":
+            art_x = round(OUTPUT_WIDTH * 0.76 - SOURCE_CROP_WIDTH * 0.5)
+        else:
+            focus_x, _ = subject_focus(normalized)
+            subject_x = round(focus_x * (SOURCE_CROP_WIDTH - 1))
+            art_x = max(
+                OUTPUT_WIDTH - SOURCE_CROP_WIDTH,
+                min(ART_X, round(OUTPUT_WIDTH * 0.76 - subject_x)),
+            )
         temporary = Path(tmp_dir) / "output.webp"
         transparent_width = OUTPUT_WIDTH - ART_X - FADE_WIDTH
         subprocess.run(
@@ -498,14 +608,11 @@ def render_horizontal_art(source: Path, target: Path, source_kind: str) -> None:
                 "xc:black",
                 "(",
                 str(normalized),
-                "-crop",
-                f"{VISIBLE_CROP_WIDTH}x{OUTPUT_HEIGHT}+{VISIBLE_CROP_X}+0",
-                "+repage",
                 ")",
                 "-gravity",
                 "northwest",
                 "-geometry",
-                f"+{ART_X}+0",
+                f"+{art_x}+0",
                 "-compose",
                 "over",
                 "-composite",
