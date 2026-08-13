@@ -45,6 +45,7 @@ function h($value): string
             </div>
             <div class="hero-coverage-strip"><span>Всего карт <b>1240</b></span><span>В пуле <b>804</b></span><span>Golden <b>1188</b></span><span class="is-ok">Изображения <b>99.4%</b></span></div>
             <nav class="pagination"><span class="page-link disabled">Назад</span><span class="page-link active">1</span><a class="page-link" href="#">2</a><a class="page-link" href="#">3</a><a class="page-link" href="#">Вперёд</a><span class="page-summary">Страница 1 из 25</span></nav>
+            <div class="table-navigation" data-table-navigation data-table-target=".cards-table" hidden><div class="table-navigation-copy"><span>Широкая таблица</span><b data-table-scroll-status>Начало</b></div><div class="table-navigation-actions"><button type="button" data-table-scroll-left aria-label="Прокрутить таблицу влево">←</button><button type="button" data-table-scroll-right aria-label="Прокрутить таблицу вправо">→</button></div></div>
             <div class="cards-table">
                 <table>
                     <thead><tr><th>Карта</th><th>Тип</th><th>Таверна</th><th>Характеристики</th><th>Механики</th><th>Пул</th><th>Обновлено</th><th>Действия</th></tr></thead>

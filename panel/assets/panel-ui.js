@@ -158,6 +158,47 @@
         });
     });
 
+    document.querySelectorAll('[data-table-navigation]').forEach((navigation) => {
+        const scope = navigation.closest('.data-panel, .analytics-hub, .parser-workspace, .token-workspace') || document;
+        const configuredTarget = scope.querySelector(navigation.dataset.tableTarget || '.cards-table');
+        const leftButton = navigation.querySelector('[data-table-scroll-left]');
+        const rightButton = navigation.querySelector('[data-table-scroll-right]');
+        const status = navigation.querySelector('[data-table-scroll-status]');
+        let scrollTarget = configuredTarget;
+
+        const resolveTarget = () => {
+            const nested = configuredTarget?.querySelector('.library-table, .constructed-table, .analytics-table-scroll, .parser-table-scroll, .token-table-shell');
+            scrollTarget = nested && nested.scrollWidth > nested.clientWidth ? nested : configuredTarget;
+            return scrollTarget;
+        };
+        const updateTableNavigation = () => {
+            const target = resolveTarget();
+            if (!target) return;
+            const maximum = Math.max(0, target.scrollWidth - target.clientWidth);
+            const position = Math.max(0, Math.min(maximum, target.scrollLeft));
+            const isScrollable = maximum > 4;
+            const atStart = position <= 4;
+            const atEnd = maximum - position <= 4;
+            navigation.hidden = !isScrollable;
+            navigation.dataset.position = atStart ? 'start' : (atEnd ? 'end' : 'middle');
+            if (leftButton) leftButton.disabled = !isScrollable || atStart;
+            if (rightButton) rightButton.disabled = !isScrollable || atEnd;
+            if (status) status.textContent = atStart ? 'Начало' : (atEnd ? 'Конец' : `${Math.round((position / maximum) * 100)}%`);
+        };
+        const move = (direction) => {
+            const target = resolveTarget();
+            if (!target) return;
+            target.scrollBy({left: direction * Math.max(240, target.clientWidth * .72), behavior: 'smooth'});
+        };
+
+        leftButton?.addEventListener('click', () => move(-1));
+        rightButton?.addEventListener('click', () => move(1));
+        configuredTarget?.addEventListener('scroll', updateTableNavigation, {passive: true});
+        configuredTarget?.querySelector('.library-table, .constructed-table')?.addEventListener('scroll', updateTableNavigation, {passive: true});
+        window.addEventListener('resize', updateTableNavigation, {passive: true});
+        updateTableNavigation();
+    });
+
     const sidebar = document.querySelector('.sidebar');
     document.querySelectorAll('.side-link').forEach((link) => {
         link.addEventListener('click', () => {

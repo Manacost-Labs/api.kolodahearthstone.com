@@ -6501,6 +6501,87 @@ td {
     flex: 0 0 auto;
 }
 
+.table-navigation {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    border-bottom: 1px solid var(--line-soft);
+    padding: 6px 10px 6px 14px;
+    background: color-mix(in srgb, var(--panel-soft), var(--panel) 35%);
+}
+
+.table-navigation[hidden] {
+    display: none;
+}
+
+.table-navigation-copy {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.table-navigation-copy span {
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 850;
+    letter-spacing: .07em;
+    text-transform: uppercase;
+}
+
+.table-navigation-copy b {
+    border-left: 1px solid var(--line);
+    padding-left: 8px;
+    color: var(--label);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+}
+
+.table-navigation-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.table-navigation-actions button {
+    width: 32px;
+    min-height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 0;
+    background: var(--panel);
+    color: var(--label);
+    font: inherit;
+    font-weight: 850;
+    cursor: pointer;
+}
+
+.table-navigation-actions button:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--accent), var(--line) 45%);
+    background: var(--accent-soft);
+    color: var(--accent);
+}
+
+.table-navigation-actions button:disabled {
+    cursor: default;
+    opacity: .38;
+}
+
+.table-navigation-actions svg {
+    width: 17px;
+    height: 17px;
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 2;
+}
+
 .table-column-picker > summary {
     min-height: 38px;
     display: inline-flex;
@@ -6755,6 +6836,12 @@ td {
         margin-top: 12px;
         max-height: calc(100vh - 24px);
         border-radius: 11px;
+    }
+
+    .table-navigation {
+        min-height: 42px;
+        padding-right: 8px;
+        padding-left: 10px;
     }
 }
 
