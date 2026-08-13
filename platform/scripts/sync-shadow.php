@@ -260,6 +260,9 @@ BEGIN
                     update_list, update_condition
                 );
             END IF;
+            IF format('%s.%s', target_schema, table_record.table_name) = ANY(append_only_tables) THEN
+                CONTINUE;
+            END IF;
             EXECUTE format(
                 'DELETE FROM %I.%I AS target WHERE NOT EXISTS ('
                 'SELECT 1 FROM %I.%I AS source WHERE %s)',

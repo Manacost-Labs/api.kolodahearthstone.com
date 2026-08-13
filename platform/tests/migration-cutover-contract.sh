@@ -62,6 +62,10 @@ assert_contains scripts/sync-shadow.php \
 assert_not_contains scripts/sync-shadow.php \
   'IS NOT DISTINCT FROM source' \
   'shadow cleanup must not disable primary-key index lookups'
+if [[ "$(grep -c '= ANY(append_only_tables)' "${project_root}/scripts/sync-shadow.php")" -lt 2 ]]; then
+  echo 'FAIL: append-only history must never run destructive cleanup joins' >&2
+  exit 1
+fi
 assert_contains scripts/verify-platform.sh \
   "test .*public_status.* = '302'" \
   'the protected panel root must be monitored as a GitHub OAuth redirect'
