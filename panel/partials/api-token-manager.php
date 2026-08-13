@@ -149,6 +149,7 @@ $tokenFormQuota = $issuedApiToken === null ? (string)($_POST['monthly_quota'] ??
                         <span><b><?= $tokenActiveCount ?></b> активных</span>
                         <span><b><?= $tokenRevokedCount ?></b> отозвано</span>
                     </div>
+                    <button class="table-density-toggle" type="button" data-table-density data-density-key="apiTokenTableDensity" aria-pressed="false">Компактно</button>
                     <details class="table-column-picker" data-column-picker data-table-target=".token-table" data-storage-key="api-tokens">
                         <summary>Колонки</summary>
                         <div class="column-picker-menu" data-column-picker-menu></div>

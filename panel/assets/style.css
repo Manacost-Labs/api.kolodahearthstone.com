@@ -6640,6 +6640,25 @@ td {
     margin-top: 0;
 }
 
+.token-list-panel.is-compact-table .token-table th,
+.token-list-panel.is-compact-table .token-table td {
+    padding-top: 6px;
+    padding-bottom: 6px;
+}
+
+.token-list-panel.is-compact-table .token-table td strong {
+    margin-bottom: 2px;
+}
+
+.token-list-panel.is-compact-table .token-id,
+.token-list-panel.is-compact-table .token-table td small {
+    display: none;
+}
+
+.token-list-panel.is-compact-table .token-manager-badge {
+    margin-top: 3px;
+}
+
 .table-column-picker > summary {
     min-height: 38px;
     display: inline-flex;

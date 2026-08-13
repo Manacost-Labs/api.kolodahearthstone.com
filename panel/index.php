@@ -4014,10 +4014,10 @@ $workspaceSection = $showApiTokens
     });
 
     document.querySelectorAll('[data-table-density]').forEach((button) => {
-        const workspace = button.closest('.data-panel, .analytics-hub');
-        const storageKey = workspace?.classList.contains('analytics-hub')
+        const workspace = button.closest('.data-panel, .analytics-hub, .token-list-panel');
+        const storageKey = button.dataset.densityKey || (workspace?.classList.contains('analytics-hub')
             ? 'analyticsTableDensity'
-            : 'catalogueTableDensity';
+            : 'catalogueTableDensity');
         const setDensity = (compact) => {
             workspace?.classList.toggle('is-compact-table', compact);
             button.setAttribute('aria-pressed', compact ? 'true' : 'false');

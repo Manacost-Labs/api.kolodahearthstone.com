@@ -65,6 +65,7 @@ assert_contains index.php 'class="catalog-empty"' 'empty catalogues must explain
 assert_contains partials/analytics-dashboard.php 'data-column-picker' 'analytics tables must expose column visibility controls'
 assert_contains partials/parser-control.php 'data-column-picker' 'parser tables must expose column visibility controls'
 assert_contains partials/api-token-manager.php 'data-column-picker' 'token tables must expose column visibility controls'
+assert_contains partials/api-token-manager.php 'data-density-key="apiTokenTableDensity"' 'token tables must expose persistent compact density'
 assert_contains assets/panel-ui.js 'textContent' 'shared table controls must render labels as text'
 assert_contains assets/panel-ui.js 'data-table-scroll-right' 'wide table navigation must keep rightward data discoverable'
 assert_contains partials/api-token-manager.php 'data-token-secret' 'new token secret must have a dedicated one-time display'
