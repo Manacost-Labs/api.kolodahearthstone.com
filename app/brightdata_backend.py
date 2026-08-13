@@ -88,6 +88,25 @@ class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
         del req, fp, code, msg, headers, newurl
 
 
+def _brightdata_policy_source_id(source_id: str) -> str | None:
+    """Resolve an exact allowlist entry for a source or its canonical parent.
+
+    Pipeline-local source IDs use ``parent:child`` (and occasionally nested
+    ``parent:child:variant``) while the operator-facing policy is configured
+    for the canonical parent. Exact child entries remain valid. Parent access
+    is granted only by equality with the segment before the first colon; this
+    deliberately avoids prefix or substring matching.
+    """
+    allowed_source_ids = brightdata_source_ids()
+    if source_id in allowed_source_ids:
+        return source_id
+    parts = source_id.split(":")
+    if len(parts) < 2 or any(not part for part in parts):
+        return None
+    canonical_parent = parts[0]
+    return canonical_parent if canonical_parent in allowed_source_ids else None
+
+
 def brightdata_configured_for_source(source_id: str) -> bool:
     zone = brightdata_unlocker_zone()
     return bool(
@@ -95,7 +114,7 @@ def brightdata_configured_for_source(source_id: str) -> bool:
         and brightdata_api_key()
         and zone
         and _ZONE_RE.fullmatch(zone)
-        and source_id in brightdata_source_ids()
+        and _brightdata_policy_source_id(source_id) is not None
         and brightdata_monthly_billable_limit() > 0
         and usage_state_initialized()
     )

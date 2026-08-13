@@ -154,6 +154,66 @@ def test_unlocker_fails_closed_until_usage_ledger_is_initialized(
     assert brightdata_configured_for_source("allowed_source") is False
 
 
+def test_canonical_parent_allowlist_authorizes_colon_child_source(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _configure(monkeypatch, tmp_path)
+    monkeypatch.setenv(
+        "HS_BRIGHTDATA_SOURCE_IDS",
+        "hsguru_archetype_analysis",
+    )
+
+    assert brightdata_configured_for_source("hsguru_archetype_analysis:page") is True
+
+
+@pytest.mark.parametrize(
+    "source_id",
+    [
+        "hsguru_archetype_analysi:page",
+        "hsguru_archetype_analysis_extra:page",
+        "hsguru_archetype_analysispage",
+    ],
+)
+def test_canonical_parent_allowlist_rejects_similar_non_children(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    source_id: str,
+) -> None:
+    _configure(monkeypatch, tmp_path)
+    monkeypatch.setenv(
+        "HS_BRIGHTDATA_SOURCE_IDS",
+        "hsguru_archetype_analysis",
+    )
+
+    assert brightdata_configured_for_source(source_id) is False
+
+
+def test_exact_colon_child_allowlist_remains_supported(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _configure(monkeypatch, tmp_path)
+    monkeypatch.setenv(
+        "HS_BRIGHTDATA_SOURCE_IDS",
+        "hsguru_archetype_analysis:page",
+    )
+
+    assert brightdata_configured_for_source("hsguru_archetype_analysis:page") is True
+    assert brightdata_configured_for_source("hsguru_archetype_analysis:other") is False
+
+
+def test_empty_source_allowlist_rejects_parent_and_child(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _configure(monkeypatch, tmp_path)
+    monkeypatch.setenv("HS_BRIGHTDATA_SOURCE_IDS", "")
+
+    assert brightdata_configured_for_source("hsguru_archetype_analysis") is False
+    assert brightdata_configured_for_source("hsguru_archetype_analysis:page") is False
+
+
 @pytest.mark.parametrize(
     "url",
     [
