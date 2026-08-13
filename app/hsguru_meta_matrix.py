@@ -1600,6 +1600,8 @@ async def _refresh_hsguru_meta_matrix_unlocked(
         len(slices) == len(specs)
         and cached_slice_count == 0
         and current_complete
+        and not cached_current_formats
+        and not errors
         and not run.timed_out
     )
     complete = publishable and cached_slice_count == 0 and not errors

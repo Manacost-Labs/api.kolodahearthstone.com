@@ -1735,6 +1735,65 @@ def test_failed_current_format_uses_same_period_cached_catalog() -> None:
     assert acquisitions[-1]["serving_cached_catalog"] is True
 
 
+def test_failed_current_format_preserves_lkg_without_publishing_hybrid() -> None:
+    from app.hsguru_meta_matrix import refresh_hsguru_meta_matrix
+
+    period = "patch_36.0.3"
+    cached = {
+        "source_id": "hsguru_meta_matrix",
+        "fetched_at": "2026-08-12T12:00:00+00:00",
+        "data": {
+            "structured": {
+                "slices": [],
+                "current_catalog": {
+                    "criteria": {"period": period},
+                    "archetypes": [
+                        _valid_current_row(format_name, period)
+                        for format_name in ("standard", "wild")
+                    ],
+                },
+            }
+        },
+    }
+
+    async def scrape_current(format_name, current_period):
+        if format_name == "wild":
+            raise RuntimeError("current Wild unavailable")
+        return [
+            _valid_current_row(format_name, current_period)
+        ], _valid_current_acquisition(format_name)
+
+    async def discover_patch(_cached):
+        return period, None
+
+    with (
+        patch("app.hsguru_meta_matrix.iter_slice_specs", return_value=()),
+        patch("app.hsguru_meta_matrix.load_dataset", return_value=cached),
+        patch("app.hsguru_meta_matrix.load_baseline", return_value=None),
+        patch("app.hsguru_meta_matrix.save_baseline"),
+        patch("app.hsguru_meta_matrix.enrich_current_rows_with_cached_decks"),
+        patch("app.hsguru_meta_matrix._record_current_history") as record_history,
+        patch("app.hsguru_meta_matrix.save_dataset") as save_dataset,
+        patch("app.hsguru_meta_matrix.save_status") as save_status,
+    ):
+        result = asyncio.run(
+            refresh_hsguru_meta_matrix(
+                attempts=1,
+                scrape_current=scrape_current,
+                discover_patch=discover_patch,
+            )
+        )
+
+    assert result["complete"] is False
+    assert result["published"] is False
+    assert result["retryable"] is True
+    assert result["cached_current_formats"] == ["wild"]
+    assert result["serving_cached_dataset"] is True
+    save_dataset.assert_not_called()
+    record_history.assert_not_called()
+    assert save_status.call_args.args[1]["published"] is False
+
+
 def test_runtime_periods_replace_previous_patch_with_discovered_patch() -> None:
     from app.hsguru_meta_matrix import matrix_periods, patch_periods_from_html
 
