@@ -5,7 +5,7 @@ declare(strict_types=1);
 const PLATFORM_DIR = __DIR__ . '/..';
 const CATALOG_CONFIG = '/etc/api-kolodahearthstone/panel-config.php';
 const ANALYTICS_DB = '/srv/hs-data-api/data/hs_parses.db';
-const PRIVATE_ANALYTICS_TABLES = ['api_tokens'];
+const PRIVATE_ANALYTICS_TABLES = ['api_tokens', 'api_token_usage_monthly'];
 
 function runProcess(array $command, string $stdin = ''): string
 {

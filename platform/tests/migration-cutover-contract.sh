@@ -88,6 +88,9 @@ assert_contains scripts/verify-data.php \
   "PRIVATE_ANALYTICS_TABLES" \
   'data parity must explicitly distinguish private API tables'
 assert_contains scripts/verify-data.php \
+  "api_token_usage_monthly" \
+  'private per-token usage must stay out of the public PostgreSQL shadow'
+assert_contains scripts/verify-data.php \
   '!in_array\(\$table, PRIVATE_ANALYTICS_TABLES, true\)' \
   'private API tables must be excluded from analytics parity and key checks'
 assert_contains scripts/index-media-assets.php \
