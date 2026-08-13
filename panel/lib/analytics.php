@@ -337,7 +337,7 @@ function analytics_normalize_parsing_reliability(
     $collecting = [
         'state' => 'collecting',
         'message' => 'Накапливаем статистику',
-        'default_window' => '7d',
+        'default_window' => '24h',
         'generated_at' => null,
         'coverage_started_at' => null,
         'methodology' => null,
@@ -362,14 +362,19 @@ function analytics_normalize_parsing_reliability(
         ? array_values(array_filter($methodology['excluded_outcomes'], 'is_string'))
         : [];
     $requiredEligibleOutcomes = ['fresh_published', 'provisional', 'lkg_served', 'failed', 'timed_out'];
+    $combinedSloReadiness = (string)($methodology['combined_slo_readiness'] ?? '');
     if (
         $methodology === null
         || $rawWindows === null
         || trim((string)($methodology['version'] ?? '')) === ''
-        || ($methodology['scope'] ?? '') !== 'generic_refresh_sources'
+        || ($methodology['scope'] ?? '') !== 'observed_scrape_and_pipeline_sources'
         || ($methodology['completeness'] ?? '') !== 'observed_attempts_only'
-        || !in_array('dedicated_pipeline_sources_excluded', $limitations, true)
+        || !in_array('missing_scheduled_pipeline_windows_not_detectable_until_ledger', $limitations, true)
         || !in_array('best_effort_write_gaps_not_detectable', $limitations, true)
+        || ($methodology['coverage_method'] ?? '') !== 'complete_generic_refresh_per_24h_bucket'
+        || ($methodology['coverage_scope'] ?? '') !== 'generic_scrape_sources_only'
+        || ($methodology['coverage_cohort_method'] ?? '') !== 'current_canonical_scrape_registry_hash'
+        || !in_array($combinedSloReadiness, ['collecting_pipeline_schedule_ledger', 'ready'], true)
         || array_diff($requiredEligibleOutcomes, $eligibleOutcomes) !== []
         || !in_array('skipped', $excludedOutcomes, true)
     ) {
@@ -408,18 +413,21 @@ function analytics_normalize_parsing_reliability(
             $coverageRatio = 0.0;
         }
         $coverageRatio = round(max(0.0, min(1.0, $coverageRatio)), 4);
-        $measurementStatus = ($rawWindow['measurement_status'] ?? '') === 'observed'
+        $rawMeasurementStatus = (string)($rawWindow['measurement_status'] ?? '');
+        $measurementStatusValid = in_array($rawMeasurementStatus, ['collecting', 'observed'], true);
+        $measurementStatus = $rawMeasurementStatus === 'observed'
             ? 'observed'
             : 'collecting';
         $fullFresh = analytics_reliability_percentage($rawWindow['full_fresh_rate_pct'] ?? null);
         $acceptedFresh = analytics_reliability_percentage($rawWindow['accepted_fresh_rate_pct'] ?? null);
         $dataAvailable = analytics_reliability_percentage($rawWindow['data_available_rate_pct'] ?? null);
-        $ratesObserved = $measurementStatus === 'observed'
+        $ratesAvailable = $measurementStatusValid
             && $eligibleAttempts > 0
             && $countsConsistent
             && $fullFresh !== null
             && $acceptedFresh !== null
             && $dataAvailable !== null;
+        $ratesObserved = $measurementStatus === 'observed' && $ratesAvailable;
 
         $windows[] = [
             'window' => $window,
@@ -433,6 +441,7 @@ function analytics_normalize_parsing_reliability(
             'full_fresh_rate_pct' => $fullFresh,
             'accepted_fresh_rate_pct' => $acceptedFresh,
             'data_available_rate_pct' => $dataAvailable,
+            'rates_available' => $ratesAvailable,
             'rates_observed' => $ratesObserved,
         ];
     }
@@ -445,7 +454,7 @@ function analytics_normalize_parsing_reliability(
     return [
         'state' => 'available',
         'message' => null,
-        'default_window' => in_array('7d', $availableWindowKeys, true) ? '7d' : $availableWindowKeys[0],
+        'default_window' => in_array('24h', $availableWindowKeys, true) ? '24h' : $availableWindowKeys[0],
         'generated_at' => isset($data['generated_at']) ? (string)$data['generated_at'] : null,
         'coverage_started_at' => isset($data['coverage_started_at']) ? (string)$data['coverage_started_at'] : null,
         'methodology' => [
@@ -454,6 +463,10 @@ function analytics_normalize_parsing_reliability(
             'scope' => (string)$methodology['scope'],
             'completeness' => (string)$methodology['completeness'],
             'limitations' => $limitations,
+            'coverage_method' => (string)$methodology['coverage_method'],
+            'coverage_scope' => (string)$methodology['coverage_scope'],
+            'coverage_cohort_method' => (string)$methodology['coverage_cohort_method'],
+            'combined_slo_readiness' => $combinedSloReadiness,
             'eligible_outcomes' => $eligibleOutcomes,
             'excluded_outcomes' => $excludedOutcomes,
         ],

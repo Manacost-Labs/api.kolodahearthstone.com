@@ -54,7 +54,7 @@
     let activePayload = null;
     let lastDetailTrigger = null;
     let imageErrorCount = 0;
-    let reliabilityWindow = '7d';
+    let reliabilityWindow = null;
     const brokenImageUrls = new Set();
     let metaBaseText = '';
     let activeModule = knownModules.has(urlState.get('stats'))
@@ -273,6 +273,9 @@
                 hasWindow: false,
                 windows: [],
                 badge: 'Накапливаем статистику',
+                observed: false,
+                preliminary: false,
+                ratesAvailable: false,
                 fullFresh: '—',
                 availability: '—',
                 acceptedFresh: '—',
@@ -290,12 +293,13 @@
         eyebrow.className = 'eyebrow';
         eyebrow.textContent = 'Наблюдаемость парсера';
         const heading = document.createElement('h3');
-        heading.textContent = 'Наблюдаемая надёжность основного парсера';
+        heading.textContent = 'Успешность получения новых данных';
         const explanation = document.createElement('p');
-        explanation.textContent = 'Учитываются только зафиксированные исходы generic refresh sources. Отдельные dedicated pipelines пока не входят; skipped исключён из знаменателя, а пропуски best-effort записи могут быть не видны.';
+        explanation.textContent = 'Главный процент считает только новые валидные публикации. Резерв LKG не улучшает его и показан отдельно; до завершения журнала расписаний срез помечен как предварительный.';
         headingGroup.append(eyebrow, heading, explanation);
         const badge = document.createElement('span');
-        badge.className = `parsing-reliability-badge ${model.observed ? 'is-observed' : 'is-collecting'}`;
+        const badgeState = model.observed ? 'is-observed' : (model.preliminary ? 'is-preliminary' : 'is-collecting');
+        badge.className = `parsing-reliability-badge ${badgeState}`;
         badge.textContent = model.badge;
         header.append(headingGroup, badge);
 
@@ -338,26 +342,29 @@
             card.append(cardLabel, cardValue, cardCopy);
             return card;
         };
-        const pendingCopy = 'Будет показано после полного покрытия выбранного окна.';
+        const pendingCopy = 'Появится после первой согласованной выборки.';
+        const freshCopy = model.preliminary
+            ? 'Предварительно по зафиксированным попыткам; provisional и LKG не входят.'
+            : 'Новая полная публикация без provisional и LKG.';
         const rates = document.createElement('div');
         rates.className = 'parsing-reliability-rates';
         rates.append(
             rateCard(
-                'Полностью свежие',
+                'Новые данные · fresh-only',
                 model.fullFresh,
-                model.observed ? 'Новая полная публикация без provisional и LKG.' : pendingCopy,
+                model.ratesAvailable ? freshCopy : pendingCopy,
                 'is-primary'
             ),
             rateCard(
                 'Доступность данных · с LKG',
                 model.availability,
-                model.observed ? 'Fresh + provisional + последний успешный набор.' : pendingCopy,
+                model.ratesAvailable ? 'Fresh + provisional + последний успешный набор LKG.' : pendingCopy,
                 'is-availability'
             ),
             rateCard(
                 'Принятая свежесть',
                 model.acceptedFresh,
-                model.observed ? 'Fresh + provisional, без резервного LKG.' : pendingCopy
+                model.ratesAvailable ? 'Fresh + provisional, без резервного LKG.' : pendingCopy
             )
         );
 
@@ -385,11 +392,12 @@
         const foot = document.createElement('p');
         foot.className = 'parsing-reliability-meta';
         const metaParts = [
+            model.preliminary ? 'статус: предварительный' : null,
             `покрытие окна: ${model.coverage}`,
             `eligible попыток: ${model.eligibleAttempts ?? '—'}`,
             `всего исходов: ${model.totalAttempts ?? '—'}`,
             `skipped: ${model.counts.skipped ?? '—'}`,
-        ];
+        ].filter(Boolean);
         if (model.generatedAt) {
             const generated = new Date(model.generatedAt);
             if (!Number.isNaN(generated.getTime())) metaParts.push(`срез: ${dateFormatter.format(generated)}`);

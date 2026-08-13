@@ -15,14 +15,18 @@ function assert_same($expected, $actual, string $message): void
 $envelope = [
     'data' => [
         'methodology' => [
-            'version' => 'logical-source-attempts-v1',
+            'version' => 'logical-source-observed-v7',
             'unit' => 'one terminal outcome per source in a refresh run',
-            'scope' => 'generic_refresh_sources',
+            'scope' => 'observed_scrape_and_pipeline_sources',
             'completeness' => 'observed_attempts_only',
             'limitations' => [
-                'dedicated_pipeline_sources_excluded',
+                'missing_scheduled_pipeline_windows_not_detectable_until_ledger',
                 'best_effort_write_gaps_not_detectable',
             ],
+            'coverage_method' => 'complete_generic_refresh_per_24h_bucket',
+            'coverage_scope' => 'generic_scrape_sources_only',
+            'coverage_cohort_method' => 'current_canonical_scrape_registry_hash',
+            'combined_slo_readiness' => 'collecting_pipeline_schedule_ledger',
             'eligible_outcomes' => ['fresh_published', 'provisional', 'lkg_served', 'failed', 'timed_out'],
             'excluded_outcomes' => ['skipped'],
         ],
@@ -77,15 +81,21 @@ $envelope = [
 $normalized = analytics_normalize_parsing_reliability($envelope);
 
 assert_same('available', $normalized['state'], 'A valid reliability envelope must be available.');
-assert_same('7d', $normalized['default_window'], 'The weekly window must be the UI default.');
+assert_same('24h', $normalized['default_window'], 'The complete daily window must be the UI default.');
 assert_same(2, count($normalized['windows']), 'Known windows must be retained.');
 assert_same(false, $normalized['windows'][0]['rates_observed'], 'Collecting rates must never be presented as observed.');
+assert_same(true, $normalized['windows'][0]['rates_available'], 'Consistent collecting rates may be presented as preliminary.');
 assert_same(100.0, $normalized['windows'][0]['full_fresh_rate_pct'], 'The observed value may be retained for diagnostics.');
 assert_same(true, $normalized['windows'][1]['rates_observed'], 'An observed window with consistent attempts may show rates.');
+assert_same(true, $normalized['windows'][1]['rates_available'], 'Observed rates must also be available.');
 assert_same(5, $normalized['windows'][1]['counts']['lkg_served'], 'LKG must remain a separate count.');
-assert_same('generic_refresh_sources', $normalized['methodology']['scope'], 'The UI must retain the generic-parser scope.');
 assert_same(
-    ['dedicated_pipeline_sources_excluded', 'best_effort_write_gaps_not_detectable'],
+    'observed_scrape_and_pipeline_sources',
+    $normalized['methodology']['scope'],
+    'The UI must retain the combined observed-source scope.'
+);
+assert_same(
+    ['missing_scheduled_pipeline_windows_not_detectable_until_ledger', 'best_effort_write_gaps_not_detectable'],
     $normalized['methodology']['limitations'],
     'The public UI must retain methodology limitations.'
 );
@@ -114,6 +124,20 @@ assert_same(
     $legacyStatus['windows'][1]['rates_observed'],
     'The removed exact status must not expose observed rates.'
 );
+assert_same(
+    false,
+    $legacyStatus['windows'][1]['rates_available'],
+    'An unknown measurement status must not expose a preliminary rate either.'
+);
+
+$inconsistentEnvelope = $envelope;
+$inconsistentEnvelope['data']['windows'][0]['eligible_attempts'] = 6;
+$inconsistent = analytics_normalize_parsing_reliability($inconsistentEnvelope);
+assert_same(
+    false,
+    $inconsistent['windows'][0]['rates_available'],
+    'Inconsistent attempt counts must suppress preliminary rates.'
+);
 
 $missingScopeEnvelope = $envelope;
 unset($missingScopeEnvelope['data']['methodology']['scope']);
@@ -122,7 +146,9 @@ assert_same('collecting', $missingScope['state'], 'Telemetry without the final s
 assert_same([], $missingScope['windows'], 'Telemetry without scope must not expose rates.');
 
 $missingLimitationEnvelope = $envelope;
-$missingLimitationEnvelope['data']['methodology']['limitations'] = ['dedicated_pipeline_sources_excluded'];
+$missingLimitationEnvelope['data']['methodology']['limitations'] = [
+    'missing_scheduled_pipeline_windows_not_detectable_until_ledger',
+];
 $missingLimitation = analytics_normalize_parsing_reliability($missingLimitationEnvelope);
 assert_same(
     'collecting',

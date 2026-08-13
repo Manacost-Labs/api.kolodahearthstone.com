@@ -23,28 +23,40 @@
 
     const buildReliabilityViewModel = (reliability, selectedWindow = null) => {
         const windows = Array.isArray(reliability?.windows) ? reliability.windows : [];
-        const requestedWindow = selectedWindow || reliability?.default_window || '7d';
+        const requestedWindow = selectedWindow || reliability?.default_window || '24h';
         const window = windows.find((item) => item?.window === requestedWindow) || windows[0] || null;
-        const observed = Boolean(
+        const measurementStatusValid = Boolean(
             window
+            && ['collecting', 'observed'].includes(window.measurement_status)
+        );
+        const ratesAvailable = Boolean(
+            measurementStatusValid
+            && window.rates_available === true
+        );
+        const observed = Boolean(
+            ratesAvailable
             && window.measurement_status === 'observed'
             && window.rates_observed === true
         );
+        const preliminary = ratesAvailable && !observed;
         const counts = window?.counts || {};
         const stale = reliability?.stale_cache === true;
+        const badge = observed
+            ? 'Наблюдаемый срез'
+            : (preliminary ? 'Предварительный срез' : 'Накапливаем статистику');
 
         return {
             hasWindow: Boolean(window),
             selectedWindow: window?.window || requestedWindow,
             windows: windows.map((item) => item.window).filter(Boolean),
-            badge: observed
-                ? (stale ? 'Наблюдаемый срез · резервный кэш' : 'Наблюдаемый срез')
-                : 'Накапливаем статистику',
+            badge: stale && ratesAvailable ? `${badge} · кэш ответа` : badge,
             observed,
+            preliminary,
+            ratesAvailable,
             stale,
-            fullFresh: observed ? percentage(window.full_fresh_rate_pct) : '—',
-            availability: observed ? percentage(window.data_available_rate_pct) : '—',
-            acceptedFresh: observed ? percentage(window.accepted_fresh_rate_pct) : '—',
+            fullFresh: ratesAvailable ? percentage(window.full_fresh_rate_pct) : '—',
+            availability: ratesAvailable ? percentage(window.data_available_rate_pct) : '—',
+            acceptedFresh: ratesAvailable ? percentage(window.accepted_fresh_rate_pct) : '—',
             coverage: window ? percentage(Number(window.coverage_ratio) * 100) : '—',
             eligibleAttempts: window ? nonNegativeCount(window.eligible_attempts) : null,
             totalAttempts: window ? nonNegativeCount(window.total_attempts) : null,

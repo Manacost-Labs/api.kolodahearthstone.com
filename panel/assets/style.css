@@ -3400,6 +3400,7 @@ thead th:last-child {
     color: var(--good);
 }
 
+.parsing-reliability-badge.is-preliminary,
 .parsing-reliability-badge.is-collecting {
     border-color: color-mix(in srgb, #d99a24, var(--line) 48%);
     background: color-mix(in srgb, #d99a24, transparent 90%);
@@ -3454,8 +3455,8 @@ thead th:last-child {
 }
 
 .parsing-reliability-rate.is-primary {
-    border-color: var(--good-line);
-    background: var(--good-soft);
+    border-color: color-mix(in srgb, var(--accent), var(--line) 42%);
+    background: color-mix(in srgb, var(--accent), transparent 90%);
 }
 
 .parsing-reliability-rate.is-availability {

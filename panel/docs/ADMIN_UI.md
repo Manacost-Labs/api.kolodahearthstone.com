@@ -72,12 +72,14 @@ The import and API contracts are documented in `LIBRARY_FULL_ART.md`.
 - The overview loads `/v1/system/parsing-reliability` independently. Its primary
   percentage is full fresh publication; data availability (including LKG) and
   accepted freshness are separate metrics. Provisional, LKG, failed and timed
-  out outcomes remain visible as counts. A percentage is shown only for an
-  `observed` window with eligible attempts and internally consistent counts.
-  This scope covers generic refresh sources; dedicated pipelines are explicitly
-  excluded for now, and best-effort telemetry cannot detect every write gap.
-  Missing, malformed, `collecting`, or legacy estimated telemetry renders as
-  “Накапливаем статистику” and never falls back to a synthetic 100%.
+  out outcomes remain visible as counts. Internally consistent `collecting`
+  windows are visible as an explicitly preliminary slice; only a complete
+  `observed` window is labelled as observed. The default view is the latest 24h
+  window. The current scope covers observed scraper and dedicated-pipeline
+  attempts, but missing scheduled pipeline windows remain undetectable until the
+  schedule ledger is complete. Missing, malformed, inconsistent, or legacy
+  estimated telemetry renders as “Накапливаем статистику” and never falls back
+  to a synthetic 100%.
 - Statistics tabs load on demand and preserve `stats`, `stats_q`,
   `stats_format`, `stats_rank`, and `stats_period` in the URL.
 - Card rows link to `stats=card` using the English card name. The card module

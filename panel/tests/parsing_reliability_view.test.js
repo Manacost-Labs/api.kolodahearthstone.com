@@ -10,6 +10,7 @@ const observedWindow = {
     window: '7d',
     measurement_status: 'observed',
     rates_observed: true,
+    rates_available: true,
     coverage_ratio: 1,
     eligible_attempts: 100,
     total_attempts: 105,
@@ -43,7 +44,7 @@ test('uses the observed weekly window for honest headline rates', () => {
     assert.equal(model.counts.timedOut, 1);
 });
 
-test('never renders a collecting 100 percent as an observed rate', () => {
+test('renders consistent collecting rates as an explicitly preliminary slice', () => {
     const model = buildReliabilityViewModel({
         state: 'available',
         default_window: '24h',
@@ -52,6 +53,7 @@ test('never renders a collecting 100 percent as an observed rate', () => {
             window: '24h',
             measurement_status: 'collecting',
             rates_observed: false,
+            rates_available: true,
             coverage_ratio: 0.25,
             full_fresh_rate_pct: 100,
             accepted_fresh_rate_pct: 100,
@@ -59,11 +61,54 @@ test('never renders a collecting 100 percent as an observed rate', () => {
         }],
     });
 
+    assert.equal(model.badge, 'Предварительный срез');
+    assert.equal(model.preliminary, true);
+    assert.equal(model.fullFresh, '100%');
+    assert.equal(model.availability, '100%');
+    assert.equal(model.acceptedFresh, '100%');
+    assert.equal(model.coverage, '25%');
+});
+
+test('uses the API daily default instead of forcing the incomplete weekly window', () => {
+    const dailyWindow = {
+        ...observedWindow,
+        window: '24h',
+        measurement_status: 'collecting',
+        rates_observed: false,
+        rates_available: true,
+        full_fresh_rate_pct: 96.77,
+        data_available_rate_pct: 99.8,
+    };
+    const model = buildReliabilityViewModel({
+        state: 'available',
+        default_window: '24h',
+        windows: [observedWindow, dailyWindow],
+    });
+
+    assert.equal(model.selectedWindow, '24h');
+    assert.equal(model.fullFresh, '96,77%');
+    assert.equal(model.availability, '99,8%');
+    assert.equal(model.counts.lkg, 5);
+});
+
+test('suppresses inconsistent or otherwise unavailable preliminary rates', () => {
+    const model = buildReliabilityViewModel({
+        state: 'available',
+        default_window: '24h',
+        windows: [{
+            ...observedWindow,
+            window: '24h',
+            measurement_status: 'collecting',
+            rates_observed: false,
+            rates_available: false,
+            full_fresh_rate_pct: 100,
+            data_available_rate_pct: 100,
+        }],
+    });
+
     assert.equal(model.badge, 'Накапливаем статистику');
     assert.equal(model.fullFresh, '—');
     assert.equal(model.availability, '—');
-    assert.equal(model.acceptedFresh, '—');
-    assert.equal(model.coverage, '25%');
 });
 
 test('shows a collecting state when the endpoint has no usable windows', () => {
