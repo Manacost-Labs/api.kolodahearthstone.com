@@ -40,6 +40,24 @@ ARENA_PERCENT_FIELDS = (
 
 FIRESTONE_STANDARD_MAX_UPSTREAM_AGE_HOURS = 36.0
 FIRESTONE_STANDARD_MAX_FUTURE_SKEW_HOURS = 6.0
+VICIOUS_RADAR_CLASSES = frozenset(
+    {
+        "DeathKnight",
+        "DemonHunter",
+        "Druid",
+        "Hunter",
+        "Mage",
+        "Paladin",
+        "Priest",
+        "Rogue",
+        "Shaman",
+        "Warlock",
+        "Warrior",
+    }
+)
+VICIOUS_RADAR_HOSTS = frozenset(
+    {"vicioussyndicate.com", "www.vicioussyndicate.com"}
+)
 
 
 def _parse_arena_percent(value: Any) -> float | None:
@@ -308,10 +326,79 @@ def _validate_vicious_live(_source_id: str, structured: dict[str, Any]) -> Valid
 
 def _validate_vicious_radars(_source_id: str, structured: dict[str, Any]) -> ValidationReport:
     report = ValidationReport()
+    radars = [
+        row
+        for row in (structured.get("radars") or [])
+        if isinstance(row, dict)
+    ]
+    diagnostics = structured.get("diagnostics")
+    diagnostics = diagnostics if isinstance(diagnostics, dict) else {}
+
+    def diagnostic_count(field: str) -> int | None:
+        value = diagnostics.get(field)
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            return value
+        return None
+
     issue_raw = str(structured.get("issue") or "")
     latest_issue_raw = str(structured.get("latest_report_issue") or "")
     issue = int(issue_raw) if issue_raw.isdigit() else None
     latest_issue = int(latest_issue_raw) if latest_issue_raw.isdigit() else None
+    discovered_items = diagnostic_count("discovered_items")
+    resolved_items = diagnostic_count("resolved_items")
+    active_radar_urls = diagnostic_count("active_radar_urls")
+    parsed_radars = diagnostic_count("parsed_radars")
+    classes_attempted = diagnostic_count("classes_attempted")
+    total_radars_raw = structured.get("total_radars")
+    total_radars = (
+        total_radars_raw
+        if isinstance(total_radars_raw, int)
+        and not isinstance(total_radars_raw, bool)
+        and total_radars_raw >= 0
+        else None
+    )
+    parsed_classes = {
+        str(row.get("class") or "").strip()
+        for row in radars
+        if str(row.get("class") or "").strip()
+    }
+    radar_identities = [
+        (
+            str(row.get("class") or "").strip(),
+            (
+                " ".join(str(row.get("archetype")).split()).casefold()
+                if row.get("archetype") is not None
+                and str(row.get("archetype")).strip()
+                else None
+            ),
+        )
+        for row in radars
+    ]
+    radar_urls = [
+        str(row.get("radar_url") or "").strip()
+        for row in radars
+        if str(row.get("radar_url") or "").strip()
+    ]
+    valid_radar_urls = 0
+    for radar_url in radar_urls:
+        try:
+            parsed_radar_url = urlparse(radar_url)
+            official_https_url = (
+                parsed_radar_url.scheme.lower() == "https"
+                and (parsed_radar_url.hostname or "").lower()
+                in VICIOUS_RADAR_HOSTS
+            )
+        except ValueError:
+            official_https_url = False
+        if official_https_url:
+            valid_radar_urls += 1
+    invalid_radar_urls = len(radars) - valid_radar_urls
+    duplicate_identities = len(radar_identities) - len(set(radar_identities))
+    duplicate_radar_urls = len(radar_urls) - len(set(radar_urls))
+    radar_issue_counts: dict[str, int] = {}
+    for radar in radars:
+        radar_issue = str(radar.get("issue") or "Unknown").strip() or "Unknown"
+        radar_issue_counts[radar_issue] = radar_issue_counts.get(radar_issue, 0) + 1
     published_raw = str(structured.get("latest_report_published_at") or "")
     content_age_days: int | None = None
     try:
@@ -327,6 +414,20 @@ def _validate_vicious_radars(_source_id: str, structured: dict[str, Any]) -> Val
             "latest_report_issue": latest_issue,
             "latest_report_published_at": published_raw or None,
             "content_age_days": content_age_days,
+            "discovered_items": discovered_items,
+            "resolved_items": resolved_items,
+            "active_radar_urls": active_radar_urls,
+            "parsed_radars": parsed_radars,
+            "radar_rows": len(radars),
+            "total_radars": total_radars,
+            "classes_attempted": classes_attempted,
+            "classes_parsed": len(parsed_classes),
+            "parsed_classes": sorted(parsed_classes),
+            "duplicate_identities": duplicate_identities,
+            "duplicate_radar_urls": duplicate_radar_urls,
+            "valid_radar_urls": valid_radar_urls,
+            "invalid_radar_urls": invalid_radar_urls,
+            "radar_issue_counts": dict(sorted(radar_issue_counts.items())),
         }
     )
 
@@ -341,7 +442,130 @@ def _validate_vicious_radars(_source_id: str, structured: dict[str, Any]) -> Val
             "vicious_radars.outdated_issue",
             f"vicious radar issue is outdated ({issue} < {latest_issue})",
             field="issue",
-            severity="warning",
+        )
+    elif issue > latest_issue:
+        report.add_issue(
+            "vicious_radars.issue_ahead_of_report",
+            f"vicious radar issue is ahead of latest report ({issue} > {latest_issue})",
+            field="issue",
+        )
+
+    required_diagnostics = {
+        "classes_attempted": classes_attempted,
+        "discovered_items": discovered_items,
+        "resolved_items": resolved_items,
+        "active_radar_urls": active_radar_urls,
+        "parsed_radars": parsed_radars,
+    }
+    missing_diagnostics = [
+        field for field, value in required_diagnostics.items() if value is None
+    ]
+    if missing_diagnostics:
+        report.add_issue(
+            "vicious_radars.missing_completeness_diagnostics",
+            "vicious radars missing completeness diagnostics: "
+            + ", ".join(sorted(missing_diagnostics)),
+            field="diagnostics",
+        )
+    if classes_attempted is not None and classes_attempted != len(
+        VICIOUS_RADAR_CLASSES
+    ):
+        report.add_issue(
+            "vicious_radars.invalid_classes_attempted",
+            "vicious radars must attempt the canonical class set "
+            f"({classes_attempted}/{len(VICIOUS_RADAR_CLASSES)})",
+            field="diagnostics.classes_attempted",
+        )
+    if total_radars is None:
+        report.add_issue(
+            "vicious_radars.invalid_total_radars",
+            "vicious radars total_radars must be a non-negative integer",
+            field="total_radars",
+        )
+    elif total_radars != len(radars):
+        report.add_issue(
+            "vicious_radars.total_mismatch",
+            "vicious radars total does not match row count "
+            f"({total_radars}/{len(radars)})",
+            field="total_radars",
+        )
+    if (
+        discovered_items is not None
+        and resolved_items is not None
+        and resolved_items != discovered_items
+    ):
+        report.add_issue(
+            "vicious_radars.incomplete_discovery",
+            "vicious radar discovery did not resolve every item "
+            f"({resolved_items}/{discovered_items})",
+            field="diagnostics.resolved_items",
+        )
+    if (
+        resolved_items is not None
+        and active_radar_urls is not None
+        and active_radar_urls != resolved_items
+    ):
+        report.add_issue(
+            "vicious_radars.incomplete_active_discovery",
+            "vicious radar discovery did not yield an active URL for every "
+            f"resolved item ({active_radar_urls}/{resolved_items})",
+            field="diagnostics.active_radar_urls",
+        )
+    if (
+        active_radar_urls is not None
+        and parsed_radars is not None
+        and (
+            parsed_radars != active_radar_urls
+            or parsed_radars != len(radars)
+        )
+    ):
+        report.add_issue(
+            "vicious_radars.incomplete_active_coverage",
+            "vicious radars did not parse every active URL "
+            f"(active={active_radar_urls}, parsed={parsed_radars}, rows={len(radars)})",
+            field="diagnostics.parsed_radars",
+        )
+    if parsed_classes != VICIOUS_RADAR_CLASSES:
+        report.add_issue(
+            "vicious_radars.incomplete_class_coverage",
+            "vicious radars did not cover the exact canonical class set "
+            f"({len(parsed_classes)}/{len(VICIOUS_RADAR_CLASSES)})",
+            field="radars.class",
+        )
+    if duplicate_identities:
+        report.add_issue(
+            "vicious_radars.duplicate_identity",
+            "vicious radars contain duplicate class/archetype identities "
+            f"({duplicate_identities})",
+            field="radars.class,radars.archetype",
+        )
+    if duplicate_radar_urls:
+        report.add_issue(
+            "vicious_radars.duplicate_radar_url",
+            f"vicious radars contain duplicate radar URLs ({duplicate_radar_urls})",
+            field="radars.radar_url",
+        )
+    if invalid_radar_urls:
+        report.add_issue(
+            "vicious_radars.invalid_radar_url",
+            "every vicious radar row must contain an HTTPS URL on the official "
+            "Vicious Syndicate host "
+            f"({valid_radar_urls}/{len(radars)})",
+            field="radars.radar_url",
+        )
+    if latest_issue is not None and (
+        not radars
+        or any(
+            not str(radar.get("issue") or "").isdigit()
+            or int(str(radar.get("issue"))) != latest_issue
+            for radar in radars
+        )
+    ):
+        report.add_issue(
+            "vicious_radars.row_issue_mismatch",
+            "every vicious radar row must match the latest report issue "
+            f"({latest_issue})",
+            field="radars.issue",
         )
     if content_age_days is None:
         report.add_issue(
@@ -358,7 +582,9 @@ def _validate_vicious_radars(_source_id: str, structured: dict[str, Any]) -> Val
         )
     issue_score = 1.0 if issue is not None and issue == latest_issue else 0.0
     age_score = 1.0 if content_age_days is not None and content_age_days <= 21 else 0.0
-    report.score = (issue_score + age_score) / 2
+    completeness_score = 1.0 if report.ok else 0.0
+    report.metrics["completeness_score"] = completeness_score
+    report.score = round((issue_score + age_score + completeness_score) / 3, 4)
     return report
 
 

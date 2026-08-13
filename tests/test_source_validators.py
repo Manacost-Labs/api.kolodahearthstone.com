@@ -4,6 +4,7 @@ import unittest
 from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
+from app.publish_gate import validate_candidate_for_publish
 from app.scrapers.quality import validate_parsed_data
 from app.source_validators import validate_structured
 from app.sources import SOURCE_BY_ID
@@ -11,6 +12,20 @@ from app.sources import SOURCE_BY_ID
 VALID_STREAMER_DECK_CODE = (
     "AAEBAf0GBs30Av76A4f7A564BtvXB63ZBwycENfOA4j0A8b5A8f5A63pBdCeBu6h"
     "Bom1BoSZB+C+B43cBwAA"
+)
+
+VICIOUS_CLASSES = (
+    "DeathKnight",
+    "DemonHunter",
+    "Druid",
+    "Hunter",
+    "Mage",
+    "Paladin",
+    "Priest",
+    "Rogue",
+    "Shaman",
+    "Warlock",
+    "Warrior",
 )
 
 
@@ -26,6 +41,53 @@ def _hero_row(idx: int, *, name: str | None = None, avg: str | None = None) -> d
         "avg_placement": avg or f"{3.5 + idx / 100:.2f}",
         "tier": ["S", "A", "B", "C"][idx % 4],
         "placement_distribution": distribution,
+    }
+
+
+def _vicious_radars_payload(
+    *,
+    issue: str,
+    latest_issue: str,
+    radar_issues: list[str] | None = None,
+    discovered_items: int | None = None,
+    resolved_items: int | None = None,
+    active_radar_urls: int | None = None,
+    classes_attempted: int = len(VICIOUS_CLASSES),
+) -> dict:
+    row_issues = radar_issues or [issue] * len(VICIOUS_CLASSES)
+    radars = [
+        {
+            "class": VICIOUS_CLASSES[index % len(VICIOUS_CLASSES)],
+            "archetype": (
+                None if index < len(VICIOUS_CLASSES) else f"Archetype {index}"
+            ),
+            "issue": row_issue,
+            "radar_url": f"https://www.vicioussyndicate.com/radars/{index}/",
+            "nodes": [{"name": f"Card {index}"}],
+            "edges": [{"source": "Card A", "target": "Card B"}],
+        }
+        for index, row_issue in enumerate(row_issues)
+    ]
+    parsed_radars = len(radars)
+    active = parsed_radars if active_radar_urls is None else active_radar_urls
+    discovered = active if discovered_items is None else discovered_items
+    resolved = discovered if resolved_items is None else resolved_items
+    return {
+        "type": "vicious_syndicate_radars",
+        "issue": issue,
+        "latest_report_issue": latest_issue,
+        "latest_report_published_at": (
+            datetime.now(UTC) - timedelta(days=2)
+        ).date().isoformat(),
+        "radars": radars,
+        "total_radars": parsed_radars,
+        "diagnostics": {
+            "classes_attempted": classes_attempted,
+            "discovered_items": discovered,
+            "resolved_items": resolved,
+            "active_radar_urls": active,
+            "parsed_radars": parsed_radars,
+        },
     }
 
 
@@ -166,27 +228,279 @@ class SourceValidatorsTest(unittest.TestCase):
         self.assertIn("vicious_live.too_few_classes", codes)
         self.assertIn("vicious_live.too_few_tier_decks", codes)
 
-    def test_vicious_radars_publish_latest_available_issue_with_warning(self) -> None:
-        structured = {
-            "type": "vicious_syndicate_radars",
-            "issue": "349",
-            "latest_report_issue": "352",
-            "latest_report_published_at": (datetime.now(UTC) - timedelta(days=10)).date().isoformat(),
-        }
+    def test_vicious_radars_reject_outdated_issue(self) -> None:
+        structured = _vicious_radars_payload(issue="349", latest_issue="352")
 
         report = validate_structured("vicious_syndicate_radars", structured)
 
-        self.assertTrue(report.ok)
+        self.assertFalse(report.ok)
         issue = next(issue for issue in report.issues if issue.code == "vicious_radars.outdated_issue")
-        self.assertEqual(issue.severity, "warning")
+        self.assertEqual(issue.severity, "error")
+
+    def test_vicious_radars_outdated_candidate_fails_publish_validation(self) -> None:
+        source = SOURCE_BY_ID["vicious_syndicate_radars"]
+        parsed = {
+            "title": source.description,
+            "structured": _vicious_radars_payload(
+                issue="354",
+                latest_issue="355",
+            ),
+        }
+
+        gate = validate_candidate_for_publish(
+            source,
+            parsed,
+            backend="vicious_syndicate_api",
+        )
+
+        self.assertFalse(gate.ok)
+        self.assertIn("source semantic validation failed", gate.reason)
+        self.assertIn("outdated (354 < 355)", gate.reason)
+
+    def test_vicious_radars_reject_active_radar_coverage_gap(self) -> None:
+        structured = _vicious_radars_payload(
+            issue="355",
+            latest_issue="355",
+            radar_issues=["355"] * 21,
+            discovered_items=22,
+            resolved_items=22,
+            active_radar_urls=22,
+        )
+
+        report = validate_structured("vicious_syndicate_radars", structured)
+
+        self.assertFalse(report.ok)
+        self.assertIn(
+            "vicious_radars.incomplete_active_coverage",
+            {issue.code for issue in report.issues},
+        )
+        self.assertEqual(report.metrics["active_radar_urls"], 22)
+        self.assertEqual(report.metrics["parsed_radars"], 21)
+
+    def test_vicious_radars_reject_mixed_row_issues(self) -> None:
+        structured = _vicious_radars_payload(
+            issue="355",
+            latest_issue="355",
+            radar_issues=["355"] * 10 + ["354"],
+        )
+
+        report = validate_structured("vicious_syndicate_radars", structured)
+
+        self.assertFalse(report.ok)
+        self.assertIn(
+            "vicious_radars.row_issue_mismatch",
+            {issue.code for issue in report.issues},
+        )
+        self.assertEqual(report.metrics["radar_issue_counts"], {"354": 1, "355": 10})
+
+    def test_vicious_radars_reject_discovery_resolution_gap(self) -> None:
+        structured = _vicious_radars_payload(
+            issue="355",
+            latest_issue="355",
+            discovered_items=12,
+            resolved_items=11,
+        )
+
+        report = validate_structured("vicious_syndicate_radars", structured)
+
+        self.assertFalse(report.ok)
+        self.assertIn(
+            "vicious_radars.incomplete_discovery",
+            {issue.code for issue in report.issues},
+        )
+        self.assertLess(report.score, 1.0)
+
+    def test_vicious_radars_reject_missing_completeness_diagnostic(self) -> None:
+        structured = _vicious_radars_payload(issue="355", latest_issue="355")
+        structured["diagnostics"].pop("parsed_radars")
+
+        report = validate_structured("vicious_syndicate_radars", structured)
+
+        self.assertFalse(report.ok)
+        self.assertIn(
+            "vicious_radars.missing_completeness_diagnostics",
+            {issue.code for issue in report.issues},
+        )
+        self.assertLess(report.score, 1.0)
+
+    def test_vicious_radars_reject_non_numeric_completeness_diagnostic(self) -> None:
+        structured = _vicious_radars_payload(issue="355", latest_issue="355")
+        structured["diagnostics"]["active_radar_urls"] = "11"
+
+        report = validate_structured("vicious_syndicate_radars", structured)
+
+        self.assertFalse(report.ok)
+        self.assertIn(
+            "vicious_radars.missing_completeness_diagnostics",
+            {issue.code for issue in report.issues},
+        )
+        self.assertLess(report.score, 1.0)
+
+    def test_vicious_radars_reject_issue_ahead_of_latest_report(self) -> None:
+        structured = _vicious_radars_payload(issue="356", latest_issue="355")
+
+        report = validate_structured("vicious_syndicate_radars", structured)
+
+        self.assertFalse(report.ok)
+        self.assertIn(
+            "vicious_radars.issue_ahead_of_report",
+            {issue.code for issue in report.issues},
+        )
+        self.assertLess(report.score, 1.0)
+
+    def test_vicious_radars_reject_total_radars_mismatch(self) -> None:
+        structured = _vicious_radars_payload(issue="355", latest_issue="355")
+        structured["total_radars"] = 10
+
+        report = validate_structured("vicious_syndicate_radars", structured)
+
+        self.assertFalse(report.ok)
+        self.assertIn(
+            "vicious_radars.total_mismatch",
+            {issue.code for issue in report.issues},
+        )
+        self.assertLess(report.score, 1.0)
+
+    def test_vicious_radars_reject_duplicate_stable_identity(self) -> None:
+        structured = _vicious_radars_payload(issue="355", latest_issue="355")
+        duplicate = {**structured["radars"][0]}
+        duplicate["radar_url"] = "https://www.vicioussyndicate.com/radars/duplicate/"
+        structured["radars"].append(duplicate)
+        structured["total_radars"] = 12
+        structured["diagnostics"].update(
+            discovered_items=12,
+            resolved_items=12,
+            active_radar_urls=12,
+            parsed_radars=12,
+        )
+
+        report = validate_structured("vicious_syndicate_radars", structured)
+
+        self.assertFalse(report.ok)
+        self.assertIn(
+            "vicious_radars.duplicate_identity",
+            {issue.code for issue in report.issues},
+        )
+        self.assertLess(report.score, 1.0)
+
+    def test_vicious_radars_reject_duplicate_radar_url_when_present(self) -> None:
+        structured = _vicious_radars_payload(issue="355", latest_issue="355")
+        duplicate_url = {**structured["radars"][0]}
+        duplicate_url.update(
+            {
+                "class": "Mage",
+                "archetype": "Unique Archetype",
+            }
+        )
+        structured["radars"].append(duplicate_url)
+        structured["total_radars"] = 12
+        structured["diagnostics"].update(
+            discovered_items=12,
+            resolved_items=12,
+            active_radar_urls=12,
+            parsed_radars=12,
+        )
+
+        report = validate_structured("vicious_syndicate_radars", structured)
+
+        self.assertFalse(report.ok)
+        self.assertIn(
+            "vicious_radars.duplicate_radar_url",
+            {issue.code for issue in report.issues},
+        )
+        self.assertLess(report.score, 1.0)
+
+    def test_vicious_radars_reject_missing_radar_url(self) -> None:
+        structured = _vicious_radars_payload(issue="355", latest_issue="355")
+        structured["radars"][0].pop("radar_url")
+
+        report = validate_structured("vicious_syndicate_radars", structured)
+
+        self.assertFalse(report.ok)
+        self.assertIn(
+            "vicious_radars.invalid_radar_url",
+            {issue.code for issue in report.issues},
+        )
+        self.assertLess(report.score, 1.0)
+
+    def test_vicious_radars_reject_non_official_radar_url(self) -> None:
+        structured = _vicious_radars_payload(issue="355", latest_issue="355")
+        structured["radars"][0]["radar_url"] = "https://example.com/radars/0/"
+
+        report = validate_structured("vicious_syndicate_radars", structured)
+
+        self.assertFalse(report.ok)
+        self.assertIn(
+            "vicious_radars.invalid_radar_url",
+            {issue.code for issue in report.issues},
+        )
+        self.assertLess(report.score, 1.0)
+
+    def test_vicious_radars_reject_non_https_official_radar_url(self) -> None:
+        structured = _vicious_radars_payload(issue="355", latest_issue="355")
+        structured["radars"][0]["radar_url"] = (
+            "http://www.vicioussyndicate.com/radars/0/"
+        )
+
+        report = validate_structured("vicious_syndicate_radars", structured)
+
+        self.assertFalse(report.ok)
+        self.assertIn(
+            "vicious_radars.invalid_radar_url",
+            {issue.code for issue in report.issues},
+        )
+        self.assertLess(report.score, 1.0)
+
+    def test_vicious_radars_reject_fake_class_with_same_class_count(self) -> None:
+        structured = _vicious_radars_payload(issue="355", latest_issue="355")
+        structured["radars"][-1]["class"] = "FakeClass"
+
+        report = validate_structured("vicious_syndicate_radars", structured)
+
+        self.assertFalse(report.ok)
+        self.assertIn(
+            "vicious_radars.incomplete_class_coverage",
+            {issue.code for issue in report.issues},
+        )
+        self.assertLess(report.score, 1.0)
+
+    def test_vicious_radars_require_exact_classes_attempted_count(self) -> None:
+        structured = _vicious_radars_payload(
+            issue="355",
+            latest_issue="355",
+            classes_attempted=12,
+        )
+
+        report = validate_structured("vicious_syndicate_radars", structured)
+
+        self.assertFalse(report.ok)
+        self.assertIn(
+            "vicious_radars.invalid_classes_attempted",
+            {issue.code for issue in report.issues},
+        )
+        self.assertLess(report.score, 1.0)
+
+    def test_vicious_radars_reject_missing_attempted_class(self) -> None:
+        structured = _vicious_radars_payload(
+            issue="355",
+            latest_issue="355",
+            radar_issues=["355"] * 10,
+            classes_attempted=11,
+        )
+
+        report = validate_structured("vicious_syndicate_radars", structured)
+
+        self.assertFalse(report.ok)
+        self.assertIn(
+            "vicious_radars.incomplete_class_coverage",
+            {issue.code for issue in report.issues},
+        )
 
     def test_vicious_radars_warn_on_old_content_even_when_issue_matches(self) -> None:
-        structured = {
-            "type": "vicious_syndicate_radars",
-            "issue": "352",
-            "latest_report_issue": "352",
-            "latest_report_published_at": (datetime.now(UTC) - timedelta(days=30)).date().isoformat(),
-        }
+        structured = _vicious_radars_payload(issue="352", latest_issue="352")
+        structured["latest_report_published_at"] = (
+            datetime.now(UTC) - timedelta(days=30)
+        ).date().isoformat()
 
         report = validate_structured("vicious_syndicate_radars", structured)
 
@@ -195,14 +509,11 @@ class SourceValidatorsTest(unittest.TestCase):
         self.assertEqual(issue.severity, "warning")
 
     def test_vicious_radars_still_reject_missing_issue_metadata(self) -> None:
+        structured = _vicious_radars_payload(issue="Unknown", latest_issue="352")
+
         report = validate_structured(
             "vicious_syndicate_radars",
-            {
-                "type": "vicious_syndicate_radars",
-                "issue": "Unknown",
-                "latest_report_issue": "352",
-                "latest_report_published_at": datetime.now(UTC).date().isoformat(),
-            },
+            structured,
         )
 
         self.assertFalse(report.ok)
@@ -212,17 +523,15 @@ class SourceValidatorsTest(unittest.TestCase):
         )
 
     def test_vicious_radars_accept_current_recent_report(self) -> None:
-        structured = {
-            "type": "vicious_syndicate_radars",
-            "issue": "353",
-            "latest_report_issue": "353",
-            "latest_report_published_at": (datetime.now(UTC) - timedelta(days=2)).date().isoformat(),
-        }
+        structured = _vicious_radars_payload(issue="353", latest_issue="353")
 
         report = validate_structured("vicious_syndicate_radars", structured)
 
         self.assertTrue(report.ok)
         self.assertEqual(report.score, 1.0)
+        self.assertEqual(report.metrics["active_radar_urls"], 11)
+        self.assertEqual(report.metrics["parsed_radars"], 11)
+        self.assertEqual(report.metrics["classes_parsed"], 11)
 
     def test_arena_class_matrix_requires_all_playable_classes(self) -> None:
         report = validate_structured(
