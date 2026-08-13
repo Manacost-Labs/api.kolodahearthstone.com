@@ -49,11 +49,15 @@ between pages. The cursor is opaque and must be returned without editing it.
 ```graphql
 query NextCardsPage($after: String) {
   cards(limit: 50, after: $after) {
-    items { cardId nameRu imageUrl }
+    items { cardId nameRu imageUrl horizontalImageUrl }
     pageInfo { hasNextPage nextCursor }
   }
 }
 ```
+
+`horizontalImageUrl` is a deterministic `320×64` WebP crop intended for compact
+rows and horizontal card containers. It is separate from the original artwork and
+can be `null` when an object has no suitable source art.
 
 Unified search:
 

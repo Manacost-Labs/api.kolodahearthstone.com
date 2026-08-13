@@ -68,6 +68,7 @@ class Card:
     attack: int | None
     health: int | None
     image_url: str | None
+    horizontal_image_url: str | None
     is_active: bool | None
     updated_at: datetime | None
 
@@ -93,6 +94,7 @@ class BattlegroundHero:
     hero_description: str | None
     hero_image_url: str | None
     hero_full_art_url: str | None
+    horizontal_image_url: str | None
     hero_power_dbf: int | None
     hero_power: JSON | None
     buddy_dbf: int | None
@@ -206,6 +208,7 @@ class BattlegroundMinion:
     popularity: float | None
     games_with_minion: int | None
     avg_placement_with: float | None
+    horizontal_image_url: str | None
     fetched_at: datetime | None
 
 
@@ -259,6 +262,7 @@ class SearchResult:
     source_id: str
     updated_at: datetime | None
     metadata: JSON
+    horizontal_image_url: str | None
 
 
 @strawberry.type
@@ -499,6 +503,7 @@ def _hero(row: dict[str, Any]) -> BattlegroundHero:
         hero_description=row.get("hero_description"),
         hero_image_url=row.get("hero_image_url"),
         hero_full_art_url=row.get("hero_full_art_url"),
+        horizontal_image_url=row.get("horizontal_image_url"),
         hero_power_dbf=row.get("hero_power_dbf"),
         hero_power=row.get("hero_power_json"),
         buddy_dbf=row.get("buddy_dbf"),
@@ -535,6 +540,7 @@ def _search_result(row: dict[str, Any]) -> SearchResult:
         source_id=str(row["source_id"]),
         updated_at=row.get("updated_at"),
         metadata=row.get("metadata") or {},
+        horizontal_image_url=row.get("horizontal_image_url"),
     )
 
 

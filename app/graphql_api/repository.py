@@ -315,11 +315,24 @@ class PostgresGraphQLRepository:
             where.append("status = %(status)s")
             params["status"] = status
         base = """(
-            SELECT card_id, dbf, hero_id, name_en, name_ru, health, armor, duos_armor,
-                   armor_text, race, hero_description, hero_image_url, hero_full_art_url,
-                   hero_power_dbf, hero_power_json, buddy_dbf, buddy_json,
-                   availability_json, status, fetched_at, updated_at
-            FROM catalog.battlegrounds_heroes
+            SELECT hero.card_id, hero.dbf, hero.hero_id, hero.name_en, hero.name_ru,
+                   hero.health, hero.armor, hero.duos_armor, hero.armor_text, hero.race,
+                   hero.hero_description, hero.hero_image_url, hero.hero_full_art_url,
+                   CASE
+                       WHEN art.local_image_url LIKE 'http%' THEN art.local_image_url
+                       WHEN art.local_image_url IS NOT NULL THEN
+                           'https://api.kolodahearthstone.com' || art.local_image_url
+                           || '?v=' || extract(epoch FROM art.generated_at)::bigint
+                       ELSE NULL
+                   END AS horizontal_image_url,
+                   hero.hero_power_dbf, hero.hero_power_json, hero.buddy_dbf,
+                   hero.buddy_json, hero.availability_json, hero.status,
+                   hero.fetched_at, hero.updated_at
+            FROM catalog.battlegrounds_heroes AS hero
+            LEFT JOIN catalog.horizontal_art_assets AS art
+              ON art.entity_type = 'hero'
+             AND art.entity_id = hero.card_id
+             AND art.status = 'ready'
         ) AS bg_heroes"""
         count_where = list(where)
         if after:

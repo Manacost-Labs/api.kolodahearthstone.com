@@ -32,7 +32,8 @@ public sealed record SearchResult(
     string? ImageUrl,
     string SourceId,
     DateTimeOffset? UpdatedAt,
-    JsonElement Metadata
+    JsonElement Metadata,
+    string? HorizontalImageUrl
 );
 
 public sealed record Card(
@@ -46,6 +47,7 @@ public sealed record Card(
     int? Attack,
     int? Health,
     string? ImageUrl,
+    string? HorizontalImageUrl,
     bool? IsActive,
     DateTimeOffset? UpdatedAt
 );

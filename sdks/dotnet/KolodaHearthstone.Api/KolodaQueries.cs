@@ -5,7 +5,7 @@ public static class KolodaQueries
     public const string Search = """
         query Search($query: String!, $kinds: [SearchEntityKind!], $after: String, $limit: Int!) {
           search(query: $query, kinds: $kinds, after: $after, limit: $limit) {
-            items { kind entityId name nameRu subtitle imageUrl sourceId updatedAt metadata }
+            items { kind entityId name nameRu subtitle imageUrl sourceId updatedAt metadata horizontalImageUrl }
             pageInfo { limit offset total hasNextPage nextCursor }
           }
         }
@@ -14,7 +14,7 @@ public static class KolodaQueries
     public const string Cards = """
         query Cards($search: String, $collection: String, $after: String, $limit: Int!) {
           cards(search: $search, collection: $collection, after: $after, limit: $limit) {
-            items { collection cardId dbf nameRu nameEn cardType manaCost attack health imageUrl isActive updatedAt }
+            items { collection cardId dbf nameRu nameEn cardType manaCost attack health imageUrl horizontalImageUrl isActive updatedAt }
             pageInfo { limit offset total hasNextPage nextCursor }
           }
         }

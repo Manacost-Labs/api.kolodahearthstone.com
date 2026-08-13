@@ -31,6 +31,7 @@ export interface SearchResult {
   sourceId: string;
   updatedAt: string | null;
   metadata: Record<string, unknown>;
+  horizontalImageUrl: string | null;
 }
 
 export interface Card {
@@ -44,6 +45,7 @@ export interface Card {
   attack: number | null;
   health: number | null;
   imageUrl: string | null;
+  horizontalImageUrl: string | null;
   isActive: boolean | null;
   updatedAt: string | null;
 }
@@ -134,14 +136,14 @@ export class KolodaGraphQLError extends Error {
 
 const SEARCH_QUERY = `query Search($query: String!, $kinds: [SearchEntityKind!], $after: String, $limit: Int!) {
   search(query: $query, kinds: $kinds, after: $after, limit: $limit) {
-    items { kind entityId name nameRu subtitle imageUrl sourceId updatedAt metadata }
+    items { kind entityId name nameRu subtitle imageUrl sourceId updatedAt metadata horizontalImageUrl }
     pageInfo { limit offset total hasNextPage nextCursor }
   }
 }`;
 
 const CARDS_QUERY = `query Cards($search: String, $collection: String, $after: String, $limit: Int!) {
   cards(search: $search, collection: $collection, after: $after, limit: $limit) {
-    items { collection cardId dbf nameRu nameEn cardType manaCost attack health imageUrl isActive updatedAt }
+    items { collection cardId dbf nameRu nameEn cardType manaCost attack health imageUrl horizontalImageUrl isActive updatedAt }
     pageInfo { limit offset total hasNextPage nextCursor }
   }
 }`;

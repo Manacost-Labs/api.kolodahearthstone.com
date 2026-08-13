@@ -113,5 +113,11 @@ assert_contains sql/008_unified_search_and_history.sql \
 assert_contains sql/008_unified_search_and_history.sql \
   'game_stat_rows_entity_history_idx' \
   'per-entity patch history must have a lookup index'
+assert_contains scripts/apply-migrations.sh \
+  '009_horizontal_art\.sql' \
+  'horizontal artwork must be exposed by the canonical GraphQL catalogue'
+assert_contains sql/009_horizontal_art.sql \
+  'horizontal_image_url' \
+  'the horizontal artwork migration must publish a dedicated URL'
 
 echo 'OK: migration cutover contract'

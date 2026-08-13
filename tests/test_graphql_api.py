@@ -74,6 +74,7 @@ class FakeRepository:
                     "attack": 2,
                     "health": 3,
                     "image_url": "https://images.example/card.png",
+                    "horizontal_image_url": "https://images.example/card-horizontal.webp",
                     "is_active": True,
                     "updated_at": NOW,
                 }
@@ -127,6 +128,7 @@ class FakeRepository:
                     "source_id": "constructed",
                     "updated_at": NOW,
                     "metadata": {"cardId": "EX1_001"},
+                    "horizontal_image_url": "https://images.example/card-horizontal.webp",
                     "search_rank": 0,
                     "search_name": "тестовая карта",
                 }
@@ -208,7 +210,7 @@ def test_graphql_v1_serves_health_and_paginated_cards(monkeypatch: Any) -> None:
         query Catalog {
           health { status databaseConnected sourceCount }
           cards(search: " Test ", limit: 1, offset: 1) {
-            items { cardId nameRu imageUrl }
+            items { cardId nameRu imageUrl horizontalImageUrl }
             pageInfo { limit offset total hasNextPage }
           }
         }
@@ -231,6 +233,7 @@ def test_graphql_v1_serves_health_and_paginated_cards(monkeypatch: Any) -> None:
                         "cardId": "EX1_001",
                         "nameRu": "Тестовая карта",
                         "imageUrl": "https://images.example/card.png",
+                        "horizontalImageUrl": "https://images.example/card-horizontal.webp",
                     }
                 ],
                 "pageInfo": {
@@ -382,7 +385,7 @@ def test_graphql_unified_search_filters_kinds_and_returns_common_shape(
         """
         query {
           search(query: " карта ", kinds: [CARD, HERO], limit: 10) {
-            items { kind entityId name nameRu subtitle imageUrl sourceId metadata }
+            items { kind entityId name nameRu subtitle imageUrl sourceId metadata horizontalImageUrl }
             pageInfo { total hasNextPage }
           }
         }
@@ -401,6 +404,7 @@ def test_graphql_unified_search_filters_kinds_and_returns_common_shape(
         "imageUrl": "https://images.example/card.png",
         "sourceId": "constructed",
         "metadata": {"cardId": "EX1_001"},
+        "horizontalImageUrl": "https://images.example/card-horizontal.webp",
     }
     assert fake.last_call == (
         "search",
