@@ -7,7 +7,11 @@ from unittest.mock import patch
 from starlette.testclient import TestClient
 
 from app.main import app
-from app.public_cache import PUBLIC_CACHE_CONTROL, cache_revision
+from app.public_cache import (
+    NO_STORE_CACHE_CONTROL,
+    PUBLIC_CACHE_CONTROL,
+    cache_revision,
+)
 from app.storage import save_dataset
 
 client = TestClient(app)
@@ -178,6 +182,48 @@ def test_hsguru_archetype_revision_tracks_deck_join() -> None:
         revision = cache_revision("/v1/hsguru/archetypes", b"format=wild")
 
     assert revision == "patch_36.2.0:joined-at"
+
+
+def test_hsguru_analysis_endpoint_never_returns_a_precomputed_304() -> None:
+    fetched_at = datetime.now(UTC).isoformat()
+    dataset = {
+        "source_id": "hsguru_archetype_analysis",
+        "fetched_at": fetched_at,
+        "data": {
+            "structured": {
+                "type": "hsguru_archetype_analysis",
+                "archetypes": [
+                    {
+                        "format": "standard",
+                        "archetype": "Void Soul DH",
+                        "updated_at": fetched_at,
+                    }
+                ],
+            }
+        },
+    }
+    status = {
+        "state": "ok",
+        "published": True,
+        "serving_cached_dataset": False,
+        "fetched_at": fetched_at,
+    }
+    url = (
+        "/v1/hsguru/archetypes/analysis?"
+        "archetype=Void%20Soul%20DH&format=standard"
+    )
+    with (
+        patch("app.routers.hsguru_meta.load_dataset", return_value=dataset),
+        patch("app.storage.load_status", return_value=status),
+    ):
+        first = client.get(url)
+        second = client.get(url, headers={"If-None-Match": '"stale"'})
+
+    assert first.status_code == second.status_code == 200
+    assert "etag" not in first.headers
+    assert first.headers["cache-control"] == NO_STORE_CACHE_CONTROL
+    assert second.headers["cache-control"] == NO_STORE_CACHE_CONTROL
+    assert second.json()["meta"]["fresh_candidate_published"] is True
 
 
 def test_live_hsguru_deck_endpoint_never_returns_disk_based_304() -> None:

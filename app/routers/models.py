@@ -5,7 +5,6 @@ from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
 T = TypeVar("T")
 
 
@@ -13,6 +12,9 @@ class ApiMeta(BaseModel):
     source_id: str
     fetched_at: str | None = None
     stale: bool
+    serving_cached_dataset: bool | None = None
+    cached_after_failure: bool | None = None
+    fresh_candidate_published: bool | None = None
     count: int = Field(ge=0)
     limit: int | None = Field(default=None, ge=1)
     offset: int | None = Field(default=None, ge=0)

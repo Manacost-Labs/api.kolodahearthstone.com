@@ -1659,12 +1659,217 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
         self.assertIn("failure budget exhausted", result["provider_circuit_reason"])
         self.assertEqual(calls, 1)
 
-    def test_checkpoint_recovery_uses_saved_targets_when_live_matrix_drifts(self) -> None:
+    def test_checkpoint_recovery_rebases_changed_live_matrix(self) -> None:
         now = datetime(2026, 8, 12, 6, 0, tzinfo=UTC)
+        started_at = (now - timedelta(hours=3)).isoformat()
+        saved_at = (now - timedelta(minutes=10)).isoformat()
         saved_targets = [
-            {"format": "standard", "archetype": "Saved Mage"},
-            {"format": "wild", "archetype": "Saved Priest"},
+            {"format": "standard", "archetype": "Kept Mage"},
+            {"format": "wild", "archetype": "Removed Priest"},
         ]
+        current_targets = [
+            {"format": "wild", "archetype": "Added Rogue"},
+            {"format": "standard", "archetype": "Kept Mage"},
+        ]
+        checkpoint_rows = [
+            {
+                **target,
+                "rank": "legend",
+                "period": "past_week",
+                "state": "ok",
+                "source_urls": analysis_urls(
+                    target["archetype"],
+                    target["format"],
+                ),
+                "class_matchups": [{"class_key": "mage"}],
+                "card_stats": [{"card_id": "TEST"}],
+                "matchups_state": "complete",
+                "card_stats_state": "complete",
+                "matchups_checked_at": started_at,
+                "matchups_updated_at": started_at,
+                "card_stats_checked_at": started_at,
+                "card_stats_updated_at": started_at,
+                "updated_at": started_at,
+                "checked_at": started_at,
+                "components": {
+                    "matchups": {
+                        "state": "complete",
+                        "checked_at": started_at,
+                        "updated_at": started_at,
+                    },
+                    "card_stats": {
+                        "state": "complete",
+                        "checked_at": started_at,
+                        "updated_at": started_at,
+                    },
+                },
+            }
+            for target in saved_targets
+        ]
+        checkpoint = {
+            "state": "in_progress",
+            "schema_version": CHECKPOINT_SCHEMA_VERSION,
+            "rank": "legend",
+            "period": "past_week",
+            "started_at": started_at,
+            "saved_at": saved_at,
+            "target_signature": _target_signature(saved_targets),
+            "targets_total": len(saved_targets),
+            "targets": saved_targets,
+            "completed": saved_targets,
+            "rows": checkpoint_rows,
+            "negative_cache": [
+                {
+                    **saved_targets[1],
+                    "kind": "card_stats",
+                    "state": "source_no_data",
+                }
+            ],
+            "unavailable": [
+                {
+                    **saved_targets[1],
+                    "kind": "card_stats",
+                    "state": "source_no_data",
+                }
+            ],
+            "acquisitions": [
+                {**target, "kind": "matchups", "backend": "scrape_do_super"}
+                for target in saved_targets
+            ],
+        }
+        calls: list[str] = []
+        saved_checkpoints: list[dict[str, object]] = []
+
+        async def fetch_html(url: str):
+            calls.append(url)
+            html = MATCHUPS_HTML if "/archetype/" in url else CARD_STATS_HTML
+            return html, {"backend": "scrape_do_super", "request_credits": 25}
+
+        with (
+            patch(
+                "app.hsguru_archetype_analysis._active_archetypes",
+                side_effect=[current_targets, current_targets],
+            ),
+            patch(
+                "app.hsguru_archetype_analysis.load_baseline",
+                return_value=checkpoint,
+            ),
+            patch(
+                "app.hsguru_archetype_analysis._previous_analysis",
+                return_value={},
+            ),
+            patch(
+                "app.hsguru_archetype_analysis._previous_negative_cache",
+                return_value={},
+            ),
+            patch("app.hsguru_archetype_analysis._utc_now", return_value=now),
+            patch(
+                "app.hsguru_archetype_analysis.save_baseline",
+                side_effect=lambda _source, _label, payload: saved_checkpoints.append(
+                    payload
+                ),
+            ),
+            patch("app.hsguru_archetype_analysis.save_dataset") as save_dataset,
+            patch("app.hsguru_archetype_analysis.save_status"),
+        ):
+            result = asyncio.run(
+                refresh_hsguru_archetype_analysis(
+                    checkpoint_recovery=True,
+                    recovery_max_targets=1,
+                    concurrency=1,
+                    fetch_html=fetch_html,
+                )
+            )
+
+        self.assertTrue(result["published"])
+        self.assertEqual(result["targets"], 2)
+        self.assertEqual(result["targets_completed"], 2)
+        self.assertEqual(result["targets_remaining"], 0)
+        self.assertEqual(result["resumed_targets"], 1)
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(any("Added%20Rogue" in url for url in calls))
+        self.assertTrue(any("archetype=Added+Rogue" in url for url in calls))
+        self.assertTrue(saved_checkpoints)
+        rebased = saved_checkpoints[0]
+        expected_targets = list(reversed(current_targets))
+        self.assertEqual(rebased["started_at"], started_at)
+        self.assertEqual(rebased["refresh_window_id"], result["refresh_window_id"])
+        self.assertNotEqual(rebased["saved_at"], saved_at)
+        self.assertEqual(rebased["targets"], expected_targets)
+        self.assertEqual(rebased["targets_total"], 2)
+        self.assertEqual(
+            rebased["target_signature"],
+            _target_signature(expected_targets),
+        )
+        self.assertEqual(rebased["completed"], [expected_targets[0]])
+        self.assertEqual(
+            [row["archetype"] for row in rebased["rows"]],
+            ["Kept Mage"],
+        )
+        self.assertEqual(rebased["negative_cache"], [])
+        self.assertEqual(rebased["unavailable"], [])
+        acquisition_archetypes = [
+            entry["archetype"] for entry in rebased["acquisitions"]
+        ]
+        self.assertIn("Kept Mage", acquisition_archetypes)
+        self.assertNotIn("Removed Priest", acquisition_archetypes)
+        save_dataset.assert_called_once()
+
+    def test_checkpoint_recovery_does_not_rebase_to_an_invalid_matrix(self) -> None:
+        now = datetime(2026, 8, 12, 6, 0, tzinfo=UTC)
+        target = {"format": "standard", "archetype": "Saved Mage"}
+        checkpoint = {
+            "state": "in_progress",
+            "schema_version": CHECKPOINT_SCHEMA_VERSION,
+            "rank": "legend",
+            "period": "past_week",
+            "started_at": (now - timedelta(hours=1)).isoformat(),
+            "saved_at": (now - timedelta(minutes=10)).isoformat(),
+            "target_signature": _target_signature([target]),
+            "targets_total": 1,
+            "targets": [target],
+            "completed": [],
+        }
+
+        for label, active_targets in {
+            "empty": [],
+            "invalid": [{"format": "standard", "archetype": "  "}],
+        }.items():
+            with self.subTest(label=label):
+                fetch_html = AsyncMock(
+                    side_effect=AssertionError("upstream must not run")
+                )
+                with (
+                    patch(
+                        "app.hsguru_archetype_analysis._active_archetypes",
+                        return_value=active_targets,
+                    ),
+                    patch(
+                        "app.hsguru_archetype_analysis._load_refresh_checkpoint",
+                        return_value=checkpoint,
+                    ),
+                    patch(
+                        "app.hsguru_archetype_analysis._utc_now",
+                        return_value=now,
+                    ),
+                ):
+                    result = asyncio.run(
+                        refresh_hsguru_archetype_analysis(
+                            checkpoint_recovery=True,
+                            fetch_html=fetch_html,
+                        )
+                    )
+
+                self.assertTrue(result["skipped"])
+                self.assertEqual(result["reason"], "checkpoint_recovery_cooldown")
+                self.assertEqual(result["targets"], 1)
+                fetch_html.assert_not_awaited()
+
+    def test_rebased_recovery_rejects_a_second_live_matrix_change(self) -> None:
+        now = datetime(2026, 8, 12, 6, 0, tzinfo=UTC)
+        saved_target = {"format": "standard", "archetype": "Saved Mage"}
+        rebased_target = {"format": "standard", "archetype": "Rebased Mage"}
+        changed_again = {"format": "wild", "archetype": "Changed Again Priest"}
         checkpoint = {
             "state": "in_progress",
             "schema_version": CHECKPOINT_SCHEMA_VERSION,
@@ -1672,9 +1877,9 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
             "period": "past_week",
             "started_at": (now - timedelta(hours=3)).isoformat(),
             "saved_at": (now - timedelta(hours=1)).isoformat(),
-            "target_signature": _target_signature(saved_targets),
-            "targets_total": len(saved_targets),
-            "targets": saved_targets,
+            "target_signature": _target_signature([saved_target]),
+            "targets_total": 1,
+            "targets": [saved_target],
             "completed": [],
             "rows": [],
             "negative_cache": [],
@@ -1691,10 +1896,10 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
         with (
             patch(
                 "app.hsguru_archetype_analysis._active_archetypes",
-                side_effect=AssertionError("recovery must not read the live matrix"),
+                side_effect=[[rebased_target], [changed_again]],
             ),
             patch(
-                "app.hsguru_archetype_analysis.load_baseline",
+                "app.hsguru_archetype_analysis._load_refresh_checkpoint",
                 return_value=checkpoint,
             ),
             patch(
@@ -1707,24 +1912,24 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
             ),
             patch("app.hsguru_archetype_analysis._utc_now", return_value=now),
             patch("app.hsguru_archetype_analysis.save_baseline"),
-            patch("app.hsguru_archetype_analysis.save_dataset"),
+            patch("app.hsguru_archetype_analysis.save_dataset") as save_dataset,
             patch("app.hsguru_archetype_analysis.save_status"),
         ):
             result = asyncio.run(
                 refresh_hsguru_archetype_analysis(
                     checkpoint_recovery=True,
-                    recovery_max_targets=1,
                     concurrency=1,
                     fetch_html=fetch_html,
                 )
             )
 
-        self.assertTrue(result["recovery_batch_complete"])
-        self.assertEqual(result["targets"], 2)
-        self.assertEqual(result["targets_completed"], 1)
-        self.assertEqual(result["targets_remaining"], 1)
+        self.assertFalse(result["published"])
+        self.assertEqual(result["reason"], "target_matrix_changed")
+        self.assertEqual(result["failure_reason_code"], "dependency")
         self.assertEqual(len(calls), 2)
-        self.assertTrue(any("Saved%20Mage" in url for url in calls))
+        self.assertTrue(any("Rebased%20Mage" in url for url in calls))
+        self.assertTrue(any("archetype=Rebased+Mage" in url for url in calls))
+        save_dataset.assert_not_called()
 
     def test_fresh_run_persists_deterministic_checkpoint_targets(self) -> None:
         active_targets = [

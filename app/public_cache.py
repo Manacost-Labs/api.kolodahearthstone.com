@@ -11,6 +11,17 @@ from .sources import SOURCES
 from .storage import load_dataset
 
 PUBLIC_CACHE_CONTROL = "public, max-age=300, stale-while-revalidate=600"
+NO_STORE_CACHE_CONTROL = "no-store"
+
+
+def _no_store_path(path: str) -> bool:
+    return path.startswith(
+        (
+            "/v1/constructed/hsguru-deck",
+            "/v1/hsguru/archetypes/analysis",
+            "/v1/system/parsing-reliability",
+        )
+    )
 
 
 def _cacheable_path(path: str) -> bool:
@@ -18,6 +29,12 @@ def _cacheable_path(path: str) -> bool:
         # This endpoint can refresh an exact archetype in process without
         # changing the disk catalogs. A disk-derived strong ETag could return
         # a false 304 for a newer live result.
+        return False
+    if path.startswith("/v1/hsguru/archetypes/analysis"):
+        # The response combines a dataset row with the latest refresh status.
+        # Those files are published independently, so a precomputed strong
+        # ETag can race their reads and return a false 304 for changed freshness
+        # metadata. Keep this endpoint coherent by evaluating every request.
         return False
     if path.startswith("/v1/system/parsing-reliability"):
         # This report has moving time-window boundaries and generated_at even
@@ -148,7 +165,19 @@ class PublicCacheMiddleware:
             return
         path = str(scope.get("path") or "")
         if not _cacheable_path(path):
-            await self.app(scope, receive, send)
+            if not _no_store_path(path):
+                await self.app(scope, receive, send)
+                return
+
+            async def no_store_headers(message: dict[str, Any]) -> None:
+                if message.get("type") == "http.response.start":
+                    headers = MutableHeaders(scope=message)
+                    headers["Cache-Control"] = NO_STORE_CACHE_CONTROL
+                    if "etag" in headers:
+                        del headers["etag"]
+                await send(message)
+
+            await self.app(scope, receive, no_store_headers)
             return
 
         request = Request(scope, receive=receive)

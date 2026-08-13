@@ -8,9 +8,62 @@ from ..hsguru_meta_matrix import MIN_GAMES, PERIODS, SOURCE_ID
 from ..storage import load_dataset
 from .models import ApiMeta, timestamp_is_stale
 
-
 router = APIRouter(prefix="/v1/hsguru", tags=["v1-hsguru"])
 ANALYSIS_SOURCE_ID = "hsguru_archetype_analysis"
+
+
+def _dataset_api_meta(
+    *,
+    source_id: str,
+    fetched_at: str | None,
+    dataset_fetched_at: str | None,
+    count: int,
+    max_age_hours: float,
+    limit: int | None = None,
+    offset: int | None = None,
+) -> dict[str, Any]:
+    """Describe both the published dataset and the latest refresh attempt."""
+    from ..storage import load_status
+
+    try:
+        loaded_status = load_status(source_id)
+    except (OSError, TypeError, ValueError):
+        loaded_status = None
+    status = loaded_status if isinstance(loaded_status, dict) else {}
+    status_correlated = bool(
+        dataset_fetched_at
+        and status.get("fetched_at")
+        and str(status.get("fetched_at")) == str(dataset_fetched_at)
+    )
+    cached_after_failure = bool(
+        status.get("cached_after_failure") or status.get("serving_cached_dataset")
+    )
+    serving_cached_dataset = bool(
+        status.get("serving_cached_dataset") or cached_after_failure
+    )
+    fresh_candidate_published = (
+        status_correlated
+        and not cached_after_failure
+        and (
+            status.get("fresh_candidate_published") is True
+            or status.get("published") is True
+        )
+    )
+    return ApiMeta(
+        source_id=source_id,
+        fetched_at=fetched_at,
+        stale=(
+            timestamp_is_stale(fetched_at, max_age_hours=max_age_hours)
+            or cached_after_failure
+            or not status_correlated
+        ),
+        serving_cached_dataset=serving_cached_dataset,
+        cached_after_failure=cached_after_failure,
+        fresh_candidate_published=fresh_candidate_published,
+        count=count,
+        limit=limit,
+        offset=offset,
+    ).model_dump(exclude_none=True)
 
 
 @router.get("/meta")
@@ -227,12 +280,16 @@ def hsguru_archetype_analysis(
             detail="Archetype analysis is not available for the requested filters",
         )
     fetched_at = selected.get("updated_at") or dataset.get("fetched_at")
+    dataset_fetched_at = dataset.get("fetched_at")
     return {
         "data": selected,
-        "meta": ApiMeta(
+        "meta": _dataset_api_meta(
             source_id=ANALYSIS_SOURCE_ID,
             fetched_at=fetched_at,
-            stale=timestamp_is_stale(fetched_at, max_age_hours=36),
+            dataset_fetched_at=(
+                str(dataset_fetched_at) if dataset_fetched_at is not None else None
+            ),
             count=1,
-        ).model_dump(exclude_none=True),
+            max_age_hours=36,
+        ),
     }

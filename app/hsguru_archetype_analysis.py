@@ -377,6 +377,90 @@ def _target_signature(targets: list[dict[str, str]]) -> str:
     return hashlib.sha256("\n".join(normalized).encode("utf-8")).hexdigest()
 
 
+def _normalized_target_descriptors(
+    raw_targets: Any,
+) -> list[dict[str, str]] | None:
+    if not isinstance(raw_targets, list) or not raw_targets:
+        return None
+
+    targets_by_key: dict[tuple[str, str], dict[str, str]] = {}
+    for raw_target in raw_targets:
+        if not isinstance(raw_target, dict) or set(raw_target) != {
+            "format",
+            "archetype",
+        }:
+            return None
+        format_name = raw_target.get("format")
+        archetype = raw_target.get("archetype")
+        if (
+            not isinstance(format_name, str)
+            or format_name not in FORMAT_IDS
+            or not isinstance(archetype, str)
+            or not archetype
+            or archetype != archetype.strip()
+            or len(archetype) > 200
+            or any(ord(character) < 32 for character in archetype)
+        ):
+            return None
+        target = {"format": format_name, "archetype": archetype}
+        targets_by_key[_target_key(target)] = target
+
+    return sorted(
+        targets_by_key.values(),
+        key=lambda target: (target["format"], target["archetype"].casefold()),
+    )
+
+
+def _rebase_refresh_checkpoint(
+    checkpoint: dict[str, Any],
+    *,
+    targets: list[dict[str, str]],
+    now: datetime,
+) -> dict[str, Any]:
+    targets_by_key = {_target_key(target): target for target in targets}
+    completed_keys = {
+        _target_key(item)
+        for item in checkpoint.get("completed") or []
+        if isinstance(item, dict) and _target_key(item) in targets_by_key
+    }
+    rows_by_key = {
+        _target_key(item): dict(item)
+        for item in checkpoint.get("rows") or []
+        if isinstance(item, dict) and _target_key(item) in targets_by_key
+    }
+
+    def current_entries(field: str) -> list[dict[str, Any]]:
+        entries: list[dict[str, Any]] = []
+        for item in checkpoint.get(field) or []:
+            if not isinstance(item, dict):
+                continue
+            target = targets_by_key.get(_target_key(item))
+            if target is not None:
+                entries.append({**item, **target})
+        return entries
+
+    started_at = str(checkpoint.get("started_at") or "")
+    return {
+        **checkpoint,
+        "saved_at": now.isoformat(),
+        "refresh_window_id": _refresh_window_id(started_at),
+        "target_signature": _target_signature(targets),
+        "targets_total": len(targets),
+        "targets": targets,
+        "completed": [
+            dict(target) for target in targets if _target_key(target) in completed_keys
+        ],
+        "rows": [
+            {**rows_by_key[key], **targets_by_key[key]}
+            for key in (_target_key(target) for target in targets)
+            if key in rows_by_key
+        ],
+        "negative_cache": current_entries("negative_cache"),
+        "unavailable": current_entries("unavailable"),
+        "acquisitions": current_entries("acquisitions"),
+    }
+
+
 def _validated_checkpoint_targets(
     checkpoint: dict[str, Any],
 ) -> list[dict[str, str]] | None:
@@ -807,6 +891,7 @@ async def _refresh_hsguru_archetype_analysis_unlocked(
     started_at = started.isoformat()
     checkpoint_enabled = archetypes is None and limit is None
     checkpoint: dict[str, Any] | None = None
+    checkpoint_rebased = False
     if checkpoint_recovery:
         if checkpoint_enabled:
             checkpoint = _load_refresh_checkpoint(
@@ -829,10 +914,22 @@ async def _refresh_hsguru_archetype_analysis_unlocked(
                 "targets": 0,
                 "recovery": True,
             }
+        current_targets = _normalized_target_descriptors(_active_archetypes())
+        if current_targets is not None and _target_signature(
+            current_targets
+        ) != _target_signature(targets):
+            checkpoint = _rebase_refresh_checkpoint(
+                checkpoint,
+                targets=current_targets,
+                now=started,
+            )
+            targets = current_targets
+            checkpoint_rebased = True
         signature = _target_signature(targets)
         checkpoint_saved_at = _checkpoint_saved_at(checkpoint)
         if (
-            checkpoint_saved_at is not None
+            not checkpoint_rebased
+            and checkpoint_saved_at is not None
             and started - checkpoint_saved_at < CHECKPOINT_RECOVERY_COOLDOWN
         ):
             return {
@@ -850,9 +947,10 @@ async def _refresh_hsguru_archetype_analysis_unlocked(
                 "recovery": True,
             }
     else:
-        targets = list(archetypes if archetypes is not None else _active_archetypes())
-        targets = list({_target_key(target): target for target in targets}.values())
-        targets.sort(key=lambda row: (row["format"], row["archetype"].casefold()))
+        targets = _normalized_target_descriptors(
+            list(archetypes if archetypes is not None else _active_archetypes())
+        )
+        targets = targets or []
         if limit is not None:
             targets = targets[: max(0, limit)]
         if not targets:
@@ -879,7 +977,8 @@ async def _refresh_hsguru_archetype_analysis_unlocked(
         for row in (checkpoint or {}).get("rows") or []
         if isinstance(row, dict)
     }
-    target_keys = {_target_key(target) for target in targets}
+    targets_by_key = {_target_key(target): target for target in targets}
+    target_keys = set(targets_by_key)
     resumed_keys = {
         _target_key(row)
         for row in (checkpoint or {}).get("completed") or []
@@ -1259,12 +1358,12 @@ async def _refresh_hsguru_archetype_analysis_unlocked(
                 "period": ANALYSIS_PERIOD,
                 "started_at": started_at,
                 "saved_at": _now(),
+                "refresh_window_id": refresh_window_id,
                 "target_signature": signature,
                 "targets_total": len(targets),
                 "targets": target_descriptors,
                 "completed": [
-                    {"format": format_name, "archetype": archetype}
-                    for format_name, archetype in sorted(completed_keys)
+                    dict(targets_by_key[key]) for key in sorted(completed_keys)
                 ],
                 "rows": sorted(
                     refreshed_by_key.values(),
@@ -1570,13 +1669,11 @@ async def _refresh_hsguru_archetype_analysis_unlocked(
     try:
         with publication_guard:
             if checkpoint_enabled:
-                current_targets = list(
-                    {
-                        _target_key(target): target
-                        for target in _active_archetypes()
-                    }.values()
-                )
-                if _target_signature(current_targets) != signature:
+                current_targets = _normalized_target_descriptors(_active_archetypes())
+                if (
+                    current_targets is None
+                    or _target_signature(current_targets) != signature
+                ):
                     return reject_publication(
                         reason="target_matrix_changed",
                         failure_reason_code="dependency",
@@ -1610,6 +1707,7 @@ async def _refresh_hsguru_archetype_analysis_unlocked(
                 "rank": ANALYSIS_RANK,
                 "period": ANALYSIS_PERIOD,
                 "completed_at": _now(),
+                "refresh_window_id": refresh_window_id,
                 "target_signature": signature,
                 "targets_total": len(targets),
                 "targets": target_descriptors,
