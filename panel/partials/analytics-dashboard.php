@@ -156,6 +156,7 @@ $statisticsPeriod = trim((string)($_GET['stats_period'] ?? 'past_day'));
             <div class="analytics-summary" data-analytics-summary aria-label="Ключевые показатели"></div>
         </div>
         <p class="visually-hidden" data-analytics-status aria-live="polite">Загрузка статистики…</p>
+        <?php $tableNavigationTarget = '[data-analytics-table]'; $tableNavigationLabel = 'Таблица статистики'; require __DIR__ . '/table-navigation.php'; ?>
         <div data-analytics-table>
             <div class="analytics-table-skeleton analytics-skeleton" aria-hidden="true"></div>
         </div>

@@ -164,6 +164,7 @@ $tokenFormQuota = $issuedApiToken === null ? (string)($_POST['monthly_quota'] ??
                     <p>Создайте первый токен в форме выше.</p>
                 </div>
             <?php else: ?>
+                <?php $tableNavigationTarget = '.token-table-shell'; $tableNavigationLabel = 'Реестр токенов'; require __DIR__ . '/table-navigation.php'; ?>
                 <div class="token-table-shell" tabindex="0" aria-label="Таблица API-токенов, доступна горизонтальная прокрутка">
                     <table class="token-table">
                         <thead>

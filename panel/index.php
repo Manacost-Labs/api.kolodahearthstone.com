@@ -1672,8 +1672,8 @@ $workspaceSection = $showApiTokens
     <meta name="robots" content="noindex,nofollow">
     <title>HS Data · Управление базой Hearthstone</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232563eb'/%3E%3Ctext x='32' y='40' text-anchor='middle' font-family='system-ui,sans-serif' font-size='25' font-weight='800' fill='white'%3EHS%3C/text%3E%3C/svg%3E">
-    <link rel="stylesheet" href="/assets/style.css?v=30">
-    <script src="/assets/panel-ui.js?v=1" defer></script>
+    <link rel="stylesheet" href="/assets/style.css?v=31">
+    <script src="/assets/panel-ui.js?v=2" defer></script>
     <script src="/assets/parsing-reliability.js?v=1" defer></script>
     <script src="/assets/analytics.js?v=4" defer></script>
     <script src="/assets/parser-control-view.js?v=1" defer></script>
@@ -2250,20 +2250,7 @@ $workspaceSection = $showApiTokens
             </nav>
         <?php endif; ?>
 
-        <div class="table-navigation" data-table-navigation data-table-target=".cards-table" hidden>
-            <div class="table-navigation-copy">
-                <span>Широкая таблица</span>
-                <b data-table-scroll-status>Начало</b>
-            </div>
-            <div class="table-navigation-actions">
-                <button type="button" data-table-scroll-left aria-label="Прокрутить таблицу влево">
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
-                </button>
-                <button type="button" data-table-scroll-right aria-label="Прокрутить таблицу вправо">
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
-                </button>
-            </div>
-        </div>
+        <?php $tableNavigationTarget = '.cards-table'; $tableNavigationLabel = 'Широкая таблица'; require __DIR__ . '/partials/table-navigation.php'; ?>
 
         <div class="cards-table">
             <?php if ($showConstructed): ?>

@@ -14,8 +14,8 @@ $_GET['stats'] = 'overview';
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Статистика · UI fixture</title>
-    <link rel="stylesheet" href="/assets/style.css?v=30">
-    <script src="/assets/panel-ui.js?v=1" defer></script>
+    <link rel="stylesheet" href="/assets/style.css?v=31">
+    <script src="/assets/panel-ui.js?v=2" defer></script>
 </head>
 <body>
 <main class="shell">

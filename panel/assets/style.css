@@ -6631,6 +6631,15 @@ td {
     white-space: nowrap;
 }
 
+.token-list-panel .table-navigation {
+    margin: 16px -18px 0;
+    border-top: 1px solid var(--line-soft);
+}
+
+.token-list-panel .table-navigation + .token-table-shell {
+    margin-top: 0;
+}
+
 .table-column-picker > summary {
     min-height: 38px;
     display: inline-flex;
@@ -6909,6 +6918,11 @@ td {
         width: 100%;
         grid-column: 1 / -1;
         margin-top: 4px;
+    }
+
+    .token-list-panel .table-navigation {
+        margin-right: -14px;
+        margin-left: -14px;
     }
 }
 

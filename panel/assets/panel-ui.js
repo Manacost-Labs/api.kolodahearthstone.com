@@ -165,10 +165,19 @@
         const rightButton = navigation.querySelector('[data-table-scroll-right]');
         const status = navigation.querySelector('[data-table-scroll-status]');
         let scrollTarget = configuredTarget;
+        let observedScrollTarget = null;
+
+        const connectScrollTarget = (target) => {
+            if (!target || target === observedScrollTarget) return;
+            observedScrollTarget?.removeEventListener('scroll', updateTableNavigation);
+            observedScrollTarget = target;
+            observedScrollTarget.addEventListener('scroll', updateTableNavigation, {passive: true});
+        };
 
         const resolveTarget = () => {
             const nested = configuredTarget?.querySelector('.library-table, .constructed-table, .analytics-table-scroll, .parser-table-scroll, .token-table-shell');
             scrollTarget = nested && nested.scrollWidth > nested.clientWidth ? nested : configuredTarget;
+            connectScrollTarget(scrollTarget);
             return scrollTarget;
         };
         const updateTableNavigation = () => {
@@ -193,9 +202,11 @@
 
         leftButton?.addEventListener('click', () => move(-1));
         rightButton?.addEventListener('click', () => move(1));
-        configuredTarget?.addEventListener('scroll', updateTableNavigation, {passive: true});
-        configuredTarget?.querySelector('.library-table, .constructed-table')?.addEventListener('scroll', updateTableNavigation, {passive: true});
         window.addEventListener('resize', updateTableNavigation, {passive: true});
+        if (configuredTarget) {
+            const observer = new MutationObserver(updateTableNavigation);
+            observer.observe(configuredTarget, {childList: true, subtree: true});
+        }
         updateTableNavigation();
     });
 

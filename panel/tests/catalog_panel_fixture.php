@@ -13,8 +13,8 @@ $fixtureEmpty = isset($_GET['empty']);
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Каталог · UI fixture</title>
-    <link rel="stylesheet" href="/assets/style.css?v=30">
-    <script src="/assets/panel-ui.js?v=1" defer></script>
+    <link rel="stylesheet" href="/assets/style.css?v=31">
+    <script src="/assets/panel-ui.js?v=2" defer></script>
 </head>
 <body>
 <main class="shell">
@@ -49,7 +49,7 @@ $fixtureEmpty = isset($_GET['empty']);
             <section class="catalog-empty" role="status"><span class="catalog-empty-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m20 20-4.3-4.3m2.3-5.2a7.5 7.5 0 1 1-15 0 7.5 7.5 0 0 1 15 0Z"/></svg></span><div><h2>По этим условиям ничего не найдено</h2><p>Сбросьте часть фильтров или измените поисковый запрос.</p></div><button class="button secondary" type="button">Сбросить фильтры</button></section>
             <?php else: ?>
             <nav class="pagination"><span class="page-link disabled">Назад</span><span class="page-link active">1</span><a class="page-link" href="#">2</a><a class="page-link" href="#">3</a><a class="page-link" href="#">Вперёд</a><span class="page-summary">Страница 1 из 25</span></nav>
-            <div class="table-navigation" data-table-navigation data-table-target=".cards-table" hidden><div class="table-navigation-copy"><span>Широкая таблица</span><b data-table-scroll-status>Начало</b></div><div class="table-navigation-actions"><button type="button" data-table-scroll-left aria-label="Прокрутить таблицу влево">←</button><button type="button" data-table-scroll-right aria-label="Прокрутить таблицу вправо">→</button></div></div>
+            <?php $tableNavigationTarget = '.cards-table'; $tableNavigationLabel = 'Широкая таблица'; require __DIR__ . '/../partials/table-navigation.php'; ?>
             <div class="cards-table">
                 <table>
                     <thead><tr><th>Карта</th><th>Тип</th><th>Таверна</th><th>Характеристики</th><th>Механики</th><th>Пул</th><th>Обновлено</th><th>Действия</th></tr></thead>

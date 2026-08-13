@@ -75,6 +75,7 @@ declare(strict_types=1);
             <button type="button" class="active" data-section-id="all" aria-pressed="true">Все</button>
         </nav>
 
+        <?php $tableNavigationTarget = '.parser-table-scroll'; $tableNavigationLabel = 'Источники данных'; require __DIR__ . '/table-navigation.php'; ?>
         <div class="parser-table-scroll" tabindex="0" aria-label="Таблица источников парсеров">
             <table class="parser-source-table">
                 <thead><tr>

@@ -58,6 +58,9 @@ The import and API contracts are documented in `LIBRARY_FULL_ART.md`.
 - Large catalogue, analytics, parser, and token tables expose a shared column
   picker. The first identity column and final action column stay visible; each
   module stores only its hidden column indexes in local browser storage.
+- Every horizontally overflowing table exposes the same explicit left/right
+  navigation with start, percentage, and end feedback. It remains hidden when
+  all columns fit, so compact tables do not gain redundant controls.
 - The parser workspace prioritizes error/partial sources, keeps source and
   action columns sticky, and exposes schedules, published row counts and recent
   run progress without loading raw operational logs into the initial view.
