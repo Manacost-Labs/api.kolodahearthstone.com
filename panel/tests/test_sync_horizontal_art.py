@@ -4,6 +4,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import urllib.error
 from pathlib import Path
 from unittest import mock
 
@@ -91,6 +92,29 @@ class HorizontalArtTest(unittest.TestCase):
                 )
             self.assertEqual(result["action"], "generated")
             self.assertEqual(result["source_url"], "/uploads/art/fallback.jpg")
+
+    def test_permanently_missing_art_is_not_a_sync_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            candidate = horizontal.Candidate(
+                "battleground_card",
+                "MISSING_TEST_CARD",
+                None,
+                "https://images.example/missing.png",
+                "art",
+            )
+            missing = urllib.error.HTTPError(
+                candidate.source_url, 404, "Not Found", None, None
+            )
+            with (
+                mock.patch.object(horizontal, "APP_ROOT", root),
+                mock.patch.object(horizontal, "UPLOAD_ROOT", root / "uploads"),
+                mock.patch.object(horizontal, "download_source", side_effect=missing),
+            ):
+                result = horizontal.process_candidate(
+                    candidate, None, force=False, dry_run=False
+                )
+        self.assertEqual(result["action"], "unavailable")
 
     def test_process_local_candidate_is_idempotent(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

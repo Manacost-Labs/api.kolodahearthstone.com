@@ -636,10 +636,12 @@ def process_candidate(
     target.parent.mkdir(parents=True, exist_ok=True)
     target.parent.chmod(0o755)
     failures = []
-    for source_url, source_kind in (
+    not_found_count = 0
+    sources = (
         (candidate.source_url, candidate.source_kind),
         *candidate.fallback_sources,
-    ):
+    )
+    for source_url, source_kind in sources:
         local_source = local_source_path(source_url)
         try:
             if local_source is not None:
@@ -662,9 +664,11 @@ def process_candidate(
                 "image_sha256": sha256_file(target),
             }
         except Exception as exc:  # noqa: BLE001 -- try the next trusted art source
+            if isinstance(exc, urllib.error.HTTPError) and exc.code == 404:
+                not_found_count += 1
             failures.append(f"{source_url}: {exc}")
     return {
-        "action": "error",
+        "action": "unavailable" if not_found_count == len(sources) else "error",
         "candidate": candidate,
         "error": " | ".join(failures),
     }
@@ -707,9 +711,13 @@ def persist_result(
                     utc_now(),
                 ),
             )
-    elif action == "error":
+    elif action in {"error", "unavailable"}:
         error = str(result.get("error") or "Unknown horizontal art error")[:65535]
-        if existing and str(existing.get("status") or "") == "ready":
+        if (
+            action == "error"
+            and existing
+            and str(existing.get("status") or "") == "ready"
+        ):
             with conn.cursor() as cur:
                 cur.execute(
                     """
@@ -726,13 +734,13 @@ def persist_result(
                     INSERT INTO horizontal_art_assets (
                         entity_type, entity_id, source_url, source_kind, source_signature,
                         recipe_version, status, last_error
-                    ) VALUES (%s, %s, %s, %s, %s, %s, 'error', %s)
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE
                         source_url = VALUES(source_url),
                         source_kind = VALUES(source_kind),
                         source_signature = VALUES(source_signature),
                         recipe_version = VALUES(recipe_version),
-                        status = 'error',
+                        status = VALUES(status),
                         last_error = VALUES(last_error)
                     """,
                     (
@@ -742,6 +750,7 @@ def persist_result(
                         candidate.source_kind,
                         source_signature(candidate),
                         RECIPE_VERSION,
+                        action,
                         error,
                     ),
                 )
