@@ -70,6 +70,7 @@ def test_heroes_cursor_keeps_total_filter_independent_from_keyset() -> None:
         call = repository._fetch_page.await_args.kwargs
         assert "after_name" not in str(call["count_query"])
         assert "after_name" in str(call["rows_query"])
+        assert "LIKE 'http%%'" in str(call["rows_query"])
         assert call["params"]["limit"] == 3
         assert result.has_next_page is True
         assert result.next_cursor == {"values": ["Hero 1", "HERO_1"]}

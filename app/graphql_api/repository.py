@@ -319,7 +319,7 @@ class PostgresGraphQLRepository:
                    hero.health, hero.armor, hero.duos_armor, hero.armor_text, hero.race,
                    hero.hero_description, hero.hero_image_url, hero.hero_full_art_url,
                    CASE
-                       WHEN art.local_image_url LIKE 'http%' THEN art.local_image_url
+                       WHEN art.local_image_url LIKE 'http%%' THEN art.local_image_url
                        WHEN art.local_image_url IS NOT NULL THEN
                            'https://api.kolodahearthstone.com' || art.local_image_url
                            || '?v=' || extract(epoch FROM art.generated_at)::bigint
