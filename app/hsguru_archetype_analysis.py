@@ -557,6 +557,24 @@ def _component_was_refreshed_in_checkpoint(
     return str(entry.get(state_field) or "") in accepted_empty_states
 
 
+def _checkpoint_matchups_are_reusable(
+    entry: dict[str, Any],
+    *,
+    started_at: str,
+) -> bool:
+    matchups = entry.get("class_matchups")
+    return (
+        entry.get("matchups_state") == "complete"
+        and isinstance(matchups, list)
+        and bool(matchups)
+        and _component_was_refreshed_in_checkpoint(
+            entry,
+            kind="matchups",
+            started_at=started_at,
+        )
+    )
+
+
 def _negative_cache_entry(
     *,
     format_name: str,
@@ -752,7 +770,11 @@ async def _refresh_hsguru_archetype_analysis_unlocked(
     resumed_keys = {
         key
         for key in resumed_keys
-        if (
+        if _checkpoint_matchups_are_reusable(
+            checkpoint_rows[key],
+            started_at=started_at,
+        )
+        and (
             (gap := negative_cache.get((*key, "card_stats"))) is None
             or _retry_is_pending(gap, started)
         )
@@ -1056,6 +1078,8 @@ async def _refresh_hsguru_archetype_analysis_unlocked(
                 "updated_at": entry.get("card_stats_updated_at"),
             },
         }
+        if not _checkpoint_matchups_are_reusable(entry, started_at=started_at):
+            reusable = False
         return entry, reusable
 
     refreshed_by_key = {

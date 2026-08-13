@@ -12,6 +12,7 @@ from app.hsguru_archetype_analysis import (
     ANALYSIS_WAIT_MS,
     CHECKPOINT_SCHEMA_VERSION,
     _active_archetypes,
+    _checkpoint_matchups_are_reusable,
     _fetch_html,
     _load_refresh_checkpoint,
     _target_signature,
@@ -95,6 +96,36 @@ CARD_STATS_SPARSE_HTML = (
 
 
 class HSGuruArchetypeAnalysisTest(unittest.TestCase):
+    def test_checkpoint_matchups_require_complete_rows_from_current_window(
+        self,
+    ) -> None:
+        started_at = "2026-08-12T10:00:00+00:00"
+        valid = {
+            "class_matchups": [{"class_key": "mage"}],
+            "matchups_state": "complete",
+            "matchups_updated_at": started_at,
+        }
+
+        self.assertTrue(
+            _checkpoint_matchups_are_reusable(valid, started_at=started_at)
+        )
+        invalid_entries = {
+            "empty_rows": {**valid, "class_matchups": []},
+            "incomplete_state": {**valid, "matchups_state": "source_no_data"},
+            "stale_timestamp": {
+                **valid,
+                "matchups_updated_at": "2026-08-12T09:59:59+00:00",
+            },
+        }
+        for label, entry in invalid_entries.items():
+            with self.subTest(label=label):
+                self.assertFalse(
+                    _checkpoint_matchups_are_reusable(
+                        entry,
+                        started_at=started_at,
+                    )
+                )
+
     def test_checkpoint_loader_uses_the_requested_recovery_ttl(self) -> None:
         now = datetime(2026, 8, 12, 12, 0, tzinfo=UTC)
         targets = [{"format": "standard", "archetype": "Checkpoint Mage"}]
@@ -1029,6 +1060,7 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
             {"format": "standard", "archetype": f"Recovery {index}"}
             for index in range(6)
         ]
+        checkpoint_started_at = (now - timedelta(hours=3)).isoformat()
         completed = targets[:2]
         checkpoint_rows = [
             {
@@ -1036,6 +1068,8 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
                 "state": "ok",
                 "class_matchups": [{"class_key": "mage"}],
                 "card_stats": [{"card_id": "TEST"}],
+                "matchups_state": "complete",
+                "matchups_updated_at": checkpoint_started_at,
             }
             for target in completed
         ]
@@ -1044,7 +1078,7 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
             "schema_version": CHECKPOINT_SCHEMA_VERSION,
             "rank": "legend",
             "period": "past_week",
-            "started_at": (now - timedelta(hours=3)).isoformat(),
+            "started_at": checkpoint_started_at,
             "saved_at": (now - timedelta(hours=1)).isoformat(),
             "target_signature": _target_signature(targets),
             "targets_total": len(targets),
@@ -1110,6 +1144,141 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
         self.assertEqual(result["recovery_targets_deferred"], 2)
         self.assertEqual(len(calls), 4)
         save_dataset.assert_not_called()
+
+    def test_matchup_gap_is_not_completed_in_checkpoint(self) -> None:
+        target = {"format": "standard", "archetype": "Missing Matchup Mage"}
+        saved_checkpoints: list[dict[str, object]] = []
+
+        async def fetch_html(url: str):
+            html = (
+                "<html><body>No matchup rows</body></html>"
+                if "/archetype/" in url
+                else CARD_STATS_HTML
+            )
+            return html, {"backend": "scrape_do_super", "request_credits": 25}
+
+        with (
+            patch(
+                "app.hsguru_archetype_analysis._active_archetypes",
+                return_value=[target],
+            ),
+            patch(
+                "app.hsguru_archetype_analysis._load_refresh_checkpoint",
+                return_value=None,
+            ),
+            patch(
+                "app.hsguru_archetype_analysis._previous_analysis",
+                return_value={},
+            ),
+            patch(
+                "app.hsguru_archetype_analysis._previous_negative_cache",
+                return_value={},
+            ),
+            patch(
+                "app.hsguru_archetype_analysis.save_baseline",
+                side_effect=lambda _source, _label, payload: saved_checkpoints.append(
+                    payload
+                ),
+            ),
+            patch("app.hsguru_archetype_analysis.save_dataset") as save_dataset,
+            patch("app.hsguru_archetype_analysis.save_status"),
+        ):
+            result = asyncio.run(
+                refresh_hsguru_archetype_analysis(
+                    concurrency=1,
+                    fetch_html=fetch_html,
+                )
+            )
+
+        self.assertFalse(result["published"])
+        self.assertEqual(result["targets_completed"], 0)
+        self.assertEqual(result["targets_remaining"], 1)
+        self.assertEqual(saved_checkpoints[-1]["completed"], [])
+        save_dataset.assert_not_called()
+
+    def test_checkpoint_recovery_retries_completed_matchup_gap(self) -> None:
+        now = datetime(2026, 8, 12, 12, 0, tzinfo=UTC)
+        target = {"format": "standard", "archetype": "Recovered Matchup Mage"}
+        started_at = (now - timedelta(hours=2)).isoformat()
+        checkpoint = {
+            "state": "in_progress",
+            "schema_version": CHECKPOINT_SCHEMA_VERSION,
+            "rank": "legend",
+            "period": "past_week",
+            "started_at": started_at,
+            "saved_at": (now - timedelta(hours=1)).isoformat(),
+            "target_signature": _target_signature([target]),
+            "targets_total": 1,
+            "targets": [target],
+            "completed": [target],
+            "rows": [
+                {
+                    **target,
+                    "rank": "legend",
+                    "period": "past_week",
+                    "state": "partial",
+                    "class_matchups": [],
+                    "card_stats": [{"card_id": "TOY_330"}],
+                    "matchups_state": "source_no_data",
+                    "card_stats_state": "complete",
+                    "matchups_updated_at": started_at,
+                    "matchups_checked_at": started_at,
+                    "card_stats_updated_at": started_at,
+                    "card_stats_checked_at": started_at,
+                }
+            ],
+            "negative_cache": [],
+            "unavailable": [
+                {
+                    **target,
+                    "kind": "matchups",
+                    "state": "source_no_data",
+                    "reason": "HSGuru sample currently has no matchup rows",
+                }
+            ],
+        }
+        calls: list[str] = []
+
+        async def fetch_html(url: str):
+            calls.append(url)
+            html = MATCHUPS_HTML if "/archetype/" in url else CARD_STATS_HTML
+            return html, {"backend": "scrape_do_super", "request_credits": 25}
+
+        with (
+            patch(
+                "app.hsguru_archetype_analysis._load_refresh_checkpoint",
+                return_value=checkpoint,
+            ),
+            patch(
+                "app.hsguru_archetype_analysis._active_archetypes",
+                return_value=[target],
+            ),
+            patch(
+                "app.hsguru_archetype_analysis._previous_analysis",
+                return_value={},
+            ),
+            patch(
+                "app.hsguru_archetype_analysis._previous_negative_cache",
+                return_value={},
+            ),
+            patch("app.hsguru_archetype_analysis._utc_now", return_value=now),
+            patch("app.hsguru_archetype_analysis.save_baseline"),
+            patch("app.hsguru_archetype_analysis.save_dataset") as save_dataset,
+            patch("app.hsguru_archetype_analysis.save_status"),
+        ):
+            result = asyncio.run(
+                refresh_hsguru_archetype_analysis(
+                    concurrency=1,
+                    checkpoint_recovery=True,
+                    fetch_html=fetch_html,
+                )
+            )
+
+        self.assertTrue(result["published"])
+        self.assertEqual(result["resumed_targets"], 0)
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(any("/archetype/" in url for url in calls))
+        save_dataset.assert_called_once()
 
     def test_checkpoint_recovery_has_a_per_run_provider_failure_budget(self) -> None:
         now = datetime(2026, 8, 12, 6, 0, tzinfo=UTC)
