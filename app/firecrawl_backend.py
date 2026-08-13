@@ -919,6 +919,7 @@ def _scrape_sync(
     skip_providers: frozenset[str] | set[str] | None = None,
     brightdata_accept_html: Callable[[str], bool] | None = None,
     brightdata_render: bool = True,
+    brightdata_anonymous_fallback: bool = False,
     accept_result: ProviderResultValidator | None = None,
     attempt_observer: ProviderAttemptObserver | None = None,
     failure_observer: ProviderFailureObserver | None = None,
@@ -978,7 +979,11 @@ def _scrape_sync(
         for item in (formats or ["html", "markdown"])
     )
     brightdata_available = False
-    if "brightdata" not in skip and headers is None and brightdata_formats_allowed:
+    if (
+        "brightdata" not in skip
+        and (headers is None or brightdata_anonymous_fallback)
+        and brightdata_formats_allowed
+    ):
         try:
             brightdata_available = brightdata_configured_for_source(source.id)
         except Exception as exc:  # noqa: BLE001 - isolate provider configuration
@@ -1108,6 +1113,7 @@ async def scrape_source_with_options(
     skip_providers: frozenset[str] | set[str] | None = None,
     brightdata_accept_html: Callable[[str], bool] | None = None,
     brightdata_render: bool = True,
+    brightdata_anonymous_fallback: bool = False,
     accept_result: ProviderResultValidator | None = None,
     attempt_observer: ProviderAttemptObserver | None = None,
     failure_observer: ProviderFailureObserver | None = None,
@@ -1124,6 +1130,7 @@ async def scrape_source_with_options(
         skip_providers=skip_providers,
         brightdata_accept_html=brightdata_accept_html,
         brightdata_render=brightdata_render,
+        brightdata_anonymous_fallback=brightdata_anonymous_fallback,
         accept_result=accept_result,
         attempt_observer=attempt_observer,
         failure_observer=failure_observer,

@@ -127,6 +127,49 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
                 checkpoint,
             )
 
+    def test_checkpoint_loader_uses_saved_at_with_an_absolute_age_limit(
+        self,
+    ) -> None:
+        now = datetime(2026, 8, 12, 12, 0, tzinfo=UTC)
+        targets = [{"format": "standard", "archetype": "Long Recovery Mage"}]
+        checkpoint = {
+            "state": "in_progress",
+            "schema_version": CHECKPOINT_SCHEMA_VERSION,
+            "rank": "legend",
+            "period": "past_week",
+            "target_signature": _target_signature(targets),
+            "targets_total": 1,
+            "targets": targets,
+            "started_at": (now - timedelta(hours=13)).isoformat(),
+            "saved_at": (now - timedelta(hours=1)).isoformat(),
+        }
+        expired_checkpoint = {
+            **checkpoint,
+            "started_at": (now - timedelta(hours=25)).isoformat(),
+        }
+
+        with patch(
+            "app.hsguru_archetype_analysis.load_baseline",
+            side_effect=[checkpoint, expired_checkpoint],
+        ):
+            self.assertEqual(
+                _load_refresh_checkpoint(
+                    target_signature=_target_signature(targets),
+                    now=now,
+                    max_age=timedelta(hours=12),
+                    absolute_max_age=timedelta(hours=24),
+                ),
+                checkpoint,
+            )
+            self.assertIsNone(
+                _load_refresh_checkpoint(
+                    target_signature=_target_signature(targets),
+                    now=now,
+                    max_age=timedelta(hours=12),
+                    absolute_max_age=timedelta(hours=24),
+                )
+            )
+
     def test_checkpoint_loader_rejects_legacy_or_corrupt_target_lists(self) -> None:
         now = datetime(2026, 8, 12, 12, 0, tzinfo=UTC)
         targets = [{"format": "standard", "archetype": "Checkpoint Mage"}]
@@ -170,7 +213,7 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
                     _load_refresh_checkpoint(target_signature=None, now=now)
                 )
 
-    def test_fetch_html_uses_only_scrape_do_without_provider_fallbacks(self) -> None:
+    def test_fetch_html_falls_back_to_firecrawl_then_brightdata(self) -> None:
         from app import firecrawl_backend
 
         provider_calls: list[str] = []
@@ -182,16 +225,30 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
 
             return fail
 
-        async def unexpected_extra_scrape_do(*_args: object, **_kwargs: object):
-            provider_calls.append("scrape_do_repeat")
-            raise RuntimeError("unexpected repeated Scrape.do request")
-
-        async def no_sleep(*_args: object, **_kwargs: object) -> None:
-            return None
+        def brightdata_success(*_args: object, **_kwargs: object):
+            provider_calls.append("brightdata")
+            return SimpleNamespace(
+                html=MATCHUPS_HTML,
+                status_code=200,
+                final_url="https://www.hsguru.com/archetype/example",
+                billable_requests=1,
+                request_id="test-request",
+                rendered=False,
+                budget_remaining=99,
+            )
 
         with (
+            patch(
+                "app.hsguru_archetype_analysis._firecrawl_headers",
+                return_value={"Cookie": "session=test-only"},
+            ),
             patch.object(
                 firecrawl_backend, "scrape_do_token", return_value="configured"
+            ),
+            patch.object(
+                firecrawl_backend,
+                "brightdata_configured_for_source",
+                return_value=True,
             ),
             patch.object(firecrawl_backend, "scrapfly_configured", return_value=True),
             patch.object(
@@ -206,36 +263,22 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
             ),
             patch.object(
                 firecrawl_backend,
+                "brightdata_scrape_url_sync",
+                side_effect=brightdata_success,
+            ),
+            patch.object(
+                firecrawl_backend,
                 "_scrape_via_scrapfly",
                 side_effect=fail_provider("scrapfly"),
             ),
-            patch(
-                "app.hsguru_archetype_analysis.peek_firecrawl_key",
-                return_value=object(),
-                create=True,
-            ),
-            patch(
-                "app.hsguru_archetype_analysis.scrape_do_token",
-                return_value="configured",
-                create=True,
-            ),
-            patch(
-                "app.hsguru_archetype_analysis.scrape_url",
-                side_effect=unexpected_extra_scrape_do,
-                create=True,
-            ),
-            patch(
-                "app.hsguru_archetype_analysis.asyncio.sleep",
-                side_effect=no_sleep,
-            ),
-            self.assertRaisesRegex(RuntimeError, "All scrape providers failed"),
         ):
-            asyncio.run(_fetch_html("https://www.hsguru.com/archetype/example"))
+            html, metadata = asyncio.run(
+                _fetch_html("https://www.hsguru.com/archetype/example")
+            )
 
-        self.assertEqual(
-            provider_calls,
-            ["scrape_do"],
-        )
+        self.assertEqual(provider_calls, ["scrape_do", "firecrawl", "brightdata"])
+        self.assertEqual(html, MATCHUPS_HTML)
+        self.assertEqual(metadata["backend"], "brightdata_web_unlocker")
 
     def test_fetch_html_uses_ssr_wait_timeout_and_schema_validator(self) -> None:
         html = '<span class="tw-font-mono">Games: 0</span>' + CARD_STATS_HTML
@@ -255,10 +298,15 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
         options = scrape.await_args.kwargs
         self.assertEqual(options["wait_ms"], ANALYSIS_WAIT_MS)
         self.assertEqual(options["timeout_ms"], ANALYSIS_TIMEOUT_MS)
-        self.assertEqual(
-            options["skip_providers"], {"firecrawl", "brightdata", "scrapfly"}
-        )
+        self.assertEqual(options["max_age_ms"], 0)
+        self.assertEqual(options["skip_providers"], {"scrapfly"})
+        self.assertTrue(options["brightdata_anonymous_fallback"])
         self.assertTrue(options["accept_result"](result))
+        self.assertFalse(
+            options["accept_result"](
+                SimpleNamespace(html="<html><body>challenge</body></html>")
+            )
+        )
 
     def test_parses_class_matchups_and_excludes_total(self) -> None:
         rows = parse_class_matchups_html(MATCHUPS_HTML)

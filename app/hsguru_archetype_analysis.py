@@ -39,6 +39,7 @@ CHECKPOINT_INTERVAL_TARGETS = 5
 CHECKPOINT_TTL = timedelta(hours=2)
 CHECKPOINT_LABEL = "refresh_checkpoint_v1"
 CHECKPOINT_RECOVERY_TTL = timedelta(hours=12)
+CHECKPOINT_RECOVERY_ABSOLUTE_TTL = timedelta(hours=36)
 CHECKPOINT_RECOVERY_COOLDOWN = timedelta(minutes=30)
 CHECKPOINT_RECOVERY_MAX_TARGETS = 20
 CHECKPOINT_RECOVERY_PROVIDER_FAILURE_BUDGET = 4
@@ -424,6 +425,7 @@ def _load_refresh_checkpoint(
     target_signature: str | None,
     now: datetime,
     max_age: timedelta = CHECKPOINT_TTL,
+    absolute_max_age: timedelta | None = None,
 ) -> dict[str, Any] | None:
     checkpoint = load_baseline(SOURCE_ID, CHECKPOINT_LABEL) or {}
     if (
@@ -444,8 +446,17 @@ def _load_refresh_checkpoint(
         return None
     if started_at.tzinfo is None:
         started_at = started_at.replace(tzinfo=UTC)
-    age = now - started_at
-    if age < -timedelta(minutes=5) or age > max_age:
+    saved_at = _checkpoint_saved_at(checkpoint)
+    if saved_at is None:
+        return None
+    inactivity_age = now - saved_at
+    absolute_age = now - started_at
+    if (
+        inactivity_age < -timedelta(minutes=5)
+        or inactivity_age > max_age
+        or absolute_age < -timedelta(minutes=5)
+        or (absolute_max_age is not None and absolute_age > absolute_max_age)
+    ):
         return None
     return checkpoint
 
@@ -580,7 +591,10 @@ async def _fetch_html(url: str) -> tuple[str, dict[str, Any]]:
         max_age_ms=0,
         wait_ms=ANALYSIS_WAIT_MS,
         timeout_ms=ANALYSIS_TIMEOUT_MS,
-        skip_providers={"firecrawl", "brightdata", "scrapfly"},
+        skip_providers={"scrapfly"},
+        brightdata_accept_html=lambda html: _analysis_html_is_valid(url, html),
+        brightdata_render=False,
+        brightdata_anonymous_fallback=True,
         accept_result=lambda scraped: _analysis_html_is_valid(url, scraped.html),
     )
     return result.html, {
@@ -616,6 +630,7 @@ async def _refresh_hsguru_archetype_analysis_unlocked(
                 target_signature=None,
                 now=started,
                 max_age=CHECKPOINT_RECOVERY_TTL,
+                absolute_max_age=CHECKPOINT_RECOVERY_ABSOLUTE_TTL,
             )
         targets = (
             _validated_checkpoint_targets(checkpoint) if checkpoint is not None else None
