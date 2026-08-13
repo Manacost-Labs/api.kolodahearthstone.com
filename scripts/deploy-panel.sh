@@ -66,5 +66,11 @@ chown root:koloda "$CONFIG_PATH"
 ln -sfn "$RELEASE_ROOT" "$TARGET_ROOT/current.next"
 mv -Tf "$TARGET_ROOT/current.next" "$TARGET_ROOT/current"
 
+# PHP-FPM caches resolved symlink targets. Reload the legacy panel pool after
+# the atomic switch so newly added entrypoints are visible immediately.
+if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet php-fpm74; then
+  systemctl reload php-fpm74
+fi
+
 echo "panel_release=$RELEASE_ID"
 echo "panel_current=$RELEASE_ROOT"
