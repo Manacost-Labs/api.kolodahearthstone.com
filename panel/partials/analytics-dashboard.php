@@ -132,6 +132,7 @@ $statisticsPeriod = trim((string)($_GET['stats_period'] ?? 'past_day'));
         <div class="analytics-control-actions">
             <button class="button secondary" type="submit">Применить</button>
             <button class="button ghost" type="button" data-analytics-refresh>Обновить</button>
+            <button class="table-density-toggle" type="button" data-table-density aria-pressed="false">Компактно</button>
         </div>
     </form>
 

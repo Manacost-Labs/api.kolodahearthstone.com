@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require __DIR__ . '/lib/auth.php';
 require __DIR__ . '/lib/api_tokens.php';
+require __DIR__ . '/lib/parser_control.php';
 
 $panelUser = panel_require_auth();
 
@@ -1559,6 +1560,7 @@ $pageWindowStart = max(1, $page - 2);
 $pageWindowEnd = min($totalPages, $page + 2);
 $showAnalyticsDashboard = $action === 'analytics';
 $showApiTokens = $action === 'api_tokens';
+$showParserControl = $action === 'parsers';
 $resetUrl = $cardType !== '' ? '/?card_type=' . rawurlencode($cardType) : '/';
 $mediaLabels = [
     'has_buddy' => 'С компаньоном',
@@ -1643,7 +1645,9 @@ $form = $editCard ?: [
     'framed_image' => '',
     'notes' => '',
 ];
-$workspaceTitle = $action === 'api_tokens'
+$workspaceTitle = $action === 'parsers'
+    ? 'Парсеры'
+    : ($action === 'api_tokens'
     ? 'API-токены'
     : ($action === 'analytics'
         ? 'Обзор и мета'
@@ -1653,7 +1657,7 @@ $workspaceTitle = $action === 'api_tokens'
             ? 'Новая карта'
             : ($editCard
                 ? 'Редактировать карту'
-                : ($showHeroSkins ? 'Скины героев' : ($showPets ? 'Питомцы' : ($showCoins ? 'Монетки' : ($showHeroes ? 'Герои' : ($showTimewarped ? 'Хрономальные карты' : ($showConstructed ? 'Стандартные и вольные карты' : ($showLibrary ? library_type_label($libraryType) : 'Карты Полей сражений')))))))))));
+                : ($showHeroSkins ? 'Скины героев' : ($showPets ? 'Питомцы' : ($showCoins ? 'Монетки' : ($showHeroes ? 'Герои' : ($showTimewarped ? 'Хрономальные карты' : ($showConstructed ? 'Стандартные и вольные карты' : ($showLibrary ? library_type_label($libraryType) : 'Карты Полей сражений'))))))))))));
 ?>
 <!doctype html>
 <html lang="ru" data-theme="dark">
@@ -1663,9 +1667,11 @@ $workspaceTitle = $action === 'api_tokens'
     <meta name="robots" content="noindex,nofollow">
     <title>HS Data · Управление базой Hearthstone</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232563eb'/%3E%3Ctext x='32' y='40' text-anchor='middle' font-family='system-ui,sans-serif' font-size='25' font-weight='800' fill='white'%3EHS%3C/text%3E%3C/svg%3E">
-    <link rel="stylesheet" href="/assets/style.css?v=28">
+    <link rel="stylesheet" href="/assets/style.css?v=29">
     <script src="/assets/parsing-reliability.js?v=1" defer></script>
     <script src="/assets/analytics.js?v=4" defer></script>
+    <script src="/assets/parser-control-view.js?v=1" defer></script>
+    <script src="/assets/parser-control.js?v=1" defer></script>
 </head>
 <body>
 <main class="shell">
@@ -1710,6 +1716,13 @@ $workspaceTitle = $action === 'api_tokens'
                 <h2>Статистика</h2>
                 <a class="side-link<?= $action === 'analytics' ? ' active' : '' ?>" href="/?action=analytics#statistics">
                     <span>Обзор и мета</span><b>Live</b>
+                </a>
+            </section>
+
+            <section class="side-section">
+                <h2>Операции</h2>
+                <a class="side-link<?= $showParserControl ? ' active' : '' ?>" href="/?action=parsers">
+                    <span>Парсеры</span><b>Live</b>
                 </a>
             </section>
 
@@ -1779,6 +1792,10 @@ $workspaceTitle = $action === 'api_tokens'
 
     <?php if ($showAnalyticsDashboard): ?>
         <?php require __DIR__ . '/partials/analytics-dashboard.php'; ?>
+    <?php endif; ?>
+
+    <?php if ($showParserControl): ?>
+        <?php require __DIR__ . '/partials/parser-control.php'; ?>
     <?php endif; ?>
 
     <?php if ($showApiTokens): ?>
@@ -2095,6 +2112,7 @@ $workspaceTitle = $action === 'api_tokens'
                 </select>
                 <button class="button" type="submit">Найти</button>
                 <a class="button ghost" href="<?= h($resetUrl) ?>">Сброс</a>
+                <button class="table-density-toggle" type="button" data-table-density aria-pressed="false">Компактно</button>
                 </div>
             </form>
             <?php if ($activeFilters): ?>
@@ -3953,6 +3971,32 @@ $workspaceTitle = $action === 'api_tokens'
         button.addEventListener('click', () => {
             const expanded = controls?.classList.toggle('filters-open') || false;
             button.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+        });
+    });
+
+    document.querySelectorAll('[data-table-density]').forEach((button) => {
+        const workspace = button.closest('.data-panel, .analytics-hub');
+        const storageKey = workspace?.classList.contains('analytics-hub')
+            ? 'analyticsTableDensity'
+            : 'catalogueTableDensity';
+        const setDensity = (compact) => {
+            workspace?.classList.toggle('is-compact-table', compact);
+            button.setAttribute('aria-pressed', compact ? 'true' : 'false');
+            button.textContent = compact ? 'Обычно' : 'Компактно';
+        };
+        try {
+            setDensity(window.localStorage.getItem(storageKey) === 'compact');
+        } catch (error) {
+            setDensity(false);
+        }
+        button.addEventListener('click', () => {
+            const compact = !workspace?.classList.contains('is-compact-table');
+            setDensity(compact);
+            try {
+                window.localStorage.setItem(storageKey, compact ? 'compact' : 'normal');
+            } catch (error) {
+                // Density remains usable for this page when storage is unavailable.
+            }
         });
     });
 

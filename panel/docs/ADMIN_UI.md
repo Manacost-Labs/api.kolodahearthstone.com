@@ -28,6 +28,12 @@ The import and API contracts are documented in `LIBRARY_FULL_ART.md`.
 - `assets/parsing-reliability.js` — dependency-free view model for observed and
   collecting parser-reliability states; the same pure logic is exercised in
   Node tests.
+- `partials/parser-control.php` — parser operations workspace, source table,
+  recent runs, and the explicit manual-run confirmation dialog.
+- `parser-control.php` + `lib/parser_control.php` — narrow authenticated bridge
+  for the local parser control API. The browser never receives its admin token.
+- `assets/parser-control-view.js` + `assets/parser-control.js` — tested parser
+  view model and DOM controller with adaptive automatic refresh.
 - `api/index.php` — public API; it is not coupled to the admin presentation.
 
 ## Interaction contracts
@@ -42,6 +48,12 @@ The import and API contracts are documented in `LIBRARY_FULL_ART.md`.
 - Golden variants are represented inside their base-card row, but their IDs and
   DBFs are also searchable.
 - The action column remains sticky during horizontal table scrolling.
+- Catalogue and statistics tables provide a persistent compact-density option.
+- The parser workspace prioritizes error/partial sources, keeps source and
+  action columns sticky, and exposes schedules, published row counts and recent
+  run progress without loading raw operational logs into the initial view.
+- Manual parser runs require GitHub authentication, a same-origin CSRF token,
+  an application-level rate budget and an explicit confirmation dialog.
 - The “Обзор и мета” workspace opens with the complete source registry. It shows
   the effective state, dataset availability, last update and calculated age for
   every source returned by `/demo/overview`.
@@ -109,8 +121,11 @@ Before deployment:
 /opt/php74/bin/php -l lib/analytics.php
 node --check assets/analytics.js
 node --check assets/parsing-reliability.js
+node --check assets/parser-control.js
+node --test tests/parser_control_view.test.js
 node --test tests/parsing_reliability_view.test.js
 php tests/parsing_reliability_test.php
+php tests/parser_control_test.php
 PANEL_ROOT="$PWD" /srv/projects/data/hs-data-platform/tests/admin-ui-contract.sh
 ```
 
