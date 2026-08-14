@@ -1067,7 +1067,11 @@ def test_refresh_timeout_stops_new_slices_and_preserves_last_known_good() -> Non
         },
     }
     status = save_status.call_args.args[1]
-    assert status["state"] == "timed_out"
+    assert status["state"] == "ok"
+    assert status["last_refresh_state"] == "timed_out"
+    assert status["cached_after_failure"] is True
+    assert status["fresh_candidate_published"] is False
+    assert status["effective_state"] == "ok_cached"
     assert status["timed_out"] is True
     assert status["published"] is False
     assert status["job_run"] == result["job_run"]
@@ -1545,6 +1549,11 @@ def test_hard_deadline_cancels_blocked_provider_and_preserves_lkg(tmp_path) -> N
     status = save_status.call_args.args[1]
     assert status["published"] is False
     assert status["serving_cached_dataset"] is True
+    assert status["state"] == "ok"
+    assert status["last_refresh_state"] == "timed_out"
+    assert status["cached_after_failure"] is True
+    assert status["fresh_candidate_published"] is False
+    assert status["effective_state"] == "ok_cached"
     assert status["job_run"] == result["job_run"]
     assert heartbeat_snapshots[-1] == result["job_run"]
 

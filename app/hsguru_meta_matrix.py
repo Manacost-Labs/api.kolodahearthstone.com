@@ -24,7 +24,7 @@ from .job_run import (
     run_periodic_heartbeat,
 )
 from .resource_locks import ResourceLocked, ResourceLockSet
-from .source_state import SourceState
+from .source_state import EFFECTIVE_OK_CACHED, SourceState
 from .sources import Source
 from .storage import (
     load_baseline,
@@ -1695,6 +1695,7 @@ async def _refresh_hsguru_meta_matrix_unlocked(
         ]
         _record_current_history(fresh_current_rows, fetched_at)
         save_dataset(SOURCE_ID, dataset)
+    serving_cached = bool(cached_dataset) and not complete
     save_progress_checkpoint(state="complete" if complete else "in_progress")
     terminal_phase = (
         str(SourceState.TIMED_OUT)
@@ -1711,7 +1712,7 @@ async def _refresh_hsguru_meta_matrix_unlocked(
             "site": "hsguru",
             "category": "meta_matrix",
             "url": HSGURU_META_URL,
-            "state": run_state,
+            "state": SourceState.OK if serving_cached else run_state,
             "failure_reason_code": failure_reason_code,
             "refresh_window_id": refresh_window_id,
             "fetched_at": fetched_at,
@@ -1730,7 +1731,10 @@ async def _refresh_hsguru_meta_matrix_unlocked(
                 )
             ),
             "errors": errors[:20],
-            "serving_cached_dataset": bool(cached_dataset) and not complete,
+            "serving_cached_dataset": serving_cached,
+            "cached_after_failure": serving_cached,
+            "fresh_candidate_published": complete,
+            "effective_state": EFFECTIVE_OK_CACHED if serving_cached else None,
             "last_refresh_state": run_state,
             "last_refresh_at": fetched_at,
             "run_id": run.run_id,
@@ -1767,7 +1771,7 @@ async def _refresh_hsguru_meta_matrix_unlocked(
         "retryable": not complete,
         "timed_out": run.timed_out,
         "job_run": run.snapshot(),
-        "serving_cached_dataset": bool(cached_dataset) and not complete,
+        "serving_cached_dataset": serving_cached,
         "source_id": SOURCE_ID,
         "fetched_at": fetched_at,
         "base_slices": len(slices),
@@ -1863,7 +1867,7 @@ def _hard_timeout_outcome(run: JobRunContext) -> dict[str, Any]:
         "site": "hsguru",
         "category": "meta_matrix",
         "url": HSGURU_META_URL,
-        "state": SourceState.TIMED_OUT,
+        "state": SourceState.OK if serving_cached else SourceState.TIMED_OUT,
         "failure_reason_code": "timeout",
         "refresh_window_id": refresh_window_id,
         "fetched_at": fetched_at,
@@ -1876,6 +1880,9 @@ def _hard_timeout_outcome(run: JobRunContext) -> dict[str, Any]:
         ),
         "errors": [error],
         "serving_cached_dataset": serving_cached,
+        "cached_after_failure": serving_cached,
+        "fresh_candidate_published": False,
+        "effective_state": EFFECTIVE_OK_CACHED if serving_cached else None,
         "last_refresh_state": SourceState.TIMED_OUT,
         "last_refresh_at": fetched_at,
         "run_id": run.run_id,
