@@ -137,6 +137,30 @@ def _winrate_availability(
     return {"available": False, "reason": None}
 
 
+def _score_availability(*, score: object) -> dict[str, object]:
+    if score is not None:
+        return {"available": True, "reason": None}
+    return {
+        "available": False,
+        "reason": "upstream_score_not_reported",
+    }
+
+
+def _legendary_field_availability(
+    *,
+    winrate: object,
+    pick_rate: object,
+    score: object,
+) -> dict[str, dict[str, object]]:
+    return {
+        "winrate": _winrate_availability(
+            winrate=winrate,
+            pick_rate=pick_rate,
+        ),
+        "score": _score_availability(score=score),
+    }
+
+
 def _group_package_cards(card_ids: list[str], *, locale: str = "ruRU") -> list[dict[str, Any]]:
     grouped: dict[str, dict[str, Any]] = {}
     for card_id in card_ids:
@@ -166,17 +190,17 @@ def _metrics_from_package(pkg: dict[str, Any]) -> dict[str, Any]:
     score = pkg.get("score") if pkg.get("score") is not None else pkg.get("arenasmith_score")
     winrate = _format_pct(pkg.get("win_rate"))
     formatted_pick_rate = _format_pct(pick_rate)
+    normalized_score = _as_number(score)
     return {
         "winrate": winrate,
         "pick_rate": formatted_pick_rate,
         "offer_rate": _format_pct(offer_rate),
-        "score": _as_number(score),
-        "field_availability": {
-            "winrate": _winrate_availability(
-                winrate=winrate,
-                pick_rate=formatted_pick_rate,
-            )
-        },
+        "score": normalized_score,
+        "field_availability": _legendary_field_availability(
+            winrate=winrate,
+            pick_rate=formatted_pick_rate,
+            score=normalized_score,
+        ),
     }
 
 
@@ -289,18 +313,17 @@ def enrich_legendary_groups(
         if not card_id:
             continue
         stats = stats_by_card_id.get(card_id)
-        if not stats:
-            continue
-        filled["joined"] += 1
-        if group.get("pick_rate") is None and stats.get("pick_rate") is not None:
-            group["pick_rate"] = _format_pct(stats["pick_rate"])
-            filled["pick_rate"] += 1
-        if group.get("offer_rate") is None and stats.get("offer_rate") is not None:
-            group["offer_rate"] = _format_pct(stats["offer_rate"])
-            filled["offer_rate"] += 1
-        if group.get("score") is None and stats.get("score") is not None:
-            group["score"] = _as_number(stats["score"])
-            filled["score"] += 1
+        if stats:
+            filled["joined"] += 1
+            if group.get("pick_rate") is None and stats.get("pick_rate") is not None:
+                group["pick_rate"] = _format_pct(stats["pick_rate"])
+                filled["pick_rate"] += 1
+            if group.get("offer_rate") is None and stats.get("offer_rate") is not None:
+                group["offer_rate"] = _format_pct(stats["offer_rate"])
+                filled["offer_rate"] += 1
+            if group.get("score") is None and stats.get("score") is not None:
+                group["score"] = _as_number(stats["score"])
+                filled["score"] += 1
         by_class = group.setdefault("by_class", {})
         all_bucket = by_class.setdefault("all", {})
         if all_bucket.get("pick_rate") is None and group.get("pick_rate") is not None:
@@ -311,13 +334,16 @@ def enrich_legendary_groups(
             all_bucket["score"] = group["score"]
         if all_bucket.get("winrate") is None and group.get("winrate") is not None:
             all_bucket["winrate"] = group["winrate"]
-        group["field_availability"] = {
-            "winrate": _winrate_availability(
-                winrate=group.get("winrate"),
-                pick_rate=group.get("pick_rate"),
-            )
-        }
-        all_bucket["field_availability"] = group["field_availability"]
+        group["field_availability"] = _legendary_field_availability(
+            winrate=group.get("winrate"),
+            pick_rate=group.get("pick_rate"),
+            score=group.get("score"),
+        )
+        all_bucket["field_availability"] = _legendary_field_availability(
+            winrate=all_bucket.get("winrate"),
+            pick_rate=all_bucket.get("pick_rate"),
+            score=all_bucket.get("score"),
+        )
     return filled
 
 
@@ -371,19 +397,20 @@ def _groups_from_class_buckets(data: dict[str, Any], *, locale: str = "ruRU") ->
                 group[field] = all_metrics.get(field)
             group["field_availability"] = all_metrics.get(
                 "field_availability",
-                {
-                    "winrate": _winrate_availability(
-                        winrate=group.get("winrate"),
-                        pick_rate=group.get("pick_rate"),
-                    )
-                },
+                _legendary_field_availability(
+                    winrate=group.get("winrate"),
+                    pick_rate=group.get("pick_rate"),
+                    score=group.get("score"),
+                ),
             )
         else:
             for field in ("winrate", "pick_rate", "offer_rate", "score"):
                 group[field] = None
-            group["field_availability"] = {
-                "winrate": {"available": False, "reason": None}
-            }
+            group["field_availability"] = _legendary_field_availability(
+                winrate=None,
+                pick_rate=None,
+                score=None,
+            )
         group["by_class"] = by_class
     return groups
 
@@ -532,19 +559,19 @@ def _normalize_firecrawl_group(raw: dict[str, Any], *, locale: str = "ruRU") -> 
 
     winrate = _format_pct(_first_non_none(raw, "winrate", "win_rate"))
     pick_rate = _format_pct(_first_non_none(raw, "pick_rate", "pickRate"))
+    score = _as_number(_first_non_none(raw, "score", "arenasmith_score"))
     metrics = {
         "winrate": winrate,
         "pick_rate": pick_rate,
         "offer_rate": _format_pct(
             _first_non_none(raw, "offer_rate", "offerRate")
         ),
-        "score": _as_number(_first_non_none(raw, "score", "arenasmith_score")),
-        "field_availability": {
-            "winrate": _winrate_availability(
-                winrate=winrate,
-                pick_rate=pick_rate,
-            )
-        },
+        "score": score,
+        "field_availability": _legendary_field_availability(
+            winrate=winrate,
+            pick_rate=pick_rate,
+            score=score,
+        ),
     }
     return {
         "key_card": key_card,

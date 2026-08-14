@@ -247,6 +247,180 @@ class LegendaryGroupsByClassTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             normalize_legendary_package(package, locale="enUS")
 
+    def test_null_scores_are_explicitly_unavailable(self) -> None:
+        data = self._full_bucket_data()
+        data["WARRIOR"][0] = {
+            **data["WARRIOR"][0],
+            "score": None,
+        }
+        data["ALL"][1] = {
+            **data["ALL"][1],
+            "score": None,
+        }
+        groups = _groups_from_class_buckets(data, locale="enUS")
+        payload = {
+            "type": "arena_legendary_groups",
+            "completeness_schema_version": 1,
+            "population_completeness": "unverifiable",
+            "upstream_freshness": {
+                "status": "unknown",
+                "reason": "transport_evidence_unavailable",
+                "observed_at": "2026-08-14T02:20:00+00:00",
+                "age_seconds": None,
+                "evidence": [],
+                "response_headers": {},
+            },
+            "row_retrieval": _package_row_retrieval(data, groups),
+            "groups": groups,
+        }
+
+        warrior = groups[0]["by_class"]["warrior"]
+        self.assertIsNone(warrior["score"])
+        self.assertEqual(
+            warrior["field_availability"]["score"],
+            {
+                "available": False,
+                "reason": "upstream_score_not_reported",
+            },
+        )
+        all_group = next(
+            group
+            for group in groups
+            if group["key_card"]["card_id"] == "CARD_1"
+        )
+        self.assertIsNone(all_group["score"])
+        self.assertIsNone(all_group["by_class"]["all"]["score"])
+        expected_unavailable = {
+            "available": False,
+            "reason": "upstream_score_not_reported",
+        }
+        self.assertEqual(
+            all_group["field_availability"]["score"],
+            expected_unavailable,
+        )
+        self.assertEqual(
+            all_group["by_class"]["all"]["field_availability"]["score"],
+            expected_unavailable,
+        )
+        validate_structured_schema(payload)
+        semantic_report = validate_structured(
+            "hsreplay_arena_legendaries",
+            payload,
+        )
+        self.assertTrue(semantic_report.ok, semantic_report.issues)
+        contract_report = contract_quality_report(
+            "hsreplay_arena_legendaries",
+            payload,
+        )
+        self.assertTrue(contract_report["ok"], contract_report["warnings"])
+        self.assertTrue(contract_report["retrieval_complete"])
+        self.assertEqual(
+            contract_report["critical_fields"]["score"][
+                "explained_unavailable"
+            ],
+            1,
+        )
+        self.assertEqual(
+            contract_report["critical_fields"]["by_class.score"][
+                "explained_unavailable"
+            ],
+            2,
+        )
+        self.assertEqual(
+            contract_report["critical_fields"]["by_class.score"][
+                "retrieval_completeness_rate"
+            ],
+            1.0,
+        )
+
+    def test_strict_score_requires_availability_descriptor(self) -> None:
+        data = self._full_bucket_data()
+        groups = _groups_from_class_buckets(data, locale="enUS")
+        payload = {
+            "type": "arena_legendary_groups",
+            "completeness_schema_version": 1,
+            "population_completeness": "unverifiable",
+            "upstream_freshness": {
+                "status": "unknown",
+                "reason": "transport_evidence_unavailable",
+                "observed_at": "2026-08-14T02:20:00+00:00",
+                "age_seconds": None,
+                "evidence": [],
+                "response_headers": {},
+            },
+            "row_retrieval": _package_row_retrieval(data, groups),
+            "groups": groups,
+        }
+
+        top_score_availability = groups[0]["field_availability"].pop("score")
+        with self.assertRaisesRegex(
+            StructuredSchemaError,
+            r"groups\[0\]\.field_availability\.score",
+        ):
+            validate_structured_schema(payload)
+        groups[0]["field_availability"]["score"] = top_score_availability
+        groups[0]["by_class"]["warrior"]["field_availability"].pop("score")
+        with self.assertRaisesRegex(
+            StructuredSchemaError,
+            r"by_class\.warrior\.field_availability\.score",
+        ):
+            validate_structured_schema(payload)
+        warrior = groups[0]["by_class"]["warrior"]
+        warrior["score"] = None
+        warrior["field_availability"]["score"] = {
+            "available": False,
+            "reason": "provider_reported_missing",
+        }
+        validate_structured_schema(payload)
+        semantic_report = validate_structured(
+            "hsreplay_arena_legendaries",
+            payload,
+        )
+        self.assertIn(
+            "arena_legendary_groups.unexplained_score",
+            {issue.code for issue in semantic_report.issues},
+        )
+        contract_report = contract_quality_report(
+            "hsreplay_arena_legendaries",
+            payload,
+        )
+        self.assertFalse(contract_report["ok"])
+        self.assertFalse(contract_report["retrieval_complete"])
+        self.assertEqual(
+            contract_report["critical_fields"]["by_class.score"][
+                "availability_conflicts"
+            ],
+            1,
+        )
+
+    def test_schema_rejects_invalid_present_per_class_score(self) -> None:
+        for invalid in (False, float("nan"), float("inf"), "unknown"):
+            with self.subTest(score=invalid):
+                data = self._full_bucket_data()
+                groups = _groups_from_class_buckets(data, locale="enUS")
+                groups[0]["by_class"]["warrior"]["score"] = invalid
+                payload = {
+                    "type": "arena_legendary_groups",
+                    "completeness_schema_version": 1,
+                    "population_completeness": "unverifiable",
+                    "upstream_freshness": {
+                        "status": "unknown",
+                        "reason": "transport_evidence_unavailable",
+                        "observed_at": "2026-08-14T02:20:00+00:00",
+                        "age_seconds": None,
+                        "evidence": [],
+                        "response_headers": {},
+                    },
+                    "row_retrieval": _package_row_retrieval(data, groups),
+                    "groups": groups,
+                }
+
+                with self.assertRaisesRegex(
+                    StructuredSchemaError,
+                    r"by_class\.warrior\.score",
+                ):
+                    validate_structured_schema(payload)
+
     def test_schema_and_semantic_gates_validate_top_and_per_class_metrics(self) -> None:
         data = self._full_bucket_data()
         groups = _groups_from_class_buckets(data, locale="enUS")
@@ -474,6 +648,14 @@ class LegendaryGroupsByClassTests(unittest.TestCase):
         self.assertEqual(filled["joined"], 1)
         self.assertEqual(groups[0]["pick_rate"], "83.3%")
         self.assertEqual(groups[0]["by_class"]["all"]["score"], 53.0)
+        self.assertEqual(
+            groups[0]["field_availability"]["score"],
+            {"available": True, "reason": None},
+        )
+        self.assertEqual(
+            groups[0]["by_class"]["all"]["field_availability"]["score"],
+            {"available": True, "reason": None},
+        )
 
     def test_validator_requires_arenasmith_metrics(self) -> None:
         groups = [

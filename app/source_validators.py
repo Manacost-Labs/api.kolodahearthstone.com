@@ -779,6 +779,15 @@ def _validate_arena_legendary_groups(source_id: str, structured: dict[str, Any])
         )
         for row in groups
     ]
+    score_statuses = [
+        field_availability_status(
+            source_id,
+            row,
+            "score",
+            require_descriptor=strict_completeness,
+        )
+        for row in groups
+    ]
     unexplained_winrates = sum(
         1
         for status, _reason in winrate_statuses
@@ -790,8 +799,14 @@ def _validate_arena_legendary_groups(source_id: str, structured: dict[str, Any])
         if status == "explained_unavailable"
         and _parse_arena_percent(row.get("pick_rate")) != 0.0
     )
+    unexplained_scores = sum(
+        1
+        for status, _reason in score_statuses
+        if status in {"unexplained_missing", "availability_conflict"}
+    )
     by_class_unexplained_winrates = 0
     by_class_incoherent_zero_pick_reasons = 0
+    by_class_unexplained_scores = 0
     invalid_metrics = 0
     invalid_package_cards = 0
     if strict_completeness:
@@ -815,16 +830,21 @@ def _validate_arena_legendary_groups(source_id: str, structured: dict[str, Any])
                 (group.get("winrate") is not None and not _is_valid_arena_percent(group.get("winrate")))
                 or not _is_valid_arena_percent(group.get("pick_rate"))
                 or not _is_valid_arena_percent(group.get("offer_rate"))
-                or not _is_finite_numeric(group.get("score"))
+                or (
+                    group.get("score") is not None
+                    and not _is_finite_numeric(group.get("score"))
+                )
             ):
                 invalid_metrics += 1
             by_class = group.get("by_class")
             if not isinstance(by_class, dict) or not by_class:
                 by_class_unexplained_winrates += 1
+                by_class_unexplained_scores += 1
                 continue
             for metrics in by_class.values():
                 if not isinstance(metrics, dict):
                     by_class_unexplained_winrates += 1
+                    by_class_unexplained_scores += 1
                     invalid_metrics += 1
                     continue
                 if (
@@ -834,7 +854,10 @@ def _validate_arena_legendary_groups(source_id: str, structured: dict[str, Any])
                     )
                     or not _is_valid_arena_percent(metrics.get("pick_rate"))
                     or not _is_valid_arena_percent(metrics.get("offer_rate"))
-                    or not _is_finite_numeric(metrics.get("score"))
+                    or (
+                        metrics.get("score") is not None
+                        and not _is_finite_numeric(metrics.get("score"))
+                    )
                 ):
                     invalid_metrics += 1
                 status, _reason = field_availability_status(
@@ -850,6 +873,17 @@ def _validate_arena_legendary_groups(source_id: str, structured: dict[str, Any])
                     and _parse_arena_percent(metrics.get("pick_rate")) != 0.0
                 ):
                     by_class_incoherent_zero_pick_reasons += 1
+                score_status, _score_reason = field_availability_status(
+                    source_id,
+                    metrics,
+                    "score",
+                    require_descriptor=True,
+                )
+                if score_status in {
+                    "unexplained_missing",
+                    "availability_conflict",
+                }:
+                    by_class_unexplained_scores += 1
     report.metrics.update(
         {
             "groups": len(groups),
@@ -864,10 +898,16 @@ def _validate_arena_legendary_groups(source_id: str, structured: dict[str, Any])
             ),
             "unexplained_winrates": unexplained_winrates,
             "incoherent_zero_pick_reasons": incoherent_zero_pick_reasons,
+            "explained_unavailable_scores": sum(
+                1 for status, _reason in score_statuses
+                if status == "explained_unavailable"
+            ),
+            "unexplained_scores": unexplained_scores,
             "by_class_unexplained_winrates": by_class_unexplained_winrates,
             "by_class_incoherent_zero_pick_reasons": (
                 by_class_incoherent_zero_pick_reasons
             ),
+            "by_class_unexplained_scores": by_class_unexplained_scores,
             "invalid_metrics": invalid_metrics,
             "invalid_package_cards": invalid_package_cards,
         }
@@ -929,6 +969,18 @@ def _validate_arena_legendary_groups(source_id: str, structured: dict[str, Any])
                 f"{by_class_incoherent_zero_pick_reasons})"
             ),
             field="by_class.*.winrate,by_class.*.field_availability.winrate",
+        )
+    if strict_completeness and source_id == "hsreplay_arena_legendaries" and (
+        unexplained_scores or by_class_unexplained_scores
+    ):
+        report.add_issue(
+            "arena_legendary_groups.unexplained_score",
+            (
+                "legendary score availability is not coherent "
+                f"(top-level={unexplained_scores}, "
+                f"per-class={by_class_unexplained_scores})"
+            ),
+            field="score,field_availability.score,by_class.*.score",
         )
     if strict_completeness and source_id == "hsreplay_arena_legendaries" and invalid_metrics:
         report.add_issue(

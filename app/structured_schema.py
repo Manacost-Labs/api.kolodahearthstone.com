@@ -574,9 +574,10 @@ def _validate_legendary_metrics(metrics: dict[str, Any], *, path: str) -> None:
             _is_percent(metrics.get(field_name)),
             f"{path}.{field_name} must be a finite percentage in 0..100",
         )
+    score = metrics.get("score")
     _require(
-        _is_finite_number(metrics.get("score")),
-        f"{path}.score must be finite numeric",
+        score is None or _is_finite_number(score),
+        f"{path}.score must be null or finite numeric",
     )
 
 
@@ -620,7 +621,7 @@ def _validate_arena_legendary_groups(data: dict[str, Any]) -> None:
             _validate_legendary_metrics(group, path=path)
         _validate_field_availability(
             group,
-            ("winrate",),
+            ("winrate", "score"),
             path=path,
             required=versioned,
         )
@@ -636,7 +637,7 @@ def _validate_arena_legendary_groups(data: dict[str, Any]) -> None:
                 _validate_legendary_metrics(metrics, path=class_path)
             _validate_field_availability(
                 metrics,
-                ("winrate",),
+                ("winrate", "score"),
                 path=class_path,
                 required=versioned,
             )

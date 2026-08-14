@@ -471,7 +471,7 @@ buckets в `row_retrieval.bucket_coverage`. Пустой список конкр
 Итоговая retrieval-оценка является минимумом полноты полей и строк. Любая
 необъяснённая потеря или противоречие ставит `retrieval_complete=false` и не
 проходит публикационный gate. У Arena Legendaries проверяются и верхние группы,
-и `winrate` каждого `by_class` bucket.
+и метрики `winrate`/`score` каждого `by_class` bucket.
 
 Разрешённые причины отсутствия полей:
 
@@ -479,7 +479,8 @@ buckets в `row_retrieval.bucket_coverage`. Пустой список конкр
 | --- | --- |
 | HSReplay BG minions | `no_current_patch_aggregates`, `insufficient_current_patch_sample` |
 | HSReplay Arena advanced | `no_games_in_window` |
-| HSReplay Arena legendaries | `upstream_unavailable_at_zero_pick_rate` |
+| HSReplay Arena legendaries (`winrate`) | `upstream_unavailable_at_zero_pick_rate` |
+| HSReplay Arena legendaries (`score`) | `upstream_score_not_reported` |
 | Firestone Standard | `generic_class_bucket_without_observed_deck_cluster` |
 
 Список объяснённых причин потери целой строки пока пуст. Поэтому parser не может

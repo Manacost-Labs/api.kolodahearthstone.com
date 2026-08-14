@@ -63,6 +63,7 @@ FIELD_UNAVAILABLE_REASONS: dict[str, dict[str, frozenset[str]]] = {
     },
     "hsreplay_arena_legendaries": {
         "winrate": frozenset({"upstream_unavailable_at_zero_pick_rate"}),
+        "score": frozenset({"upstream_score_not_reported"}),
     },
     "firestone_standard": {
         "core_cards": frozenset(
@@ -1443,7 +1444,9 @@ def contract_quality_report(
                     source_id,
                     bucket,
                     field,
-                    require_descriptor=field == "winrate",
+                    require_descriptor=(
+                        field in FIELD_UNAVAILABLE_REASONS.get(source_id, {})
+                    ),
                 )[0]
                 for bucket in class_buckets
             ]

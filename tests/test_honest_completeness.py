@@ -493,14 +493,16 @@ def test_semantic_validators_reject_availability_contradictions() -> None:
             "offer_rate": "20%",
             "score": 1.0,
             "field_availability": {
-                "winrate": {"available": True, "reason": None}
+                "winrate": {"available": True, "reason": None},
+                "score": {"available": True, "reason": None},
             },
             "by_class": {
                 "all": {
                     "winrate": None if index == 9 else "50%",
                     "pick_rate": "10%",
                     "field_availability": {
-                        "winrate": {"available": True, "reason": None}
+                        "winrate": {"available": True, "reason": None},
+                        "score": {"available": True, "reason": None},
                     },
                 }
             },
@@ -627,7 +629,8 @@ def test_v1_legendary_by_class_conflict_fails_semantic_and_contract_gates() -> N
             "offer_rate": "20%",
             "score": 1.0,
             "field_availability": {
-                "winrate": {"available": True, "reason": None}
+                "winrate": {"available": True, "reason": None},
+                "score": {"available": True, "reason": None},
             },
             "by_class": {
                 class_key: {
@@ -636,7 +639,8 @@ def test_v1_legendary_by_class_conflict_fails_semantic_and_contract_gates() -> N
                     "offer_rate": "20%",
                     "score": 1.0,
                     "field_availability": {
-                        "winrate": {"available": True, "reason": None}
+                        "winrate": {"available": True, "reason": None},
+                        "score": {"available": True, "reason": None},
                     },
                 }
                 for class_key in HS_BUCKET_TO_CLASS_KEY.values()

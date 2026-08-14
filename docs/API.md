@@ -941,6 +941,7 @@ body/header блокируют новый snapshot. Отсутствие target 
 | `hsreplay_battlegrounds_minions` | `impact`, `win_share`, `popularity` | `no_current_patch_aggregates`, `insufficient_current_patch_sample` |
 | `hsreplay_arena_cards_advanced` | `deck_winrate`, `winrate_when_drawn`, `winrate_when_played` | `no_games_in_window` |
 | `hsreplay_arena_legendaries` | `winrate`, включая каждый `by_class` bucket | `upstream_unavailable_at_zero_pick_rate` |
+| `hsreplay_arena_legendaries` | `score`, включая каждый `by_class` bucket | `upstream_score_not_reported` |
 | `firestone_standard` | `core_cards` | `generic_class_bucket_without_observed_deck_cluster` |
 
 Пустой `core_cards` у Firestone-архетипа, который не является generic class
@@ -951,12 +952,15 @@ bucket, получает причину
 В v1 числовые значения проверяются до форматирования. Arena rates должны быть
 конечными числами в диапазоне `0..100`; `false`, `NaN`, бесконечность,
 произвольный текст и значения вне диапазона отвергаются. `score` обязан быть
-конечным числом, а `avg_copies` — конечным неотрицательным числом. У Arena
-Legendaries каждый package обязан иметь непустой `package_card_ids`, а каждый
-нормализованный элемент `cards[]` — непустой `card_id` и положительный целый
-`count`. Уникальность идентичностей также входит в retrieval gate: `card_id`
-для Arena Advanced, `minion_dbf_id` для BG minions, `(bucket, package_key)` для
-Arena Legendaries, отдельно `decklist` и `archetype_id` для Firestone.
+конечным числом либо `null` с согласованным
+`field_availability.score=upstream_score_not_reported`; подстановка нуля вместо
+отсутствующего upstream-значения запрещена. `avg_copies` — конечное
+неотрицательное число. У Arena Legendaries каждый package обязан иметь
+непустой `package_card_ids`, а каждый нормализованный элемент `cards[]` —
+непустой `card_id` и положительный целый `count`. Уникальность идентичностей
+также входит в retrieval gate: `card_id` для Arena Advanced,
+`minion_dbf_id` для BG minions, `(bucket, package_key)` для Arena Legendaries,
+отдельно `decklist` и `archetype_id` для Firestone.
 
 Показатели в `status.quality` имеют разные назначения:
 
@@ -966,8 +970,8 @@ Arena Legendaries, отдельно `decklist` и `archetype_id` для Fireston
   минимуму из полноты критичных полей и полноты строк;
 - `retrieval_complete=true` возможен только без необъяснённых пропусков,
   конфликтов descriptors и потерь строк. Для Arena Legendaries в расчёт входит
-  отдельный показатель `critical_fields["by_class.winrate"]` по всем class
-  buckets.
+  отдельные показатели `critical_fields["by_class.winrate"]` и
+  `critical_fields["by_class.score"]` по всем class buckets.
 
 Порог `min_field_fill_rate` строгой v1-схемы использует retrieval-долю
 (`available + allow-listed explained_unavailable`), сохраняя
