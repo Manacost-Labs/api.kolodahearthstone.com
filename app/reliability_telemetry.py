@@ -19,7 +19,10 @@ from typing import Any
 
 from .completeness import COMPLETENESS_SCHEMA_VERSION
 from .config import source_operationally_enabled
-from .source_contracts import FIELD_UNAVAILABLE_REASONS
+from .source_contracts import (
+    FIELD_UNAVAILABLE_REASONS,
+    HSREPLAY_FRESHNESS_GATED_SOURCE_IDS,
+)
 from .source_state import SourceState
 from .storage import root_dir
 
@@ -87,13 +90,10 @@ AI_DIAGNOSIS_DOMAINS = (
 )
 COMPLETENESS_STATES = ("complete", "incomplete", "unknown")
 COMPLETENESS_TRACKED_SOURCE_IDS = frozenset(FIELD_UNAVAILABLE_REASONS)
-HSREPLAY_UPSTREAM_FRESHNESS_SOURCE_IDS = frozenset(
-    {
-        "hsreplay_battlegrounds_minions",
-        "hsreplay_arena_cards_advanced",
-        "hsreplay_arena_legendaries",
-    }
-)
+# Keep telemetry anchored to the same canonical freshness policy as publish
+# validation. A duplicated list can silently overstate strict completeness
+# when a newly instrumented HSReplay source is added in only one place.
+HSREPLAY_UPSTREAM_FRESHNESS_SOURCE_IDS = HSREPLAY_FRESHNESS_GATED_SOURCE_IDS
 
 _schema_lock = threading.Lock()
 

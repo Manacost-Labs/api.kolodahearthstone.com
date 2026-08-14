@@ -22,7 +22,10 @@ from app.reliability_telemetry import (
     reliability_cache_revision,
     update_terminal_ai_results,
 )
-from app.source_contracts import FIELD_UNAVAILABLE_REASONS
+from app.source_contracts import (
+    FIELD_UNAVAILABLE_REASONS,
+    HSREPLAY_FRESHNESS_GATED_SOURCE_IDS,
+)
 from app.sources import SOURCE_BY_ID, Source
 
 
@@ -48,35 +51,49 @@ def test_hsreplay_verified_completeness_requires_fresh_upstream_evidence() -> No
         "retrieval_completeness_score": 1.0,
         "population_completeness": "unverifiable",
     }
-    source_id = "hsreplay_arena_cards_advanced"
-
-    assert reliability_telemetry._completeness_terminal_fields(
-        source_id,
-        {"quality": {**base_quality, "upstream_freshness": {"status": "fresh"}}},
-    ) == (1, "complete", 1.0)
-    assert reliability_telemetry._completeness_terminal_fields(
-        source_id,
-        {"quality": {**base_quality, "upstream_freshness": {"status": "stale"}}},
-    ) == (1, "incomplete", 1.0)
-    assert reliability_telemetry._completeness_terminal_fields(
-        source_id,
-        {"quality": {**base_quality, "upstream_freshness": {"status": "unknown"}}},
-    ) == (1, "unknown", 1.0)
-    assert reliability_telemetry._completeness_terminal_fields(
-        source_id,
-        {
-            "quality": {
-                **base_quality,
-                "retrieval_complete": False,
-                "retrieval_completeness_score": 0.75,
-                "upstream_freshness": {"status": "unknown"},
-            }
-        },
-    ) == (1, "incomplete", 0.75)
-    assert reliability_telemetry._completeness_terminal_fields(
-        source_id,
-        {"quality": base_quality},
-    ) == (1, "unknown", 1.0)
+    for source_id in HSREPLAY_FRESHNESS_GATED_SOURCE_IDS:
+        assert reliability_telemetry._completeness_terminal_fields(
+            source_id,
+            {
+                "quality": {
+                    **base_quality,
+                    "upstream_freshness": {"status": "fresh"},
+                }
+            },
+        ) == (1, "complete", 1.0)
+        assert reliability_telemetry._completeness_terminal_fields(
+            source_id,
+            {
+                "quality": {
+                    **base_quality,
+                    "upstream_freshness": {"status": "stale"},
+                }
+            },
+        ) == (1, "incomplete", 1.0)
+        assert reliability_telemetry._completeness_terminal_fields(
+            source_id,
+            {
+                "quality": {
+                    **base_quality,
+                    "upstream_freshness": {"status": "unknown"},
+                }
+            },
+        ) == (1, "unknown", 1.0)
+        assert reliability_telemetry._completeness_terminal_fields(
+            source_id,
+            {
+                "quality": {
+                    **base_quality,
+                    "retrieval_complete": False,
+                    "retrieval_completeness_score": 0.75,
+                    "upstream_freshness": {"status": "unknown"},
+                }
+            },
+        ) == (1, "incomplete", 0.75)
+        assert reliability_telemetry._completeness_terminal_fields(
+            source_id,
+            {"quality": base_quality},
+        ) == (1, "unknown", 1.0)
     with patch.dict("os.environ", {}, clear=True):
         assert reliability_telemetry._completeness_terminal_fields(
             "firestone_standard",
@@ -94,9 +111,12 @@ def test_hsreplay_verified_completeness_requires_fresh_upstream_evidence() -> No
 
 
 def test_disabled_firestone_is_not_in_verified_completeness_catalog() -> None:
+    expected_without_firestone = frozenset(FIELD_UNAVAILABLE_REASONS) - {
+        "firestone_standard"
+    }
     with patch.dict("os.environ", {}, clear=True):
         instrumented, catalog_count = reliability_telemetry._completeness_source_catalog()
-        assert "firestone_standard" not in instrumented
+        assert instrumented == expected_without_firestone
         assert catalog_count == len(SOURCE_BY_ID) - 1
 
     with patch.dict(
@@ -105,7 +125,7 @@ def test_disabled_firestone_is_not_in_verified_completeness_catalog() -> None:
         clear=True,
     ):
         instrumented, catalog_count = reliability_telemetry._completeness_source_catalog()
-        assert "firestone_standard" in instrumented
+        assert instrumented == frozenset(FIELD_UNAVAILABLE_REASONS)
         assert catalog_count == len(SOURCE_BY_ID)
 
 

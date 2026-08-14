@@ -784,7 +784,19 @@ def main(argv: list[str] | None = None) -> int:
         sources = []
         bad = []
         warn = []
+        excluded_sources = []
         for source in SOURCE_BY_ID.values():
+            if not source_operationally_enabled(source.id):
+                excluded_sources.append(
+                    {
+                        "source_id": source.id,
+                        "site": source.site,
+                        "category": source.category,
+                        "state": "excluded",
+                        "exclusion_reason": "operationally-disabled",
+                    }
+                )
+                continue
             status = load_status(source.id) or {}
             is_screenshot_asset = source.id == SCREENSHOT_SOURCE_ID
             dataset = (
@@ -883,8 +895,13 @@ def main(argv: list[str] | None = None) -> int:
                 warn.append(row)
         payload = {
             "ok": not bad,
-            "sources": len(sources),
-            "by_site": dict(Counter(row["site"] for row in sources)),
+            "sources": len(SOURCE_BY_ID),
+            "checked_sources": len(sources),
+            "excluded_count": len(excluded_sources),
+            "excluded_sources": excluded_sources,
+            "by_site": dict(
+                Counter(source.site for source in SOURCE_BY_ID.values())
+            ),
             "min_quality_score": args.min_quality_score,
             "warn_quality_score": args.warn_quality_score,
             "bad_count": len(bad),

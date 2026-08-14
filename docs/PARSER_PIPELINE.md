@@ -127,6 +127,11 @@ docker exec hs-data-api python -m app.cli freshness-check --since-hours 48
 docker exec hs-data-api python -m app.cli quality-check
 ```
 
+`quality-check` сохраняет `sources` как размер полного каталога, отдельно
+показывает `checked_sources` и помещает операционно запрещённые источники в
+`excluded_sources` с причиной `operationally-disabled`. Такие источники не
+выдаются ни за успешную проверку, ни за ошибку отсутствующего dataset.
+
 С admin token дополнительно доступны `/ops/health`, `/ops/summary`, события и
 trace/run details.
 

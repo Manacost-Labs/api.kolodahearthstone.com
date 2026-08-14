@@ -570,6 +570,80 @@ class CliTest(unittest.TestCase):
 
         self.assertEqual(exit_code, 1)
 
+    def test_quality_check_excludes_operationally_disabled_source(self) -> None:
+        source = Source(
+            "firestone_standard",
+            "https://example.test",
+            "firestone",
+            "standard",
+        )
+        stdout = io.StringIO()
+        with (
+            patch("app.cli.SOURCE_BY_ID", {source.id: source}),
+            patch("app.cli.source_operationally_enabled", return_value=False),
+            patch("app.storage.load_status") as load_status,
+            patch(
+                "app.parser_control.load_resolved_public_dataset"
+            ) as load_dataset,
+            redirect_stdout(stdout),
+        ):
+            exit_code = cli.main(["quality-check"])
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["sources"], 1)
+        self.assertEqual(payload["checked_sources"], 0)
+        self.assertEqual(payload["bad_count"], 0)
+        self.assertEqual(payload["excluded_count"], 1)
+        self.assertEqual(
+            payload["excluded_sources"],
+            [
+                {
+                    "source_id": "firestone_standard",
+                    "site": "firestone",
+                    "category": "standard",
+                    "state": "excluded",
+                    "exclusion_reason": "operationally-disabled",
+                }
+            ],
+        )
+        load_status.assert_not_called()
+        load_dataset.assert_not_called()
+
+    def test_quality_check_keeps_enabled_firestone_missing_dataset_as_bad(self) -> None:
+        source = Source(
+            "firestone_standard",
+            "https://example.test",
+            "firestone",
+            "standard",
+        )
+        stdout = io.StringIO()
+        with (
+            patch("app.cli.SOURCE_BY_ID", {source.id: source}),
+            patch("app.cli.source_operationally_enabled", return_value=True),
+            patch(
+                "app.storage.load_status",
+                return_value={"state": "ok", "backend": "test"},
+            ),
+            patch(
+                "app.parser_control.load_resolved_public_dataset",
+                return_value=None,
+            ),
+            redirect_stdout(stdout),
+        ):
+            exit_code = cli.main(["quality-check"])
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 1)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["bad_count"], 1)
+        self.assertEqual(payload["bad_sources"][0]["source_id"], source.id)
+        self.assertEqual(
+            payload["bad_sources"][0]["validate_reason"],
+            "missing dataset",
+        )
+
     def test_quality_check_passes_valid_cached_dataset(self) -> None:
         source = Source("ok_source", "https://example.test", "hsreplay", "arena")
         with patch("app.cli.SOURCE_BY_ID", {"ok_source": source}), patch(
