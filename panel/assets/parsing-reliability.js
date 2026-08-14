@@ -11,9 +11,16 @@
     'use strict';
 
     const percentage = (value) => {
+        if (value === null || value === '' || typeof value === 'boolean') return '—';
         const number = Number(value);
         if (!Number.isFinite(number)) return '—';
         return `${new Intl.NumberFormat('ru-RU', {maximumFractionDigits: 2}).format(number)}%`;
+    };
+
+    const boundedPercentage = (value) => {
+        if (value === null || value === '' || typeof value === 'boolean') return null;
+        const number = Number(value);
+        return Number.isFinite(number) && number >= 0 && number <= 100 ? number : null;
     };
 
     const nonNegativeCount = (value) => {
@@ -21,10 +28,248 @@
         return Number.isFinite(number) && number >= 0 ? Math.trunc(number) : null;
     };
 
+    const exactNonNegativeCount = (value) => {
+        if (value === null || value === '' || typeof value === 'boolean') return null;
+        const number = Number(value);
+        return Number.isInteger(number) && number >= 0 ? number : null;
+    };
+
+    const buildVerifiedCompleteness = (
+        verified,
+        parentMeasurementStatus,
+        allParserAttempts
+    ) => {
+        const fallback = {
+            reported: false,
+            hasObservations: false,
+            rateAvailable: false,
+            completeFreshRate: '—',
+            attemptCoverage: '—',
+            sourceCatalogCoverage: '—',
+            instrumentedObservationCoverage: '—',
+            targetRate: '99%',
+            instrumentedSources: null,
+            catalogSources: null,
+            observedInstrumentedSources: null,
+            sourcesMeetingTarget: null,
+            sourcesBelowTarget: null,
+            sourcesWithoutObservations: null,
+            sourceTargetAttainment: '—',
+            macroCompleteFreshRate: '—',
+            macroTargetMet: null,
+            worstObservedSourceRate: '—',
+            trackedAttempts: null,
+            completeFresh: null,
+            states: {complete: null, incomplete: null, unknown: null},
+            objectiveStatus: 'collecting',
+            objectiveLabel: 'Недостаточно наблюдений · collecting',
+            objectiveClass: 'is-collecting',
+        };
+        if (verified?.reported !== true) return fallback;
+
+        const instrumentedSources = exactNonNegativeCount(verified.instrumented_sources);
+        const catalogSources = exactNonNegativeCount(verified.catalog_sources);
+        const sourceCatalogCoverage = boundedPercentage(
+            verified.source_catalog_coverage_pct
+        );
+        const observedInstrumentedSources = exactNonNegativeCount(
+            verified.observed_instrumented_sources
+        );
+        const instrumentedObservationCoverage = boundedPercentage(
+            verified.instrumented_source_observation_coverage_pct
+        );
+        const sourcesMeetingTarget = exactNonNegativeCount(
+            verified.sources_meeting_target
+        );
+        const sourcesBelowTarget = exactNonNegativeCount(
+            verified.sources_below_target
+        );
+        const sourcesWithoutObservations = exactNonNegativeCount(
+            verified.sources_without_observations
+        );
+        const sourceTargetAttainment = boundedPercentage(
+            verified.source_target_attainment_pct
+        );
+        const macroCompleteFreshRate = boundedPercentage(
+            verified.macro_complete_fresh_rate_pct
+        );
+        const macroTargetMet = typeof verified.macro_target_met === 'boolean'
+            ? verified.macro_target_met
+            : null;
+        const worstObservedSourceRate = boundedPercentage(
+            verified.worst_observed_source_rate_pct
+        );
+        const trackedAttempts = exactNonNegativeCount(verified.tracked_attempts);
+        const completeFresh = exactNonNegativeCount(verified.complete_fresh);
+        const complete = exactNonNegativeCount(verified.states?.complete);
+        const incomplete = exactNonNegativeCount(verified.states?.incomplete);
+        const unknown = exactNonNegativeCount(verified.states?.unknown);
+        const attemptCoverage = boundedPercentage(
+            verified.coverage_of_all_parser_attempts_pct
+        );
+        const completeFreshRate = boundedPercentage(verified.complete_fresh_rate_pct);
+        const target = boundedPercentage(verified.target_rate_pct);
+        const objectiveStatus = String(verified.objective_status || '');
+        const parentStatusValid = ['collecting', 'observed'].includes(
+            parentMeasurementStatus
+        );
+        const eligibleAttempts = exactNonNegativeCount(allParserAttempts);
+        const countsValid = [
+            instrumentedSources,
+            catalogSources,
+            observedInstrumentedSources,
+            sourcesMeetingTarget,
+            sourcesBelowTarget,
+            sourcesWithoutObservations,
+            trackedAttempts,
+            completeFresh,
+            complete,
+            incomplete,
+            unknown,
+            eligibleAttempts,
+        ]
+            .every((value) => value !== null)
+            && instrumentedSources <= catalogSources
+            && observedInstrumentedSources <= instrumentedSources
+            && sourcesMeetingTarget + sourcesBelowTarget === observedInstrumentedSources
+            && sourcesWithoutObservations === instrumentedSources - observedInstrumentedSources
+            && trackedAttempts <= eligibleAttempts
+            && completeFresh <= complete
+            && sourcesMeetingTarget <= completeFresh
+            && !(completeFresh === trackedAttempts && sourcesBelowTarget > 0)
+            && complete + incomplete + unknown === trackedAttempts;
+        const ratioMatches = (numerator, denominator, reported) => {
+            if (denominator === 0) return numerator === 0 && reported === null;
+            const expected = Math.round((numerator / denominator) * 10000) / 100;
+            return reported !== null && Math.abs(reported - expected) <= 0.011;
+        };
+        const coverageCountsValid = countsValid
+            && ratioMatches(instrumentedSources, catalogSources, sourceCatalogCoverage)
+            && ratioMatches(
+                observedInstrumentedSources,
+                instrumentedSources,
+                instrumentedObservationCoverage
+            )
+            && ratioMatches(
+                sourcesMeetingTarget,
+                instrumentedSources,
+                sourceTargetAttainment
+            )
+            && ratioMatches(trackedAttempts, eligibleAttempts, attemptCoverage);
+        const macroBoundsValid = (() => {
+            if (!countsValid) return false;
+            if (instrumentedSources === 0) {
+                return macroCompleteFreshRate === null
+                    && worstObservedSourceRate === null;
+            }
+            if (macroCompleteFreshRate === null) return false;
+            const lower = (sourcesMeetingTarget * 99) / instrumentedSources;
+            const upper = (
+                (sourcesMeetingTarget * 100) + (sourcesBelowTarget * 99)
+            ) / instrumentedSources;
+            if (
+                macroCompleteFreshRate + 0.011 < lower
+                || macroCompleteFreshRate - 0.011 > upper
+                || macroCompleteFreshRate - 0.011 > instrumentedObservationCoverage
+            ) return false;
+            if (observedInstrumentedSources === 0) {
+                return macroCompleteFreshRate === 0 && worstObservedSourceRate === null;
+            }
+            if (worstObservedSourceRate === null) return false;
+            const observedMean = (macroCompleteFreshRate * instrumentedSources)
+                / observedInstrumentedSources;
+            return worstObservedSourceRate - 0.011 <= observedMean
+                && !(sourcesBelowTarget === 0 && worstObservedSourceRate < 99)
+                && !(sourcesBelowTarget > 0 && worstObservedSourceRate > 99);
+        })();
+        const emptyValid = trackedAttempts === 0
+            && completeFresh === 0
+            && completeFreshRate === null
+            && objectiveStatus === 'collecting';
+        const observedValid = trackedAttempts > 0
+            && completeFreshRate !== null
+            && ratioMatches(completeFresh, trackedAttempts, completeFreshRate);
+        const allCoverageGatesMet = catalogSources > 0
+            && instrumentedSources * 100 >= 99 * catalogSources
+            && instrumentedSources > 0
+            && observedInstrumentedSources * 100 >= 99 * instrumentedSources
+            && eligibleAttempts > 0
+            && trackedAttempts * 100 >= 99 * eligibleAttempts;
+        const sourceTargetGateMet = instrumentedSources > 0
+            && sourcesMeetingTarget * 100 >= 99 * instrumentedSources;
+        const macroTargetGateValid = macroTargetMet !== null
+            && (!macroTargetMet || (
+                macroCompleteFreshRate !== null
+                && macroCompleteFreshRate + 0.011 >= 99
+            ));
+        const expectedObjective = parentMeasurementStatus !== 'observed'
+            || !allCoverageGatesMet
+            || completeFreshRate === null
+            ? 'collecting'
+            : (
+                completeFresh * 100 >= 99 * trackedAttempts
+                    && sourceTargetGateMet
+                    && macroTargetMet
+                    ? 'met'
+                    : 'miss'
+            );
+        if (
+            !coverageCountsValid
+            || !macroBoundsValid
+            || !macroTargetGateValid
+            || !parentStatusValid
+            || target !== 99
+            || (!emptyValid && !observedValid)
+            || objectiveStatus !== expectedObjective
+        ) return fallback;
+
+        const objectiveLabels = {
+            collecting: 'Собираем наблюдения · collecting',
+            met: 'Цель достигнута · met',
+            miss: 'Цель не достигнута · miss',
+        };
+        return {
+            reported: true,
+            hasObservations: trackedAttempts > 0,
+            rateAvailable: completeFreshRate !== null,
+            completeFreshRate: percentage(completeFreshRate),
+            attemptCoverage: percentage(attemptCoverage),
+            sourceCatalogCoverage: percentage(sourceCatalogCoverage),
+            instrumentedObservationCoverage: percentage(
+                instrumentedObservationCoverage
+            ),
+            targetRate: percentage(target),
+            instrumentedSources,
+            catalogSources,
+            observedInstrumentedSources,
+            sourcesMeetingTarget,
+            sourcesBelowTarget,
+            sourcesWithoutObservations,
+            sourceTargetAttainment: percentage(sourceTargetAttainment),
+            macroCompleteFreshRate: percentage(macroCompleteFreshRate),
+            macroTargetMet,
+            worstObservedSourceRate: percentage(worstObservedSourceRate),
+            trackedAttempts,
+            completeFresh,
+            states: {complete, incomplete, unknown},
+            objectiveStatus,
+            objectiveLabel: objectiveLabels[objectiveStatus],
+            objectiveClass: `is-${objectiveStatus}`,
+        };
+    };
+
     const buildReliabilityViewModel = (reliability, selectedWindow = null) => {
         const windows = Array.isArray(reliability?.windows) ? reliability.windows : [];
         const requestedWindow = selectedWindow || reliability?.default_window || '24h';
         const window = windows.find((item) => item?.window === requestedWindow) || windows[0] || null;
+        const readiness = reliability?.methodology?.combined_slo_readiness;
+        const readinessAllowsObserved = readiness === undefined || readiness === 'ready';
+        const stale = reliability?.stale_cache === true;
+        const measurementStatus = !stale
+            && window?.measurement_status === 'observed'
+            && readinessAllowsObserved
+            ? 'observed'
+            : 'collecting';
         const measurementStatusValid = Boolean(
             window
             && ['collecting', 'observed'].includes(window.measurement_status)
@@ -35,12 +280,16 @@
         );
         const observed = Boolean(
             ratesAvailable
-            && window.measurement_status === 'observed'
+            && measurementStatus === 'observed'
             && window.rates_observed === true
         );
         const preliminary = ratesAvailable && !observed;
         const counts = window?.counts || {};
-        const stale = reliability?.stale_cache === true;
+        const verifiedCompleteness = buildVerifiedCompleteness(
+            window?.verified_completeness,
+            measurementStatus,
+            window?.eligible_attempts
+        );
         const badge = observed
             ? 'Наблюдаемый срез'
             : (preliminary ? 'Предварительный срез' : 'Накапливаем статистику');
@@ -69,6 +318,7 @@
                 timedOut: window ? nonNegativeCount(counts.timed_out) : null,
                 skipped: window ? nonNegativeCount(counts.skipped) : null,
             },
+            verifiedCompleteness,
             generatedAt: reliability?.generated_at || null,
             message: reliability?.message || 'Накапливаем статистику',
         };

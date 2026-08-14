@@ -80,6 +80,19 @@ The import and API contracts are documented in `LIBRARY_FULL_ART.md`.
   schedule ledger is complete. Missing, malformed, inconsistent, or legacy
   estimated telemetry renders as “Накапливаем статистику” and never falls back
   to a synthetic 100%.
+- Every reliability window also shows verified extraction completeness as a
+  separate SLO: fresh responses normalized without unexplained loss, the 99%
+  target, instrumented/catalog source rollout, observed instrumented cohort,
+  tracked-attempt coverage, and complete/incomplete/unknown states. The weighted
+  attempt rate is separate from source-target attainment, the unweighted macro
+  rate (unobserved instrumented sources contribute zero), and the worst observed
+  source. All three coverage gates must reach 99%, at least 99% of instrumented
+  sources must individually meet the target, and the parent window must be
+  `observed` before the objective can become `met`; a measured macro-gate failure
+  is `miss`. This evidence covers the received upstream response through
+  normalization; upstream catalog completeness still depends on its baseline or
+  reported totals and is not proven for every source. Missing or contradictory
+  telemetry renders as “Недостаточно наблюдений”, never as 100%.
 - Statistics tabs load on demand and preserve `stats`, `stats_q`,
   `stats_format`, `stats_rank`, and `stats_period` in the URL.
 - Card rows link to `stats=card` using the English card name. The card module

@@ -389,6 +389,163 @@
             countCard('Таймауты', model.counts.timedOut, 'завершены по лимиту времени')
         );
 
+        const verified = model.verifiedCompleteness || {
+            reported: false,
+            hasObservations: false,
+            completeFreshRate: '—',
+            attemptCoverage: '—',
+            sourceCatalogCoverage: '—',
+            instrumentedObservationCoverage: '—',
+            targetRate: '99%',
+            instrumentedSources: null,
+            catalogSources: null,
+            observedInstrumentedSources: null,
+            sourcesMeetingTarget: null,
+            sourcesBelowTarget: null,
+            sourcesWithoutObservations: null,
+            sourceTargetAttainment: '—',
+            macroCompleteFreshRate: '—',
+            worstObservedSourceRate: '—',
+            trackedAttempts: null,
+            completeFresh: null,
+            states: {complete: null, incomplete: null, unknown: null},
+            objectiveLabel: 'Недостаточно наблюдений · collecting',
+            objectiveClass: 'is-collecting',
+        };
+        const completeness = document.createElement('section');
+        completeness.className = 'parsing-completeness';
+        completeness.setAttribute('aria-labelledby', 'parsing-completeness-title');
+        const completenessHead = document.createElement('header');
+        completenessHead.className = 'parsing-completeness-head';
+        const completenessHeadingGroup = document.createElement('div');
+        const completenessHeading = document.createElement('h4');
+        completenessHeading.id = 'parsing-completeness-title';
+        completenessHeading.textContent = 'Проверенная полнота извлечения';
+        const completenessCopy = document.createElement('p');
+        completenessCopy.textContent = 'Полученный ответ нормализован без необъяснимых потерь. Полнота каталога upstream отдельно ограничена baseline или собственными totals источника и пока не доказана для всех источников.';
+        completenessHeadingGroup.append(completenessHeading, completenessCopy);
+        const completenessBadge = document.createElement('span');
+        completenessBadge.className = `parsing-reliability-badge ${verified.objectiveClass || 'is-collecting'}`;
+        completenessBadge.textContent = `Цель ${verified.targetRate || '99%'} · ${verified.objectiveLabel || 'Недостаточно наблюдений · collecting'}`;
+        completenessHead.append(completenessHeadingGroup, completenessBadge);
+
+        const completenessRates = document.createElement('div');
+        completenessRates.className = 'parsing-completeness-rates';
+        completenessRates.append(
+            rateCard(
+                'Свежие ответы без потерь извлечения · weighted по попыткам',
+                verified.completeFreshRate,
+                verified.hasObservations
+                    ? 'Взвешено числом попыток: частый источник влияет сильнее редкого.'
+                    : 'Недостаточно наблюдений: процент пока не считается.',
+                'is-primary'
+            ),
+            rateCard(
+                'Целевой уровень',
+                verified.targetRate,
+                'Нужны наблюдаемое окно, три coverage gates и выполнение цели минимум 99% источников.'
+            )
+        );
+
+        const ratioDetail = (numerator, denominator, noun) => (
+            numerator === null || numerator === undefined
+            || denominator === null || denominator === undefined
+                ? 'Недостаточно наблюдений.'
+                : `${integerFormatter.format(numerator)} из ${integerFormatter.format(denominator)} ${noun}.`
+        );
+        const completenessSourceRates = document.createElement('div');
+        completenessSourceRates.className = 'parsing-completeness-source-rates';
+        completenessSourceRates.append(
+            rateCard(
+                'Источники, выполняющие 99%',
+                verified.sourceTargetAttainment,
+                ratioDetail(
+                    verified.sourcesMeetingTarget,
+                    verified.instrumentedSources,
+                    'инструментированных источников выполняют цель'
+                ),
+                'is-primary'
+            ),
+            rateCard(
+                'Macro rate по источникам',
+                verified.macroCompleteFreshRate,
+                'Невзвешенное среднее по источникам; источник без наблюдений даёт 0%.'
+            ),
+            rateCard(
+                'Худший наблюдавшийся источник',
+                verified.worstObservedSourceRate,
+                'Минимальная доля fresh-ответов без потерь извлечения среди наблюдавшихся источников.'
+            )
+        );
+
+        const completenessGates = document.createElement('div');
+        completenessGates.className = 'parsing-completeness-gates';
+        completenessGates.append(
+            rateCard(
+                'Rollout источников',
+                verified.sourceCatalogCoverage,
+                ratioDetail(
+                    verified.instrumentedSources,
+                    verified.catalogSources,
+                    'источников каталога инструментировано'
+                )
+            ),
+            rateCard(
+                'Наблюдение cohort',
+                verified.instrumentedObservationCoverage,
+                ratioDetail(
+                    verified.observedInstrumentedSources,
+                    verified.instrumentedSources,
+                    'инструментированных источников наблюдалось'
+                )
+            ),
+            rateCard(
+                'Покрытие попыток',
+                verified.attemptCoverage,
+                ratioDetail(
+                    verified.trackedAttempts,
+                    model.eligibleAttempts,
+                    'eligible-попыток проверено'
+                )
+            )
+        );
+
+        const completenessCounts = document.createElement('div');
+        completenessCounts.className = 'parsing-completeness-counts';
+        completenessCounts.append(
+            countCard('Проверено попыток', verified.trackedAttempts, 'tracked attempts'),
+            countCard('Fresh без потерь', verified.completeFresh, 'новые ответы без потерь извлечения'),
+            countCard('Complete', verified.states?.complete, 'нет необъяснимых потерь'),
+            countCard('Incomplete', verified.states?.incomplete, 'обнаружены потери извлечения'),
+            countCard('Unknown', verified.states?.unknown, 'результат не доказан')
+        );
+        const completenessSourceCounts = document.createElement('div');
+        completenessSourceCounts.className = 'parsing-completeness-source-counts';
+        completenessSourceCounts.append(
+            countCard('Выполняют 99%', verified.sourcesMeetingTarget, 'источники на целевом уровне'),
+            countCard('Ниже 99%', verified.sourcesBelowTarget, 'наблюдались, но цель не выполнена'),
+            countCard('Без наблюдений', verified.sourcesWithoutObservations, 'в macro rate учитываются как 0%')
+        );
+        completeness.append(
+            completenessHead,
+            completenessRates,
+            completenessSourceRates,
+            completenessGates,
+            completenessSourceCounts,
+            completenessCounts
+        );
+        if (!verified.reported || !verified.hasObservations) {
+            const completenessEmpty = document.createElement('div');
+            completenessEmpty.className = 'parsing-completeness-empty';
+            completenessEmpty.setAttribute('role', 'status');
+            const completenessEmptyTitle = document.createElement('strong');
+            completenessEmptyTitle.textContent = 'Недостаточно наблюдений';
+            const completenessEmptyCopy = document.createElement('p');
+            completenessEmptyCopy.textContent = 'API ещё не вернул достаточную проверенную выборку. Это состояние collecting и оно не считается 100%.';
+            completenessEmpty.append(completenessEmptyTitle, completenessEmptyCopy);
+            completeness.append(completenessEmpty);
+        }
+
         const foot = document.createElement('p');
         foot.className = 'parsing-reliability-meta';
         const metaParts = [
@@ -405,7 +562,7 @@
             if (!Number.isNaN(generated.getTime())) metaParts.push(`срез: ${dateFormatter.format(generated)}`);
         }
         foot.textContent = metaParts.join(' · ');
-        reliabilityHost.replaceChildren(header, windowNav, rates, counts, foot);
+        reliabilityHost.replaceChildren(header, windowNav, rates, counts, completeness, foot);
     };
 
     const detailLabels = {

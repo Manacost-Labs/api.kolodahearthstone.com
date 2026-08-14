@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+const ANALYTICS_RELIABILITY_STALE_CACHE_MAX_AGE_SECONDS = 300;
+
 /**
  * Read-only integration with the local Hearthstone Data API.
  *
@@ -329,10 +331,299 @@ function analytics_reliability_count($value): int
     return max(0, (int)$value);
 }
 
+function analytics_reliability_exact_count($value): ?int
+{
+    if (!is_numeric($value)) {
+        return null;
+    }
+    $number = (float)$value;
+    if (!is_finite($number) || $number < 0 || floor($number) !== $number) {
+        return null;
+    }
+    return (int)$number;
+}
+
+function analytics_empty_verified_completeness(): array
+{
+    return [
+        'reported' => false,
+        'instrumented_sources' => null,
+        'catalog_sources' => null,
+        'source_catalog_coverage_pct' => null,
+        'observed_instrumented_sources' => null,
+        'instrumented_source_observation_coverage_pct' => null,
+        'sources_meeting_target' => null,
+        'sources_below_target' => null,
+        'sources_without_observations' => null,
+        'source_target_attainment_pct' => null,
+        'macro_complete_fresh_rate_pct' => null,
+        'macro_target_met' => null,
+        'worst_observed_source_rate_pct' => null,
+        'tracked_attempts' => null,
+        'complete_fresh' => null,
+        'states' => [
+            'complete' => null,
+            'incomplete' => null,
+            'unknown' => null,
+        ],
+        'coverage_of_all_parser_attempts_pct' => null,
+        'complete_fresh_rate_pct' => null,
+        'target_rate_pct' => 99.0,
+        'objective_status' => 'collecting',
+    ];
+}
+
+function analytics_normalize_verified_completeness(
+    $raw,
+    int $allParserAttempts,
+    bool $parentCountsConsistent,
+    string $parentMeasurementStatus
+): array {
+    $empty = analytics_empty_verified_completeness();
+    if (!$parentCountsConsistent || !is_array($raw) || !is_array($raw['states'] ?? null)) {
+        return $empty;
+    }
+
+    $instrumentedSources = analytics_reliability_exact_count(
+        $raw['instrumented_sources'] ?? null
+    );
+    $catalogSources = analytics_reliability_exact_count($raw['catalog_sources'] ?? null);
+    $sourceCatalogCoverage = analytics_reliability_percentage(
+        $raw['source_catalog_coverage_pct'] ?? null
+    );
+    $observedInstrumentedSources = analytics_reliability_exact_count(
+        $raw['observed_instrumented_sources'] ?? null
+    );
+    $instrumentedObservationCoverage = analytics_reliability_percentage(
+        $raw['instrumented_source_observation_coverage_pct'] ?? null
+    );
+    $sourcesMeetingTarget = analytics_reliability_exact_count(
+        $raw['sources_meeting_target'] ?? null
+    );
+    $sourcesBelowTarget = analytics_reliability_exact_count(
+        $raw['sources_below_target'] ?? null
+    );
+    $sourcesWithoutObservations = analytics_reliability_exact_count(
+        $raw['sources_without_observations'] ?? null
+    );
+    $sourceTargetAttainment = analytics_reliability_percentage(
+        $raw['source_target_attainment_pct'] ?? null
+    );
+    $macroCompleteFreshRate = analytics_reliability_percentage(
+        $raw['macro_complete_fresh_rate_pct'] ?? null
+    );
+    $macroTargetMet = is_bool($raw['macro_target_met'] ?? null)
+        ? $raw['macro_target_met']
+        : null;
+    $worstObservedSourceRate = analytics_reliability_percentage(
+        $raw['worst_observed_source_rate_pct'] ?? null
+    );
+    $trackedAttempts = analytics_reliability_exact_count($raw['tracked_attempts'] ?? null);
+    $completeFresh = analytics_reliability_exact_count($raw['complete_fresh'] ?? null);
+    $complete = analytics_reliability_exact_count($raw['states']['complete'] ?? null);
+    $incomplete = analytics_reliability_exact_count($raw['states']['incomplete'] ?? null);
+    $unknown = analytics_reliability_exact_count($raw['states']['unknown'] ?? null);
+    $coverage = analytics_reliability_percentage(
+        $raw['coverage_of_all_parser_attempts_pct'] ?? null
+    );
+    $completeFreshRate = analytics_reliability_percentage(
+        $raw['complete_fresh_rate_pct'] ?? null
+    );
+    $target = analytics_reliability_percentage($raw['target_rate_pct'] ?? null);
+    $objective = (string)($raw['objective_status'] ?? '');
+
+    if (
+        $instrumentedSources === null
+        || $catalogSources === null
+        || $observedInstrumentedSources === null
+        || $sourcesMeetingTarget === null
+        || $sourcesBelowTarget === null
+        || $sourcesWithoutObservations === null
+        || $macroTargetMet === null
+        || $trackedAttempts === null
+        || $completeFresh === null
+        || $complete === null
+        || $incomplete === null
+        || $unknown === null
+        || $target === null
+        || abs($target - 99.0) > 0.001
+        || !in_array($objective, ['collecting', 'met', 'miss'], true)
+        || !in_array($parentMeasurementStatus, ['collecting', 'observed'], true)
+        || $instrumentedSources > $catalogSources
+        || $observedInstrumentedSources > $instrumentedSources
+        || $sourcesMeetingTarget + $sourcesBelowTarget !== $observedInstrumentedSources
+        || $sourcesWithoutObservations !== $instrumentedSources - $observedInstrumentedSources
+        || $trackedAttempts > $allParserAttempts
+        || $completeFresh > $complete
+        || $sourcesMeetingTarget > $completeFresh
+        || ($completeFresh === $trackedAttempts && $sourcesBelowTarget > 0)
+        || $complete + $incomplete + $unknown !== $trackedAttempts
+        || (
+            $macroTargetMet
+            && ($macroCompleteFreshRate === null || $macroCompleteFreshRate + 0.011 < 99.0)
+        )
+    ) {
+        return $empty;
+    }
+
+    if ($catalogSources === 0) {
+        if ($instrumentedSources !== 0 || $sourceCatalogCoverage !== null) {
+            return $empty;
+        }
+    } else {
+        $expectedCatalogCoverage = round(($instrumentedSources / $catalogSources) * 100, 2);
+        if (
+            $sourceCatalogCoverage === null
+            || abs($sourceCatalogCoverage - $expectedCatalogCoverage) > 0.011
+        ) {
+            return $empty;
+        }
+    }
+
+    if ($instrumentedSources === 0) {
+        if (
+            $observedInstrumentedSources !== 0
+            || $instrumentedObservationCoverage !== null
+            || $sourceTargetAttainment !== null
+            || $macroCompleteFreshRate !== null
+        ) {
+            return $empty;
+        }
+    } else {
+        $expectedObservationCoverage = round(
+            ($observedInstrumentedSources / $instrumentedSources) * 100,
+            2
+        );
+        if (
+            $instrumentedObservationCoverage === null
+            || abs($instrumentedObservationCoverage - $expectedObservationCoverage) > 0.011
+        ) {
+            return $empty;
+        }
+        $expectedTargetAttainment = round(
+            ($sourcesMeetingTarget / $instrumentedSources) * 100,
+            2
+        );
+        if (
+            $sourceTargetAttainment === null
+            || abs($sourceTargetAttainment - $expectedTargetAttainment) > 0.011
+            || $macroCompleteFreshRate === null
+        ) {
+            return $empty;
+        }
+
+        $macroLowerBound = ($sourcesMeetingTarget * 99.0) / $instrumentedSources;
+        $macroUpperBound = (
+            ($sourcesMeetingTarget * 100.0) + ($sourcesBelowTarget * 99.0)
+        ) / $instrumentedSources;
+        if (
+            $macroCompleteFreshRate + 0.011 < $macroLowerBound
+            || $macroCompleteFreshRate - 0.011 > $macroUpperBound
+            || $macroCompleteFreshRate - 0.011 > $instrumentedObservationCoverage
+        ) {
+            return $empty;
+        }
+    }
+
+    if ($observedInstrumentedSources === 0) {
+        $expectedEmptyMacro = $instrumentedSources === 0 ? null : 0.0;
+        if (
+            $worstObservedSourceRate !== null
+            || $macroCompleteFreshRate !== $expectedEmptyMacro
+        ) {
+            return $empty;
+        }
+    } elseif ($worstObservedSourceRate === null) {
+        return $empty;
+    } else {
+        $observedMean = ($macroCompleteFreshRate * $instrumentedSources)
+            / $observedInstrumentedSources;
+        if ($worstObservedSourceRate - 0.011 > $observedMean) {
+            return $empty;
+        }
+        if (
+            ($sourcesBelowTarget === 0 && $worstObservedSourceRate < 99.0)
+            || ($sourcesBelowTarget > 0 && $worstObservedSourceRate > 99.0)
+        ) {
+            return $empty;
+        }
+    }
+
+    if ($allParserAttempts === 0) {
+        if ($trackedAttempts !== 0 || $coverage !== null) {
+            return $empty;
+        }
+    } else {
+        $expectedCoverage = round(($trackedAttempts / $allParserAttempts) * 100, 2);
+        if ($coverage === null || abs($coverage - $expectedCoverage) > 0.011) {
+            return $empty;
+        }
+    }
+
+    if ($trackedAttempts === 0) {
+        if ($completeFresh !== 0 || $completeFreshRate !== null || $objective !== 'collecting') {
+            return $empty;
+        }
+    } else {
+        $expectedRate = round(($completeFresh / $trackedAttempts) * 100, 2);
+        if ($completeFreshRate === null || abs($completeFreshRate - $expectedRate) > 0.011) {
+            return $empty;
+        }
+        $allCoverageGatesMet = $catalogSources > 0
+            && $instrumentedSources * 100 >= 99 * $catalogSources
+            && $instrumentedSources > 0
+            && $observedInstrumentedSources * 100 >= 99 * $instrumentedSources
+            && $allParserAttempts > 0
+            && $trackedAttempts * 100 >= 99 * $allParserAttempts;
+        $sourceTargetGateMet = $instrumentedSources > 0
+            && $sourcesMeetingTarget * 100 >= 99 * $instrumentedSources;
+        $expectedObjective = $parentMeasurementStatus !== 'observed' || !$allCoverageGatesMet
+            ? 'collecting'
+            : (
+                $completeFresh * 100 >= 99 * $trackedAttempts
+                    && $sourceTargetGateMet
+                    && $macroTargetMet
+                    ? 'met'
+                    : 'miss'
+            );
+        if ($objective !== $expectedObjective) {
+            return $empty;
+        }
+    }
+
+    return [
+        'reported' => true,
+        'instrumented_sources' => $instrumentedSources,
+        'catalog_sources' => $catalogSources,
+        'source_catalog_coverage_pct' => $sourceCatalogCoverage,
+        'observed_instrumented_sources' => $observedInstrumentedSources,
+        'instrumented_source_observation_coverage_pct' => $instrumentedObservationCoverage,
+        'sources_meeting_target' => $sourcesMeetingTarget,
+        'sources_below_target' => $sourcesBelowTarget,
+        'sources_without_observations' => $sourcesWithoutObservations,
+        'source_target_attainment_pct' => $sourceTargetAttainment,
+        'macro_complete_fresh_rate_pct' => $macroCompleteFreshRate,
+        'macro_target_met' => $macroTargetMet,
+        'worst_observed_source_rate_pct' => $worstObservedSourceRate,
+        'tracked_attempts' => $trackedAttempts,
+        'complete_fresh' => $completeFresh,
+        'states' => [
+            'complete' => $complete,
+            'incomplete' => $incomplete,
+            'unknown' => $unknown,
+        ],
+        'coverage_of_all_parser_attempts_pct' => $coverage,
+        'complete_fresh_rate_pct' => $completeFreshRate,
+        'target_rate_pct' => $target,
+        'objective_status' => $objective,
+    ];
+}
+
 function analytics_normalize_parsing_reliability(
     ?array $envelope,
     bool $cached = false,
-    bool $staleCache = false
+    bool $staleCache = false,
+    ?int $cacheAge = null
 ): array {
     $collecting = [
         'state' => 'collecting',
@@ -343,8 +634,16 @@ function analytics_normalize_parsing_reliability(
         'methodology' => null,
         'cached' => $cached,
         'stale_cache' => $staleCache,
+        'cache_age' => $cacheAge,
         'windows' => [],
     ];
+    if (
+        $staleCache
+        && ($cacheAge === null || $cacheAge > ANALYTICS_RELIABILITY_STALE_CACHE_MAX_AGE_SECONDS)
+    ) {
+        $collecting['message'] = 'Сохранённый отчёт устарел; ждём свежую телеметрию.';
+        return $collecting;
+    }
     if ($envelope === null || !is_array($envelope['data'] ?? null)) {
         return $collecting;
     }
@@ -424,7 +723,9 @@ function analytics_normalize_parsing_reliability(
         $coverageRatio = round(max(0.0, min(1.0, $coverageRatio)), 4);
         $rawMeasurementStatus = (string)($rawWindow['measurement_status'] ?? '');
         $measurementStatusValid = in_array($rawMeasurementStatus, ['collecting', 'observed'], true);
-        $measurementStatus = $rawMeasurementStatus === 'observed'
+        $measurementStatus = !$staleCache
+            && $rawMeasurementStatus === 'observed'
+            && $combinedSloReadiness === 'ready'
             ? 'observed'
             : 'collecting';
         $fullFresh = analytics_reliability_percentage($rawWindow['full_fresh_rate_pct'] ?? null);
@@ -437,6 +738,13 @@ function analytics_normalize_parsing_reliability(
             && $acceptedFresh !== null
             && $dataAvailable !== null;
         $ratesObserved = $measurementStatus === 'observed' && $ratesAvailable;
+
+        $verifiedCompleteness = analytics_normalize_verified_completeness(
+            $rawWindow['verified_completeness'] ?? null,
+            $eligibleAttempts,
+            $countsConsistent && $measurementStatusValid,
+            $measurementStatus
+        );
 
         $windows[] = [
             'window' => $window,
@@ -454,6 +762,7 @@ function analytics_normalize_parsing_reliability(
             'data_available_rate_pct' => $dataAvailable,
             'rates_available' => $ratesAvailable,
             'rates_observed' => $ratesObserved,
+            'verified_completeness' => $verifiedCompleteness,
         ];
     }
 
@@ -484,6 +793,7 @@ function analytics_normalize_parsing_reliability(
         ],
         'cached' => $cached,
         'stale_cache' => $staleCache,
+        'cache_age' => $cacheAge,
         'windows' => $windows,
     ];
 }
@@ -495,7 +805,8 @@ function analytics_attach_parsing_reliability(array $overview): array
         $overview['parsing_reliability'] = analytics_normalize_parsing_reliability(
             $fetch['payload'],
             (bool)$fetch['cached'],
-            (bool)$fetch['stale_cache']
+            (bool)$fetch['stale_cache'],
+            isset($fetch['cache_age']) ? (int)$fetch['cache_age'] : null
         );
     } catch (Throwable $ignored) {
         $overview['parsing_reliability'] = analytics_normalize_parsing_reliability(null);
