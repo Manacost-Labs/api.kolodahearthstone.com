@@ -62,7 +62,10 @@ PERIODS = (*ROLLING_PERIODS, DEFAULT_PATCH_PERIOD, *NAMED_PERIODS)
 COINS = ("any_player",)
 MIN_GAMES = (100, 250, 500, 1000, 2500, 5000)
 CURRENT_MIN_GAMES = 50
-DEFAULT_RUN_DEADLINE_SECONDS = 60 * 60
+# Scrape.do can legitimately need more than an hour for the full 108-slice
+# matrix. The checkpoint still bounds retries and lets an interrupted run
+# resume, while this deadline avoids turning a healthy slow run into an LKG.
+DEFAULT_RUN_DEADLINE_SECONDS = 90 * 60
 CHECKPOINT_SCHEMA_VERSION = 1
 CHECKPOINT_LABEL = "refresh_checkpoint_v1"
 CHECKPOINT_TTL = timedelta(hours=2)

@@ -1634,7 +1634,7 @@ def test_hsguru_matrix_systemd_unit_has_outer_hard_timeout() -> None:
     )
     unit = unit_path.read_text(encoding="utf-8")
 
-    assert "TimeoutStartSec=65min" in unit
+    assert "TimeoutStartSec=100min" in unit
     assert "TimeoutStopSec=30s" in unit
     assert "Restart=on-failure" in unit
     assert "RestartSec=10min" in unit
