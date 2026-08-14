@@ -255,6 +255,34 @@ def _terminal_ai_reason_code(status: dict[str, Any]) -> str:
     return "unknown"
 
 
+def _is_verified_vicious_pending_temporal_lkg(status: dict[str, Any]) -> bool:
+    """Recognize the exact deterministic state that needs no repeated AI audit."""
+
+    if not (
+        status.get("source_id") == "vicious_syndicate_radars"
+        and status.get("state") == SourceState.OK
+        and status.get("effective_state") == EFFECTIVE_OK_CACHED
+        and status.get("serving_cached_dataset") is True
+        and status.get("cached_after_failure") is True
+        and status.get("fresh_candidate_published") is False
+        and status.get("cached_content_temporally_grandfathered") is True
+        and status.get("last_refresh_state") == SourceState.QUALITY_ERROR
+        and status.get("failure_reason_code") == "unavailable"
+        and status.get("upstream_state") == "upstream_publication_pending"
+        and status.get("last_refresh_upstream_state")
+        == "upstream_publication_pending"
+    ):
+        return False
+
+    from .vicious_syndicate import verified_upstream_pending_readiness
+
+    return bool(
+        verified_upstream_pending_readiness(
+            status.get("last_refresh_upstream_readiness")
+        )
+    )
+
+
 async def _enqueue_terminal_failure_ai_jobs(
     statuses: list[dict[str, Any]],
 ) -> None:
@@ -277,6 +305,14 @@ async def _enqueue_terminal_failure_ai_jobs(
             or status.get("skipped") is True
             or (isinstance(review, dict) and review.get("quarantine") is True)
         ):
+            continue
+        if _is_verified_vicious_pending_temporal_lkg(status):
+            _best_effort_log_action(
+                "ai.diagnosis.skipped",
+                source_id=source_id,
+                level="info",
+                extra={"reason": "verified_upstream_publication_pending"},
+            )
             continue
         state = str(status.get("state") or "")
         failed_live_refresh = state in FAILURE_STATES or bool(

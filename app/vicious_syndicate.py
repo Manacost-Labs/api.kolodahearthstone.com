@@ -364,7 +364,9 @@ def _radar_issue_from_html(html: str) -> str:
     return match.group(1) if match else "Unknown"
 
 
-def _recent_readiness_status(readiness: dict[str, Any]) -> bool:
+def readiness_is_recent(readiness: dict[str, Any]) -> bool:
+    """Return whether readiness was proven by a recent full discovery."""
+
     refreshed_raw = str(readiness.get(_READINESS_TIMESTAMP_FIELD) or "").strip()
     try:
         refreshed_at = datetime.fromisoformat(refreshed_raw.replace("Z", "+00:00"))
@@ -374,6 +376,31 @@ def _recent_readiness_status(readiness: dict[str, Any]) -> bool:
         refreshed_at = refreshed_at.replace(tzinfo=UTC)
     age = datetime.now(UTC) - refreshed_at.astimezone(UTC)
     return timedelta(0) <= age < _READINESS_REDISCOVERY_INTERVAL
+
+
+def verified_upstream_pending_readiness(
+    value: object,
+) -> dict[str, Any] | None:
+    """Return normalized recent evidence for a verified temporal upstream gap."""
+
+    readiness = sanitize_upstream_readiness(value)
+    candidate_issue = str(readiness.get("candidate_issue") or "")
+    latest_issue = str(readiness.get("latest_report_issue") or "")
+    radar_urls = readiness.get("radar_urls")
+    blocking_urls = readiness.get("blocking_radar_urls")
+    if not (
+        candidate_issue.isdigit()
+        and latest_issue.isdigit()
+        and int(candidate_issue) < int(latest_issue)
+        and isinstance(radar_urls, list)
+        and radar_urls
+        and isinstance(blocking_urls, list)
+        and blocking_urls
+        and set(blocking_urls) <= set(radar_urls)
+        and readiness_is_recent(readiness)
+    ):
+        return None
+    return readiness
 
 
 def classify_radar_publication(
@@ -471,7 +498,7 @@ async def preflight_known_pending_publication(
         status.get("last_refresh_upstream_readiness")
         or status.get("upstream_readiness")
     )
-    if not _recent_readiness_status(readiness):
+    if not readiness_is_recent(readiness):
         # Only a full discovery advances this timestamp. Cheap pending checks
         # must not postpone the periodic rediscovery forever.
         return

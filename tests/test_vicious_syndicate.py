@@ -17,6 +17,7 @@ from app.vicious_syndicate import (
     preflight_known_pending_publication,
     sanitize_upstream_readiness,
     upstream_publication_metadata,
+    verified_upstream_pending_readiness,
 )
 
 
@@ -652,6 +653,39 @@ class ViciousSyndicateFetchTest(unittest.TestCase):
         self.assertEqual(
             readiness["full_discovery_at"],
             "2026-08-13T23:30:00+00:00",
+        )
+
+    def test_verified_pending_readiness_requires_recent_bounded_evidence(self) -> None:
+        valid = (
+            "https://www.vicioussyndicate.com/wp-content/datareaper/radars/"
+            "Mage/index.html"
+        )
+        evidence = {
+            "latest_report_issue": "355",
+            "candidate_issue": "354",
+            "full_discovery_at": datetime.now(UTC).isoformat(),
+            "radar_urls": [valid],
+            "blocking_radar_urls": [valid],
+        }
+
+        self.assertIsNotNone(verified_upstream_pending_readiness(evidence))
+        self.assertIsNone(
+            verified_upstream_pending_readiness(
+                {**evidence, "blocking_radar_urls": [
+                    "https://www.vicioussyndicate.com/wp-content/datareaper/"
+                    "radars/Other/index.html"
+                ]}
+            )
+        )
+        self.assertIsNone(
+            verified_upstream_pending_readiness(
+                {
+                    **evidence,
+                    "full_discovery_at": (
+                        datetime.now(UTC) - timedelta(hours=7)
+                    ).isoformat(),
+                }
+            )
         )
 
     def test_mixed_radar_issue_classification_is_order_independent(self) -> None:

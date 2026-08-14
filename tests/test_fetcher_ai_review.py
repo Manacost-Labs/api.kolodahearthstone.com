@@ -268,6 +268,149 @@ class FetcherAIReviewIntegrationTest(unittest.TestCase):
         )
         self.assertEqual(status["ai_diagnosis"]["failure_domain"], "protection")
 
+    def test_verified_vicious_pending_lkg_skips_repeated_ai_diagnosis(self) -> None:
+        from datetime import UTC, datetime
+
+        radar_url = (
+            "https://www.vicioussyndicate.com/wp-content/datareaper/radars/"
+            "Egg%20Death%20Knight/index.html"
+        )
+        status = {
+            "source_id": "vicious_syndicate_radars",
+            "state": SourceState.OK,
+            "effective_state": EFFECTIVE_OK_CACHED,
+            "serving_cached_dataset": True,
+            "cached_after_failure": True,
+            "fresh_candidate_published": False,
+            "cached_content_temporally_grandfathered": True,
+            "last_refresh_state": SourceState.QUALITY_ERROR,
+            "failure_reason_code": "unavailable",
+            "upstream_state": "upstream_publication_pending",
+            "last_refresh_upstream_state": "upstream_publication_pending",
+            "last_refresh_upstream_readiness": {
+                "latest_report_issue": "355",
+                "candidate_issue": "354",
+                "full_discovery_at": datetime.now(UTC).isoformat(),
+                "radar_urls": [radar_url],
+                "blocking_radar_urls": [radar_url],
+            },
+        }
+
+        async def scenario() -> None:
+            _begin_deferred_ai_collection()
+            await _flush_deferred_ai_jobs("pending-run", [status])
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "HS_AI_REVIEW_ENABLED": "true",
+                    "HS_AI_REVIEW_DIAGNOSE_FAILURES": "true",
+                },
+                clear=False,
+            ),
+            patch(
+                "app.fetcher._diagnose_candidate_with_ai",
+                new=AsyncMock(),
+            ) as diagnose,
+            patch("app.fetcher.log_action") as log_action,
+        ):
+            asyncio.run(scenario())
+
+        diagnose.assert_not_awaited()
+        skipped = [
+            call
+            for call in log_action.call_args_list
+            if call.args and call.args[0] == "ai.diagnosis.skipped"
+        ]
+        self.assertEqual(len(skipped), 1)
+        self.assertEqual(
+            skipped[0].kwargs["extra"]["reason"],
+            "verified_upstream_publication_pending",
+        )
+        self.assertNotIn(radar_url, _serialized_log_calls(log_action))
+
+    def test_actionable_vicious_lkg_still_gets_ai_diagnosis(self) -> None:
+        base = {
+            "source_id": "vicious_syndicate_radars",
+            "state": SourceState.OK,
+            "effective_state": EFFECTIVE_OK_CACHED,
+            "serving_cached_dataset": True,
+            "cached_after_failure": True,
+            "fresh_candidate_published": False,
+            "cached_content_temporally_grandfathered": True,
+            "last_refresh_state": SourceState.FETCH_ERROR,
+            "failure_reason_code": "transport",
+        }
+
+        async def scenario() -> None:
+            _begin_deferred_ai_collection()
+            await _flush_deferred_ai_jobs("actionable-run", [base])
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "HS_AI_REVIEW_ENABLED": "true",
+                    "HS_AI_REVIEW_DIAGNOSE_FAILURES": "true",
+                },
+                clear=False,
+            ),
+            patch(
+                "app.fetcher._diagnose_candidate_with_ai",
+                new=AsyncMock(return_value=None),
+            ) as diagnose,
+            patch("app.fetcher.log_action"),
+        ):
+            asyncio.run(scenario())
+
+        diagnose.assert_awaited_once()
+
+    def test_invalid_vicious_pending_readiness_still_gets_ai_diagnosis(self) -> None:
+        status = {
+            "source_id": "vicious_syndicate_radars",
+            "state": SourceState.OK,
+            "effective_state": EFFECTIVE_OK_CACHED,
+            "serving_cached_dataset": True,
+            "cached_after_failure": True,
+            "fresh_candidate_published": False,
+            "cached_content_temporally_grandfathered": True,
+            "last_refresh_state": SourceState.QUALITY_ERROR,
+            "failure_reason_code": "unavailable",
+            "upstream_state": "upstream_publication_pending",
+            "last_refresh_upstream_state": "upstream_publication_pending",
+            "last_refresh_upstream_readiness": {
+                "latest_report_issue": "355",
+                "candidate_issue": "354",
+                "full_discovery_at": "not-a-timestamp",
+                "radar_urls": [],
+                "blocking_radar_urls": [],
+            },
+        }
+
+        async def scenario() -> None:
+            _begin_deferred_ai_collection()
+            await _flush_deferred_ai_jobs("invalid-pending-run", [status])
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "HS_AI_REVIEW_ENABLED": "true",
+                    "HS_AI_REVIEW_DIAGNOSE_FAILURES": "true",
+                },
+                clear=False,
+            ),
+            patch(
+                "app.fetcher._diagnose_candidate_with_ai",
+                new=AsyncMock(return_value=None),
+            ) as diagnose,
+            patch("app.fetcher.log_action"),
+        ):
+            asyncio.run(scenario())
+
+        diagnose.assert_awaited_once()
+
     def test_refresh_level_dependency_failure_uses_one_ai_call_for_all_sources(
         self,
     ) -> None:
