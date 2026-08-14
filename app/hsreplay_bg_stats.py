@@ -102,6 +102,23 @@ def _required_non_negative_int(row: dict[str, Any], field: str) -> int:
     return value
 
 
+def _optional_combat_result_pair(
+    row: dict[str, Any],
+) -> tuple[int | None, int | None]:
+    wins = row.get("total_wins")
+    losses = row.get("total_losses")
+    if wins is None and losses is None:
+        return None, None
+    if wins is None or losses is None:
+        raise ValueError(
+            "normal_aggregates.total_wins and total_losses must both be present or null"
+        )
+    return (
+        _required_non_negative_int(row, "total_wins"),
+        _required_non_negative_int(row, "total_losses"),
+    )
+
+
 def _placement_sum(
     row: dict[str, Any],
     *,
@@ -154,8 +171,9 @@ def _minion_stats(row: dict[str, Any]) -> dict[str, Any] | None:
     without_count = 0.0
     with_places = 0.0
     without_places = 0.0
-    wins = 0.0
-    losses = 0.0
+    wins = 0
+    losses = 0
+    combat_results_complete = True
     combat_rounds: list[dict[str, Any]] = []
 
     for item in aggregates:
@@ -178,8 +196,7 @@ def _minion_stats(row: dict[str, Any]) -> dict[str, Any] | None:
             field="sum_of_placements_for_players_without_minion",
             count=c_without,
         )
-        round_wins = _required_non_negative_int(item, "total_wins")
-        round_losses = _required_non_negative_int(item, "total_losses")
+        round_wins, round_losses = _optional_combat_result_pair(item)
         round_avg_with = round_with_places / c_with if c_with else None
         round_avg_without = round_without_places / c_without if c_without else None
         round_impact = (
@@ -191,8 +208,18 @@ def _minion_stats(row: dict[str, Any]) -> dict[str, Any] | None:
         without_count += c_without
         with_places += round_with_places
         without_places += round_without_places
-        wins += round_wins
-        losses += round_losses
+        if round_wins is None or round_losses is None:
+            combat_results_complete = False
+        else:
+            wins += round_wins
+            losses += round_losses
+        round_combat_winrate = (
+            round_wins / (round_wins + round_losses) * 100
+            if round_wins is not None
+            and round_losses is not None
+            and round_wins + round_losses
+            else None
+        )
         combat_rounds.append(
             {
                 "combat_round": int(combat_round) if isinstance(combat_round, int) else None,
@@ -201,10 +228,10 @@ def _minion_stats(row: dict[str, Any]) -> dict[str, Any] | None:
                 "avg_placement_with": _round(round_avg_with),
                 "avg_placement_without": _round(round_avg_without),
                 "impact": _round(round_impact),
-                "combat_winrate": _pct(round_wins / (round_wins + round_losses) * 100 if round_wins + round_losses else None),
-                "combat_winrate_value": _pct_float(round_wins / (round_wins + round_losses) * 100 if round_wins + round_losses else None),
-                "wins": int(round_wins) if round_wins else 0,
-                "losses": int(round_losses) if round_losses else 0,
+                "combat_winrate": _pct(round_combat_winrate),
+                "combat_winrate_value": _pct_float(round_combat_winrate),
+                "wins": round_wins,
+                "losses": round_losses,
             }
         )
 
@@ -215,7 +242,11 @@ def _minion_stats(row: dict[str, Any]) -> dict[str, Any] | None:
         if avg_with is not None and avg_without is not None
         else None
     )
-    combat_winrate = wins / (wins + losses) * 100 if wins + losses else None
+    combat_winrate = (
+        wins / (wins + losses) * 100
+        if combat_results_complete and wins + losses
+        else None
+    )
     popularity = with_count / (with_count + without_count) * 100 if with_count + without_count else None
     impact_value = _round(impact)
     win_share = _pct(combat_winrate)

@@ -323,11 +323,21 @@ def _validate_bg_minion_metrics(minion: dict[str, Any], *, path: str) -> None:
             and 1 <= combat_round <= 16,
             f"{round_path}.combat_round must be an integer in 1..16",
         )
-        for field_name in ("games_with_minion", "games_without_minion", "wins", "losses"):
+        for field_name in ("games_with_minion", "games_without_minion"):
             _require(
                 _is_non_negative_int(round_row.get(field_name)),
                 f"{round_path}.{field_name} must be a non-negative integer",
             )
+        round_wins = round_row.get("wins")
+        round_losses = round_row.get("losses")
+        _require(
+            (round_wins is None and round_losses is None)
+            or (
+                _is_non_negative_int(round_wins)
+                and _is_non_negative_int(round_losses)
+            ),
+            f"{round_path}.wins and losses must both be non-negative integers or null",
+        )
         for field_name in ("avg_placement_with", "avg_placement_without"):
             _require_optional_range(
                 round_row.get(field_name),

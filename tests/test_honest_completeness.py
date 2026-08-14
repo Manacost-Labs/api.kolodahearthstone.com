@@ -154,6 +154,71 @@ def test_bg_normalizer_rejects_non_integer_counts_and_impossible_placements(
         )
 
 
+def test_bg_missing_combat_result_pair_is_explicitly_unavailable() -> None:
+    result = _minion_stats(
+        {
+            "minion_dbf_id": 59670,
+            "normal_aggregates": [
+                {
+                    "combat_round": 16,
+                    "count_of_games_with_minion": 591,
+                    "count_of_games_without_minion": 15_473,
+                    "sum_of_placements_for_players_with_minion": 810,
+                    "sum_of_placements_for_players_without_minion": 23_913,
+                    "total_wins": None,
+                    "total_losses": None,
+                }
+            ],
+        }
+    )
+
+    assert result is not None
+    assert result["win_share"] is None
+    assert result["combat_winrate_value"] is None
+    assert result["field_availability"]["win_share"] == {
+        "available": False,
+        "reason": "insufficient_current_patch_sample",
+    }
+    assert result["combat_rounds"][0]["wins"] is None
+    assert result["combat_rounds"][0]["losses"] is None
+    validate_structured_schema(
+        {
+            "type": "bg_minions",
+            "completeness_schema_version": 1,
+            "population_completeness": "unverifiable",
+            "upstream_freshness": {
+                "status": "unknown",
+                "reason": "transport_evidence_unavailable",
+                "observed_at": "2026-08-14T03:40:00+00:00",
+                "age_seconds": None,
+                "evidence": [],
+                "response_headers": {},
+            },
+            "minions": [result],
+        }
+    )
+
+
+def test_bg_rejects_half_missing_combat_result_pair() -> None:
+    with pytest.raises(ValueError, match="total_wins and total_losses"):
+        _minion_stats(
+            {
+                "minion_dbf_id": 59670,
+                "normal_aggregates": [
+                    {
+                        "combat_round": 16,
+                        "count_of_games_with_minion": 1,
+                        "count_of_games_without_minion": 1,
+                        "sum_of_placements_for_players_with_minion": 1,
+                        "sum_of_placements_for_players_without_minion": 1,
+                        "total_wins": None,
+                        "total_losses": 1,
+                    }
+                ],
+            }
+        )
+
+
 def test_arena_zero_game_row_keeps_null_rates_with_reason() -> None:
     row = normalize_arena_card_row(
         {
