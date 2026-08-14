@@ -2,15 +2,21 @@ from __future__ import annotations
 
 import asyncio
 import unittest
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import httpx
 
 from app.proxy_errors import ProxyPaymentRequiredError
 from app.vicious_syndicate import (
+    ViciousUpstreamPublicationPending,
     _valid_vicious_response,
     _ViciousProxyCircuit,
+    classify_radar_publication,
     fetch_with_retry,
+    preflight_known_pending_publication,
+    sanitize_upstream_readiness,
+    upstream_publication_metadata,
 )
 
 
@@ -112,6 +118,32 @@ class _RedirectAsyncClient(_FakeAsyncClient):
         )
 
 
+class _PendingRadarAsyncClient(_FakeAsyncClient):
+    requested_urls: list[str] = []
+
+    async def get(self, url: str, headers: dict[str, str] | None = None) -> httpx.Response:
+        type(self).requested_urls.append(url)
+        if "Egg%20Death%20Knight" in url or "Egg Death Knight" in url:
+            return httpx.Response(
+                404,
+                text="<html>not published</html>",
+                request=httpx.Request("GET", url, headers=headers),
+            )
+        raise AssertionError("readiness preflight must stop at known blockers")
+
+
+class _RadarReadinessAsyncClient(_FakeAsyncClient):
+    response_text = ""
+    status_code = 200
+
+    async def get(self, url: str, headers: dict[str, str] | None = None) -> httpx.Response:
+        return httpx.Response(
+            type(self).status_code,
+            text=type(self).response_text,
+            request=httpx.Request("GET", url, headers=headers),
+        )
+
+
 class ViciousSyndicateFetchTest(unittest.TestCase):
     def setUp(self) -> None:
         _FakeAsyncClient.calls = 0
@@ -126,6 +158,7 @@ class ViciousSyndicateFetchTest(unittest.TestCase):
         _ProxyThenDirectAsyncClient.direct_calls = 0
         _RedirectAsyncClient.calls = 0
         _RedirectAsyncClient.last_kwargs = {}
+        _PendingRadarAsyncClient.requested_urls = []
 
     def test_optional_fetch_404_does_not_use_error_logger(self) -> None:
         async def run() -> None:
@@ -449,6 +482,242 @@ class ViciousSyndicateFetchTest(unittest.TestCase):
             self.assertEqual(_ProxyThenDirectAsyncClient.calls, 0)
 
         asyncio.run(run())
+
+    def test_known_pending_preflight_checks_blocker_first_without_paid_fallbacks(self) -> None:
+        egg_url = (
+            "https://www.vicioussyndicate.com/wp-content/datareaper/radars/"
+            "Egg%20Death%20Knight/index.html"
+        )
+        mage_url = (
+            "https://www.vicioussyndicate.com/wp-content/datareaper/radars/"
+            "Mage/index.html"
+        )
+        status = {
+            "last_refresh_at": datetime.now(UTC).isoformat(),
+            "last_refresh_upstream_readiness": {
+                "latest_report_issue": "355",
+                "candidate_issue": "354",
+                "full_discovery_at": datetime.now(UTC).isoformat(),
+                "radar_urls": [mage_url, egg_url],
+                "blocking_radar_urls": [egg_url],
+            }
+        }
+
+        async def run() -> None:
+            with (
+                patch("app.vicious_syndicate.load_status", return_value=status),
+                patch(
+                    "app.vicious_syndicate.httpx.AsyncClient",
+                    _PendingRadarAsyncClient,
+                ),
+                self.assertRaises(ViciousUpstreamPublicationPending) as pending,
+            ):
+                await preflight_known_pending_publication(
+                    "vicious_syndicate_radars",
+                    latest_issue="355",
+                )
+
+            self.assertEqual(pending.exception.failure_reason_code, "unavailable")
+            self.assertTrue(pending.exception.skip_browser_fallback)
+            self.assertEqual(_PendingRadarAsyncClient.requested_urls, [egg_url])
+
+        asyncio.run(run())
+
+    def test_readiness_200_blocks_only_on_valid_older_numeric_radar(self) -> None:
+        radar_url = (
+            "https://www.vicioussyndicate.com/wp-content/datareaper/radars/"
+            "Mage/index.html"
+        )
+        status = {
+            "last_refresh_at": datetime.now(UTC).isoformat(),
+            "last_refresh_upstream_readiness": {
+                "latest_report_issue": "355",
+                "candidate_issue": "354",
+                "full_discovery_at": datetime.now(UTC).isoformat(),
+                "radar_urls": [radar_url],
+                "blocking_radar_urls": [radar_url],
+            }
+        }
+        graph = """
+            <script>function setup(canvas) {
+            var n = {"Card A": {radius: 1}, "Card B": {radius: 1}};
+            var e = [["Card A", "Card B", {weight: 1}]];
+            }</script>
+        """
+
+        async def run_case(html: str, *, pending: bool) -> None:
+            _RadarReadinessAsyncClient.response_text = html
+            with (
+                patch("app.vicious_syndicate.load_status", return_value=status),
+                patch(
+                    "app.vicious_syndicate.httpx.AsyncClient",
+                    _RadarReadinessAsyncClient,
+                ),
+            ):
+                if pending:
+                    with self.assertRaises(ViciousUpstreamPublicationPending):
+                        await preflight_known_pending_publication(
+                            "vicious_syndicate_radars",
+                            latest_issue="355",
+                        )
+                else:
+                    await preflight_known_pending_publication(
+                        "vicious_syndicate_radars",
+                        latest_issue="355",
+                    )
+
+        asyncio.run(
+            run_case(
+                "<html><title>Just a moment...</title>cf-chl</html>",
+                pending=False,
+            )
+        )
+        asyncio.run(run_case(graph, pending=False))
+        asyncio.run(
+            run_case(
+                f"<title>Data Reaper's Radar - Issue #354</title>{graph}",
+                pending=True,
+            )
+        )
+        asyncio.run(
+            run_case(
+                f"<title>Data Reaper's Radar - Issue #356</title>{graph}",
+                pending=False,
+            )
+        )
+
+    def test_old_pending_status_forces_periodic_full_rediscovery(self) -> None:
+        radar_url = (
+            "https://www.vicioussyndicate.com/wp-content/datareaper/radars/"
+            "Mage/index.html"
+        )
+        status = {
+            # A cheap pending attempt may have refreshed this mutable field.
+            "last_refresh_at": datetime.now(UTC).isoformat(),
+            "last_refresh_upstream_readiness": {
+                "latest_report_issue": "355",
+                "candidate_issue": "354",
+                "full_discovery_at": (
+                    datetime.now(UTC) - timedelta(hours=7)
+                ).isoformat(),
+                "radar_urls": [radar_url],
+                "blocking_radar_urls": [radar_url],
+            },
+        }
+
+        async def run() -> None:
+            with (
+                patch("app.vicious_syndicate.load_status", return_value=status),
+                patch(
+                    "app.vicious_syndicate.httpx.AsyncClient",
+                    side_effect=AssertionError("stale readiness must not be requested"),
+                ) as client,
+            ):
+                await preflight_known_pending_publication(
+                    "vicious_syndicate_radars",
+                    latest_issue="355",
+                )
+            client.assert_not_called()
+
+        asyncio.run(run())
+
+    def test_readiness_sanitizer_accepts_only_canonical_official_radar_urls(self) -> None:
+        valid = (
+            "https://www.vicioussyndicate.com/wp-content/datareaper/radars/"
+            "Egg%20Death%20Knight/index.html"
+        )
+        invalid = [
+            "https://user@www.vicioussyndicate.com/wp-content/datareaper/radars/Mage/index.html",
+            "https://www.vicioussyndicate.com:444/wp-content/datareaper/radars/Mage/index.html",
+            "https://www.vicioussyndicate.com/wp-content/datareaper/radars/Mage/index.html?q=1",
+            "https://www.vicioussyndicate.com/wp-json/wp/v2/users",
+            "https://www.vicioussyndicate.com/wp-content/datareaper/radars/../index.html",
+            "https://www.vicioussyndicate.com/wp-content/datareaper/radars/%2e%2e/index.html",
+            "https://[invalid",
+            "https://www.vicioussyndicate.com/" + "x" * 2050,
+        ]
+
+        readiness = sanitize_upstream_readiness(
+            {
+                "latest_report_issue": "355",
+                "candidate_issue": "354",
+                "full_discovery_at": "2026-08-13T23:30:00Z",
+                "radar_urls": [valid, *invalid],
+                "blocking_radar_urls": [valid, *invalid],
+            }
+        )
+
+        self.assertEqual(readiness["radar_urls"], [valid])
+        self.assertEqual(readiness["blocking_radar_urls"], [valid])
+        self.assertEqual(
+            readiness["full_discovery_at"],
+            "2026-08-13T23:30:00+00:00",
+        )
+
+    def test_mixed_radar_issue_classification_is_order_independent(self) -> None:
+        self.assertEqual(
+            classify_radar_publication([], latest_issue="355"),
+            ("Unknown", "upstream_unavailable"),
+        )
+        for row_issues in (["355", "354"], ["354", "355"]):
+            with self.subTest(row_issues=row_issues):
+                self.assertEqual(
+                    classify_radar_publication(row_issues, latest_issue="355"),
+                    ("354", "upstream_publication_pending"),
+                )
+        for row_issues in (["354", "356"], ["356", "354"]):
+            with self.subTest(row_issues=row_issues):
+                self.assertEqual(
+                    classify_radar_publication(row_issues, latest_issue="355"),
+                    ("Mixed", "upstream_unavailable"),
+                )
+
+    def test_pending_metadata_is_bounded_and_requires_only_upstream_issues(self) -> None:
+        egg_url = (
+            "https://www.vicioussyndicate.com/wp-content/datareaper/radars/"
+            "Egg%20Death%20Knight/index.html"
+        )
+        structured = {
+            "type": "vicious_syndicate_radars",
+            "issue": "354",
+            "latest_report_issue": "355",
+            "upstream_state": "upstream_publication_pending",
+            "diagnostics": {
+                "radar_urls": [egg_url, "https://example.com/not-allowed"],
+                "broken_radar_urls": [egg_url],
+                "active_radar_urls": 22,
+                "parsed_radars": 21,
+                "ready_latest_issue_radars": 0,
+            },
+        }
+        issues = [
+            {"code": "vicious_radars.outdated_issue"},
+            {"code": "vicious_radars.incomplete_active_coverage"},
+            {"code": "vicious_radars.row_issue_mismatch"},
+        ]
+
+        metadata = upstream_publication_metadata(
+            structured,
+            semantic_issues=issues,
+        )
+
+        self.assertIsNotNone(metadata)
+        assert metadata is not None
+        self.assertEqual(metadata["failure_reason_code"], "unavailable")
+        self.assertEqual(metadata["upstream_state"], "upstream_publication_pending")
+        self.assertEqual(metadata["upstream_readiness"]["radar_urls"], [egg_url])
+        discovery_at = datetime.fromisoformat(
+            metadata["upstream_readiness"]["full_discovery_at"]
+        )
+        self.assertLessEqual(
+            abs((datetime.now(UTC) - discovery_at).total_seconds()),
+            2,
+        )
+
+        issues.append({"code": "vicious_radars.invalid_radar_url"})
+        self.assertIsNone(
+            upstream_publication_metadata(structured, semantic_issues=issues)
+        )
 
     def test_transient_proxy_transport_error_keeps_normal_retry(self) -> None:
         async def run() -> None:

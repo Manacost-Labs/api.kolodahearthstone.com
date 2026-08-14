@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import posixpath
 import random
 import re
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
@@ -21,6 +22,7 @@ from .scrapers.http_resilience import (
 )
 from .scrapers.proxy import burn_proxy_session, httpx_client_kwargs
 from .sources import Source
+from .storage import load_status
 from .vicious_syndicate_auth import vicious_syndicate_cookies_for_fetch
 
 logger = logging.getLogger(__name__)
@@ -84,6 +86,48 @@ CLASS_SLUGS = {
     "Warrior": "warrior-decks",
 }
 REPORT_INDEX_URL = "https://www.vicioussyndicate.com/tag/data-reaper-report/"
+_UPSTREAM_PUBLICATION_ISSUES = frozenset(
+    {
+        "vicious_radars.outdated_issue",
+        "vicious_radars.incomplete_active_coverage",
+        "vicious_radars.row_issue_mismatch",
+    }
+)
+_READINESS_URL_FIELDS = ("radar_urls", "blocking_radar_urls")
+_MAX_READINESS_URLS = 24
+_MAX_READINESS_URL_LENGTH = 2048
+_READINESS_TIMEOUT_SECONDS = 5.0
+_READINESS_TOTAL_TIMEOUT_SECONDS = 15.0
+_READINESS_REDISCOVERY_INTERVAL = timedelta(hours=6)
+_READINESS_TIMESTAMP_FIELD = "full_discovery_at"
+_READINESS_COUNT_FIELDS = (
+    "active_radar_urls",
+    "parsed_radars",
+    "ready_latest_issue_radars",
+)
+
+
+class ViciousUpstreamPublicationPending(RuntimeError):
+    """The report exists, but its official radar assets are not all published."""
+
+    failure_reason_code = "unavailable"
+    upstream_state = "upstream_publication_pending"
+    skip_browser_fallback = True
+
+    def __init__(
+        self,
+        readiness: dict[str, Any],
+        *,
+        transport_backend: str | None = None,
+    ) -> None:
+        self.upstream_readiness = sanitize_upstream_readiness(readiness)
+        self.transport_backend = transport_backend
+        latest = self.upstream_readiness.get("latest_report_issue", "unknown")
+        candidate = self.upstream_readiness.get("candidate_issue", "unknown")
+        super().__init__(
+            "Vicious upstream publication pending "
+            f"(candidate issue {candidate}, latest report {latest})"
+        )
 
 
 def parse_latest_report_metadata(html: str) -> dict[str, str]:
@@ -228,11 +272,263 @@ def find_radar_url(html: str, *, base_url: str) -> str | None:
 
 
 def _is_official_vicious_url(url: str) -> bool:
-    parsed_url = urlparse(url)
-    return parsed_url.scheme == "https" and (parsed_url.hostname or "").lower() in {
-        "vicioussyndicate.com",
-        "www.vicioussyndicate.com",
+    try:
+        parsed_url = urlparse(url)
+        return parsed_url.scheme == "https" and (
+            parsed_url.hostname or ""
+        ).lower() in {
+            "vicioussyndicate.com",
+            "www.vicioussyndicate.com",
+        }
+    except ValueError:
+        return False
+
+
+def _is_official_readiness_radar_url(url: str) -> bool:
+    if not url or len(url) > _MAX_READINESS_URL_LENGTH:
+        return False
+    try:
+        parsed_url = urlparse(url)
+        canonical_path = posixpath.normpath(parsed_url.path)
+        decoded_path = unquote(parsed_url.path)
+        canonical_decoded_path = posixpath.normpath(decoded_path)
+        return bool(
+            _is_official_vicious_url(url)
+            and parsed_url.port in (None, 443)
+            and not parsed_url.username
+            and not parsed_url.password
+            and not parsed_url.query
+            and not parsed_url.fragment
+            and canonical_path == parsed_url.path
+            and canonical_decoded_path == decoded_path
+            and "\\" not in decoded_path
+            and not any(ord(character) < 32 for character in decoded_path)
+            and parsed_url.path.startswith("/wp-content/datareaper/radars/")
+            and parsed_url.path.endswith("/index.html")
+        )
+    except ValueError:
+        return False
+
+
+def sanitize_upstream_readiness(value: object) -> dict[str, Any]:
+    """Bound status metadata and retain only official, non-secret readiness data."""
+
+    if not isinstance(value, dict):
+        return {}
+    readiness: dict[str, Any] = {}
+    for field in ("latest_report_issue", "candidate_issue"):
+        candidate = str(value.get(field) or "").strip()
+        if candidate.isdigit() and len(candidate) <= 8:
+            readiness[field] = candidate
+    observed_raw = str(value.get(_READINESS_TIMESTAMP_FIELD) or "").strip()
+    if observed_raw and len(observed_raw) <= 64:
+        try:
+            observed_at = datetime.fromisoformat(observed_raw.replace("Z", "+00:00"))
+        except ValueError:
+            pass
+        else:
+            if observed_at.tzinfo is None:
+                observed_at = observed_at.replace(tzinfo=UTC)
+            observed_at = observed_at.astimezone(UTC)
+            if 2000 <= observed_at.year <= 2100:
+                readiness[_READINESS_TIMESTAMP_FIELD] = observed_at.isoformat()
+    for field in _READINESS_COUNT_FIELDS:
+        candidate = value.get(field)
+        if (
+            isinstance(candidate, int)
+            and not isinstance(candidate, bool)
+            and 0 <= candidate <= 10_000
+        ):
+            readiness[field] = candidate
+    for field in _READINESS_URL_FIELDS:
+        urls: list[str] = []
+        raw_urls = value.get(field)
+        if isinstance(raw_urls, list):
+            for raw_url in raw_urls[:_MAX_READINESS_URLS]:
+                url = str(raw_url or "").strip()
+                if _is_official_readiness_radar_url(url) and url not in urls:
+                    urls.append(url)
+        if urls:
+            readiness[field] = urls
+    return readiness
+
+
+def _radar_issue_from_html(html: str) -> str:
+    soup = BeautifulSoup(html, "lxml")
+    title_text = soup.title.get_text(" ", strip=True) if soup.title else ""
+    match = re.search(
+        r"Issue\s*(?:&#35;|#)\s*(\d+)",
+        title_text,
+        re.IGNORECASE,
+    )
+    return match.group(1) if match else "Unknown"
+
+
+def _recent_readiness_status(readiness: dict[str, Any]) -> bool:
+    refreshed_raw = str(readiness.get(_READINESS_TIMESTAMP_FIELD) or "").strip()
+    try:
+        refreshed_at = datetime.fromisoformat(refreshed_raw.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if refreshed_at.tzinfo is None:
+        refreshed_at = refreshed_at.replace(tzinfo=UTC)
+    age = datetime.now(UTC) - refreshed_at.astimezone(UTC)
+    return timedelta(0) <= age < _READINESS_REDISCOVERY_INTERVAL
+
+
+def classify_radar_publication(
+    row_issues: list[object],
+    *,
+    latest_issue: str,
+) -> tuple[str, str]:
+    """Classify the whole radar set without depending on response order."""
+
+    latest = int(latest_issue) if str(latest_issue).isdigit() else None
+    normalized = [str(issue or "Unknown").strip() or "Unknown" for issue in row_issues]
+    numeric = {int(issue) for issue in normalized if issue.isdigit()}
+    has_unknown = any(not issue.isdigit() for issue in normalized)
+    if not normalized:
+        return "Unknown", "upstream_unavailable"
+    if latest is None or has_unknown or any(
+        issue > latest for issue in numeric
+    ):
+        return "Mixed" if len(set(normalized)) > 1 else normalized[0], "upstream_unavailable"
+    if any(issue < latest for issue in numeric):
+        oldest = min(numeric)
+        return str(oldest), "upstream_publication_pending"
+    return str(latest), "ready"
+
+
+def upstream_publication_metadata(
+    structured: dict[str, Any],
+    *,
+    semantic_issues: list[object],
+) -> dict[str, Any] | None:
+    """Return bounded failure metadata only for a verified temporal upstream gap."""
+
+    if structured.get("upstream_state") != "upstream_publication_pending":
+        return None
+    error_codes: set[str] = set()
+    for issue in semantic_issues:
+        if isinstance(issue, dict):
+            severity = str(issue.get("severity") or "error")
+            code = str(issue.get("code") or "")
+        else:
+            severity = str(getattr(issue, "severity", "error"))
+            code = str(getattr(issue, "code", ""))
+        if severity == "error" and code:
+            error_codes.add(code)
+    if not error_codes or not error_codes <= _UPSTREAM_PUBLICATION_ISSUES:
+        return None
+
+    candidate_issue = str(structured.get("issue") or "").strip()
+    latest_issue = str(structured.get("latest_report_issue") or "").strip()
+    if not (
+        candidate_issue.isdigit()
+        and latest_issue.isdigit()
+        and int(candidate_issue) < int(latest_issue)
+    ):
+        return None
+
+    diagnostics = structured.get("diagnostics")
+    diagnostics = diagnostics if isinstance(diagnostics, dict) else {}
+    blocking_urls = diagnostics.get("blocking_radar_urls")
+    if not isinstance(blocking_urls, list):
+        blocking_urls = [
+            *(diagnostics.get("broken_radar_urls") or []),
+            *(diagnostics.get("outdated_radar_urls") or []),
+        ]
+    readiness = sanitize_upstream_readiness(
+        {
+            **diagnostics,
+            "latest_report_issue": latest_issue,
+            "candidate_issue": candidate_issue,
+            "blocking_radar_urls": blocking_urls,
+            _READINESS_TIMESTAMP_FIELD: datetime.now(UTC).isoformat(),
+        }
+    )
+    if not readiness.get("radar_urls") or not readiness.get(
+        "blocking_radar_urls"
+    ):
+        return None
+    return {
+        "failure_reason_code": "unavailable",
+        "upstream_state": "upstream_publication_pending",
+        "upstream_readiness": readiness,
     }
+
+
+async def preflight_known_pending_publication(
+    source_id: str,
+    *,
+    latest_issue: str,
+    transport_backend: str | None = None,
+) -> None:
+    """Recheck known official blockers directly before a paid full discovery."""
+
+    status = load_status(source_id) or {}
+    readiness = sanitize_upstream_readiness(
+        status.get("last_refresh_upstream_readiness")
+        or status.get("upstream_readiness")
+    )
+    if not _recent_readiness_status(readiness):
+        # Only a full discovery advances this timestamp. Cheap pending checks
+        # must not postpone the periodic rediscovery forever.
+        return
+    if readiness.get("latest_report_issue") != str(latest_issue):
+        return
+    radar_urls = readiness.get("radar_urls") or []
+    blocking_urls = readiness.get("blocking_radar_urls") or []
+    ordered_urls = [
+        *blocking_urls,
+        *(url for url in radar_urls if url not in blocking_urls),
+    ][:_MAX_READINESS_URLS]
+    if not ordered_urls:
+        return
+
+    headers = build_fetch_headers(
+        ordered_urls[0],
+        accept="text/html,application/xhtml+xml",
+    )
+    try:
+        async with asyncio.timeout(_READINESS_TOTAL_TIMEOUT_SECONDS):
+            async with httpx.AsyncClient(
+                timeout=_READINESS_TIMEOUT_SECONDS,
+                follow_redirects=False,
+                trust_env=False,
+            ) as client:
+                for url in ordered_urls:
+                    response = await client.get(url, headers=headers)
+                    if response.status_code in {404, 410}:
+                        raise ViciousUpstreamPublicationPending(
+                            readiness,
+                            transport_backend=transport_backend,
+                        )
+                    if response.status_code != 200:
+                        return
+                    response_url = str(response.url)
+                    if not _is_official_readiness_radar_url(response_url):
+                        return
+                    if not _valid_vicious_response(response_url, response.text):
+                        return
+                    radar_issue = _radar_issue_from_html(response.text)
+                    if (
+                        radar_issue.isdigit()
+                        and str(latest_issue).isdigit()
+                        and int(radar_issue) < int(latest_issue)
+                    ):
+                        raise ViciousUpstreamPublicationPending(
+                            readiness,
+                            transport_backend=transport_backend,
+                        )
+                    if radar_issue != str(latest_issue):
+                        return
+    except ViciousUpstreamPublicationPending:
+        raise
+    except (TimeoutError, httpx.HTTPError):
+        # A transport failure is not proof of an incomplete publication. Let the
+        # normal resilient path classify it and use its configured providers.
+        return
 
 
 def _valid_vicious_response(url: str, html: str) -> bool:
@@ -623,6 +919,11 @@ async def fetch_vicious_syndicate_radars(source: Source) -> dict[str, Any]:
         if report_index_response is None:
             raise RuntimeError("Could not fetch Vicious Syndicate report index")
         latest_report = parse_latest_report_metadata(report_index_response.text)
+        await preflight_known_pending_publication(
+            source.id,
+            latest_issue=latest_report["latest_report_issue"],
+            transport_backend=proxy_circuit.transport_backend,
+        )
 
         # Step 1: Discover class indexes & potential archetype pages
         discovery_tasks = [
@@ -686,9 +987,12 @@ async def fetch_vicious_syndicate_radars(source: Source) -> dict[str, Any]:
                 return None
 
             soup = BeautifulSoup(html, "lxml")
-            title_text = soup.title.string if soup.title else f"Data Reaper's Radar - {item['class']}"
-            issue_match = re.search(r"Issue\s*&#35;(\d+)|Issue\s*#(\d+)", title_text)
-            issue = issue_match.group(1) or issue_match.group(2) if issue_match else "Unknown"
+            title_text = (
+                soup.title.get_text(" ", strip=True)
+                if soup.title
+                else f"Data Reaper's Radar - {item['class']}"
+            )
+            issue = _radar_issue_from_html(html)
 
             radar_data = parse_radar_js(html)
             return {
@@ -706,12 +1010,39 @@ async def fetch_vicious_syndicate_radars(source: Source) -> dict[str, Any]:
         parse_results = await asyncio.gather(*parse_tasks)
 
     radars = [r for r in parse_results if r is not None]
+    latest_issue = latest_report["latest_report_issue"]
+    radar_urls = [
+        str(item["radar_url"])
+        for item in active_items
+        if _is_official_vicious_url(str(item.get("radar_url") or ""))
+    ]
+    broken_radar_urls = [
+        str(item["radar_url"])
+        for item, parsed_radar in zip(active_items, parse_results, strict=True)
+        if parsed_radar is None
+    ]
+    outdated_radar_urls = [
+        str(parsed_radar["radar_url"])
+        for parsed_radar in parse_results
+        if parsed_radar is not None
+        and str(parsed_radar.get("issue") or "") != latest_issue
+    ]
+    blocking_radar_urls = list(
+        dict.fromkeys([*broken_radar_urls, *outdated_radar_urls])
+    )
     diagnostics = {
         "classes_attempted": len(CLASSES),
         "discovered_items": discovery_count,
         "resolved_items": resolved_count,
         "active_radar_urls": len(active_items),
         "parsed_radars": len(radars),
+        "ready_latest_issue_radars": sum(
+            str(radar.get("issue") or "") == latest_issue for radar in radars
+        ),
+        "radar_urls": list(dict.fromkeys(radar_urls)),
+        "broken_radar_urls": list(dict.fromkeys(broken_radar_urls)),
+        "outdated_radar_urls": list(dict.fromkeys(outdated_radar_urls)),
+        "blocking_radar_urls": blocking_radar_urls,
     }
     try:
         from .refresh_log import log_action
@@ -729,11 +1060,10 @@ async def fetch_vicious_syndicate_radars(source: Source) -> dict[str, Any]:
     except Exception:
         logger.debug("Failed to log Vicious diagnostics", exc_info=True)
 
-    issue = "Unknown"
-    for r in radars:
-        if r.get("issue") != "Unknown":
-            issue = r["issue"]
-            break
+    issue, upstream_state = classify_radar_publication(
+        [radar.get("issue") for radar in radars],
+        latest_issue=latest_issue,
+    )
 
     classes_summary = {}
     for r in radars:
@@ -754,7 +1084,7 @@ async def fetch_vicious_syndicate_radars(source: Source) -> dict[str, Any]:
         "_fetch_backend": proxy_circuit.transport_backend,
         "issue": issue,
         **latest_report,
-        "upstream_state": radar_upstream_state(issue, latest_report["latest_report_issue"]),
+        "upstream_state": upstream_state,
         "classes_summary": list(classes_summary.values()),
         "radars": radars,
         "total_radars": len(radars),

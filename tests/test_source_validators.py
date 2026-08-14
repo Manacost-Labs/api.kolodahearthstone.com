@@ -63,7 +63,7 @@ def _vicious_radars_payload(
             ),
             "issue": row_issue,
             "radar_url": f"https://www.vicioussyndicate.com/radars/{index}/",
-            "nodes": [{"name": f"Card {index}"}],
+            "nodes": [{"name": "Card A"}, {"name": "Card B"}],
             "edges": [{"source": "Card A", "target": "Card B"}],
         }
         for index, row_issue in enumerate(row_issues)
@@ -292,6 +292,43 @@ class SourceValidatorsTest(unittest.TestCase):
             {issue.code for issue in report.issues},
         )
         self.assertEqual(report.metrics["radar_issue_counts"], {"354": 1, "355": 10})
+
+    def test_vicious_radars_reject_dangling_graph_edges(self) -> None:
+        structured = _vicious_radars_payload(issue="355", latest_issue="355")
+        structured["radars"][0]["edges"][0]["target"] = "Missing Card"
+
+        report = validate_structured("vicious_syndicate_radars", structured)
+
+        self.assertFalse(report.ok)
+        self.assertIn(
+            "vicious_radars.invalid_graph",
+            {issue.code for issue in report.issues},
+        )
+        self.assertEqual(report.metrics["invalid_graphs"], 1)
+        self.assertEqual(report.metrics["dangling_edges"], 1)
+
+    def test_vicious_radars_reject_duplicate_or_blank_graph_nodes(self) -> None:
+        for nodes in (
+            [{"name": "Card A"}, {"name": "Card A"}],
+            [{"name": "Card A"}, {"name": ""}],
+        ):
+            with self.subTest(nodes=nodes):
+                structured = _vicious_radars_payload(
+                    issue="355",
+                    latest_issue="355",
+                )
+                structured["radars"][0]["nodes"] = nodes
+
+                report = validate_structured(
+                    "vicious_syndicate_radars",
+                    structured,
+                )
+
+                self.assertFalse(report.ok)
+                self.assertIn(
+                    "vicious_radars.invalid_graph",
+                    {issue.code for issue in report.issues},
+                )
 
     def test_vicious_radars_reject_discovery_resolution_gap(self) -> None:
         structured = _vicious_radars_payload(

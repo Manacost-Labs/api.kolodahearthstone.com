@@ -396,9 +396,52 @@ def _validate_vicious_radars(_source_id: str, structured: dict[str, Any]) -> Val
     duplicate_identities = len(radar_identities) - len(set(radar_identities))
     duplicate_radar_urls = len(radar_urls) - len(set(radar_urls))
     radar_issue_counts: dict[str, int] = {}
+    invalid_graphs = 0
+    duplicate_node_names = 0
+    dangling_edges = 0
     for radar in radars:
         radar_issue = str(radar.get("issue") or "Unknown").strip() or "Unknown"
         radar_issue_counts[radar_issue] = radar_issue_counts.get(radar_issue, 0) + 1
+        nodes = radar.get("nodes")
+        edges = radar.get("edges")
+        node_names = [
+            str(node.get("name") or "").strip()
+            for node in nodes
+            if isinstance(node, dict) and str(node.get("name") or "").strip()
+        ] if isinstance(nodes, list) else []
+        node_name_set = set(node_names)
+        duplicate_names_for_radar = len(node_names) - len(node_name_set)
+        invalid_node_rows = (
+            len(nodes) - len(node_names) if isinstance(nodes, list) else 1
+        )
+        invalid_edge_rows = 0
+        dangling_for_radar = 0
+        if isinstance(edges, list):
+            for edge in edges:
+                if not isinstance(edge, dict):
+                    invalid_edge_rows += 1
+                    continue
+                source_name = str(edge.get("source") or "").strip()
+                target_name = str(edge.get("target") or "").strip()
+                if not source_name or not target_name:
+                    invalid_edge_rows += 1
+                elif source_name not in node_name_set or target_name not in node_name_set:
+                    dangling_for_radar += 1
+        else:
+            invalid_edge_rows = 1
+        duplicate_node_names += duplicate_names_for_radar
+        dangling_edges += dangling_for_radar
+        if (
+            not isinstance(nodes, list)
+            or not nodes
+            or not isinstance(edges, list)
+            or not edges
+            or invalid_node_rows
+            or invalid_edge_rows
+            or duplicate_names_for_radar
+            or dangling_for_radar
+        ):
+            invalid_graphs += 1
     published_raw = str(structured.get("latest_report_published_at") or "")
     content_age_days: int | None = None
     try:
@@ -428,6 +471,9 @@ def _validate_vicious_radars(_source_id: str, structured: dict[str, Any]) -> Val
             "valid_radar_urls": valid_radar_urls,
             "invalid_radar_urls": invalid_radar_urls,
             "radar_issue_counts": dict(sorted(radar_issue_counts.items())),
+            "invalid_graphs": invalid_graphs,
+            "duplicate_node_names": duplicate_node_names,
+            "dangling_edges": dangling_edges,
         }
     )
 
@@ -552,6 +598,16 @@ def _validate_vicious_radars(_source_id: str, structured: dict[str, Any]) -> Val
             "Vicious Syndicate host "
             f"({valid_radar_urls}/{len(radars)})",
             field="radars.radar_url",
+        )
+    if invalid_graphs:
+        report.add_issue(
+            "vicious_radars.invalid_graph",
+            "every vicious radar must contain non-empty unique nodes and edges "
+            "whose endpoints reference those nodes "
+            f"(invalid_graphs={invalid_graphs}, "
+            f"duplicate_node_names={duplicate_node_names}, "
+            f"dangling_edges={dangling_edges})",
+            field="radars.nodes,radars.edges",
         )
     if latest_issue is not None and (
         not radars

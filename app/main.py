@@ -585,6 +585,31 @@ def _semantic_dataset_quality(
     }
 
 
+def _valid_temporal_lkg_for_serving(
+    source: Any,
+    status: dict[str, Any] | None,
+    dataset: dict[str, Any] | None,
+) -> bool:
+    """Confirm that an explicitly cached temporal LKG is still safe to serve."""
+    if not status or not status.get("serving_cached_dataset"):
+        return False
+    if not status.get("cached_content_temporally_grandfathered"):
+        return False
+    if not isinstance(dataset, dict):
+        return False
+    parsed = dataset.get("data")
+    if not isinstance(parsed, dict) or not parsed:
+        return False
+
+    from .publish_gate import is_usable_vicious_temporal_lkg
+
+    try:
+        return is_usable_vicious_temporal_lkg(source, parsed)
+    except (AttributeError, KeyError, TypeError, ValueError):
+        # Health must fail closed when revalidation itself cannot complete.
+        return False
+
+
 def _active_trinkets_only(structured: dict[str, Any]) -> dict[str, Any]:
     trinkets = structured.get("trinkets")
     if not isinstance(trinkets, list):
@@ -851,7 +876,12 @@ def build_health_diagnostics() -> dict:
         if state != SourceState.OK and not standard_publication_usable:
             hard_failed_sources.append(source.id)
         semantic_quality = _semantic_dataset_quality(source.id, served_dataset)
-        if semantic_quality and not semantic_quality["ok"]:
+        temporal_lkg_usable = (
+            semantic_quality
+            and not semantic_quality["ok"]
+            and _valid_temporal_lkg_for_serving(source, status, served_dataset)
+        )
+        if semantic_quality and not semantic_quality["ok"] and not temporal_lkg_usable:
             semantic_failed_sources.append(source.id)
             semantic_failures.append(
                 {

@@ -209,11 +209,15 @@ curl -s "https://api.kolodahearthstone.com/sources?site=hsreplay" | jq .
 structured/status diagnostics содержат `upstream_state`. Например,
 `vicious_syndicate_live_beta` использует `upstream_unclassified`, пока Firebase
 после выхода дополнения содержит только агрегаты `Other <Class>`; такие строки
-не выдаются как реальные архетипы и кандидат не проходит publish-gate. Radar
-использует `upstream_stale`, если последний доступный полноценный radar issue
-отстаёт от последнего Data Reaper report. Такой radar публикуется вместе с
-`issue`, `latest_report_issue`, `latest_report_published_at` и предупреждением;
-пустой или повреждённый граф по-прежнему блокируется contract-gate.
+не выдаются как реальные архетипы и кандидат не проходит publish-gate. Последний
+полный Radar использует `upstream_stale`, если его issue отстаёт от последнего
+Data Reaper report. Во время незавершённой публикации новый кандидат и status
+получают `upstream_publication_pending`, а прежний полный snapshot отдаётся
+только как явный LKG (`serving_cached_dataset=true`,
+`fresh_candidate_published=false`). Известные официальные radar URL сначала
+проверяются дешёвым direct-readiness запросом; платные fallback-провайдеры для
+подтверждённо отсутствующего upstream-файла не вызываются. Пустой, повреждённый
+или смешанный граф по-прежнему блокируется contract-gate.
 
 #### `GET /datasets/hearthstone_decks`
 

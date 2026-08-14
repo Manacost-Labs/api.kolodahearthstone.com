@@ -2,12 +2,64 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
 
 from starlette.testclient import TestClient
 
 from app import main
+from app.sources import SOURCE_BY_ID
+
+
+def _vicious_temporal_lkg_dataset() -> dict:
+    classes = (
+        "DeathKnight",
+        "DemonHunter",
+        "Druid",
+        "Hunter",
+        "Mage",
+        "Paladin",
+        "Priest",
+        "Rogue",
+        "Shaman",
+        "Warlock",
+        "Warrior",
+    )
+    radars = [
+        {
+            "class": class_name,
+            "archetype": None,
+            "issue": "354",
+            "radar_url": (
+                "https://www.vicioussyndicate.com/"
+                f"wp-content/datareaper/radars/{class_name}/index.html"
+            ),
+            "nodes": [{"name": "Card A"}, {"name": "Card B"}],
+            "edges": [{"source": "Card A", "target": "Card B"}],
+        }
+        for index, class_name in enumerate(classes)
+    ]
+    return {
+        "backend": "vicious_syndicate_api",
+        "data": {
+            "structured": {
+                "type": "vicious_syndicate_radars",
+                "issue": "354",
+                "latest_report_issue": "355",
+                "latest_report_published_at": datetime.now(UTC).date().isoformat(),
+                "radars": radars,
+                "total_radars": len(radars),
+                "diagnostics": {
+                    "classes_attempted": len(classes),
+                    "discovered_items": len(radars) + 1,
+                    "resolved_items": len(radars) + 1,
+                    "active_radar_urls": len(radars) + 1,
+                    "parsed_radars": len(radars),
+                },
+            }
+        },
+    }
 
 
 class HealthEndpointTest(unittest.TestCase):
@@ -89,6 +141,65 @@ class HealthEndpointTest(unittest.TestCase):
                 for issue in payload["semantic_failures"][0]["issues"]
             },
         )
+
+    def test_ops_health_serves_explicit_valid_temporal_vicious_lkg(self) -> None:
+        source = SOURCE_BY_ID["vicious_syndicate_radars"]
+        status = {
+            "source_id": source.id,
+            "state": "ok",
+            "serving_cached_dataset": True,
+            "cached_after_failure": True,
+            "last_refresh_state": "quality_error",
+            "cached_content_temporally_grandfathered": True,
+            "fetched_at": "2026-08-12T00:00:00Z",
+        }
+        dataset = _vicious_temporal_lkg_dataset()
+
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.object(main, "SOURCES", [source]),
+            patch.object(main, "load_status", return_value=status),
+            patch.object(main, "load_dataset", return_value=dataset),
+            patch.object(main, "root_dir", return_value=Path(tmp)),
+            patch("app.stale_monitor.find_stale_sources", return_value=[]),
+            patch("app.scrapers.quality._log_quality_action") as quality_log,
+        ):
+            payload = main.build_health_diagnostics()
+
+        self.assertTrue(payload["serving_ok"], payload)
+        self.assertFalse(payload["freshness_ok"])
+        self.assertTrue(payload["degraded"])
+        self.assertEqual(payload["semantic_failed_sources"], [])
+        self.assertEqual(payload["cached_sources"], [source.id])
+        quality_log.assert_not_called()
+
+    def test_ops_health_rejects_corrupt_dataset_despite_temporal_lkg_status(self) -> None:
+        source = SOURCE_BY_ID["vicious_syndicate_radars"]
+        status = {
+            "source_id": source.id,
+            "state": "ok",
+            "serving_cached_dataset": True,
+            "cached_after_failure": True,
+            "last_refresh_state": "quality_error",
+            "cached_content_temporally_grandfathered": True,
+            "fetched_at": "2026-08-12T00:00:00Z",
+        }
+        dataset = _vicious_temporal_lkg_dataset()
+        dataset["data"]["structured"]["radars"][0]["nodes"] = "corrupt"
+
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.object(main, "SOURCES", [source]),
+            patch.object(main, "load_status", return_value=status),
+            patch.object(main, "load_dataset", return_value=dataset),
+            patch.object(main, "root_dir", return_value=Path(tmp)),
+            patch("app.stale_monitor.find_stale_sources", return_value=[]),
+        ):
+            payload = main.build_health_diagnostics()
+
+        self.assertFalse(payload["serving_ok"], payload)
+        self.assertTrue(payload["degraded"])
+        self.assertEqual(payload["semantic_failed_sources"], [source.id])
 
     def test_ops_health_validates_resolved_stable_dataset_after_early_window(self) -> None:
         source = type("SourceStub", (), {"id": "hsguru_meta_standard_legend"})()

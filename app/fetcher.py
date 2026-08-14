@@ -988,8 +988,13 @@ def _preserve_cached_ok_status(source: Source, failed_status: dict[str, Any]) ->
     )
     _attach_provisional_status(status, _provisional_metadata_from_parsed(parsed))
     status["serving_cached_dataset"] = True
+    status["cached_after_failure"] = True
+    status["fresh_candidate_published"] = False
     status["cached_backend_policy_grandfathered"] = bool(
         gate.extra.get("backend_policy_grandfathered")
+    )
+    status["cached_content_temporally_grandfathered"] = bool(
+        gate.extra.get("lkg_temporal_grandfathered")
     )
     status["effective_state"] = EFFECTIVE_OK_CACHED
     status["last_refresh_state"] = failed_status.get("state")
@@ -1011,6 +1016,23 @@ def _preserve_cached_ok_status(source: Source, failed_status: dict[str, Any]) ->
         status["last_refresh_transport_backend"] = failed_status[
             "transport_backend"
         ]
+    from .reliability_telemetry import FAILURE_REASONS
+
+    failure_reason = str(failed_status.get("failure_reason_code") or "").strip()
+    if failure_reason in FAILURE_REASONS:
+        status["failure_reason_code"] = failure_reason
+    if failed_status.get("upstream_state") == "upstream_publication_pending":
+        status["upstream_state"] = "upstream_publication_pending"
+        status["last_refresh_upstream_state"] = "upstream_publication_pending"
+    if source.id == "vicious_syndicate_radars":
+        from .vicious_syndicate import sanitize_upstream_readiness
+
+        readiness = sanitize_upstream_readiness(
+            failed_status.get("upstream_readiness")
+            or failed_status.get("last_refresh_upstream_readiness")
+        )
+        if readiness:
+            status["last_refresh_upstream_readiness"] = readiness
     if failed_status.get("proxy_status") in {402, 407}:
         status["last_refresh_proxy_status"] = failed_status["proxy_status"]
     try:
@@ -2351,7 +2373,20 @@ async def _fetch_source_with_active_lifecycle(
 
                     if hsreplay_email() and hsreplay_password() and await force_relogin_hsreplay():
                         return await fetch_source(client, source, retry_on_auth_failure=False)
-                if source.id in firecrawl_fallback_source_ids():
+                upstream_metadata: dict[str, Any] | None = None
+                if source.id == "vicious_syndicate_radars":
+                    from .vicious_syndicate import upstream_publication_metadata
+
+                    structured = parsed.get("structured")
+                    if isinstance(structured, dict):
+                        upstream_metadata = upstream_publication_metadata(
+                            structured,
+                            semantic_issues=qmetrics.get("semantic_issues") or [],
+                        )
+                if (
+                    upstream_metadata is None
+                    and source.id in firecrawl_fallback_source_ids()
+                ):
                     firecrawl_status = await _try_firecrawl_html(
                         source,
                         fetched_at=fetched_at,
@@ -2370,7 +2405,7 @@ async def _fetch_source_with_active_lifecycle(
                     and publication_decision.rejection_kind == "regression"
                 )
                 ai_diagnosis = None
-                if not ai_quarantine:
+                if not ai_quarantine and upstream_metadata is None:
                     ai_diagnosis = await _diagnose_candidate_with_ai(
                         source,
                         parsed,
@@ -2409,6 +2444,8 @@ async def _fetch_source_with_active_lifecycle(
                 )
                 _attach_ai_review_status(status, ai_telemetry)
                 _attach_ai_diagnosis_status(status, ai_diagnosis)
+                if upstream_metadata is not None:
+                    status.update(upstream_metadata)
                 if publication_decision is not None:
                     try:
                         reconciliation = DatasetPublicationStore().reconcile_current_publication(
@@ -2490,6 +2527,7 @@ async def _fetch_source_with_active_lifecycle(
             import logging
 
             api_detail = str(exc)[:2000]
+            skip_browser_fallback = getattr(exc, "skip_browser_fallback", False) is True
             if isinstance(exc, ProxyPaymentRequiredError):
                 # API collectors and browser fallbacks share one paid proxy.
                 # A typed CONNECT rejection must stop browser backends from
@@ -2508,15 +2546,56 @@ async def _fetch_source_with_active_lifecycle(
 
                 if hsreplay_email() and hsreplay_password() and await force_relogin_hsreplay():
                     return await fetch_source(client, source, retry_on_auth_failure=False)
-            log_action(
-                "api.route.fail",
-                source_id=source.id,
-                state=SourceState.FETCH_ERROR,
-                error_type=type(exc).__name__,
-                detail=api_detail,
-                tier=source_tier,
-                level="error",
-            )
+            if not skip_browser_fallback:
+                log_action(
+                    "api.route.fail",
+                    source_id=source.id,
+                    state=SourceState.FETCH_ERROR,
+                    error_type=type(exc).__name__,
+                    detail=api_detail,
+                    tier=source_tier,
+                    level="error",
+                )
+            if skip_browser_fallback:
+                transport_backend = _sanitize_transport_backend(
+                    getattr(exc, "transport_backend", None)
+                )
+                status = _status_payload(
+                    source,
+                    SourceState.QUALITY_ERROR,
+                    fetched_at=fetched_at,
+                    error=type(exc).__name__,
+                    detail=api_detail,
+                    backend="vicious_syndicate_api",
+                    transport_backend=transport_backend,
+                    used_residential_proxy=(
+                        "residential_httpx" in transport_backend
+                        if transport_backend is not None
+                        else None
+                    ),
+                )
+                failure_reason = str(
+                    getattr(exc, "failure_reason_code", "") or ""
+                ).strip()
+                if failure_reason:
+                    status["failure_reason_code"] = failure_reason
+                upstream_state = str(getattr(exc, "upstream_state", "") or "")
+                if upstream_state:
+                    status["upstream_state"] = upstream_state
+                upstream_readiness = getattr(exc, "upstream_readiness", None)
+                if isinstance(upstream_readiness, dict):
+                    status["upstream_readiness"] = upstream_readiness
+                status = _save_failure_status(source, status)
+                log_action(
+                    "api.fallback.skipped",
+                    source_id=source.id,
+                    state=SourceState.QUALITY_ERROR,
+                    detail=api_detail,
+                    tier=source_tier,
+                    level="warn",
+                    extra={"reason": "verified_upstream_publication_pending"},
+                )
+                return _finish(status)
             if blocks_browser_fallback(source.id):
                 logging.getLogger(__name__).warning(
                     "API-only source %s failed (no browser fallback): %s",

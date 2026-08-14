@@ -399,7 +399,7 @@ Source ID: `vicious_syndicate_radars`, тип `vicious_syndicate_radars`.
 | --- | --- |
 | `issue` | Выпуск фактически опубликованного radar. |
 | `latest_report_issue` | Последний Data Reaper report на сайте. |
-| `upstream_state` | `ready` или `upstream_stale`. |
+| `upstream_state` | `ready`, `upstream_stale` или `upstream_publication_pending` в diagnostics/status нового кандидата. |
 | `latest_report_url`, `latest_report_published_at` | Provenance последнего report. |
 | `total_radars` | Число валидных radar-графов. |
 | `classes_summary` | Классы и найденные архетипы. |
@@ -409,9 +409,12 @@ Source ID: `vicious_syndicate_radars`, тип `vicious_syndicate_radars`.
 `url`, `radar_url`, `deck_code`, `nodes[]` и `edges[]`. Node описывает карту и
 визуальные свойства; edge связывает две карты и может содержать weight/length.
 
-Если report уже новый, а соответствующий radar ещё не опубликован, API отдаёт
-последний **полный** radar с `upstream_state=upstream_stale`. Пустой или
-повреждённый граф quality-gate не пропускает.
+Если report уже новый, а хотя бы один официальный radar ещё не опубликован, API
+отдаёт последний **полный** radar как явно устаревший LKG. Status содержит
+`upstream_state=upstream_publication_pending`, `failure_reason_code=unavailable`
+и ограниченный readiness-снимок; свежим успехом такая попытка не считается.
+Пустой, повреждённый, неполный или смешанный по issue граф quality-gate не
+пропускает.
 
 ## Патчи Hearthstone
 

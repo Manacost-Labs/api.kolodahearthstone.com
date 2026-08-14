@@ -55,7 +55,11 @@ from app.source_tiers import SourceTier, tier_for
 from app.sources import SOURCES, Source
 from app.storage import load_dataset, load_status, save_dataset, save_status
 from app.vicious_live import build_ladder_view, build_power_tier_list, build_table_view
-from app.vicious_syndicate import find_radar_url, looks_like_vicious_deck_library
+from app.vicious_syndicate import (
+    ViciousUpstreamPublicationPending,
+    find_radar_url,
+    looks_like_vicious_deck_library,
+)
 
 
 class RefreshStabilityTest(unittest.TestCase):
@@ -403,6 +407,151 @@ class RefreshStabilityTest(unittest.TestCase):
 
         self.assertEqual(result["state"], "ok")
         self.assertEqual(result["backend"], "firestone_api")
+
+    def test_vicious_pending_publication_skips_paid_fallback_and_serves_lkg(self) -> None:
+        source = next(
+            item for item in SOURCES if item.id == "vicious_syndicate_radars"
+        )
+        parsed = {
+            "source_id": source.id,
+            "structured": {
+                "type": "vicious_syndicate_radars",
+                "issue": "354",
+                "latest_report_issue": "355",
+                "upstream_state": "upstream_publication_pending",
+            },
+            "counts": {"api_bytes": 128},
+            "_backend": "vicious_syndicate_api",
+        }
+        upstream_metadata = {
+            "failure_reason_code": "unavailable",
+            "upstream_state": "upstream_publication_pending",
+            "upstream_readiness": {
+                "latest_report_issue": "355",
+                "candidate_issue": "354",
+                "full_discovery_at": "2026-08-13T00:00:00+00:00",
+                "radar_urls": [
+                    "https://www.vicioussyndicate.com/radars/Mage/index.html"
+                ],
+                "blocking_radar_urls": [
+                    "https://www.vicioussyndicate.com/radars/Mage/index.html"
+                ],
+            },
+        }
+        preserved = {
+            "source_id": source.id,
+            "state": "ok",
+            "serving_cached_dataset": True,
+        }
+
+        with (
+            patch(
+                "app.fetcher._fetch_hsreplay_api_source",
+                new=AsyncMock(return_value=parsed),
+            ),
+            patch(
+                "app.fetcher.validate_candidate_for_publish",
+                return_value=SimpleNamespace(
+                    ok=False,
+                    reason="upstream publication pending",
+                    extra={},
+                ),
+            ),
+            patch(
+                "app.fetcher.quality_metrics",
+                return_value={
+                    "semantic_issues": [
+                        {"code": "vicious_radars.outdated_issue"}
+                    ]
+                },
+            ),
+            patch(
+                "app.vicious_syndicate.upstream_publication_metadata",
+                return_value=upstream_metadata,
+            ),
+            patch(
+                "app.fetcher._try_firecrawl_html",
+                new=AsyncMock(side_effect=AssertionError("paid fallback must be skipped")),
+            ) as firecrawl,
+            patch("app.fetcher._save_failure_status", return_value=preserved) as save_failed,
+            patch("app.fetcher._diagnose_candidate_with_ai", new=AsyncMock()) as ai,
+            patch("app.fetcher.firecrawl_primary_source_ids", return_value=set()),
+            patch(
+                "app.fetcher.firecrawl_fallback_source_ids",
+                return_value={source.id},
+            ),
+            patch("app.fetcher.log_action"),
+        ):
+            result = asyncio.run(fetch_source(None, source))
+
+        self.assertEqual(result, preserved)
+        firecrawl.assert_not_awaited()
+        ai.assert_not_awaited()
+        failed_status = save_failed.call_args.args[1]
+        self.assertEqual(failed_status["failure_reason_code"], "unavailable")
+        self.assertEqual(
+            failed_status["upstream_state"],
+            "upstream_publication_pending",
+        )
+
+    def test_vicious_readiness_exception_skips_all_browser_providers(self) -> None:
+        source = next(
+            item for item in SOURCES if item.id == "vicious_syndicate_radars"
+        )
+        readiness = {
+            "latest_report_issue": "355",
+            "candidate_issue": "354",
+            "radar_urls": [
+                "https://www.vicioussyndicate.com/"
+                "wp-content/datareaper/radars/Mage/index.html"
+            ],
+            "blocking_radar_urls": [
+                "https://www.vicioussyndicate.com/"
+                "wp-content/datareaper/radars/Mage/index.html"
+            ],
+        }
+        preserved = {
+            "source_id": source.id,
+            "state": "ok",
+            "serving_cached_dataset": True,
+        }
+
+        with (
+            patch(
+                "app.fetcher._fetch_hsreplay_api_source",
+                new=AsyncMock(
+                    side_effect=ViciousUpstreamPublicationPending(
+                        readiness,
+                        transport_backend="residential_httpx",
+                    )
+                ),
+            ),
+            patch(
+                "app.fetcher.fetch_html",
+                new=AsyncMock(side_effect=AssertionError("browser must be skipped")),
+            ) as browser,
+            patch(
+                "app.fetcher._try_firecrawl_html",
+                new=AsyncMock(side_effect=AssertionError("Firecrawl must be skipped")),
+            ) as firecrawl,
+            patch("app.fetcher._save_failure_status", return_value=preserved) as save_failed,
+            patch("app.fetcher.firecrawl_primary_source_ids", return_value=set()),
+            patch("app.fetcher.log_action"),
+        ):
+            result = asyncio.run(fetch_source(None, source))
+
+        self.assertEqual(result, preserved)
+        browser.assert_not_awaited()
+        firecrawl.assert_not_awaited()
+        failed_status = save_failed.call_args.args[1]
+        self.assertEqual(failed_status["state"], "quality_error")
+        self.assertEqual(failed_status["failure_reason_code"], "unavailable")
+        self.assertEqual(failed_status["upstream_readiness"], readiness)
+        self.assertEqual(
+            failed_status["transport_backend"],
+            "residential_httpx",
+        )
+        self.assertTrue(failed_status["used_residential_proxy"])
 
     def test_test_process_refuses_default_production_writes(self) -> None:
         with patch("app.storage.data_dir", return_value=Path("/var/lib/hs-data-api")):
@@ -1168,7 +1317,75 @@ class RefreshStabilityTest(unittest.TestCase):
                 self.assertEqual(out["content_length"], 1234)
                 self.assertEqual(out["last_refresh_state"], "blocked_by_protection")
                 self.assertIn("Cloudflare challenge", out["last_refresh_error"])
+                self.assertTrue(out["cached_after_failure"])
+                self.assertFalse(out["fresh_candidate_published"])
                 self.assertEqual(load_status(source.id), out)
+
+    def test_preserved_lkg_keeps_bounded_upstream_failure_metadata(self) -> None:
+        source = Source(
+            id="vicious_syndicate_radars",
+            site="vicious-syndicate",
+            category="matchups",
+            url="https://www.vicioussyndicate.com/deck-library/death-knight-decks/",
+        )
+        cached = {
+            "fetched_at": "2026-08-10T00:00:00+00:00",
+            "backend": "vicious_syndicate_api",
+            "data": {"structured": {"type": "vicious_syndicate_radars"}},
+        }
+        failed = {
+            "state": "quality_error",
+            "fetched_at": "2026-08-13T00:00:00+00:00",
+            "detail": "upstream publication pending",
+            "failure_reason_code": "unavailable",
+            "upstream_state": "upstream_publication_pending",
+            "upstream_readiness": {
+                "latest_report_issue": "355",
+                "candidate_issue": "354",
+                "radar_urls": [
+                    "https://www.vicioussyndicate.com/"
+                    "wp-content/datareaper/radars/Mage/index.html"
+                ],
+                "blocking_radar_urls": [
+                    "https://www.vicioussyndicate.com/"
+                    "wp-content/datareaper/radars/Mage/index.html"
+                ],
+            },
+        }
+        gate = SimpleNamespace(
+            ok=True,
+            reason="usable temporal LKG",
+            extra={
+                "backend_policy_grandfathered": False,
+                "lkg_temporal_grandfathered": True,
+            },
+        )
+        with (
+            patch(
+                "app.parser_control.load_resolved_public_dataset",
+                return_value=cached,
+            ),
+            patch(
+                "app.fetcher.validate_existing_publication_for_serving",
+                return_value=gate,
+            ),
+            patch("app.fetcher.save_status"),
+            patch("app.fetcher.log_action"),
+        ):
+            out = _preserve_cached_ok_status(source, failed)
+
+        self.assertIsNotNone(out)
+        assert out is not None
+        self.assertTrue(out["serving_cached_dataset"])
+        self.assertTrue(out["cached_after_failure"])
+        self.assertFalse(out["fresh_candidate_published"])
+        self.assertEqual(out["failure_reason_code"], "unavailable")
+        self.assertEqual(out["upstream_state"], "upstream_publication_pending")
+        self.assertEqual(
+            out["last_refresh_upstream_readiness"],
+            failed["upstream_readiness"],
+        )
+        self.assertTrue(out["cached_content_temporally_grandfathered"])
 
     def test_preserve_cached_status_uses_resolved_stable_publication(self) -> None:
         source = Source(
