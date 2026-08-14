@@ -173,6 +173,7 @@ def test_v1_parsing_reliability_returns_sanitized_public_contract() -> None:
                         "attempted": 2,
                         "completed": 1,
                         "errors": 1,
+                        "skipped": 3,
                         "coverage_of_all_parser_attempts_pct": 10.0,
                         "valid_response_rate_pct": 50.0,
                         "verdicts": {"pass": 1, "fail": 0, "uncertain": 0},

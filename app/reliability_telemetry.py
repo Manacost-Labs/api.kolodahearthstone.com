@@ -1018,6 +1018,7 @@ def _query_ai_quality(
     review_attempted = 0
     review_completed = 0
     review_errors = 0
+    review_skipped = 0
     review_counts = {
         verdict: 0 for verdict in AI_REVIEW_VERDICTS if verdict != "not_run"
     }
@@ -1039,8 +1040,10 @@ def _query_ai_quality(
         diagnosis_domain,
         ai_quarantined,
     ) in rows:
-        if review_state != "not_run":
+        if review_state in {"ok", "error"}:
             review_attempted += 1
+        elif review_state in {"disabled", "skipped"}:
+            review_skipped += 1
         if review_state == "error":
             review_errors += 1
         if review_state == "ok" and review_verdict in review_counts:
@@ -1065,6 +1068,7 @@ def _query_ai_quality(
             "attempted": review_attempted,
             "completed": review_completed,
             "errors": review_errors,
+            "skipped": review_skipped,
             "coverage_of_all_parser_attempts_pct": _percentage(
                 review_completed,
                 eligible,
@@ -1110,6 +1114,7 @@ def _empty_ai_quality() -> dict[str, Any]:
             "attempted": 0,
             "completed": 0,
             "errors": 0,
+            "skipped": 0,
             "coverage_of_all_parser_attempts_pct": None,
             "valid_response_rate_pct": None,
             "verdicts": {"pass": 0, "fail": 0, "uncertain": 0},

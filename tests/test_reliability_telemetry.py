@@ -910,6 +910,7 @@ def test_ai_quality_reports_coverage_but_never_claims_unlabeled_accuracy(
         "attempted": 2,
         "completed": 1,
         "errors": 1,
+        "skipped": 0,
         "coverage_of_all_parser_attempts_pct": 25.0,
         "valid_response_rate_pct": 50.0,
         "verdicts": {"pass": 1, "fail": 0, "uncertain": 0},
@@ -930,6 +931,54 @@ def test_ai_quality_reports_coverage_but_never_claims_unlabeled_accuracy(
         "false_positive_rate_pct": None,
         "limitation": "human_labels_not_collected",
     }
+
+
+def test_ai_candidate_skips_are_reported_without_counting_as_attempts(
+    tmp_path: Path,
+) -> None:
+    now = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
+    path = tmp_path / "reliability.sqlite3"
+    record_terminal_results(
+        "ai-skip-run",
+        [
+            _status(
+                "review-ok",
+                ai_review={"state": "ok", "verdict": "pass"},
+            ),
+            _status(
+                "review-error",
+                ai_review={"state": "error", "error_type": "transport_error"},
+            ),
+            _status(
+                "review-circuit-open",
+                ai_review={"state": "skipped", "error_type": "circuit_open"},
+            ),
+            _status(
+                "review-budget-exhausted",
+                ai_review={
+                    "state": "skipped",
+                    "error_type": "refresh_budget_exhausted",
+                },
+            ),
+            _status(
+                "review-disabled",
+                ai_review={"state": "disabled", "error_type": "review_disabled"},
+            ),
+        ],
+        finished_at=now,
+        path=path,
+    )
+
+    candidate = build_reliability_report(now=now, path=path)["windows"][0][
+        "ai_quality"
+    ]["candidate_review"]
+
+    assert candidate["all_parser_attempts"] == 5
+    assert candidate["attempted"] == 2
+    assert candidate["completed"] == 1
+    assert candidate["errors"] == 1
+    assert candidate["skipped"] == 3
+    assert candidate["valid_response_rate_pct"] == 50.0
 
 
 def test_deferred_ai_fields_update_existing_terminal_attempt(tmp_path: Path) -> None:

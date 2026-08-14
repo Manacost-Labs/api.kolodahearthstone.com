@@ -89,6 +89,7 @@ class AICandidateReviewSummary(BaseModel):
     attempted: int = Field(ge=0)
     completed: int = Field(ge=0)
     errors: int = Field(ge=0)
+    skipped: int = Field(ge=0)
     coverage_of_all_parser_attempts_pct: float | None = Field(
         default=None,
         ge=0.0,
