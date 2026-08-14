@@ -388,6 +388,98 @@
             countCard('Ошибки', model.counts.failed, 'без результата'),
             countCard('Таймауты', model.counts.timedOut, 'завершены по лимиту времени')
         );
+        const ratioDetail = (numerator, denominator, noun) => (
+            numerator === null || numerator === undefined
+            || denominator === null || denominator === undefined
+                ? 'Недостаточно наблюдений.'
+                : `${integerFormatter.format(numerator)} из ${integerFormatter.format(denominator)} ${noun}.`
+        );
+
+        const scheduled = model.scheduledReliability || {
+            reported: false,
+            preliminary: false,
+            onTimeFreshRate: '—',
+            targetRate: '99%',
+            scheduleCoverage: '—',
+            temporalCoverage: '—',
+            trackedSchedules: null,
+            catalogSchedules: null,
+            dueSlots: null,
+            missing: null,
+            late: null,
+            excludedSlots: null,
+            pendingSlots: null,
+            objectiveLabel: 'Недостаточно данных расписания · collecting',
+            objectiveClass: 'is-collecting',
+        };
+        const scheduleSection = document.createElement('section');
+        scheduleSection.className = 'parsing-completeness parsing-schedule-reliability';
+        scheduleSection.setAttribute('aria-labelledby', 'parsing-schedule-title');
+        const scheduleHead = document.createElement('header');
+        scheduleHead.className = 'parsing-completeness-head';
+        const scheduleHeadingGroup = document.createElement('div');
+        const scheduleHeading = document.createElement('h4');
+        scheduleHeading.id = 'parsing-schedule-title';
+        scheduleHeading.textContent = 'Выполнение расписания';
+        const scheduleCopy = document.createElement('p');
+        scheduleCopy.textContent = !scheduled.reported
+            ? 'Журнал ещё не вернул согласованный срез; состояние остаётся collecting.'
+            : (scheduled.preliminary
+                ? 'Предварительно: журнал покрывает только часть расписаний или периода; процент ещё не является итоговым SLO.'
+                : 'Каждый обязательный запуск сопоставляется с новой публикацией до своего дедлайна.');
+        scheduleHeadingGroup.append(scheduleHeading, scheduleCopy);
+        const scheduleBadge = document.createElement('span');
+        scheduleBadge.className = `parsing-reliability-badge ${scheduled.objectiveClass || 'is-collecting'}`;
+        scheduleBadge.textContent = `Цель ${scheduled.targetRate || '99%'} · ${scheduled.objectiveLabel || 'collecting'}`;
+        scheduleHead.append(scheduleHeadingGroup, scheduleBadge);
+
+        const scheduleRates = document.createElement('div');
+        scheduleRates.className = 'parsing-completeness-gates';
+        scheduleRates.append(
+            rateCard(
+                'On-time fresh',
+                scheduled.onTimeFreshRate,
+                scheduled.reported
+                    ? 'Новая валидная публикация завершена до дедлайна обязательного запуска.'
+                    : 'Недостаточно данных журнала: процент пока не считается.',
+                'is-primary'
+            ),
+            rateCard(
+                'Покрытие расписаний',
+                scheduled.scheduleCoverage,
+                ratioDetail(
+                    scheduled.trackedSchedules,
+                    scheduled.catalogSchedules,
+                    'расписаний отслеживается'
+                )
+            ),
+            rateCard(
+                'Покрытие периода',
+                scheduled.temporalCoverage,
+                'Доля выбранного окна, материализованная долговечным журналом.'
+            )
+        );
+        const scheduleCounts = document.createElement('div');
+        scheduleCounts.className = 'parsing-completeness-counts';
+        scheduleCounts.append(
+            countCard('Due', scheduled.dueSlots, 'слоты с наступившим дедлайном'),
+            countCard('Missing', scheduled.missing, 'обязательные запуски без результата'),
+            countCard('Late', scheduled.late, 'результат получен после дедлайна'),
+            countCard('Excluded', scheduled.excludedSlots, 'явно исключённые слоты'),
+            countCard('Pending', scheduled.pendingSlots, 'дедлайн ещё не наступил')
+        );
+        scheduleSection.append(scheduleHead, scheduleRates, scheduleCounts);
+        if (!scheduled.reported) {
+            const scheduleEmpty = document.createElement('div');
+            scheduleEmpty.className = 'parsing-completeness-empty';
+            scheduleEmpty.setAttribute('role', 'status');
+            const scheduleEmptyTitle = document.createElement('strong');
+            scheduleEmptyTitle.textContent = 'Журнал расписаний накапливается';
+            const scheduleEmptyCopy = document.createElement('p');
+            scheduleEmptyCopy.textContent = 'До появления согласованного блока показываем collecting без вычисленного процента.';
+            scheduleEmpty.append(scheduleEmptyTitle, scheduleEmptyCopy);
+            scheduleSection.append(scheduleEmpty);
+        }
 
         const verified = model.verifiedCompleteness || {
             reported: false,
@@ -447,12 +539,6 @@
             )
         );
 
-        const ratioDetail = (numerator, denominator, noun) => (
-            numerator === null || numerator === undefined
-            || denominator === null || denominator === undefined
-                ? 'Недостаточно наблюдений.'
-                : `${integerFormatter.format(numerator)} из ${integerFormatter.format(denominator)} ${noun}.`
-        );
         const completenessSourceRates = document.createElement('div');
         completenessSourceRates.className = 'parsing-completeness-source-rates';
         completenessSourceRates.append(
@@ -562,7 +648,15 @@
             if (!Number.isNaN(generated.getTime())) metaParts.push(`срез: ${dateFormatter.format(generated)}`);
         }
         foot.textContent = metaParts.join(' · ');
-        reliabilityHost.replaceChildren(header, windowNav, rates, counts, completeness, foot);
+        reliabilityHost.replaceChildren(
+            header,
+            windowNav,
+            rates,
+            counts,
+            scheduleSection,
+            completeness,
+            foot
+        );
     };
 
     const detailLabels = {

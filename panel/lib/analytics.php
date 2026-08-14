@@ -343,6 +343,176 @@ function analytics_reliability_exact_count($value): ?int
     return (int)$number;
 }
 
+function analytics_empty_scheduled_reliability(): array
+{
+    return [
+        'reported' => false,
+        'ledger_status' => 'absent',
+        'measurement_status' => 'collecting',
+        'schedule_coverage_ratio' => 0.0,
+        'temporal_coverage_ratio' => 0.0,
+        'coverage_started_at' => null,
+        'materialized_through' => null,
+        'tracked_schedules' => null,
+        'catalog_schedules' => null,
+        'expected_slots' => null,
+        'eligible_slots' => null,
+        'excluded_slots' => null,
+        'pending_slots' => null,
+        'due_slots' => null,
+        'on_time_fresh' => null,
+        'on_time_nonfresh' => null,
+        'late' => null,
+        'missing' => null,
+        'on_time_fresh_rate_pct' => null,
+        'target_rate_pct' => 99.0,
+        'objective_status' => 'collecting',
+    ];
+}
+
+function analytics_reliability_ratio($value): ?float
+{
+    if (!is_numeric($value) || is_bool($value)) {
+        return null;
+    }
+    $number = (float)$value;
+    if (!is_finite($number) || $number < 0.0 || $number > 1.0) {
+        return null;
+    }
+    return round($number, 4);
+}
+
+function analytics_reliability_iso_datetime($value): ?string
+{
+    if (!is_string($value) || !preg_match(
+        '/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/D',
+        $value
+    )) {
+        return null;
+    }
+    $parts = date_parse($value);
+    if (($parts['error_count'] ?? 1) !== 0 || ($parts['warning_count'] ?? 1) !== 0) {
+        return null;
+    }
+    return $value;
+}
+
+function analytics_normalize_scheduled_reliability(
+    $raw,
+    bool $forceCollecting = false
+): array
+{
+    $empty = analytics_empty_scheduled_reliability();
+    if (!is_array($raw)) {
+        return $empty;
+    }
+
+    $ledgerStatus = (string)($raw['ledger_status'] ?? '');
+    $measurementStatus = (string)($raw['measurement_status'] ?? '');
+    $objectiveStatus = (string)($raw['objective_status'] ?? '');
+    $scheduleCoverage = analytics_reliability_ratio($raw['schedule_coverage_ratio'] ?? null);
+    $temporalCoverage = analytics_reliability_ratio($raw['temporal_coverage_ratio'] ?? null);
+    $target = analytics_reliability_percentage($raw['target_rate_pct'] ?? null);
+    if (
+        !in_array($ledgerStatus, ['absent', 'partial', 'covered'], true)
+        || !in_array($measurementStatus, ['collecting', 'observed'], true)
+        || !in_array($objectiveStatus, ['collecting', 'meeting', 'breached'], true)
+        || $scheduleCoverage === null
+        || $temporalCoverage === null
+        || $target === null
+    ) {
+        return $empty;
+    }
+    if ($ledgerStatus === 'absent') {
+        return $empty;
+    }
+
+    $countKeys = [
+        'tracked_schedules', 'catalog_schedules', 'expected_slots', 'eligible_slots',
+        'excluded_slots', 'pending_slots', 'due_slots', 'on_time_fresh',
+        'on_time_nonfresh', 'late', 'missing',
+    ];
+    $counts = [];
+    foreach ($countKeys as $key) {
+        $counts[$key] = analytics_reliability_exact_count($raw[$key] ?? null);
+        if ($counts[$key] === null) {
+            return $empty;
+        }
+    }
+
+    $coverageStartedAt = analytics_reliability_iso_datetime(
+        $raw['coverage_started_at'] ?? null
+    );
+    $materializedThrough = analytics_reliability_iso_datetime(
+        $raw['materialized_through'] ?? null
+    );
+    if (
+        $coverageStartedAt === null
+        || $materializedThrough === null
+        || new DateTimeImmutable($materializedThrough) < new DateTimeImmutable($coverageStartedAt)
+    ) {
+        return $empty;
+    }
+
+    $expectedScheduleCoverage = $counts['catalog_schedules'] === 0
+        ? 0.0
+        : round($counts['tracked_schedules'] / $counts['catalog_schedules'], 4);
+    $onTimeRate = analytics_reliability_percentage(
+        $raw['on_time_fresh_rate_pct'] ?? null
+    );
+    $expectedOnTimeRate = $counts['due_slots'] === 0
+        ? null
+        : round($counts['on_time_fresh'] / $counts['due_slots'] * 100, 2);
+    $covered = $scheduleCoverage === 1.0 && $temporalCoverage === 1.0;
+    $expectedObjective = 'collecting';
+    if ($measurementStatus === 'observed' && $counts['due_slots'] > 0) {
+        $expectedObjective = $counts['on_time_fresh'] * 100
+            >= $target * $counts['due_slots']
+            ? 'meeting'
+            : 'breached';
+    }
+
+    if (
+        $counts['tracked_schedules'] === 0
+        || $counts['catalog_schedules'] === 0
+        || $counts['tracked_schedules'] > $counts['catalog_schedules']
+        || abs($scheduleCoverage - $expectedScheduleCoverage) > 0.00011
+        || $counts['expected_slots'] !== $counts['eligible_slots'] + $counts['excluded_slots']
+        || $counts['eligible_slots'] !== $counts['due_slots'] + $counts['pending_slots']
+        || $counts['due_slots'] !== $counts['on_time_fresh']
+            + $counts['on_time_nonfresh'] + $counts['late'] + $counts['missing']
+        || ($expectedOnTimeRate === null && $onTimeRate !== null)
+        || ($expectedOnTimeRate !== null && (
+            $onTimeRate === null || abs($onTimeRate - $expectedOnTimeRate) > 0.011
+        ))
+        || ($ledgerStatus === 'covered' && !$covered)
+        || ($ledgerStatus === 'partial' && $covered)
+        || ($measurementStatus === 'observed' && ($ledgerStatus !== 'covered' || !$covered))
+        || ($measurementStatus === 'collecting' && $objectiveStatus !== 'collecting')
+        || $objectiveStatus !== $expectedObjective
+    ) {
+        return $empty;
+    }
+
+    return array_merge(
+        [
+            'reported' => true,
+            'ledger_status' => $ledgerStatus,
+            'measurement_status' => $forceCollecting ? 'collecting' : $measurementStatus,
+            'schedule_coverage_ratio' => $scheduleCoverage,
+            'temporal_coverage_ratio' => $temporalCoverage,
+            'coverage_started_at' => $coverageStartedAt,
+            'materialized_through' => $materializedThrough,
+        ],
+        $counts,
+        [
+            'on_time_fresh_rate_pct' => $onTimeRate,
+            'target_rate_pct' => $target,
+            'objective_status' => $forceCollecting ? 'collecting' : $objectiveStatus,
+        ]
+    );
+}
+
 function analytics_empty_verified_completeness(): array
 {
     return [
@@ -763,6 +933,10 @@ function analytics_normalize_parsing_reliability(
             'rates_available' => $ratesAvailable,
             'rates_observed' => $ratesObserved,
             'verified_completeness' => $verifiedCompleteness,
+            'scheduled_reliability' => analytics_normalize_scheduled_reliability(
+                $rawWindow['scheduled_reliability'] ?? null,
+                $staleCache
+            ),
         ];
     }
 

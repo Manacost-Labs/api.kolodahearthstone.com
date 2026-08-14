@@ -34,6 +34,167 @@
         return Number.isInteger(number) && number >= 0 ? number : null;
     };
 
+    const buildScheduledReliability = (scheduled, stale = false) => {
+        const fallback = {
+            reported: false,
+            ledgerStatus: 'absent',
+            measurementStatus: 'collecting',
+            observed: false,
+            preliminary: false,
+            onTimeFreshRate: '—',
+            rateAvailable: false,
+            targetRate: '99%',
+            scheduleCoverage: '—',
+            temporalCoverage: '—',
+            coverageStartedAt: null,
+            materializedThrough: null,
+            trackedSchedules: null,
+            catalogSchedules: null,
+            expectedSlots: null,
+            eligibleSlots: null,
+            excludedSlots: null,
+            pendingSlots: null,
+            dueSlots: null,
+            onTimeFresh: null,
+            onTimeNonfresh: null,
+            late: null,
+            missing: null,
+            objectiveStatus: 'collecting',
+            objectiveLabel: 'Недостаточно данных расписания · collecting',
+            objectiveClass: 'is-collecting',
+        };
+        if (!scheduled || scheduled.reported === false) return fallback;
+
+        const ledgerStatus = String(scheduled.ledger_status || '');
+        const measurementStatus = String(scheduled.measurement_status || '');
+        const objectiveStatus = String(scheduled.objective_status || '');
+        const boundedRatio = (value) => {
+            if (value === null || value === '' || typeof value === 'boolean') return null;
+            const number = Number(value);
+            return Number.isFinite(number) && number >= 0 && number <= 1
+                ? number
+                : null;
+        };
+        const scheduleCoverage = boundedRatio(scheduled.schedule_coverage_ratio);
+        const temporalCoverage = boundedRatio(scheduled.temporal_coverage_ratio);
+        const target = boundedPercentage(scheduled.target_rate_pct);
+        const countKeys = [
+            'tracked_schedules', 'catalog_schedules', 'expected_slots',
+            'eligible_slots', 'excluded_slots', 'pending_slots', 'due_slots',
+            'on_time_fresh', 'on_time_nonfresh', 'late', 'missing',
+        ];
+        const counts = Object.fromEntries(countKeys.map((key) => [
+            key,
+            exactNonNegativeCount(scheduled[key]),
+        ]));
+        const countsPresent = Object.values(counts).every((value) => value !== null);
+        const isoTimestamp = (value) => {
+            if (typeof value !== 'string') return false;
+            const match = value.match(
+                /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,6})?(?:Z|[+-](\d{2}):(\d{2}))$/
+            );
+            if (!match) return false;
+            const [year, month, day, hour, minute, second] = match
+                .slice(1, 7)
+                .map(Number);
+            const offsetHour = match[7] === undefined ? null : Number(match[7]);
+            const offsetMinute = match[8] === undefined ? null : Number(match[8]);
+            const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+            return month >= 1 && month <= 12
+                && day >= 1 && day <= daysInMonth
+                && hour <= 23 && minute <= 59 && second <= 59
+                && (offsetHour === null || (offsetHour <= 23 && offsetMinute <= 59))
+                && Number.isFinite(Date.parse(value));
+        };
+        const timestampsValid = isoTimestamp(scheduled.coverage_started_at)
+            && isoTimestamp(scheduled.materialized_through)
+            && Date.parse(scheduled.materialized_through)
+                >= Date.parse(scheduled.coverage_started_at);
+        const ratiosValid = scheduleCoverage !== null && temporalCoverage !== null;
+        if (
+            !['partial', 'covered'].includes(ledgerStatus)
+            || !['collecting', 'observed'].includes(measurementStatus)
+            || !['collecting', 'meeting', 'breached'].includes(objectiveStatus)
+            || target === null
+            || !countsPresent
+            || !timestampsValid
+            || !ratiosValid
+        ) return fallback;
+
+        const expectedScheduleCoverage = counts.catalog_schedules === 0
+            ? 0
+            : Math.round((counts.tracked_schedules / counts.catalog_schedules) * 10000) / 10000;
+        const reportedRate = boundedPercentage(scheduled.on_time_fresh_rate_pct);
+        const expectedRate = counts.due_slots === 0
+            ? null
+            : Math.round((counts.on_time_fresh / counts.due_slots) * 10000) / 100;
+        const covered = scheduleCoverage === 1 && temporalCoverage === 1;
+        let expectedObjective = 'collecting';
+        if (measurementStatus === 'observed' && counts.due_slots > 0) {
+            expectedObjective = counts.on_time_fresh * 100
+                >= target * counts.due_slots ? 'meeting' : 'breached';
+        }
+        const valid = counts.tracked_schedules > 0
+            && counts.catalog_schedules > 0
+            && counts.tracked_schedules <= counts.catalog_schedules
+            && Math.abs(scheduleCoverage - expectedScheduleCoverage) <= 0.00011
+            && counts.expected_slots === counts.eligible_slots + counts.excluded_slots
+            && counts.eligible_slots === counts.due_slots + counts.pending_slots
+            && counts.due_slots === counts.on_time_fresh + counts.on_time_nonfresh
+                + counts.late + counts.missing
+            && (
+                (expectedRate === null && reportedRate === null)
+                || (expectedRate !== null && reportedRate !== null
+                    && Math.abs(reportedRate - expectedRate) <= 0.011)
+            )
+            && (ledgerStatus === 'covered') === covered
+            && !(measurementStatus === 'observed' && !covered)
+            && !(measurementStatus === 'collecting' && objectiveStatus !== 'collecting')
+            && objectiveStatus === expectedObjective;
+        if (!valid) return fallback;
+
+        const presentedStatus = stale ? 'collecting' : measurementStatus;
+        const presentedObjective = stale ? 'collecting' : objectiveStatus;
+        const objectiveLabels = {
+            collecting: 'Собираем наблюдения · collecting',
+            meeting: 'Цель выполняется · meeting',
+            breached: 'Цель нарушена · breached',
+        };
+        const objectiveClasses = {
+            collecting: 'is-collecting',
+            meeting: 'is-met',
+            breached: 'is-miss',
+        };
+        return {
+            reported: true,
+            ledgerStatus,
+            measurementStatus: presentedStatus,
+            observed: presentedStatus === 'observed',
+            preliminary: ledgerStatus === 'partial' || presentedStatus !== 'observed',
+            onTimeFreshRate: expectedRate === null ? '—' : percentage(reportedRate),
+            rateAvailable: expectedRate !== null,
+            targetRate: percentage(target),
+            scheduleCoverage: percentage(scheduleCoverage * 100),
+            temporalCoverage: percentage(temporalCoverage * 100),
+            coverageStartedAt: scheduled.coverage_started_at,
+            materializedThrough: scheduled.materialized_through,
+            trackedSchedules: counts.tracked_schedules,
+            catalogSchedules: counts.catalog_schedules,
+            expectedSlots: counts.expected_slots,
+            eligibleSlots: counts.eligible_slots,
+            excludedSlots: counts.excluded_slots,
+            pendingSlots: counts.pending_slots,
+            dueSlots: counts.due_slots,
+            onTimeFresh: counts.on_time_fresh,
+            onTimeNonfresh: counts.on_time_nonfresh,
+            late: counts.late,
+            missing: counts.missing,
+            objectiveStatus: presentedObjective,
+            objectiveLabel: objectiveLabels[presentedObjective],
+            objectiveClass: objectiveClasses[presentedObjective],
+        };
+    };
+
     const buildVerifiedCompleteness = (
         verified,
         parentMeasurementStatus,
@@ -290,6 +451,10 @@
             measurementStatus,
             window?.eligible_attempts
         );
+        const scheduledReliability = buildScheduledReliability(
+            window?.scheduled_reliability,
+            stale
+        );
         const badge = observed
             ? 'Наблюдаемый срез'
             : (preliminary ? 'Предварительный срез' : 'Накапливаем статистику');
@@ -319,6 +484,7 @@
                 skipped: window ? nonNegativeCount(counts.skipped) : null,
             },
             verifiedCompleteness,
+            scheduledReliability,
             generatedAt: reliability?.generated_at || null,
             message: reliability?.message || 'Накапливаем статистику',
         };

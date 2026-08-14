@@ -80,6 +80,28 @@ $envelope = [
                     'target_rate_pct' => 99.0,
                     'objective_status' => 'collecting',
                 ],
+                'scheduled_reliability' => [
+                    'ledger_status' => 'partial',
+                    'measurement_status' => 'collecting',
+                    'schedule_coverage_ratio' => 0.5,
+                    'temporal_coverage_ratio' => 1.0,
+                    'coverage_started_at' => '2026-08-10T03:30:00+00:00',
+                    'materialized_through' => '2026-08-12T03:30:00+00:00',
+                    'tracked_schedules' => 1,
+                    'catalog_schedules' => 2,
+                    'expected_slots' => 12,
+                    'eligible_slots' => 10,
+                    'excluded_slots' => 2,
+                    'pending_slots' => 2,
+                    'due_slots' => 8,
+                    'on_time_fresh' => 7,
+                    'on_time_nonfresh' => 0,
+                    'late' => 0,
+                    'missing' => 1,
+                    'on_time_fresh_rate_pct' => 87.5,
+                    'target_rate_pct' => 99.0,
+                    'objective_status' => 'collecting',
+                ],
             ],
             [
                 'window' => '7d',
@@ -127,6 +149,28 @@ $envelope = [
                     'target_rate_pct' => 99.0,
                     'objective_status' => 'met',
                 ],
+                'scheduled_reliability' => [
+                    'ledger_status' => 'covered',
+                    'measurement_status' => 'observed',
+                    'schedule_coverage_ratio' => 1.0,
+                    'temporal_coverage_ratio' => 1.0,
+                    'coverage_started_at' => '2026-08-01T00:00:00+00:00',
+                    'materialized_through' => '2026-08-12T03:30:00+00:00',
+                    'tracked_schedules' => 2,
+                    'catalog_schedules' => 2,
+                    'expected_slots' => 102,
+                    'eligible_slots' => 100,
+                    'excluded_slots' => 2,
+                    'pending_slots' => 0,
+                    'due_slots' => 100,
+                    'on_time_fresh' => 99,
+                    'on_time_nonfresh' => 0,
+                    'late' => 1,
+                    'missing' => 0,
+                    'on_time_fresh_rate_pct' => 99.0,
+                    'target_rate_pct' => 99.0,
+                    'objective_status' => 'meeting',
+                ],
             ],
         ],
     ],
@@ -147,6 +191,102 @@ assert_same(9, $normalized['windows'][0]['eligible_attempts'], 'Missing terminal
 assert_same(true, $normalized['windows'][1]['rates_observed'], 'An observed window with consistent attempts may show rates.');
 assert_same(true, $normalized['windows'][1]['rates_available'], 'Observed rates must also be available.');
 assert_same(5, $normalized['windows'][1]['counts']['lkg_served'], 'LKG must remain a separate count.');
+assert_same(
+    true,
+    $normalized['windows'][0]['scheduled_reliability']['reported'],
+    'A coherent partial schedule ledger must remain visible as preliminary evidence.'
+);
+assert_same(
+    'collecting',
+    $normalized['windows'][0]['scheduled_reliability']['measurement_status'],
+    'A partial schedule ledger must remain collecting.'
+);
+assert_same(
+    87.5,
+    $normalized['windows'][0]['scheduled_reliability']['on_time_fresh_rate_pct'],
+    'A coherent partial ledger may expose its explicitly preliminary on-time rate.'
+);
+assert_same(
+    true,
+    $normalized['windows'][1]['scheduled_reliability']['reported'],
+    'A fully covered ledger must reach the panel.'
+);
+assert_same(
+    'observed',
+    $normalized['windows'][1]['scheduled_reliability']['measurement_status'],
+    'Only a fully covered ledger may be observed.'
+);
+assert_same(
+    'meeting',
+    $normalized['windows'][1]['scheduled_reliability']['objective_status'],
+    'The schedule objective must reconcile with exact due and on-time counts.'
+);
+
+$missingScheduleLedger = $envelope;
+unset($missingScheduleLedger['data']['windows'][0]['scheduled_reliability']);
+$missingScheduleLedger = analytics_normalize_parsing_reliability($missingScheduleLedger);
+assert_same(
+    false,
+    $missingScheduleLedger['windows'][0]['scheduled_reliability']['reported'],
+    'A missing schedule ledger must fail closed.'
+);
+assert_same(
+    null,
+    $missingScheduleLedger['windows'][0]['scheduled_reliability']['on_time_fresh_rate_pct'],
+    'A missing ledger must never manufacture an on-time percentage.'
+);
+
+$invalidScheduleArithmetic = $envelope;
+$invalidScheduleArithmetic['data']['windows'][0]['scheduled_reliability']['due_slots'] = 7;
+$invalidScheduleArithmetic = analytics_normalize_parsing_reliability($invalidScheduleArithmetic);
+assert_same(
+    false,
+    $invalidScheduleArithmetic['windows'][0]['scheduled_reliability']['reported'],
+    'Contradictory expected, due, and outcome counts must fail closed.'
+);
+
+$prematureObservedSchedule = $envelope;
+$prematureObservedSchedule['data']['windows'][0]['scheduled_reliability']['measurement_status'] =
+    'observed';
+$prematureObservedSchedule['data']['windows'][0]['scheduled_reliability']['objective_status'] =
+    'breached';
+$prematureObservedSchedule = analytics_normalize_parsing_reliability(
+    $prematureObservedSchedule
+);
+assert_same(
+    'collecting',
+    $prematureObservedSchedule['windows'][0]['scheduled_reliability']['measurement_status'],
+    'A partial ledger must never be presented as observed.'
+);
+assert_same(
+    null,
+    $prematureObservedSchedule['windows'][0]['scheduled_reliability']['on_time_fresh_rate_pct'],
+    'An invalid observed claim must not leak its percentage.'
+);
+
+$invalidScheduleObjective = $envelope;
+$invalidScheduleObjective['data']['windows'][1]['scheduled_reliability']['objective_status'] =
+    'breached';
+$invalidScheduleObjective = analytics_normalize_parsing_reliability(
+    $invalidScheduleObjective
+);
+assert_same(
+    false,
+    $invalidScheduleObjective['windows'][1]['scheduled_reliability']['reported'],
+    'The objective must reconcile with exact on-time and due counts.'
+);
+
+$invalidScheduleTimestamp = $envelope;
+$invalidScheduleTimestamp['data']['windows'][0]['scheduled_reliability']['coverage_started_at'] =
+    '2026-02-30T00:00:00+00:00';
+$invalidScheduleTimestamp = analytics_normalize_parsing_reliability(
+    $invalidScheduleTimestamp
+);
+assert_same(
+    false,
+    $invalidScheduleTimestamp['windows'][0]['scheduled_reliability']['reported'],
+    'Invalid ISO timestamps must fail closed.'
+);
 assert_same(
     true,
     $normalized['windows'][0]['verified_completeness']['reported'],
@@ -238,6 +378,16 @@ assert_same(
     'collecting',
     $briefStaleCache['windows'][1]['verified_completeness']['objective_status'],
     'A stale cache must never retain a met completeness objective.'
+);
+assert_same(
+    'collecting',
+    $briefStaleCache['windows'][1]['scheduled_reliability']['measurement_status'],
+    'A stale cache must never confirm an observed schedule window.'
+);
+assert_same(
+    'collecting',
+    $briefStaleCache['windows'][1]['scheduled_reliability']['objective_status'],
+    'A stale cache must never retain a meeting schedule objective.'
 );
 
 $expiredStaleCache = analytics_normalize_parsing_reliability(

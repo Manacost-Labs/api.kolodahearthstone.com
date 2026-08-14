@@ -57,6 +57,30 @@ const observedWindow = {
     },
 };
 
+const coveredSchedule = {
+    reported: true,
+    ledger_status: 'covered',
+    measurement_status: 'observed',
+    schedule_coverage_ratio: 1,
+    temporal_coverage_ratio: 1,
+    coverage_started_at: '2026-08-01T00:00:00+00:00',
+    materialized_through: '2026-08-12T00:00:00+00:00',
+    tracked_schedules: 2,
+    catalog_schedules: 2,
+    expected_slots: 102,
+    eligible_slots: 100,
+    excluded_slots: 2,
+    pending_slots: 0,
+    due_slots: 100,
+    on_time_fresh: 98,
+    on_time_nonfresh: 1,
+    late: 1,
+    missing: 0,
+    on_time_fresh_rate_pct: 98,
+    target_rate_pct: 99,
+    objective_status: 'breached',
+};
+
 test('describes extraction evidence without claiming full upstream pages', () => {
     const renderer = fs.readFileSync(
         path.join(__dirname, '../assets/analytics.js'),
@@ -71,7 +95,123 @@ test('describes extraction evidence without claiming full upstream pages', () =>
     assert.match(renderer, /Источники, выполняющие 99%/);
     assert.match(renderer, /Macro rate по источникам/);
     assert.match(renderer, /Худший наблюдавшийся источник/);
+    assert.match(renderer, /Выполнение расписания/);
+    assert.match(renderer, /On-time fresh/);
+    assert.match(renderer, /Покрытие расписаний/);
+    assert.match(renderer, /предварительно/i);
     assert.doesNotMatch(renderer, /Полное получение данных|страница получена целиком/);
+});
+
+test('shows an observed schedule objective only for a fully covered ledger', () => {
+    const model = buildReliabilityViewModel({
+        state: 'available',
+        default_window: '7d',
+        windows: [{...observedWindow, scheduled_reliability: coveredSchedule}],
+    });
+
+    assert.equal(model.scheduledReliability.reported, true);
+    assert.equal(model.scheduledReliability.observed, true);
+    assert.equal(model.scheduledReliability.preliminary, false);
+    assert.equal(model.scheduledReliability.onTimeFreshRate, '98%');
+    assert.equal(model.scheduledReliability.scheduleCoverage, '100%');
+    assert.equal(model.scheduledReliability.temporalCoverage, '100%');
+    assert.equal(model.scheduledReliability.dueSlots, 100);
+    assert.equal(model.scheduledReliability.late, 1);
+    assert.equal(model.scheduledReliability.objectiveStatus, 'breached');
+    assert.equal(model.scheduledReliability.objectiveClass, 'is-miss');
+});
+
+test('labels a coherent partial schedule slice as explicitly preliminary', () => {
+    const model = buildReliabilityViewModel({
+        state: 'available',
+        default_window: '7d',
+        windows: [{
+            ...observedWindow,
+            scheduled_reliability: {
+                ...coveredSchedule,
+                ledger_status: 'partial',
+                measurement_status: 'collecting',
+                schedule_coverage_ratio: 0.5,
+                tracked_schedules: 1,
+                objective_status: 'collecting',
+            },
+        }],
+    });
+
+    assert.equal(model.scheduledReliability.reported, true);
+    assert.equal(model.scheduledReliability.observed, false);
+    assert.equal(model.scheduledReliability.preliminary, true);
+    assert.equal(model.scheduledReliability.onTimeFreshRate, '98%');
+    assert.equal(model.scheduledReliability.scheduleCoverage, '50%');
+    assert.equal(model.scheduledReliability.excludedSlots, 2);
+    assert.equal(model.scheduledReliability.pendingSlots, 0);
+    assert.equal(model.scheduledReliability.objectiveStatus, 'collecting');
+    assert.equal(model.scheduledReliability.objectiveClass, 'is-collecting');
+});
+
+test('fails schedule telemetry closed on arithmetic, coverage, or objective contradictions', () => {
+    const invalidBlocks = [
+        {...coveredSchedule, due_slots: 99},
+        {
+            ...coveredSchedule,
+            ledger_status: 'partial',
+            schedule_coverage_ratio: 0.5,
+            tracked_schedules: 1,
+        },
+        {...coveredSchedule, objective_status: 'meeting'},
+        {...coveredSchedule, coverage_started_at: '2026-02-30T00:00:00+00:00'},
+        {...coveredSchedule, temporal_coverage_ratio: true},
+    ];
+
+    invalidBlocks.forEach((scheduled_reliability) => {
+        const model = buildReliabilityViewModel({
+            state: 'available',
+            default_window: '7d',
+            windows: [{...observedWindow, scheduled_reliability}],
+        });
+        assert.equal(model.scheduledReliability.reported, false);
+        assert.equal(model.scheduledReliability.measurementStatus, 'collecting');
+        assert.equal(model.scheduledReliability.onTimeFreshRate, '—');
+        assert.equal(model.scheduledReliability.objectiveStatus, 'collecting');
+    });
+});
+
+test('does not invent a schedule percentage when the block is absent', () => {
+    const model = buildReliabilityViewModel({
+        state: 'available',
+        default_window: '7d',
+        windows: [observedWindow],
+    });
+
+    assert.equal(model.scheduledReliability.reported, false);
+    assert.equal(model.scheduledReliability.onTimeFreshRate, '—');
+    assert.equal(model.scheduledReliability.scheduleCoverage, '—');
+    assert.equal(model.scheduledReliability.objectiveStatus, 'collecting');
+    assert.doesNotMatch(JSON.stringify(model.scheduledReliability), /100%/);
+});
+
+test('downgrades a cached schedule objective to preliminary collecting', () => {
+    const model = buildReliabilityViewModel({
+        state: 'available',
+        stale_cache: true,
+        default_window: '7d',
+        windows: [{
+            ...observedWindow,
+            scheduled_reliability: {
+                ...coveredSchedule,
+                on_time_fresh: 99,
+                on_time_nonfresh: 0,
+                on_time_fresh_rate_pct: 99,
+                objective_status: 'meeting',
+            },
+        }],
+    });
+
+    assert.equal(model.scheduledReliability.reported, true);
+    assert.equal(model.scheduledReliability.observed, false);
+    assert.equal(model.scheduledReliability.preliminary, true);
+    assert.equal(model.scheduledReliability.onTimeFreshRate, '99%');
+    assert.equal(model.scheduledReliability.objectiveStatus, 'collecting');
 });
 
 test('uses the observed weekly window for honest headline rates', () => {
