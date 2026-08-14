@@ -83,6 +83,7 @@ Authorization: Bearer khs_v1_<token-id>_<secret>
 | `GET` | `/v1/sources` | Типизированный каталог источников. |
 | `GET` | `/v1/datasets` | Состояние кешей всех источников. |
 | `GET` | `/v1/health` | Диагностика в v1-конверте; не кешируется. |
+| `GET` | `/v1/system/parsing-reliability` | Честная надёжность и проверенная полнота за 24h, 7d и 30d; `no-store`. |
 
 Старые `/v1/bg/*` и `/v1/system/{sources,datasets,health}` остаются
 deprecated aliases и возвращают тот же JSON.
@@ -103,14 +104,41 @@ deprecated aliases и возвращают тот же JSON.
 }
 ```
 
-Публичные `GET /v1/*`, `GET /api/*` и `GET /datasets*` возвращают:
+Большинство публичных `GET /v1/*`, `GET /api/*` и `GET /datasets*` возвращают:
 
 ```http
 Cache-Control: public, max-age=300, stale-while-revalidate=600
 ETag: "..."
 ```
 
-`ETag` учитывает путь, query string и время актуального snapshot/dataset. Условный запрос с `If-None-Match` возвращает `304` без тела. `/health`, `/v1/health`, `/v1/system/health`, `/ops`, `/admin` и `/ui` исключены из публичного кеша.
+`ETag` учитывает путь, query string и время актуального snapshot/dataset. Условный запрос с `If-None-Match` возвращает `304` без тела. `/health`, `/v1/health`, `/v1/system/health`, `/v1/system/parsing-reliability`, `/ops`, `/admin` и `/ui` исключены из публичного кеша.
+
+### `GET /v1/system/parsing-reliability`
+
+Endpoint возвращает независимые окна `24h`, `7d` и `30d`. LKG означает
+доступность старого набора и не попадает в `fresh_published` или
+`verified_completeness.complete_fresh`. Ответ всегда имеет
+`Cache-Control: no-store`.
+
+Поля `verified_completeness`:
+
+| Поле | Знаменатель и смысл |
+| --- | --- |
+| `instrumented_sources / catalog_sources` | Охват строгим контрактом всего текущего каталога источников. |
+| `observed_instrumented_sources / instrumented_sources` | Сколько инструментированных источников реально наблюдалось в окне. |
+| `tracked_attempts / eligible_attempts` | Охват строгой полнотой всех учитываемых parser-attempts, включая записанные terminal deficits. |
+| `complete_fresh / tracked_attempts` | Взвешенный процент попыток: опубликован новый кандидат, retrieval полный и freshness доказана. |
+| `states` | Число `complete`, доказанно `incomplete` и `unknown`; сумма равна `tracked_attempts`. |
+| `macro_complete_fresh_rate_pct` | Невзвешенное среднее per-source rates по всем инструментированным источникам; ненаблюдавшийся источник даёт 0. |
+| `macro_target_met` | Результат точного сравнения неокруглённого среднего per-source rates с целью 99%; интерфейс не восстанавливает его из округлённого процента. |
+| `worst_observed_source_rate_pct` | Худший rate среди реально наблюдавшихся инструментированных источников. |
+| `sources_meeting_target / instrumented_sources` | Доля источников, каждый из которых отдельно выполняет цель 99%. |
+| `objective_status` | `met` только при полном измеряемом окне и прохождении всех coverage/rate gates; иначе `collecting` или `miss`. |
+
+Граница 99% проверяется по целым счётчикам до округления. Пока durable
+schedule ledger не покрывает окно целиком, полностью не стартовавший scheduler
+run нельзя доказанно включить в знаменатель, поэтому `measurement_status` и
+`objective_status` остаются `collecting`.
 
 ### `GET /health`
 
@@ -257,13 +285,18 @@ residential proxy. Общие поля строки: `archetype_id`, `archetype_
 # Запускайте отдельно внутри штатного production-контейнера.
 docker exec hs-data-api python -m app.cli refresh \
   --source hearthstone_decks --require-all-ok
-docker exec hs-data-api python -m app.cli refresh \
+docker exec -e HS_FIRESTONE_STANDARD_AUTHORIZED=true hs-data-api \
+  python -m app.cli refresh \
   --source firestone_standard --require-all-ok
 ```
 
 > `firestone_standard` нельзя включать в публичном или коммерческом production
 > без письменного разрешения Firestone/ZeroToHeroes. См.
 > [Firestone Terms of Service](https://github.com/Zero-to-Heroes/firestone/blob/master/tos.md).
+> По умолчанию `HS_FIRESTONE_STANDARD_AUTHORIZED=false`: сетевой fetch и
+> scheduled refresh заблокированы, старый кэш не выдаётся через dataset/demo/v1,
+> а источник не входит в denominator verified completeness. Флаг `true` —
+> явное подтверждение оператора, что необходимое разрешение получено.
 
 Опциональная сессия Vicious Syndicate хранится отдельно от HSReplay и
 используется только при запросах к домену `vicioussyndicate.com`:
@@ -816,6 +849,143 @@ Structured datasets created by API-first parsers include:
 ```
 
 If a legacy/generic dataset has no registered schema, `validated` can be `false` with `reason: "no schema registered"`.
+
+### Контракт полноты данных v1
+
+Новые snapshots источников `hsreplay_battlegrounds_minions`,
+`hsreplay_arena_cards_advanced`, `hsreplay_arena_legendaries` и
+`firestone_standard` публикуют проверяемый контракт:
+
+```json
+{
+  "completeness_schema_version": 1,
+  "population_completeness": "unverifiable",
+  "upstream_freshness": {
+    "status": "fresh",
+    "reason": null,
+    "observed_at": "2026-08-14T02:20:00+00:00",
+    "age_seconds": 3600,
+    "evidence": ["meta_period_id", "selected_params", "last_modified"],
+    "meta_period_id": 16,
+    "selected_params": [
+      "ArenaGameTypeFilter.BGT_UNDERGROUND_ARENA",
+      "ArenaTimestampRangeFilter.LAST_4_DAYS"
+    ],
+    "filters_match": true,
+    "response_headers": {}
+  },
+  "row_retrieval": {
+    "raw_rows": 901,
+    "eligible_rows": 901,
+    "normalized_rows": 900,
+    "explained_drops": 0,
+    "unexplained_drops": 1,
+    "drop_reasons": {
+      "explained": {},
+      "unexplained": {"normalizer_rejected": 1}
+    },
+    "scope": "primary_class:ALL"
+  },
+  "cards": [
+    {
+      "deck_winrate": null,
+      "field_availability": {
+        "deck_winrate": {
+          "available": false,
+          "reason": "no_games_in_window"
+        }
+      }
+    }
+  ]
+}
+```
+
+`row_retrieval` обязан удовлетворять условиям
+`raw_rows >= eligible_rows >= normalized_rows` и
+`raw_rows - normalized_rows = explained_drops + unexplained_drops`. Суммы в
+`drop_reasons` должны совпадать с соответствующими счётчиками. Разрешённый
+список причин для `explained` сейчас пуст: произвольное объяснение не позволяет
+выдать потерянную строку за успешное получение. Для Arena Cards считается
+только выбранный первичный class slice, а для Arena Legendaries — уникальные
+package keys, поэтому дубликаты классовых представлений не искажают процент.
+Для `hsreplay_arena_legendaries` объект дополнительно содержит
+`bucket_coverage`: фиксированный `expected_buckets` (`ALL` и 11 классов),
+фактически полученные `observed_buckets`, отсутствующие `missing_buckets`,
+неизвестные `unknown_buckets` и `duplicate_bucket_package_keys`. Пустой список
+строк внутри ожидаемого bucket допустим, но отсутствие самого ключа, неизвестный
+bucket или повтор пары `(bucket, package_key)` делают snapshot неполным. Поэтому
+free/Firecrawl-ответ только с `ALL` может использоваться как диагностический
+fallback, но не публикуется как новый полностью полученный v1 snapshot.
+
+`population_completeness="unverifiable"` обязателен для трёх HSReplay v1
+схем: upstream не публикует total/pagination contract, поэтому API не заявляет
+полноту всей популяции. `upstream_freshness.status` отделяет свежесть upstream
+представления от времени нашего HTTP-запроса. BG доказывает её body-полем
+`as_of` и допускает возраст до 36 часов; Arena требует точные filters,
+положительный `meta_period_id` и `Last-Modified` не старше 6 часов. Заголовок
+`Date` сохраняется только как контекст и не является доказательством изменения
+данных.
+
+`stale`, неверные filters/metadata, malformed/future timestamps и mismatch
+body/header блокируют новый snapshot. Отсутствие target headers у fallback
+фиксируется как `unknown` (`missing_last_modified` или
+`transport_evidence_unavailable`), а не как выдуманная свежесть. Такой
+кандидат может пройти остальные content gates, но не считается complete-fresh
+в telemetry; LKG продолжает обслуживаться при отклонении кандидата.
+
+Отсутствующее поле засчитывается как полученное только при согласованном
+`field_availability.available=false` и детерминированной причине из списка:
+
+| Источник | Поля | Допустимые объяснения отсутствия |
+| --- | --- | --- |
+| `hsreplay_battlegrounds_minions` | `impact`, `win_share`, `popularity` | `no_current_patch_aggregates`, `insufficient_current_patch_sample` |
+| `hsreplay_arena_cards_advanced` | `deck_winrate`, `winrate_when_drawn`, `winrate_when_played` | `no_games_in_window` |
+| `hsreplay_arena_legendaries` | `winrate`, включая каждый `by_class` bucket | `upstream_unavailable_at_zero_pick_rate` |
+| `firestone_standard` | `core_cards` | `generic_class_bucket_without_observed_deck_cluster` |
+
+Пустой `core_cards` у Firestone-архетипа, который не является generic class
+bucket, получает причину
+`empty_core_cards_without_deterministic_explanation`; это необъяснённая потеря
+и quality gate её отклоняет.
+
+В v1 числовые значения проверяются до форматирования. Arena rates должны быть
+конечными числами в диапазоне `0..100`; `false`, `NaN`, бесконечность,
+произвольный текст и значения вне диапазона отвергаются. `score` обязан быть
+конечным числом, а `avg_copies` — конечным неотрицательным числом. У Arena
+Legendaries каждый package обязан иметь непустой `package_card_ids`, а каждый
+нормализованный элемент `cards[]` — непустой `card_id` и положительный целый
+`count`. Уникальность идентичностей также входит в retrieval gate: `card_id`
+для Arena Advanced, `minion_dbf_id` для BG minions, `(bucket, package_key)` для
+Arena Legendaries, отдельно `decklist` и `archetype_id` для Firestone.
+
+Показатели в `status.quality` имеют разные назначения:
+
+- `quality_score` и `metric_availability_score` показывают долю реально
+  заполненных критичных метрик;
+- `retrieval_completeness_score` показывает честную полноту получения и равен
+  минимуму из полноты критичных полей и полноты строк;
+- `retrieval_complete=true` возможен только без необъяснённых пропусков,
+  конфликтов descriptors и потерь строк. Для Arena Legendaries в расчёт входит
+  отдельный показатель `critical_fields["by_class.winrate"]` по всем class
+  buckets.
+
+Порог `min_field_fill_rate` строгой v1-схемы использует retrieval-долю
+(`available + allow-listed explained_unavailable`), сохраняя
+`metric_availability_score` как сырой процент реально заполненных значений.
+Поэтому низкая выборка после патча не маскируется как наличие метрик, но и не
+считается ошибкой получения, если причина согласована и входит в allow-list.
+Для BG minions дополнительно проверяются placements `1..8`, физический
+`impact` в `-7..7`, rates `0..100`, целые неотрицательные counts и
+reconciliation placement sums.
+
+Поддерживается только точная версия `completeness_schema_version=1`; явно
+переданные `0`, `2` или неизвестная будущая версия отклоняются fail-closed.
+Snapshot без `completeness_schema_version` считается legacy: он остаётся
+доступным во время постепенного перехода, а `retrieval_completeness_score` и
+`retrieval_complete` для него равны `null`, то есть «неизвестно», а не
+«успешно». При `effective_state=ok_cached` показатели относятся к фактически
+отдаваемому LKG snapshot; диагностика отклонённого свежего кандидата хранится
+отдельно в `last_refresh_quality`.
 
 ## Examples
 

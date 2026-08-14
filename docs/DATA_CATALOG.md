@@ -227,6 +227,10 @@ GET /datasets/firestone_standard
 > `firestone_standard` нельзя включать в публичном или коммерческом production
 > без письменного разрешения Firestone/ZeroToHeroes. См.
 > [Firestone Terms of Service](https://github.com/Zero-to-Heroes/firestone/blob/master/tos.md).
+> Интеграция fail-closed: `HS_FIRESTONE_STANDARD_AUTHORIZED` по умолчанию равен
+> `false`. До явного `true` источник не запускается вручную или по расписанию,
+> сохранённый ранее snapshot не публикуется через dataset/demo/v1, а источник
+> исключён из denominator verified completeness.
 
 ## Matchups и meta
 
@@ -439,6 +443,88 @@ Source ID: `vicious_syndicate_radars`, тип `vicious_syndicate_radars`.
 
 `effective_state=ok_cached` означает, что refresh завершился неудачно, но API
 безопасно продолжает отдавать предыдущий валидный snapshot.
+
+### Честная полнота v1
+
+У `hsreplay_battlegrounds_minions`, `hsreplay_arena_cards_advanced`,
+`hsreplay_arena_legendaries` и `firestone_standard` новый snapshot содержит
+`completeness_schema_version=1`. Он включает два независимых доказательства:
+
+- `field_availability` у критичных полей отличает реальное значение,
+  детерминированно отсутствующую upstream-метрику и необъяснённую потерю;
+- `row_retrieval` сверяет число сырых, допустимых и нормализованных строк,
+  отдельно учитывая объяснённые и необъяснённые отбрасывания.
+
+Arena Legendaries дополнительно доказывает покрытие `ALL` и всех 11 class
+buckets в `row_retrieval.bucket_coverage`. Пустой список конкретного класса
+допустим, но отсутствующий/неизвестный bucket, повтор одной пары
+`(bucket, package_key)` или fallback только с `ALL` не считается полным
+получением.
+
+`quality_score` (`metric_availability_score`) отвечает на вопрос «сколько
+метрик заполнено», а `retrieval_completeness_score` — «какая доля ожидаемых
+данных достоверно получена или детерминированно отсутствует у upstream».
+Порог заполнения строгих v1-наборов применяется к retrieval-доле, поэтому
+честный `explained_unavailable` не ломает публикацию; сырой
+`metric_availability_score` при этом не повышается и остаётся видимой мерой
+реального наличия чисел.
+Итоговая retrieval-оценка является минимумом полноты полей и строк. Любая
+необъяснённая потеря или противоречие ставит `retrieval_complete=false` и не
+проходит публикационный gate. У Arena Legendaries проверяются и верхние группы,
+и `winrate` каждого `by_class` bucket.
+
+Разрешённые причины отсутствия полей:
+
+| Источник | Причины, считающиеся объяснёнными |
+| --- | --- |
+| HSReplay BG minions | `no_current_patch_aggregates`, `insufficient_current_patch_sample` |
+| HSReplay Arena advanced | `no_games_in_window` |
+| HSReplay Arena legendaries | `upstream_unavailable_at_zero_pick_rate` |
+| Firestone Standard | `generic_class_bucket_without_observed_deck_cluster` |
+
+Список объяснённых причин потери целой строки пока пуст. Поэтому parser не может
+повысить процент произвольным текстом или AI-оценкой: все неразобранные строки
+считаются ошибкой. Legacy snapshot без версии продолжает работать безопасно, но
+его retrieval-показатели равны `null` («полнота не измерялась»). Явная версия,
+отличная от `1`, отклоняется; будущая схема не может незаметно обойти строгий
+gate. Rates Arena проверяются как конечные числа `0..100`, package cards и
+идентификаторы обязаны иметь корректную форму и быть уникальными. Если после
+неудачного refresh отдаётся LKG, основной quality относится к LKG, а качество
+отклонённого кандидата находится в `last_refresh_quality`.
+
+Три HSReplay v1-набора также публикуют
+`population_completeness="unverifiable"`: upstream не сообщает полный размер
+популяции, поэтому число возвращённых строк нельзя честно назвать 100% всех
+существующих сущностей. Отдельный `upstream_freshness` имеет состояние
+`fresh`, `stale` или `unknown`, возраст и ограниченный список доказательств.
+Для BG источником времени служит body `as_of` (порог 36 часов), для Arena —
+точные выбранные фильтры, `meta_period_id` и `Last-Modified` (порог 6 часов).
+HTTP `Date` означает только время ответа и само по себе свежесть данных не
+доказывает.
+
+Известный `stale`, неверные фильтры, некорректные даты/metadata, timestamp из
+будущего и несовпадение body/header отклоняют новый кандидат и сохраняют LKG.
+Если рабочий fallback не предоставляет target headers, состояние честно равно
+`unknown` с причиной `missing_last_modified` или
+`transport_evidence_unavailable`; такой результат не выдаётся за доказанно
+свежий. В месячном `verified_completeness` в числитель попадает только
+`retrieval_complete=true` вместе с `upstream_freshness.status="fresh"`.
+
+BG minions дополнительно проверяет физические домены: placements `1..8`,
+`impact` как разницу placements в `-7..7`, проценты `0..100`, целые
+неотрицательные counts и согласованность placement sums с количеством игр.
+
+Агрегат `/v1/system/parsing-reliability` не смешивает доступность LKG с новым
+полным получением. Его `complete_fresh / tracked_attempts` — weighted rate по
+попыткам, `macro_complete_fresh_rate_pct` — невзвешенное среднее per-source
+rates (ненаблюдавшиеся дают 0), а `sources_meeting_target / instrumented_sources`
+— отдельный gate по источникам. `instrumented_sources / catalog_sources`,
+наблюдаемость инструментированного набора и охват всех parser attempts — три
+самостоятельных coverage gates. Полный справочник полей и знаменателей находится
+в [API.md](API.md#get-v1systemparsing-reliability).
+
+Поле `macro_target_met` вычисляется backend по точным дробям до округления и
+является единственным безопасным сигналом прохождения macro-gate для панели.
 
 Для public-клиента рекомендуется:
 
