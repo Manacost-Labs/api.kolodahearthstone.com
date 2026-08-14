@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, patch
 
 from app import cli
 from app.resource_locks import ResourceLocked
+from app.source_tiers import LIGHT_API_IDS, MEDIUM_API_IDS
 from app.sources import SOURCES, Source
 
 
@@ -182,6 +183,38 @@ class CliTest(unittest.TestCase):
                         for call in refresh.await_args_list
                     )
                 )
+
+    def test_api_tier_schedule_claim_is_shared_by_both_tier_runs(self) -> None:
+        refresh = AsyncMock(return_value=[])
+        with (
+            patch("app.cli.refresh_sources", new=refresh),
+            patch(
+                "app.schedule_ledger.claim_occurrence",
+                return_value="refresh-api-daily:20260814T160000Z",
+            ) as claim,
+            redirect_stdout(io.StringIO()),
+        ):
+            exit_code = cli.main(
+                [
+                    "refresh-api-tiers",
+                    "--schedule-id",
+                    "refresh-api-daily",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        claim.assert_called_once_with(
+            "refresh-api-daily",
+            sorted(LIGHT_API_IDS | MEDIUM_API_IDS),
+        )
+        self.assertEqual(len(refresh.await_args_list), 2)
+        self.assertTrue(
+            all(
+                call.kwargs["refresh_window_id"]
+                == "refresh-api-daily:20260814T160000Z"
+                for call in refresh.await_args_list
+            )
+        )
 
     def test_scheduled_publishable_matrix_with_cached_slices_is_degraded(self) -> None:
         result = {

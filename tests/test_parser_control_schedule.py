@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import patch
 from pathlib import Path
+from unittest.mock import patch
 
 from app import cli
+from app.sources import SOURCE_BY_ID
 
 
 class ParserControlScheduleTest(unittest.TestCase):
@@ -25,6 +26,53 @@ class ParserControlScheduleTest(unittest.TestCase):
             tier=None,
             respect_section_controls=True,
         )
+
+    def test_canonical_scheduled_refresh_claims_one_durable_occurrence(self) -> None:
+        with patch(
+            "app.schedule_ledger.claim_occurrence",
+            return_value="refresh-all-daily:20260815T050000Z",
+        ) as claim, patch("app.cli.refresh_sources", return_value=[]) as refresh:
+            exit_code = cli.main(
+                [
+                    "refresh",
+                    "--all",
+                    "--scheduled",
+                    "--schedule-id",
+                    "refresh-all-daily",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        claim.assert_called_once()
+        self.assertEqual(claim.call_args.args[0], "refresh-all-daily")
+        self.assertEqual(
+            set(claim.call_args.args[1]),
+            {
+                source_id
+                for source_id, source in SOURCE_BY_ID.items()
+                if source.kind == "scrape"
+            },
+        )
+        refresh.assert_called_once_with(
+            None,
+            tier=None,
+            respect_section_controls=True,
+            refresh_window_id="refresh-all-daily:20260815T050000Z",
+        )
+
+    def test_schedule_id_requires_scheduled_mode(self) -> None:
+        with patch("app.cli.refresh_sources") as refresh:
+            exit_code = cli.main(
+                [
+                    "refresh",
+                    "--all",
+                    "--schedule-id",
+                    "refresh-all-daily",
+                ]
+            )
+
+        self.assertEqual(exit_code, 2)
+        refresh.assert_not_called()
 
     def test_scheduled_pipeline_is_skipped_when_its_section_is_disabled(self) -> None:
         with patch(

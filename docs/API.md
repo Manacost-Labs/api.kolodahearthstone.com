@@ -135,10 +135,24 @@ Endpoint возвращает независимые окна `24h`, `7d` и `30
 | `sources_meeting_target / instrumented_sources` | Доля источников, каждый из которых отдельно выполняет цель 99%. |
 | `objective_status` | `met` только при полном измеряемом окне и прохождении всех coverage/rate gates; иначе `collecting` или `miss`. |
 
-Граница 99% проверяется по целым счётчикам до округления. Пока durable
-schedule ledger не покрывает окно целиком, полностью не стартовавший scheduler
-run нельзя доказанно включить в знаменатель, поэтому `measurement_status` и
-`objective_status` остаются `collecting`.
+Поля `scheduled_reliability`:
+
+| Поле | Смысл |
+| --- | --- |
+| `schedule_coverage_ratio` | Доля primary-расписаний, уже подключённых к durable ledger. |
+| `temporal_coverage_ratio` | Доля выбранного окна между `coverage_started_at` и непрерывным `materialized_through`. |
+| `due_slots` | Eligible-слоты, дедлайн которых уже наступил. |
+| `on_time_fresh` | Новая публикация завершена не позже дедлайна. |
+| `on_time_nonfresh` | До дедлайна был terminal, но не fresh publication. |
+| `late` | Первый пригодный terminal появился только после дедлайна. |
+| `missing` | После дедлайна нет ни одного non-skipped terminal. |
+| `excluded_slots` | Сохранённые, но не включённые в знаменатель решения (`section-disabled` или `operationally-disabled`). |
+
+Граница 99% проверяется по целым счётчикам до округления. Ledger уже обнаруживает
+полностью не стартовавшие запуски для `refresh-all-daily` и
+`refresh-api-daily`. Пока остальные primary timers не подключены или выбранное
+временное окно не накоплено полностью, `ledger_status=partial`, а его
+`measurement_status` и `objective_status` остаются `collecting`.
 
 ### `GET /health`
 

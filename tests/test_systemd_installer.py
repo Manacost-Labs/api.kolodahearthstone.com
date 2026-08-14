@@ -154,6 +154,32 @@ def test_api_refresh_units_use_one_aggregating_command() -> None:
         assert "SuccessExitStatus=10" in service_text
 
 
+def test_primary_docker_refreshes_use_durable_schedule_occurrences() -> None:
+    full_refresh = (
+        ROOT / "systemd" / "hs-data-api-docker-refresh.service"
+    ).read_text(encoding="utf-8")
+    api_refresh = (
+        ROOT / "systemd" / "hs-data-api-docker-refresh-api.service"
+    ).read_text(encoding="utf-8")
+
+    assert "--schedule-id refresh-all-daily" in full_refresh
+    assert "--schedule-id refresh-api-daily" in api_refresh
+
+
+def test_schedule_ledger_reconciler_materializes_48_hours_every_five_minutes() -> None:
+    service = (
+        ROOT / "systemd" / "hs-data-api-docker-reconcile-schedule-ledger.service"
+    ).read_text(encoding="utf-8")
+    timer = (
+        ROOT / "systemd" / "hs-data-api-docker-reconcile-schedule-ledger.timer"
+    ).read_text(encoding="utf-8")
+
+    assert "reconcile-schedule-ledger --horizon-hours 48" in service
+    assert "OnCalendar=*-*-* *:00/5:00 UTC" in timer
+    assert "AccuracySec=30s" in timer
+    assert "Persistent=true" in timer
+
+
 def test_docker_bg_hero_details_accepts_degraded_exit_code() -> None:
     service_text = (
         ROOT / "systemd" / "hs-data-api-docker-refresh-bg-hero-details.service"

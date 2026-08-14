@@ -775,8 +775,12 @@ def _next_run(spec: _ScheduleSpec, *, at: datetime) -> datetime | None:
         if spec.recurrence == "odd-month-days" and candidate_day.day % 2 == 0:
             continue
         for local_time in spec.local_times:
-            candidate = datetime.combine(candidate_day, local_time, tzinfo=timezone)
+            naive_candidate = datetime.combine(candidate_day, local_time)
+            candidate = naive_candidate.replace(tzinfo=timezone, fold=0)
             candidate_utc = candidate.astimezone(UTC)
+            round_trip = candidate_utc.astimezone(timezone).replace(tzinfo=None)
+            if round_trip != naive_candidate:
+                continue
             if candidate_utc > moment:
                 return candidate_utc
     return None

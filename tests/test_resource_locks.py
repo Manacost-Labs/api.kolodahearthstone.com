@@ -188,6 +188,38 @@ def test_one_locked_source_does_not_block_another_requested_source(tmp_path) -> 
     )
 
 
+def test_scheduled_window_is_shared_by_locked_and_available_outcomes(tmp_path) -> None:
+    source_ids = [source.id for source in SOURCES if source.kind == "scrape"][:2]
+    locked_source_id, available_source_id = source_ids
+    window_id = "refresh-all-daily:20260814T050000Z"
+    with (
+        ResourceLockSet([locked_source_id], lock_dir=tmp_path / ".locks"),
+        patch("app.resource_locks.data_dir", return_value=tmp_path),
+        patch(
+            "app.fetcher._record_reliability_results_best_effort"
+        ) as record_reliability,
+        patch(
+            "app.fetcher._refresh_sources_unlocked",
+            new_callable=AsyncMock,
+            return_value=[{"source_id": available_source_id, "state": "ok"}],
+        ) as unlocked_refresh,
+    ):
+        asyncio.run(
+            refresh_sources(
+                [locked_source_id, available_source_id],
+                refresh_window_id=window_id,
+            )
+        )
+
+    assert record_reliability.call_args.kwargs["refresh_window_id"] == window_id
+    unlocked_refresh.assert_awaited_once_with(
+        [available_source_id],
+        tier_filter=None,
+        respect_section_controls=False,
+        refresh_window_id=window_id,
+    )
+
+
 def test_legacy_orchestration_scripts_delegate_to_shared_locked_refresh() -> None:
     root = Path(__file__).resolve().parents[1]
     streamer = (root / "scripts" / "firecrawl-streamer-decks.py").read_text(

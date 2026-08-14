@@ -213,6 +213,29 @@ class AIQualitySummary(BaseModel):
     calibration: AICalibrationSummary
 
 
+class ScheduledReliabilitySummary(BaseModel):
+    ledger_status: Literal["absent", "partial", "covered"]
+    measurement_status: Literal["collecting", "observed"]
+    schedule_coverage_ratio: float = Field(ge=0.0, le=1.0)
+    temporal_coverage_ratio: float = Field(ge=0.0, le=1.0)
+    coverage_started_at: str | None = None
+    materialized_through: str | None = None
+    tracked_schedules: int = Field(ge=0)
+    catalog_schedules: int = Field(ge=0)
+    expected_slots: int = Field(ge=0)
+    eligible_slots: int = Field(ge=0)
+    excluded_slots: int = Field(ge=0)
+    pending_slots: int = Field(ge=0)
+    due_slots: int = Field(ge=0)
+    on_time_fresh: int = Field(ge=0)
+    on_time_nonfresh: int = Field(ge=0)
+    late: int = Field(ge=0)
+    missing: int = Field(ge=0)
+    on_time_fresh_rate_pct: float | None = Field(default=None, ge=0.0, le=100.0)
+    target_rate_pct: float = Field(ge=0.0, le=100.0)
+    objective_status: Literal["collecting", "meeting", "breached"]
+
+
 class ReliabilityWindow(BaseModel):
     window: Literal["24h", "7d", "30d"]
     from_at: str
@@ -233,6 +256,7 @@ class ReliabilityWindow(BaseModel):
     availability_slo: ReliabilitySLO
     verified_completeness: VerifiedCompletenessSummary
     ai_quality: AIQualitySummary
+    scheduled_reliability: ScheduledReliabilitySummary
 
 
 class ReliabilityMethodology(BaseModel):

@@ -3227,6 +3227,7 @@ def _record_reliability_results_best_effort(
     *,
     coverage_scope: str = "partial",
     expected_source_count: int | None = None,
+    refresh_window_id: str | None = None,
 ) -> None:
     """Persist aggregate telemetry without changing a parser outcome."""
 
@@ -3235,12 +3236,21 @@ def _record_reliability_results_best_effort(
     try:
         from .reliability_telemetry import record_terminal_results
 
-        record_terminal_results(
-            run_id,
-            results,
-            coverage_scope=coverage_scope,
-            expected_source_count=expected_source_count,
-        )
+        if refresh_window_id is None:
+            record_terminal_results(
+                run_id,
+                results,
+                coverage_scope=coverage_scope,
+                expected_source_count=expected_source_count,
+            )
+        else:
+            record_terminal_results(
+                run_id,
+                results,
+                coverage_scope=coverage_scope,
+                expected_source_count=expected_source_count,
+                refresh_window_id=refresh_window_id,
+            )
     except Exception as exc:  # noqa: BLE001 - telemetry cannot invert parser outcomes
         logger.warning(
             "Reliability telemetry write failed for run %s: %s",
@@ -3513,6 +3523,7 @@ async def _refresh_sources_unlocked(
     *,
     tier_filter: str | None = None,
     respect_section_controls: bool = False,
+    refresh_window_id: str | None = None,
 ) -> list[dict[str, Any]]:
     global _firecrawl_fallback_attempts
     _firecrawl_fallback_attempts = 0
@@ -3596,6 +3607,24 @@ async def _refresh_sources_unlocked(
     reliability_expected_source_count = (
         len(canonical_scrape_source_ids) if full_refresh else len(selected)
     )
+
+    def record_reliability(terminal_results: list[dict[str, Any]]) -> None:
+        if refresh_window_id is None:
+            _record_reliability_results_best_effort(
+                run_id,
+                terminal_results,
+                coverage_scope="full" if full_refresh else "partial",
+                expected_source_count=reliability_expected_source_count,
+            )
+        else:
+            _record_reliability_results_best_effort(
+                run_id,
+                terminal_results,
+                coverage_scope="full" if full_refresh else "partial",
+                expected_source_count=reliability_expected_source_count,
+                refresh_window_id=refresh_window_id,
+            )
+
     parts_preview = partition_sources(selected)
     backends_lower_preview = [b.lower() for b in fetch_backends()]
     _begin_deferred_ai_collection()
@@ -3631,12 +3660,7 @@ async def _refresh_sources_unlocked(
             }
             for source in selected
         ]
-        _record_reliability_results_best_effort(
-            run_id,
-            terminal_results,
-            coverage_scope="full" if full_refresh else "partial",
-            expected_source_count=reliability_expected_source_count,
-        )
+        record_reliability(terminal_results)
         try:
             _best_effort_log_action(
                 "refresh.end",
@@ -3691,12 +3715,7 @@ async def _refresh_sources_unlocked(
                 }
                 for source in selected
             ]
-            _record_reliability_results_best_effort(
-                run_id,
-                terminal_results,
-                coverage_scope="full" if full_refresh else "partial",
-                expected_source_count=reliability_expected_source_count,
-            )
+            record_reliability(terminal_results)
             try:
                 _best_effort_log_action(
                     "refresh.end",
@@ -3868,12 +3887,7 @@ async def _refresh_sources_unlocked(
                 if source.id not in completed_source_ids
             ),
         ]
-        _record_reliability_results_best_effort(
-            run_id,
-            terminal_results,
-            coverage_scope="full" if full_refresh else "partial",
-            expected_source_count=reliability_expected_source_count,
-        )
+        record_reliability(terminal_results)
         if use_patchright or use_flaresolverr:
             await PatchrightPool.shutdown()
         if use_cloakbrowser:
@@ -3922,6 +3936,7 @@ async def refresh_sources(
     *,
     tier: str | None = None,
     respect_section_controls: bool = False,
+    refresh_window_id: str | None = None,
 ) -> list[dict[str, Any]]:
     lock_source_ids = _refresh_lock_source_ids(source_ids, tier=tier)
     available_source_ids: list[str] = []
@@ -3938,10 +3953,17 @@ async def refresh_sources(
                 available_source_ids.append(source_id)
 
         if locked_outcomes:
-            _record_reliability_results_best_effort(
-                f"locked-{uuid.uuid4().hex}",
-                locked_outcomes,
-            )
+            if refresh_window_id is None:
+                _record_reliability_results_best_effort(
+                    f"locked-{uuid.uuid4().hex}",
+                    locked_outcomes,
+                )
+            else:
+                _record_reliability_results_best_effort(
+                    f"locked-{uuid.uuid4().hex}",
+                    locked_outcomes,
+                    refresh_window_id=refresh_window_id,
+                )
 
         if not available_source_ids:
             return locked_outcomes
@@ -3949,11 +3971,19 @@ async def refresh_sources(
         refresh_source_ids = source_ids
         if locked_outcomes:
             refresh_source_ids = available_source_ids
-        refreshed = await _refresh_sources_unlocked(
-            refresh_source_ids,
-            tier_filter=tier,
-            respect_section_controls=respect_section_controls,
-        )
+        if refresh_window_id is None:
+            refreshed = await _refresh_sources_unlocked(
+                refresh_source_ids,
+                tier_filter=tier,
+                respect_section_controls=respect_section_controls,
+            )
+        else:
+            refreshed = await _refresh_sources_unlocked(
+                refresh_source_ids,
+                tier_filter=tier,
+                respect_section_controls=respect_section_controls,
+                refresh_window_id=refresh_window_id,
+            )
         return [*refreshed, *locked_outcomes]
 
 

@@ -1258,6 +1258,11 @@ def _query_window(
         eligible_parser_attempts=eligible_attempts,
         measurement_complete=measurement_complete,
     )
+    scheduled_reliability = _query_scheduled_reliability(
+        connection,
+        from_at=from_at,
+        report_at=report_at,
+    )
     return {
         "window": label,
         "from_at": from_at.isoformat(),
@@ -1286,6 +1291,7 @@ def _query_window(
         ),
         "verified_completeness": verified_completeness,
         "ai_quality": ai_quality,
+        "scheduled_reliability": scheduled_reliability,
     }
 
 
@@ -1324,9 +1330,251 @@ def _empty_report(report_at: datetime) -> dict[str, Any]:
                 ),
                 "verified_completeness": _empty_verified_completeness(),
                 "ai_quality": _empty_ai_quality(),
+                "scheduled_reliability": _empty_scheduled_reliability(),
             }
             for label, duration in WINDOWS
         ],
+    }
+
+
+def _empty_scheduled_reliability() -> dict[str, Any]:
+    return {
+        "ledger_status": "absent",
+        "measurement_status": "collecting",
+        "schedule_coverage_ratio": 0.0,
+        "temporal_coverage_ratio": 0.0,
+        "coverage_started_at": None,
+        "materialized_through": None,
+        "tracked_schedules": 0,
+        "catalog_schedules": 0,
+        "expected_slots": 0,
+        "eligible_slots": 0,
+        "excluded_slots": 0,
+        "pending_slots": 0,
+        "due_slots": 0,
+        "on_time_fresh": 0,
+        "on_time_nonfresh": 0,
+        "late": 0,
+        "missing": 0,
+        "on_time_fresh_rate_pct": None,
+        "target_rate_pct": SLO_TARGET_RATE_PCT,
+        "objective_status": "collecting",
+    }
+
+
+def _query_scheduled_reliability(
+    connection: sqlite3.Connection,
+    *,
+    from_at: datetime,
+    report_at: datetime,
+) -> dict[str, Any]:
+    required_windows = {
+        "occurrence_id",
+        "schedule_id",
+        "scheduled_for",
+        "deadline_at",
+        "source_id",
+        "cohort_hash",
+        "eligible",
+    }
+    required_state = {
+        "coverage_started_at",
+        "materialized_through",
+        "cohort_hash",
+        "tracked_schedule_count",
+        "catalog_schedule_count",
+    }
+    try:
+        window_columns = {
+            str(row[1])
+            for row in connection.execute(
+                "PRAGMA table_info(schedule_source_windows)"
+            )
+        }
+        state_columns = {
+            str(row[1])
+            for row in connection.execute("PRAGMA table_info(schedule_ledger_state)")
+        }
+    except sqlite3.DatabaseError:
+        return _empty_scheduled_reliability()
+    if not required_windows.issubset(window_columns) or not required_state.issubset(
+        state_columns
+    ):
+        return _empty_scheduled_reliability()
+
+    state = connection.execute(
+        """
+        SELECT
+            coverage_started_at,
+            materialized_through,
+            cohort_hash,
+            tracked_schedule_count,
+            catalog_schedule_count
+        FROM schedule_ledger_state
+        WHERE singleton = 1
+        """
+    ).fetchone()
+    if state is None:
+        return _empty_scheduled_reliability()
+
+    try:
+        coverage_started_at = float(state[0])
+        materialized_through = float(state[1])
+        cohort_hash = str(state[2])
+        tracked_schedules = int(state[3])
+        catalog_schedules = int(state[4])
+    except (TypeError, ValueError, OverflowError):
+        return _empty_scheduled_reliability()
+    if (
+        not math.isfinite(coverage_started_at)
+        or not math.isfinite(materialized_through)
+        or materialized_through < coverage_started_at
+        or len(cohort_hash) != 64
+        or any(character not in "0123456789abcdef" for character in cohort_hash)
+        or tracked_schedules <= 0
+        or catalog_schedules <= 0
+        or tracked_schedules > catalog_schedules
+    ):
+        return _empty_scheduled_reliability()
+    from_epoch = from_at.timestamp()
+    report_epoch = report_at.timestamp()
+    duration_seconds = max(1.0, report_epoch - from_epoch)
+    temporal_seconds = max(
+        0.0,
+        min(report_epoch, materialized_through)
+        - max(from_epoch, coverage_started_at),
+    )
+    temporal_coverage_ratio = round(
+        min(1.0, temporal_seconds / duration_seconds),
+        4,
+    )
+    schedule_coverage_ratio = round(
+        min(1.0, tracked_schedules / catalog_schedules),
+        4,
+    ) if catalog_schedules > 0 else 0.0
+
+    counts_row = connection.execute(
+        """
+        WITH relevant_slots AS (
+            SELECT *
+            FROM schedule_source_windows
+            WHERE cohort_hash = ?
+              AND deadline_at >= ?
+              AND scheduled_for <= ?
+        ),
+        attempt_flags AS (
+            SELECT
+                slots.occurrence_id,
+                slots.source_id,
+                MAX(CASE
+                    WHEN attempts.outcome = 'fresh_published'
+                     AND attempts.finished_at <= slots.deadline_at
+                    THEN 1 ELSE 0
+                END) AS on_time_fresh,
+                MAX(CASE
+                    WHEN attempts.outcome != 'skipped'
+                     AND attempts.finished_at <= slots.deadline_at
+                    THEN 1 ELSE 0
+                END) AS on_time_terminal,
+                MAX(CASE
+                    WHEN attempts.outcome != 'skipped'
+                     AND attempts.finished_at > slots.deadline_at
+                    THEN 1 ELSE 0
+                END) AS late_terminal
+            FROM relevant_slots AS slots
+            LEFT JOIN source_attempts AS attempts
+              ON attempts.refresh_window_id = slots.occurrence_id
+             AND attempts.source_id = slots.source_id
+             AND attempts.finished_at <= ?
+            GROUP BY slots.occurrence_id, slots.source_id
+        )
+        SELECT
+            COUNT(*),
+            COALESCE(SUM(CASE WHEN slots.eligible = 1 THEN 1 ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN slots.eligible = 0 THEN 1 ELSE 0 END), 0),
+            COALESCE(SUM(CASE
+                WHEN slots.eligible = 1 AND slots.deadline_at > ? THEN 1 ELSE 0
+            END), 0),
+            COALESCE(SUM(CASE
+                WHEN slots.eligible = 1 AND slots.deadline_at <= ? THEN 1 ELSE 0
+            END), 0),
+            COALESCE(SUM(CASE
+                WHEN slots.eligible = 1 AND slots.deadline_at <= ?
+                 AND flags.on_time_fresh = 1 THEN 1 ELSE 0
+            END), 0),
+            COALESCE(SUM(CASE
+                WHEN slots.eligible = 1 AND slots.deadline_at <= ?
+                 AND flags.on_time_fresh = 0 AND flags.on_time_terminal = 1
+                THEN 1 ELSE 0
+            END), 0),
+            COALESCE(SUM(CASE
+                WHEN slots.eligible = 1 AND slots.deadline_at <= ?
+                 AND flags.on_time_fresh = 0 AND flags.on_time_terminal = 0
+                 AND flags.late_terminal = 1 THEN 1 ELSE 0
+            END), 0),
+            COALESCE(SUM(CASE
+                WHEN slots.eligible = 1 AND slots.deadline_at <= ?
+                 AND flags.on_time_fresh = 0 AND flags.on_time_terminal = 0
+                 AND flags.late_terminal = 0 THEN 1 ELSE 0
+            END), 0)
+        FROM relevant_slots AS slots
+        JOIN attempt_flags AS flags USING (occurrence_id, source_id)
+        """,
+        (
+            cohort_hash,
+            from_epoch,
+            report_epoch,
+            report_epoch,
+            report_epoch,
+            report_epoch,
+            report_epoch,
+            report_epoch,
+            report_epoch,
+            report_epoch,
+        ),
+    ).fetchone()
+    values = [int(value or 0) for value in (counts_row or (0,) * 9)]
+    (
+        expected_slots,
+        eligible_slots,
+        excluded_slots,
+        pending_slots,
+        due_slots,
+        on_time_fresh,
+        on_time_nonfresh,
+        late,
+        missing,
+    ) = values
+    covered = schedule_coverage_ratio >= 1.0 and temporal_coverage_ratio >= 1.0
+    measurement_status = "observed" if covered else "collecting"
+    objective_status = "collecting"
+    if measurement_status == "observed" and due_slots > 0:
+        objective_status = (
+            "meeting"
+            if _ratio_meets_target(on_time_fresh, due_slots)
+            else "breached"
+        )
+    return {
+        "ledger_status": "covered" if covered else "partial",
+        "measurement_status": measurement_status,
+        "schedule_coverage_ratio": schedule_coverage_ratio,
+        "temporal_coverage_ratio": temporal_coverage_ratio,
+        "coverage_started_at": _iso_from_epoch(coverage_started_at),
+        "materialized_through": _iso_from_epoch(materialized_through),
+        "tracked_schedules": tracked_schedules,
+        "catalog_schedules": catalog_schedules,
+        "expected_slots": expected_slots,
+        "eligible_slots": eligible_slots,
+        "excluded_slots": excluded_slots,
+        "pending_slots": pending_slots,
+        "due_slots": due_slots,
+        "on_time_fresh": on_time_fresh,
+        "on_time_nonfresh": on_time_nonfresh,
+        "late": late,
+        "missing": missing,
+        "on_time_fresh_rate_pct": _percentage(on_time_fresh, due_slots),
+        "target_rate_pct": SLO_TARGET_RATE_PCT,
+        "objective_status": objective_status,
     }
 
 

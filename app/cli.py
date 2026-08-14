@@ -9,6 +9,7 @@ import re
 import sys
 import uuid
 from collections.abc import Callable
+from datetime import timedelta
 from pathlib import Path
 
 from .config import source_operationally_enabled
@@ -208,15 +209,35 @@ def _scheduled_refresh_exit_code(
     return int(ExitCode.DEGRADED if degraded else ExitCode.OK)
 
 
-async def _refresh_scheduled_api_tiers() -> tuple[list[dict[str, object]], int]:
+async def _refresh_scheduled_api_tiers(
+    *,
+    schedule_id: str | None = None,
+) -> tuple[list[dict[str, object]], int]:
+    refresh_window_id: str | None = None
+    if schedule_id is not None:
+        from .schedule_ledger import claim_occurrence
+        from .source_tiers import LIGHT_API_IDS, MEDIUM_API_IDS
+
+        refresh_window_id = claim_occurrence(
+            schedule_id,
+            sorted(LIGHT_API_IDS | MEDIUM_API_IDS),
+        )
     tier_runs: list[dict[str, object]] = []
     exit_codes: list[int] = []
     for tier in ("light_api", "medium_api"):
-        results = await refresh_sources(
-            None,
-            tier=tier,
-            respect_section_controls=True,
-        )
+        if refresh_window_id is None:
+            results = await refresh_sources(
+                None,
+                tier=tier,
+                respect_section_controls=True,
+            )
+        else:
+            results = await refresh_sources(
+                None,
+                tier=tier,
+                respect_section_controls=True,
+                refresh_window_id=refresh_window_id,
+            )
         exit_code = _scheduled_refresh_exit_code(results)
         tier_runs.append(
             {
@@ -297,12 +318,30 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="Honor per-section enable/disable controls for a scheduled run.",
     )
-    sub.add_parser(
+    refresh.add_argument(
+        "--schedule-id",
+        help="Bind a scheduled run to an existing durable ledger occurrence.",
+    )
+    refresh_api_tiers = sub.add_parser(
         "refresh-api-tiers",
         help=(
             "Refresh scheduled light_api and medium_api tiers and aggregate "
             "their exit status."
         ),
+    )
+    refresh_api_tiers.add_argument(
+        "--schedule-id",
+        help="Bind both API tier batches to one durable ledger occurrence.",
+    )
+    reconcile_ledger = sub.add_parser(
+        "reconcile-schedule-ledger",
+        help="Materialize future expected parser runs in durable telemetry.",
+    )
+    reconcile_ledger.add_argument(
+        "--horizon-hours",
+        type=float,
+        default=48.0,
+        help="How far ahead to materialize expected runs (1-48 hours).",
     )
     brightdata_init = sub.add_parser(
         "brightdata-init-usage",
@@ -1335,9 +1374,29 @@ def main(argv: list[str] | None = None) -> int:
             print(sid, json.dumps(summary, ensure_ascii=False))
         return 0
     if args.command == "refresh-api-tiers":
-        tier_runs, exit_code = asyncio.run(_refresh_scheduled_api_tiers())
+        try:
+            tier_runs, exit_code = asyncio.run(
+                _refresh_scheduled_api_tiers(schedule_id=args.schedule_id)
+            )
+        except Exception as exc:  # noqa: BLE001 - scheduler needs a bounded failure
+            print(
+                f"Schedule ledger claim failed: {type(exc).__name__}",
+                file=sys.stderr,
+            )
+            return int(ExitCode.ERROR)
         print(json.dumps({"tiers": tier_runs}, ensure_ascii=False, indent=2))
         return exit_code
+    if args.command == "reconcile-schedule-ledger":
+        if not 1.0 <= args.horizon_hours <= 48.0:
+            print("--horizon-hours must be between 1 and 48", file=sys.stderr)
+            return 2
+        from .schedule_ledger import reconcile_schedule_ledger
+
+        result = reconcile_schedule_ledger(
+            horizon=timedelta(hours=args.horizon_hours),
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
     if args.command == "refresh":
         if not args.all and not args.source and not args.tier:
             print("Use --all, --tier TIER, or --source SOURCE_ID", file=sys.stderr)
@@ -1363,14 +1422,56 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 2
         source_ids = None if args.all else (args.source or None)
-        if args.scheduled:
-            results = asyncio.run(
-                refresh_sources(
-                    source_ids,
-                    tier=args.tier,
-                    respect_section_controls=True,
+        if args.schedule_id and not args.scheduled:
+            print("--schedule-id requires --scheduled", file=sys.stderr)
+            return 2
+        refresh_window_id: str | None = None
+        if args.schedule_id:
+            from .schedule_ledger import claim_occurrence
+
+            declared_source_ids = {
+                source_id
+                for source_id, source in SOURCE_BY_ID.items()
+                if source.kind == "scrape"
+            } if args.all else set(args.source)
+            if args.tier:
+                from .source_tiers import SourceTier, tier_for
+
+                selected_tier = SourceTier(args.tier)
+                declared_source_ids = {
+                    source_id
+                    for source_id in declared_source_ids
+                    if tier_for(source_id) == selected_tier
+                }
+            try:
+                refresh_window_id = claim_occurrence(
+                    args.schedule_id,
+                    sorted(declared_source_ids),
                 )
-            )
+            except Exception as exc:  # noqa: BLE001 - scheduler needs bounded output
+                print(
+                    f"Schedule ledger claim failed: {type(exc).__name__}",
+                    file=sys.stderr,
+                )
+                return int(ExitCode.ERROR)
+        if args.scheduled:
+            if refresh_window_id is None:
+                results = asyncio.run(
+                    refresh_sources(
+                        source_ids,
+                        tier=args.tier,
+                        respect_section_controls=True,
+                    )
+                )
+            else:
+                results = asyncio.run(
+                    refresh_sources(
+                        source_ids,
+                        tier=args.tier,
+                        respect_section_controls=True,
+                        refresh_window_id=refresh_window_id,
+                    )
+                )
         else:
             results = asyncio.run(refresh_sources(source_ids, tier=args.tier))
         print(json.dumps(results, ensure_ascii=False, indent=2))

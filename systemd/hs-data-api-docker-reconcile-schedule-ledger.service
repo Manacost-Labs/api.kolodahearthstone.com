@@ -1,0 +1,9 @@
+[Unit]
+Description=Materialize durable Hearthstone parser schedule obligations
+Requires=hs-data-api-docker.service
+After=hs-data-api-docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/srv/hs-data-api
+ExecStart=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm api python -m app.cli reconcile-schedule-ledger --horizon-hours 48

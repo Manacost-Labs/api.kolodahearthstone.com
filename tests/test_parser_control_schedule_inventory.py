@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -11,6 +11,8 @@ from app.parser_control_registry import SECTION_BY_ID, SOURCE_TO_SECTION
 from app.parser_control_schedule import (
     SCHEDULE_INVENTORY_SCHEMA_VERSION,
     SCHEDULE_INVENTORY_VERSION,
+    _next_run,
+    _ScheduleSpec,
     build_schedule_inventory,
 )
 from app.sources import SOURCE_BY_ID
@@ -126,6 +128,27 @@ def test_schedule_inventory_calculates_nominal_next_runs_in_utc() -> None:
     assert streamer["nextRunAt"] == "2026-07-21T00:15:00+00:00"
     assert streamer["recoveryScheduleIds"] == ["recover-hsguru-streamer"]
     assert streamer["nextRecoveryRunAt"] == "2026-07-21T00:10:00+00:00"
+
+
+def test_nominal_next_run_skips_nonexistent_warsaw_dst_time() -> None:
+    spec = _ScheduleSpec(
+        id="dst-test",
+        label="DST test",
+        systemd_unit="dst-test.timer",
+        on_calendar=("*-*-* 02:45:00 Europe/Warsaw",),
+        source_ids=frozenset({"source"}),
+        recurrence="daily",
+        local_times=(time(2, 45),),
+    )
+
+    assert _next_run(spec, at=datetime(2026, 3, 29, 0, 0, tzinfo=UTC)) == datetime(
+        2026,
+        3,
+        30,
+        0,
+        45,
+        tzinfo=UTC,
+    )
 
 
 def test_expired_bounded_schedule_remains_in_inventory_without_a_next_run() -> None:
