@@ -356,6 +356,7 @@ class HsGuruDecksImprovementsTest(unittest.TestCase):
         from app.hsguru_decks import HSGuruCatalogPartial
 
         calls: list[tuple[str, str]] = []
+        periods: list[str] = []
 
         async def refresh(
             format_name: str,
@@ -364,6 +365,7 @@ class HsGuruDecksImprovementsTest(unittest.TestCase):
             period: str,
         ) -> list[dict[str, str]]:
             calls.append((format_name, rank))
+            periods.append(period)
             if (format_name, rank) == ("standard", "all") and calls.count(
                 (format_name, rank)
             ) == 1:
@@ -380,10 +382,40 @@ class HsGuruDecksImprovementsTest(unittest.TestCase):
                 ]
             return [{"deck_code": f"{format_name}-{rank}-{period}"}]
 
+        def load_persisted(source_id: str) -> dict[str, object]:
+            format_name = "standard" if "standard" in source_id else "wild"
+            rows = (
+                [
+                    {"deck_code": "complete-standard-all-1"},
+                    {"deck_code": "complete-standard-all-2"},
+                ]
+                if format_name == "standard"
+                else [{"deck_code": "wild-all"}]
+            )
+            return {
+                "source_id": source_id,
+                "state": "ok",
+                "sample_state": (
+                    "sparse_post_patch" if format_name == "standard" else "complete"
+                ),
+                "period": periods[-1],
+                "criteria": {
+                    "format": format_name,
+                    "rank": "all",
+                    "period": periods[-1],
+                },
+                "missing_archetypes": [],
+                "zero_sample_archetypes": (
+                    ["No Sample DK"] if format_name == "standard" else []
+                ),
+                "data": rows,
+            }
+
         result = asyncio.run(
             refresh_all_deck_catalogs(
                 refresh=refresh,
                 join=lambda: {"joined": True},
+                load_persisted=load_persisted,
             )
         )
 
@@ -401,7 +433,17 @@ class HsGuruDecksImprovementsTest(unittest.TestCase):
         self.assertEqual(result["errors"], {})
         self.assertEqual(
             result["datasets"]["standard_all"],
-            {"decks": 2, "state": "ok"},
+            {
+                "decks": 2,
+                "state": "ok",
+                "missing_archetypes": 0,
+                "zero_sample_archetypes": 1,
+                "sample_state": "sparse_post_patch",
+            },
+        )
+        self.assertEqual(
+            result["datasets"]["standard_legend"],
+            {"decks": 1, "state": "ok"},
         )
         self.assertEqual(
             result["continuations"]["standard_all"]["state"],
