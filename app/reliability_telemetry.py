@@ -13,9 +13,13 @@ import sqlite3
 import threading
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime, timedelta
+from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
+from .completeness import COMPLETENESS_SCHEMA_VERSION
+from .config import source_operationally_enabled
+from .source_contracts import FIELD_UNAVAILABLE_REASONS
 from .source_state import SourceState
 from .storage import root_dir
 
@@ -34,7 +38,7 @@ WINDOWS = (
     ("7d", timedelta(days=7)),
     ("30d", timedelta(days=30)),
 )
-METHODOLOGY_VERSION = "logical-source-observed-v9"
+METHODOLOGY_VERSION = "logical-source-observed-v10"
 SLO_TARGET_RATE_PCT = 99.0
 PIPELINE_SCHEDULE_LEDGER_READY = False
 COVERAGE_BUCKET_SECONDS = 24 * 60 * 60
@@ -81,6 +85,15 @@ AI_DIAGNOSIS_DOMAINS = (
     "backend_policy",
     "unknown",
 )
+COMPLETENESS_STATES = ("complete", "incomplete", "unknown")
+COMPLETENESS_TRACKED_SOURCE_IDS = frozenset(FIELD_UNAVAILABLE_REASONS)
+HSREPLAY_UPSTREAM_FRESHNESS_SOURCE_IDS = frozenset(
+    {
+        "hsreplay_battlegrounds_minions",
+        "hsreplay_arena_cards_advanced",
+        "hsreplay_arena_legendaries",
+    }
+)
 
 _schema_lock = threading.Lock()
 
@@ -94,7 +107,11 @@ def canonical_scrape_cohort_hash() -> str | None:
 
     from .sources import SOURCES
 
-    source_ids = sorted(source.id for source in SOURCES if source.kind == "scrape")
+    source_ids = sorted(
+        source.id
+        for source in SOURCES
+        if source.kind == "scrape" and source_operationally_enabled(source.id)
+    )
     if not source_ids:
         return None
     return hashlib.sha256("\0".join(source_ids).encode()).hexdigest()
@@ -280,6 +297,105 @@ def _ai_terminal_fields(
     )
 
 
+def _completeness_terminal_fields(
+    source_id: str,
+    status: Mapping[str, object],
+) -> tuple[int, str, float | None]:
+    """Return only rollout-scoped, bounded completeness telemetry."""
+
+    if (
+        source_id not in COMPLETENESS_TRACKED_SOURCE_IDS
+        or not source_operationally_enabled(source_id)
+    ):
+        return 0, "unknown", None
+
+    quality = status.get("quality")
+    if not isinstance(quality, Mapping):
+        return 1, "unknown", None
+    quality_mapping = quality
+    evidence_fields = (
+        "completeness_schema_version",
+        "retrieval_complete",
+        "retrieval_completeness_score",
+    )
+    if not all(field in quality_mapping for field in evidence_fields):
+        return 1, "unknown", None
+    if any(
+        field in status
+        and not _completeness_values_agree(
+            field,
+            status.get(field),
+            quality_mapping.get(field),
+        )
+        for field in evidence_fields
+    ):
+        return 1, "unknown", None
+
+    schema_version = _bounded_completeness_schema_version(
+        quality_mapping.get("completeness_schema_version")
+    )
+    if schema_version is None:
+        return 1, "unknown", None
+
+    raw_complete = quality_mapping.get("retrieval_complete")
+    score = _bounded_completeness_score(
+        quality_mapping.get("retrieval_completeness_score")
+    )
+    if score is None:
+        return 1, "unknown", None
+    # A deterministic retrieval failure is stronger evidence than missing
+    # freshness metadata.  Preserve that known failure instead of diluting it
+    # into ``unknown`` when a transport did not expose target headers.
+    if raw_complete is False:
+        return 1, "incomplete", score
+    if source_id in HSREPLAY_UPSTREAM_FRESHNESS_SOURCE_IDS:
+        freshness = quality_mapping.get("upstream_freshness")
+        if (
+            not isinstance(freshness, Mapping)
+            or quality_mapping.get("population_completeness") != "unverifiable"
+        ):
+            return 1, "unknown", score
+        freshness_status = freshness.get("status")
+        if freshness_status == "stale":
+            return 1, "incomplete", score
+        if freshness_status != "fresh":
+            return 1, "unknown", score
+    if raw_complete is True and score == 1.0:
+        return 1, "complete", score
+    return 1, "unknown", score
+
+
+def _bounded_completeness_schema_version(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value if value == COMPLETENESS_SCHEMA_VERSION else None
+
+
+def _bounded_completeness_score(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    candidate = float(value)
+    return candidate if math.isfinite(candidate) and 0.0 <= candidate <= 1.0 else None
+
+
+def _completeness_values_agree(
+    field: str,
+    left: object,
+    right: object,
+) -> bool:
+    if field == "completeness_schema_version":
+        left_version = _bounded_completeness_schema_version(left)
+        right_version = _bounded_completeness_schema_version(right)
+        return left_version is not None and left_version == right_version
+    if field == "retrieval_complete":
+        return isinstance(left, bool) and isinstance(right, bool) and left is right
+    if left is None or right is None:
+        return left is None and right is None
+    left_score = _bounded_completeness_score(left)
+    right_score = _bounded_completeness_score(right)
+    return left_score is not None and left_score == right_score
+
+
 def record_terminal_results(
     run_id: str,
     results: Iterable[Mapping[str, object]],
@@ -316,6 +432,7 @@ def record_terminal_results(
         outcome = classify_terminal_status(result)
         reason_code = classify_failure_reason(result)
         ai_fields = _ai_terminal_fields(result)
+        completeness_fields = _completeness_terminal_fields(source_id, result)
         terminal_state = _bounded_terminal_state(result.get("state"))
         result_refresh_window_id = _bounded_refresh_window_id(
             refresh_window_id
@@ -336,6 +453,7 @@ def record_terminal_results(
                 terminal_state,
                 reason_code,
                 *ai_fields,
+                *completeness_fields,
                 recorded_epoch,
             )
         )
@@ -385,8 +503,11 @@ def record_terminal_results(
                     ai_diagnosis_classification,
                     ai_diagnosis_domain,
                     ai_quarantined,
+                    completeness_tracked,
+                    completeness_state,
+                    retrieval_completeness_score,
                     recorded_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 row,
             )
@@ -590,6 +711,9 @@ def _schema_is_current(connection: sqlite3.Connection) -> bool:
         "ai_diagnosis_classification",
         "ai_diagnosis_domain",
         "ai_quarantined",
+        "completeness_tracked",
+        "completeness_state",
+        "retrieval_completeness_score",
         "recorded_at",
     }.issubset(source_columns) and {
         "run_id",
@@ -646,6 +770,18 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
                     ai_diagnosis_classification TEXT NOT NULL DEFAULT 'not_run',
                     ai_diagnosis_domain TEXT NOT NULL DEFAULT 'none',
                     ai_quarantined INTEGER NOT NULL DEFAULT 0,
+                    completeness_tracked INTEGER NOT NULL DEFAULT 0 CHECK (
+                        completeness_tracked IN (0, 1)
+                    ),
+                    completeness_state TEXT NOT NULL DEFAULT 'unknown' CHECK (
+                        completeness_state IN ('complete', 'incomplete', 'unknown')
+                    ),
+                    retrieval_completeness_score REAL CHECK (
+                        retrieval_completeness_score IS NULL OR (
+                            retrieval_completeness_score >= 0.0 AND
+                            retrieval_completeness_score <= 1.0
+                        )
+                    ),
                     recorded_at REAL NOT NULL
                 )
                 """
@@ -663,6 +799,18 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
                 "ai_diagnosis_classification": "TEXT NOT NULL DEFAULT 'not_run'",
                 "ai_diagnosis_domain": "TEXT NOT NULL DEFAULT 'none'",
                 "ai_quarantined": "INTEGER NOT NULL DEFAULT 0",
+                "completeness_tracked": (
+                    "INTEGER NOT NULL DEFAULT 0 CHECK (completeness_tracked IN (0, 1))"
+                ),
+                "completeness_state": (
+                    "TEXT NOT NULL DEFAULT 'unknown' "
+                    "CHECK (completeness_state IN ('complete', 'incomplete', 'unknown'))"
+                ),
+                "retrieval_completeness_score": (
+                    "REAL CHECK (retrieval_completeness_score IS NULL OR "
+                    "(retrieval_completeness_score >= 0.0 AND "
+                    "retrieval_completeness_score <= 1.0))"
+                ),
             }
             for column, definition in migrations.items():
                 if column not in columns:
@@ -754,6 +902,238 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
         except BaseException:
             connection.rollback()
             raise
+
+
+def _query_verified_completeness(
+    connection: sqlite3.Connection,
+    *,
+    from_epoch: float,
+    to_epoch: float,
+    eligible_parser_attempts: int,
+    measurement_complete: bool,
+) -> dict[str, Any]:
+    instrumented_source_ids, catalog_sources = _completeness_source_catalog()
+    source_rows = connection.execute(
+        """
+        WITH ranked_attempts AS (
+            SELECT
+                attempt_id,
+                source_id,
+                outcome,
+                completeness_tracked,
+                completeness_state,
+                ROW_NUMBER() OVER (
+                    PARTITION BY
+                        source_id,
+                        CASE
+                            WHEN refresh_window_id != ''
+                                THEN 'window:' || refresh_window_id
+                            ELSE 'attempt:' || attempt_id
+                        END
+                    ORDER BY
+                        CASE WHEN outcome = 'skipped' THEN 1 ELSE 0 END,
+                        finished_at DESC,
+                        recorded_at DESC,
+                        attempt_id DESC
+                ) AS logical_rank
+            FROM source_attempts
+            WHERE finished_at >= ? AND finished_at <= ?
+        )
+        SELECT
+            source_id,
+            COUNT(*),
+            COALESCE(SUM(
+                CASE
+                    WHEN completeness_state = 'complete'
+                     AND outcome = 'fresh_published'
+                    THEN 1 ELSE 0
+                END
+            ), 0),
+            COALESCE(SUM(
+                CASE
+                    WHEN completeness_state = 'complete'
+                    THEN 1 ELSE 0
+                END
+            ), 0),
+            COALESCE(SUM(
+                CASE
+                    WHEN completeness_state = 'incomplete'
+                    THEN 1 ELSE 0
+                END
+            ), 0),
+            COALESCE(SUM(
+                CASE
+                    WHEN completeness_state NOT IN ('complete', 'incomplete')
+                    THEN 1 ELSE 0
+                END
+            ), 0)
+        FROM ranked_attempts
+        WHERE logical_rank = 1
+          AND outcome != 'skipped'
+          AND completeness_tracked = 1
+        GROUP BY source_id
+        """,
+        (from_epoch, to_epoch),
+    ).fetchall()
+    per_source_counts = {
+        str(source_row[0]): tuple(int(value or 0) for value in source_row[1:])
+        for source_row in source_rows
+        if str(source_row[0]) in instrumented_source_ids
+    }
+    instrumented_sources = len(instrumented_source_ids)
+    observed_instrumented_sources = len(per_source_counts)
+    tracked_attempts = sum(counts[0] for counts in per_source_counts.values())
+    complete_fresh = sum(counts[1] for counts in per_source_counts.values())
+    states = {
+        "complete": sum(counts[2] for counts in per_source_counts.values()),
+        "incomplete": sum(counts[3] for counts in per_source_counts.values()),
+        "unknown": sum(counts[4] for counts in per_source_counts.values()),
+    }
+    observed_source_rates = [
+        Fraction(counts[1], counts[0])
+        for counts in per_source_counts.values()
+        if counts[0] > 0
+    ]
+    sources_meeting_target = sum(
+        int(_ratio_meets_target(counts[1], counts[0]))
+        for counts in per_source_counts.values()
+        if counts[0] > 0
+    )
+    sources_below_target = observed_instrumented_sources - sources_meeting_target
+    sources_without_observations = max(
+        0,
+        instrumented_sources - observed_instrumented_sources,
+    )
+    source_target_attainment_pct = _percentage(
+        sources_meeting_target,
+        instrumented_sources,
+    )
+    macro_complete_fresh_rate_pct = (
+        round(
+            float(sum(observed_source_rates, start=Fraction()) / instrumented_sources)
+            * 100.0,
+            2,
+        )
+        if instrumented_sources > 0
+        else None
+    )
+    worst_observed_source_rate_pct = (
+        round(float(min(observed_source_rates)) * 100.0, 2)
+        if observed_source_rates
+        else None
+    )
+    macro_target_met = _macro_source_ratio_meets_target(
+        per_source_counts,
+        instrumented_sources=instrumented_sources,
+    )
+    source_catalog_coverage_pct = _percentage(
+        instrumented_sources,
+        catalog_sources,
+    )
+    instrumented_source_observation_coverage_pct = _percentage(
+        observed_instrumented_sources,
+        instrumented_sources,
+    )
+    coverage_pct = _percentage(tracked_attempts, eligible_parser_attempts)
+    complete_fresh_rate_pct = _percentage(complete_fresh, tracked_attempts)
+    coverage_gates_met = (
+        _ratio_meets_target(instrumented_sources, catalog_sources),
+        _ratio_meets_target(
+            observed_instrumented_sources,
+            instrumented_sources,
+        ),
+        _ratio_meets_target(tracked_attempts, eligible_parser_attempts),
+    )
+    source_target_gate_met = _ratio_meets_target(
+        sources_meeting_target,
+        instrumented_sources,
+    )
+    if (
+        not measurement_complete
+        or complete_fresh_rate_pct is None
+        or not all(coverage_gates_met)
+    ):
+        objective_status = "collecting"
+    elif (
+        _ratio_meets_target(
+            complete_fresh,
+            tracked_attempts,
+        )
+        and source_target_gate_met
+        and macro_target_met
+    ):
+        objective_status = "met"
+    else:
+        objective_status = "miss"
+    return {
+        "instrumented_sources": instrumented_sources,
+        "catalog_sources": catalog_sources,
+        "source_catalog_coverage_pct": source_catalog_coverage_pct,
+        "observed_instrumented_sources": observed_instrumented_sources,
+        "instrumented_source_observation_coverage_pct": (
+            instrumented_source_observation_coverage_pct
+        ),
+        "sources_meeting_target": sources_meeting_target,
+        "sources_below_target": sources_below_target,
+        "sources_without_observations": sources_without_observations,
+        "source_target_attainment_pct": source_target_attainment_pct,
+        "macro_complete_fresh_rate_pct": macro_complete_fresh_rate_pct,
+        "macro_target_met": macro_target_met,
+        "worst_observed_source_rate_pct": worst_observed_source_rate_pct,
+        "tracked_attempts": tracked_attempts,
+        "complete_fresh": complete_fresh,
+        "states": states,
+        "coverage_of_all_parser_attempts_pct": coverage_pct,
+        "complete_fresh_rate_pct": complete_fresh_rate_pct,
+        "target_rate_pct": SLO_TARGET_RATE_PCT,
+        "objective_status": objective_status,
+    }
+
+
+def _empty_verified_completeness() -> dict[str, Any]:
+    instrumented_source_ids, catalog_sources = _completeness_source_catalog()
+    instrumented_sources = len(instrumented_source_ids)
+    return {
+        "instrumented_sources": instrumented_sources,
+        "catalog_sources": catalog_sources,
+        "source_catalog_coverage_pct": _percentage(
+            instrumented_sources,
+            catalog_sources,
+        ),
+        "observed_instrumented_sources": 0,
+        "instrumented_source_observation_coverage_pct": _percentage(
+            0,
+            instrumented_sources,
+        ),
+        "sources_meeting_target": 0,
+        "sources_below_target": 0,
+        "sources_without_observations": instrumented_sources,
+        "source_target_attainment_pct": _percentage(0, instrumented_sources),
+        "macro_complete_fresh_rate_pct": _percentage(0, instrumented_sources),
+        "macro_target_met": False,
+        "worst_observed_source_rate_pct": None,
+        "tracked_attempts": 0,
+        "complete_fresh": 0,
+        "states": {state: 0 for state in COMPLETENESS_STATES},
+        "coverage_of_all_parser_attempts_pct": None,
+        "complete_fresh_rate_pct": None,
+        "target_rate_pct": SLO_TARGET_RATE_PCT,
+        "objective_status": "collecting",
+    }
+
+
+def _completeness_source_catalog() -> tuple[frozenset[str], int]:
+    """Return current catalog instrumentation without inflating removed sources."""
+
+    from .sources import SOURCES
+
+    catalog_source_ids = frozenset(
+        source.id for source in SOURCES if source_operationally_enabled(source.id)
+    )
+    return (
+        catalog_source_ids & COMPLETENESS_TRACKED_SOURCE_IDS,
+        len(catalog_source_ids),
+    )
 
 
 def _query_window(
@@ -871,6 +1251,13 @@ def _query_window(
         from_epoch=from_at.timestamp(),
         to_epoch=report_at.timestamp(),
     )
+    verified_completeness = _query_verified_completeness(
+        connection,
+        from_epoch=from_at.timestamp(),
+        to_epoch=report_at.timestamp(),
+        eligible_parser_attempts=eligible_attempts,
+        measurement_complete=measurement_complete,
+    )
     return {
         "window": label,
         "from_at": from_at.isoformat(),
@@ -897,6 +1284,7 @@ def _query_window(
             eligible_attempts=eligible_attempts,
             measurement_complete=measurement_complete,
         ),
+        "verified_completeness": verified_completeness,
         "ai_quality": ai_quality,
     }
 
@@ -934,6 +1322,7 @@ def _empty_report(report_at: datetime) -> dict[str, Any]:
                     eligible_attempts=0,
                     measurement_complete=False,
                 ),
+                "verified_completeness": _empty_verified_completeness(),
                 "ai_quality": _empty_ai_quality(),
             }
             for label, duration in WINDOWS
@@ -1340,6 +1729,41 @@ def _percentage(numerator: int, denominator: int) -> float | None:
     if denominator <= 0:
         return None
     return round((numerator / denominator) * 100.0, 2)
+
+
+def _macro_source_ratio_meets_target(
+    per_source_counts: Mapping[str, tuple[int, ...]],
+    *,
+    instrumented_sources: int,
+    target_pct: float = SLO_TARGET_RATE_PCT,
+) -> bool:
+    """Compare the unweighted per-source mean without display rounding."""
+
+    if instrumented_sources <= 0:
+        return False
+    ratio_sum = sum(
+        (
+            Fraction(counts[1], counts[0])
+            for counts in per_source_counts.values()
+            if len(counts) >= 2 and counts[0] > 0
+        ),
+        start=Fraction(),
+    )
+    macro_ratio = ratio_sum / instrumented_sources
+    return macro_ratio >= Fraction(str(target_pct)) / 100
+
+
+def _ratio_meets_target(
+    numerator: int,
+    denominator: int,
+    *,
+    target_pct: float = SLO_TARGET_RATE_PCT,
+) -> bool:
+    """Compare exact counts; rounded percentages are presentation only."""
+
+    return denominator > 0 and Fraction(numerator, denominator) >= (
+        Fraction(str(target_pct)) / 100
+    )
 
 
 def _as_utc(value: datetime) -> datetime:

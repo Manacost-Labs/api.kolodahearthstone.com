@@ -76,6 +76,67 @@ class ReliabilitySLO(BaseModel):
     error_budget_consumed_pct: float | None = Field(default=None, ge=0.0)
 
 
+class VerifiedCompletenessStates(BaseModel):
+    complete: int = Field(ge=0)
+    incomplete: int = Field(ge=0)
+    unknown: int = Field(ge=0)
+
+
+class VerifiedCompletenessSummary(BaseModel):
+    instrumented_sources: int = Field(ge=0)
+    catalog_sources: int = Field(ge=0)
+    source_catalog_coverage_pct: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=100.0,
+    )
+    observed_instrumented_sources: int = Field(ge=0)
+    instrumented_source_observation_coverage_pct: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=100.0,
+    )
+    sources_meeting_target: int = Field(ge=0)
+    sources_below_target: int = Field(ge=0)
+    sources_without_observations: int = Field(ge=0)
+    source_target_attainment_pct: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=100.0,
+    )
+    macro_complete_fresh_rate_pct: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=100.0,
+        description=(
+            "Unweighted mean across every instrumented source; sources without "
+            "observations contribute zero."
+        ),
+    )
+    macro_target_met: bool = Field(
+        description=(
+            "Whether the exact, unrounded mean of per-source complete-fresh "
+            "ratios meets the target."
+        )
+    )
+    worst_observed_source_rate_pct: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=100.0,
+    )
+    tracked_attempts: int = Field(ge=0)
+    complete_fresh: int = Field(ge=0)
+    states: VerifiedCompletenessStates
+    coverage_of_all_parser_attempts_pct: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=100.0,
+    )
+    complete_fresh_rate_pct: float | None = Field(default=None, ge=0.0, le=100.0)
+    target_rate_pct: float = Field(ge=0.0, le=100.0)
+    objective_status: Literal["collecting", "met", "miss"]
+
+
 class AIReviewVerdicts(BaseModel):
     model_config = ConfigDict(serialize_by_alias=True)
 
@@ -170,6 +231,7 @@ class ReliabilityWindow(BaseModel):
     data_available_rate_pct: float | None = Field(default=None, ge=0.0, le=100.0)
     freshness_slo: ReliabilitySLO
     availability_slo: ReliabilitySLO
+    verified_completeness: VerifiedCompletenessSummary
     ai_quality: AIQualitySummary
 
 

@@ -11,6 +11,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+import app.sources as sources_module
+from app import reliability_telemetry
 from app.fetcher import _refresh_sources_unlocked, _run_tier_serial_browser
 from app.reliability_telemetry import (
     build_reliability_report,
@@ -20,13 +22,91 @@ from app.reliability_telemetry import (
     reliability_cache_revision,
     update_terminal_ai_results,
 )
+from app.source_contracts import FIELD_UNAVAILABLE_REASONS
 from app.sources import SOURCE_BY_ID, Source
 
 
 def _status(source_id: str, **overrides: object) -> dict[str, object]:
     value: dict[str, object] = {"source_id": source_id, "state": "ok"}
+    quality = overrides.get("quality")
+    if (
+        source_id in reliability_telemetry.HSREPLAY_UPSTREAM_FRESHNESS_SOURCE_IDS
+        and isinstance(quality, dict)
+    ):
+        quality = dict(quality)
+        quality.setdefault("upstream_freshness", {"status": "fresh"})
+        quality.setdefault("population_completeness", "unverifiable")
+        overrides["quality"] = quality
     value.update(overrides)
     return value
+
+
+def test_hsreplay_verified_completeness_requires_fresh_upstream_evidence() -> None:
+    base_quality: dict[str, object] = {
+        "completeness_schema_version": 1,
+        "retrieval_complete": True,
+        "retrieval_completeness_score": 1.0,
+        "population_completeness": "unverifiable",
+    }
+    source_id = "hsreplay_arena_cards_advanced"
+
+    assert reliability_telemetry._completeness_terminal_fields(
+        source_id,
+        {"quality": {**base_quality, "upstream_freshness": {"status": "fresh"}}},
+    ) == (1, "complete", 1.0)
+    assert reliability_telemetry._completeness_terminal_fields(
+        source_id,
+        {"quality": {**base_quality, "upstream_freshness": {"status": "stale"}}},
+    ) == (1, "incomplete", 1.0)
+    assert reliability_telemetry._completeness_terminal_fields(
+        source_id,
+        {"quality": {**base_quality, "upstream_freshness": {"status": "unknown"}}},
+    ) == (1, "unknown", 1.0)
+    assert reliability_telemetry._completeness_terminal_fields(
+        source_id,
+        {
+            "quality": {
+                **base_quality,
+                "retrieval_complete": False,
+                "retrieval_completeness_score": 0.75,
+                "upstream_freshness": {"status": "unknown"},
+            }
+        },
+    ) == (1, "incomplete", 0.75)
+    assert reliability_telemetry._completeness_terminal_fields(
+        source_id,
+        {"quality": base_quality},
+    ) == (1, "unknown", 1.0)
+    with patch.dict("os.environ", {}, clear=True):
+        assert reliability_telemetry._completeness_terminal_fields(
+            "firestone_standard",
+            {"quality": base_quality},
+        ) == (0, "unknown", None)
+    with patch.dict(
+        "os.environ",
+        {"HS_FIRESTONE_STANDARD_AUTHORIZED": "true"},
+        clear=True,
+    ):
+        assert reliability_telemetry._completeness_terminal_fields(
+            "firestone_standard",
+            {"quality": base_quality},
+        ) == (1, "complete", 1.0)
+
+
+def test_disabled_firestone_is_not_in_verified_completeness_catalog() -> None:
+    with patch.dict("os.environ", {}, clear=True):
+        instrumented, catalog_count = reliability_telemetry._completeness_source_catalog()
+        assert "firestone_standard" not in instrumented
+        assert catalog_count == len(SOURCE_BY_ID) - 1
+
+    with patch.dict(
+        "os.environ",
+        {"HS_FIRESTONE_STANDARD_AUTHORIZED": "true"},
+        clear=True,
+    ):
+        instrumented, catalog_count = reliability_telemetry._completeness_source_catalog()
+        assert "firestone_standard" in instrumented
+        assert catalog_count == len(SOURCE_BY_ID)
 
 
 def _record_process_attempt(args: tuple[str, int, float]) -> int:
@@ -701,6 +781,27 @@ def test_empty_report_never_claims_one_hundred_percent(tmp_path: Path) -> None:
         assert window["measurement_status"] == "collecting"
         assert window["freshness_slo"]["objective_status"] == "collecting"
         assert window["freshness_slo"]["error_budget_consumed_pct"] is None
+        assert window["verified_completeness"] == {
+            "instrumented_sources": 3,
+            "catalog_sources": 98,
+            "source_catalog_coverage_pct": 3.06,
+            "observed_instrumented_sources": 0,
+            "instrumented_source_observation_coverage_pct": 0.0,
+            "sources_meeting_target": 0,
+            "sources_below_target": 0,
+            "sources_without_observations": 3,
+            "source_target_attainment_pct": 0.0,
+            "macro_complete_fresh_rate_pct": 0.0,
+            "macro_target_met": False,
+            "worst_observed_source_rate_pct": None,
+            "tracked_attempts": 0,
+            "complete_fresh": 0,
+            "states": {"complete": 0, "incomplete": 0, "unknown": 0},
+            "coverage_of_all_parser_attempts_pct": None,
+            "complete_fresh_rate_pct": None,
+            "target_rate_pct": 99.0,
+            "objective_status": "collecting",
+        }
 
 
 def test_schema_migrates_existing_database_without_losing_rows(tmp_path: Path) -> None:
@@ -725,7 +826,7 @@ def test_schema_migrates_existing_database_without_losing_rows(tmp_path: Path) -
         (
             "old",
             "old-run",
-            "old-source",
+            "hsreplay_arena_cards_advanced",
             now.timestamp(),
             "lkg_served",
             "ok",
@@ -761,8 +862,668 @@ def test_schema_migrates_existing_database_without_losing_rows(tmp_path: Path) -
         legacy_window = connection.execute(
             "SELECT refresh_window_id FROM source_attempts WHERE attempt_id = 'old'"
         ).fetchone()
+        legacy_completeness = connection.execute(
+            """
+            SELECT
+                completeness_tracked,
+                completeness_state,
+                retrieval_completeness_score
+            FROM source_attempts
+            WHERE attempt_id = 'old'
+            """
+        ).fetchone()
     assert "refresh_window_id" in columns
+    assert {
+        "completeness_tracked",
+        "completeness_state",
+        "retrieval_completeness_score",
+    }.issubset(columns)
     assert legacy_window == ("",)
+    assert legacy_completeness == (0, "unknown", None)
+
+
+@pytest.mark.parametrize("source_id", tuple(FIELD_UNAVAILABLE_REASONS))
+def test_new_attempts_track_every_instrumented_completeness_source(
+    tmp_path: Path,
+    source_id: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HS_FIRESTONE_STANDARD_AUTHORIZED", "true")
+    now = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
+    path = tmp_path / f"{source_id}.sqlite3"
+
+    record_terminal_results(
+        "instrumented-run",
+        [
+            _status(
+                source_id,
+                retrieval_complete=True,
+                retrieval_completeness_score=1.0,
+                quality={
+                    "completeness_schema_version": 1,
+                    "retrieval_complete": True,
+                    "retrieval_completeness_score": 1.0,
+                },
+            )
+        ],
+        finished_at=now,
+        path=path,
+    )
+
+    with sqlite3.connect(path) as connection:
+        stored = connection.execute(
+            """
+            SELECT
+                completeness_tracked,
+                completeness_state,
+                retrieval_completeness_score
+            FROM source_attempts
+            """
+        ).fetchone()
+    assert stored == (1, "complete", 1.0)
+
+
+def test_completeness_attempt_is_bounded_and_idempotent(tmp_path: Path) -> None:
+    now = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
+    path = tmp_path / "reliability.sqlite3"
+    source_id = "hsreplay_arena_cards_advanced"
+
+    inserted = record_terminal_results(
+        "immutable-completeness-run",
+        [
+            _status(
+                source_id,
+                quality={
+                    "completeness_schema_version": 1,
+                    "retrieval_complete": True,
+                    "retrieval_completeness_score": 1.0,
+                },
+                raw_payload="must never be persisted",
+            )
+        ],
+        finished_at=now,
+        path=path,
+    )
+    duplicate = record_terminal_results(
+        "immutable-completeness-run",
+        [
+            _status(
+                source_id,
+                quality={
+                    "completeness_schema_version": 1,
+                    "retrieval_complete": False,
+                    "retrieval_completeness_score": 2.0,
+                },
+            )
+        ],
+        finished_at=now,
+        path=path,
+    )
+    record_terminal_results(
+        "bounded-invalid-score",
+        [
+            _status(
+                source_id,
+                quality={
+                    "completeness_schema_version": 1,
+                    "retrieval_complete": False,
+                    "retrieval_completeness_score": 2.0,
+                },
+            )
+        ],
+        finished_at=now,
+        path=path,
+    )
+    record_terminal_results(
+        "untracked-run",
+        [
+            _status(
+                "not-instrumented",
+                retrieval_complete=True,
+                retrieval_completeness_score=1.0,
+            )
+        ],
+        finished_at=now,
+        path=path,
+    )
+
+    with sqlite3.connect(path) as connection:
+        rows = connection.execute(
+            """
+            SELECT
+                run_id,
+                source_id,
+                completeness_tracked,
+                completeness_state,
+                retrieval_completeness_score
+            FROM source_attempts
+            ORDER BY run_id
+            """
+        ).fetchall()
+        columns = {
+            str(row[1])
+            for row in connection.execute("PRAGMA table_info(source_attempts)")
+        }
+
+    assert inserted == 1
+    assert duplicate == 0
+    assert rows == [
+        ("bounded-invalid-score", source_id, 1, "unknown", None),
+        ("immutable-completeness-run", source_id, 1, "complete", 1.0),
+        ("untracked-run", "not-instrumented", 0, "unknown", None),
+    ]
+    assert "raw_payload" not in columns
+
+
+def test_verified_completeness_window_folds_recovery_and_requires_fresh_data(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HS_FIRESTONE_STANDARD_AUTHORIZED", "true")
+    now = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
+    path = tmp_path / "reliability.sqlite3"
+    source_ids = tuple(FIELD_UNAVAILABLE_REASONS)
+    recovery_window = "completeness:2026-08-11"
+    record_terminal_results(
+        "failed-before-recovery",
+        [
+            _status(
+                source_ids[0],
+                state="fetch_error",
+                quality={
+                    "completeness_schema_version": 1,
+                    "retrieval_complete": False,
+                    "retrieval_completeness_score": 0.4,
+                },
+            )
+        ],
+        finished_at=now - timedelta(hours=2),
+        path=path,
+        refresh_window_id=recovery_window,
+    )
+    record_terminal_results(
+        "successful-recovery",
+        [
+            _status(
+                source_ids[0],
+                quality={
+                    "completeness_schema_version": 1,
+                    "retrieval_complete": True,
+                    "retrieval_completeness_score": 1.0,
+                },
+            )
+        ],
+        finished_at=now - timedelta(hours=1),
+        path=path,
+        refresh_window_id=recovery_window,
+    )
+    record_terminal_results(
+        "other-terminals",
+        [
+            _status(
+                source_ids[1],
+                serving_cached_dataset=True,
+                quality={
+                    "completeness_schema_version": 1,
+                    "retrieval_complete": True,
+                    "retrieval_completeness_score": 1.0,
+                },
+            ),
+            _status(
+                source_ids[2],
+                state="timed_out",
+                quality={
+                    "completeness_schema_version": 1,
+                    "retrieval_complete": False,
+                    "retrieval_completeness_score": 0.5,
+                },
+            ),
+            _status(source_ids[3], state="fetch_error"),
+            _status("not-instrumented"),
+        ],
+        finished_at=now - timedelta(minutes=30),
+        path=path,
+    )
+
+    verified = build_reliability_report(now=now, path=path)["windows"][0][
+        "verified_completeness"
+    ]
+
+    assert verified == {
+        "instrumented_sources": 4,
+        "catalog_sources": 99,
+        "source_catalog_coverage_pct": 4.04,
+        "observed_instrumented_sources": 4,
+        "instrumented_source_observation_coverage_pct": 100.0,
+        "sources_meeting_target": 1,
+        "sources_below_target": 3,
+        "sources_without_observations": 0,
+        "source_target_attainment_pct": 25.0,
+        "macro_complete_fresh_rate_pct": 25.0,
+        "macro_target_met": False,
+        "worst_observed_source_rate_pct": 0.0,
+        "tracked_attempts": 4,
+        "complete_fresh": 1,
+        "states": {"complete": 2, "incomplete": 1, "unknown": 1},
+        "coverage_of_all_parser_attempts_pct": 80.0,
+        "complete_fresh_rate_pct": 25.0,
+        "target_rate_pct": 99.0,
+        "objective_status": "collecting",
+    }
+
+
+@pytest.mark.parametrize(
+    ("retrieval_complete", "expected_state", "expected_rate", "objective_status"),
+    [
+        (True, "complete", 100.0, "met"),
+        (False, "incomplete", 0.0, "miss"),
+    ],
+)
+def test_verified_completeness_objective_requires_all_three_coverage_gates(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    retrieval_complete: bool,
+    expected_state: str,
+    expected_rate: float,
+    objective_status: str,
+) -> None:
+    now = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
+    path = tmp_path / f"{objective_status}.sqlite3"
+    source_id = "hsreplay_arena_cards_advanced"
+    monkeypatch.setattr(
+        reliability_telemetry,
+        "COMPLETENESS_TRACKED_SOURCE_IDS",
+        frozenset({source_id}),
+    )
+    monkeypatch.setattr(
+        reliability_telemetry,
+        "PIPELINE_SCHEDULE_LEDGER_READY",
+        True,
+    )
+    monkeypatch.setattr(sources_module, "SOURCES", (SOURCE_BY_ID[source_id],))
+    record_terminal_results(
+        "fully-instrumented-run",
+        [
+            _status(
+                source_id,
+                quality={
+                    "completeness_schema_version": 1,
+                    "retrieval_complete": retrieval_complete,
+                    "retrieval_completeness_score": (
+                        1.0 if retrieval_complete else 0.5
+                    ),
+                },
+            )
+        ],
+        finished_at=now,
+        path=path,
+        coverage_scope="full",
+        expected_source_count=1,
+    )
+
+    window = build_reliability_report(now=now, path=path)["windows"][0]
+    verified = window["verified_completeness"]
+
+    assert window["measurement_status"] == "observed"
+    assert verified["instrumented_sources"] == 1
+    assert verified["catalog_sources"] == 1
+    assert verified["source_catalog_coverage_pct"] == 100.0
+    assert verified["observed_instrumented_sources"] == 1
+    assert verified["instrumented_source_observation_coverage_pct"] == 100.0
+    assert verified["sources_meeting_target"] == int(retrieval_complete)
+    assert verified["sources_below_target"] == int(not retrieval_complete)
+    assert verified["sources_without_observations"] == 0
+    assert verified["source_target_attainment_pct"] == expected_rate
+    assert verified["macro_complete_fresh_rate_pct"] == expected_rate
+    assert verified["macro_target_met"] is retrieval_complete
+    assert verified["worst_observed_source_rate_pct"] == expected_rate
+    assert verified["tracked_attempts"] == 1
+    assert verified["states"][expected_state] == 1
+    assert verified["coverage_of_all_parser_attempts_pct"] == 100.0
+    assert verified["complete_fresh_rate_pct"] == expected_rate
+    assert verified["target_rate_pct"] == 99.0
+    assert verified["objective_status"] == objective_status
+
+
+def test_verified_completeness_cannot_meet_target_for_partial_catalog_rollout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HS_FIRESTONE_STANDARD_AUTHORIZED", "true")
+    now = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
+    path = tmp_path / "partial-catalog-rollout.sqlite3"
+    tracked_sources = tuple(FIELD_UNAVAILABLE_REASONS)
+    record_terminal_results(
+        "partial-catalog-rollout",
+        [
+            _status(
+                source_id,
+                quality={
+                    "completeness_schema_version": 1,
+                    "retrieval_complete": True,
+                    "retrieval_completeness_score": 1.0,
+                },
+            )
+            for source_id in tracked_sources
+        ],
+        finished_at=now,
+        path=path,
+    )
+
+    verified = build_reliability_report(now=now, path=path)["windows"][0][
+        "verified_completeness"
+    ]
+
+    assert verified["instrumented_sources"] == len(tracked_sources)
+    assert verified["catalog_sources"] == len(SOURCE_BY_ID)
+    assert verified["source_catalog_coverage_pct"] == 4.04
+    assert verified["observed_instrumented_sources"] == len(tracked_sources)
+    assert verified["instrumented_source_observation_coverage_pct"] == 100.0
+    assert verified["sources_meeting_target"] == len(tracked_sources)
+    assert verified["sources_below_target"] == 0
+    assert verified["sources_without_observations"] == 0
+    assert verified["source_target_attainment_pct"] == 100.0
+    assert verified["macro_complete_fresh_rate_pct"] == 100.0
+    assert verified["macro_target_met"] is True
+    assert verified["worst_observed_source_rate_pct"] == 100.0
+    assert verified["coverage_of_all_parser_attempts_pct"] == 100.0
+    assert verified["complete_fresh_rate_pct"] == 100.0
+    assert verified["objective_status"] == "collecting"
+
+
+def test_verified_completeness_threshold_uses_exact_counts_not_rounded_rate() -> None:
+    assert reliability_telemetry._percentage(19_799, 20_000) == 99.0
+    assert not reliability_telemetry._ratio_meets_target(19_799, 20_000)
+    assert reliability_telemetry._ratio_meets_target(19_800, 20_000)
+
+
+def test_verified_completeness_macro_gate_uses_exact_per_source_ratios() -> None:
+    per_source_counts = {
+        f"frequent-{index}": (200, 199, 199, 1, 0)
+        for index in range(99)
+    }
+    per_source_counts["rare-failure"] = (1, 0, 0, 1, 0)
+
+    assert reliability_telemetry._ratio_meets_target(19_701, 19_801)
+    assert sum(
+        reliability_telemetry._ratio_meets_target(counts[1], counts[0])
+        for counts in per_source_counts.values()
+    ) == 99
+    assert not reliability_telemetry._macro_source_ratio_meets_target(
+        per_source_counts,
+        instrumented_sources=100,
+    )
+
+
+def test_verified_completeness_macro_gate_exposes_rare_source_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
+    path = tmp_path / "macro-source-gate.sqlite3"
+    frequent_source = "hsreplay_arena_cards_advanced"
+    rare_source = "hsreplay_arena_legendaries"
+    source_ids = frozenset({frequent_source, rare_source})
+    monkeypatch.setattr(
+        reliability_telemetry,
+        "COMPLETENESS_TRACKED_SOURCE_IDS",
+        source_ids,
+    )
+    monkeypatch.setattr(
+        reliability_telemetry,
+        "PIPELINE_SCHEDULE_LEDGER_READY",
+        True,
+    )
+    monkeypatch.setattr(
+        sources_module,
+        "SOURCES",
+        tuple(SOURCE_BY_ID[source_id] for source_id in source_ids),
+    )
+    record_terminal_results(
+        "macro-base",
+        [
+            _status(
+                frequent_source,
+                quality={
+                    "completeness_schema_version": 1,
+                    "retrieval_complete": True,
+                    "retrieval_completeness_score": 1.0,
+                },
+            ),
+            _status(
+                rare_source,
+                quality={
+                    "completeness_schema_version": 1,
+                    "retrieval_complete": False,
+                    "retrieval_completeness_score": 0.5,
+                },
+            ),
+        ],
+        finished_at=now,
+        path=path,
+        coverage_scope="full",
+        expected_source_count=2,
+    )
+    for attempt in range(99):
+        record_terminal_results(
+            f"frequent-success-{attempt}",
+            [
+                _status(
+                    frequent_source,
+                    quality={
+                        "completeness_schema_version": 1,
+                        "retrieval_complete": True,
+                        "retrieval_completeness_score": 1.0,
+                    },
+                )
+            ],
+            finished_at=now,
+            path=path,
+        )
+
+    window = build_reliability_report(now=now, path=path)["windows"][0]
+    verified = window["verified_completeness"]
+
+    assert window["measurement_status"] == "observed"
+    assert verified["tracked_attempts"] == 101
+    assert verified["complete_fresh"] == 100
+    assert verified["complete_fresh_rate_pct"] == 99.01
+    assert verified["sources_meeting_target"] == 1
+    assert verified["sources_below_target"] == 1
+    assert verified["sources_without_observations"] == 0
+    assert verified["source_target_attainment_pct"] == 50.0
+    assert verified["macro_complete_fresh_rate_pct"] == 50.0
+    assert verified["macro_target_met"] is False
+    assert verified["worst_observed_source_rate_pct"] == 0.0
+    assert verified["objective_status"] == "miss"
+
+
+def test_verified_completeness_waits_for_complete_schedule_measurement(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
+    path = tmp_path / "schedule-collecting.sqlite3"
+    source_id = "hsreplay_arena_cards_advanced"
+    monkeypatch.setattr(
+        reliability_telemetry,
+        "COMPLETENESS_TRACKED_SOURCE_IDS",
+        frozenset({source_id}),
+    )
+    monkeypatch.setattr(sources_module, "SOURCES", (SOURCE_BY_ID[source_id],))
+    record_terminal_results(
+        "schedule-collecting",
+        [
+            _status(
+                source_id,
+                quality={
+                    "completeness_schema_version": 1,
+                    "retrieval_complete": True,
+                    "retrieval_completeness_score": 1.0,
+                },
+            )
+        ],
+        finished_at=now,
+        path=path,
+        coverage_scope="full",
+        expected_source_count=1,
+    )
+
+    window = build_reliability_report(now=now, path=path)["windows"][0]
+    verified = window["verified_completeness"]
+
+    assert window["coverage_ratio"] == 1.0
+    assert window["measurement_status"] == "collecting"
+    assert verified["source_catalog_coverage_pct"] == 100.0
+    assert verified["instrumented_source_observation_coverage_pct"] == 100.0
+    assert verified["coverage_of_all_parser_attempts_pct"] == 100.0
+    assert verified["complete_fresh_rate_pct"] == 100.0
+    assert verified["objective_status"] == "collecting"
+
+
+def test_verified_completeness_attempt_coverage_counts_missing_terminals(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
+    path = tmp_path / "missing-terminal.sqlite3"
+    source_id = "hsreplay_arena_cards_advanced"
+    monkeypatch.setattr(
+        reliability_telemetry,
+        "COMPLETENESS_TRACKED_SOURCE_IDS",
+        frozenset({source_id}),
+    )
+    monkeypatch.setattr(sources_module, "SOURCES", (SOURCE_BY_ID[source_id],))
+    record_terminal_results(
+        "missing-terminal",
+        [
+            _status(
+                source_id,
+                quality={
+                    "completeness_schema_version": 1,
+                    "retrieval_complete": True,
+                    "retrieval_completeness_score": 1.0,
+                },
+            )
+        ],
+        finished_at=now,
+        path=path,
+        expected_source_count=2,
+    )
+
+    window = build_reliability_report(now=now, path=path)["windows"][0]
+    verified = window["verified_completeness"]
+
+    assert window["observed_eligible_attempts"] == 1
+    assert window["missing_terminal_windows"] == 1
+    assert window["eligible_attempts"] == 2
+    assert verified["tracked_attempts"] == 1
+    assert verified["coverage_of_all_parser_attempts_pct"] == 50.0
+    assert verified["objective_status"] == "collecting"
+
+
+def test_completeness_evidence_fails_closed_for_partial_legacy_and_conflicts(
+    tmp_path: Path,
+) -> None:
+    now = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
+    path = tmp_path / "fail-closed-completeness.sqlite3"
+    source_id = "hsreplay_arena_cards_advanced"
+    cases = {
+        "complete": _status(
+            source_id,
+            quality={
+                "completeness_schema_version": 1,
+                "retrieval_complete": True,
+                "retrieval_completeness_score": 1.0,
+            },
+        ),
+        "top-only-v1": _status(
+            source_id,
+            completeness_schema_version=1,
+            retrieval_complete=True,
+            retrieval_completeness_score=1.0,
+        ),
+        "partial-true": _status(
+            source_id,
+            quality={
+                "completeness_schema_version": 1,
+                "retrieval_complete": True,
+                "retrieval_completeness_score": 0.9876,
+            },
+        ),
+        "missing-score": _status(
+            source_id,
+            quality={
+                "completeness_schema_version": 1,
+                "retrieval_complete": True,
+                "retrieval_completeness_score": None,
+            },
+        ),
+        "legacy": _status(
+            source_id,
+            retrieval_complete=True,
+            retrieval_completeness_score=1.0,
+        ),
+        "future-schema": _status(
+            source_id,
+            quality={
+                "completeness_schema_version": 2,
+                "retrieval_complete": True,
+                "retrieval_completeness_score": 1.0,
+            },
+        ),
+        "conflict": _status(
+            source_id,
+            retrieval_complete=False,
+            retrieval_completeness_score=1.0,
+            quality={
+                "completeness_schema_version": 1,
+                "retrieval_complete": True,
+                "retrieval_completeness_score": 1.0,
+            },
+        ),
+        "incomplete": _status(
+            source_id,
+            quality={
+                "completeness_schema_version": 1,
+                "retrieval_complete": False,
+                "retrieval_completeness_score": 0.5,
+            },
+        ),
+    }
+    for run_id, status in cases.items():
+        record_terminal_results(run_id, [status], finished_at=now, path=path)
+
+    with sqlite3.connect(path) as connection:
+        stored = {
+            str(run_id): (str(state), score)
+            for run_id, state, score in connection.execute(
+                """
+                SELECT run_id, completeness_state, retrieval_completeness_score
+                FROM source_attempts
+                """
+            )
+        }
+    verified = build_reliability_report(now=now, path=path)["windows"][0][
+        "verified_completeness"
+    ]
+
+    assert stored == {
+        "complete": ("complete", 1.0),
+        "top-only-v1": ("unknown", None),
+        "partial-true": ("unknown", 0.9876),
+        "missing-score": ("unknown", None),
+        "legacy": ("unknown", None),
+        "future-schema": ("unknown", None),
+        "conflict": ("unknown", None),
+        "incomplete": ("incomplete", 0.5),
+    }
+    assert verified["states"] == {
+        "complete": 1,
+        "incomplete": 1,
+        "unknown": 6,
+    }
+    assert verified["complete_fresh"] == 1
 
 
 def test_schema_migration_backfills_refresh_run_window_from_attempts(

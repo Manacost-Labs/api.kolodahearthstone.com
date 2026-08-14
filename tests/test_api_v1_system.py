@@ -54,7 +54,7 @@ def test_v1_system_paths_do_not_replace_legacy_paths() -> None:
 def test_v1_parsing_reliability_returns_sanitized_public_contract() -> None:
     report = {
         "methodology": {
-            "version": "logical-source-observed-v9",
+            "version": "logical-source-observed-v10",
             "unit": "one terminal outcome per source in a refresh run",
             "scope": "observed_scrape_and_pipeline_sources",
             "completeness": "observed_attempts_plus_recorded_run_deficits",
@@ -166,6 +166,31 @@ def test_v1_parsing_reliability_returns_sanitized_public_contract() -> None:
                     "bad_attempts_over_budget": 3,
                     "error_budget_remaining_attempts": -2.88,
                     "error_budget_consumed_pct": 2500.0,
+                },
+                "verified_completeness": {
+                    "instrumented_sources": 4,
+                    "catalog_sources": 99,
+                    "source_catalog_coverage_pct": 4.04,
+                    "observed_instrumented_sources": 3,
+                    "instrumented_source_observation_coverage_pct": 75.0,
+                    "sources_meeting_target": 2,
+                    "sources_below_target": 1,
+                    "sources_without_observations": 1,
+                    "source_target_attainment_pct": 50.0,
+                    "macro_complete_fresh_rate_pct": 62.5,
+                    "macro_target_met": False,
+                    "worst_observed_source_rate_pct": 50.0,
+                    "tracked_attempts": 4,
+                    "complete_fresh": 3,
+                    "states": {
+                        "complete": 3,
+                        "incomplete": 1,
+                        "unknown": 0,
+                    },
+                    "coverage_of_all_parser_attempts_pct": 40.0,
+                    "complete_fresh_rate_pct": 75.0,
+                    "target_rate_pct": 99.0,
+                    "objective_status": "collecting",
                 },
                 "ai_quality": {
                     "candidate_review": {
