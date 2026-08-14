@@ -527,10 +527,12 @@ async def preflight_known_pending_publication(
                 for url in ordered_urls:
                     response = await client.get(url, headers=headers)
                     if response.status_code in {404, 410}:
-                        raise ViciousUpstreamPublicationPending(
-                            readiness,
-                            transport_backend=transport_backend,
-                        )
+                        # A previously discovered optional archetype can be
+                        # removed while the remaining radar set advances. A
+                        # missing URL therefore is not proof that the current
+                        # issue is still unpublished; keep checking the known
+                        # graph URLs and let full discovery reconcile removals.
+                        continue
                     if response.status_code != 200:
                         return
                     response_url = str(response.url)

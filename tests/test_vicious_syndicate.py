@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import unittest
 from datetime import UTC, datetime, timedelta
+from typing import ClassVar
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -120,17 +121,49 @@ class _RedirectAsyncClient(_FakeAsyncClient):
 
 
 class _PendingRadarAsyncClient(_FakeAsyncClient):
-    requested_urls: list[str] = []
+    requested_urls: ClassVar[list[str]] = []
+
+    async def get(self, url: str, headers: dict[str, str] | None = None) -> httpx.Response:
+        type(self).requested_urls.append(url)
+        if "Egg%20Death%20Knight" in url or "Egg Death Knight" in url:
+            graph = """
+                <title>Data Reaper's Radar - Issue #354</title>
+                <script>function setup(canvas) {
+                var n = {"Card A": {radius: 1}, "Card B": {radius: 1}};
+                var e = [["Card A", "Card B", {weight: 1}]];
+                }</script>
+            """
+            return httpx.Response(
+                200,
+                text=graph,
+                request=httpx.Request("GET", url, headers=headers),
+            )
+        raise AssertionError("readiness preflight must stop at known blockers")
+
+
+class _RemovedThenReadyRadarAsyncClient(_FakeAsyncClient):
+    requested_urls: ClassVar[list[str]] = []
 
     async def get(self, url: str, headers: dict[str, str] | None = None) -> httpx.Response:
         type(self).requested_urls.append(url)
         if "Egg%20Death%20Knight" in url or "Egg Death Knight" in url:
             return httpx.Response(
                 404,
-                text="<html>not published</html>",
+                text="<html>removed optional radar</html>",
                 request=httpx.Request("GET", url, headers=headers),
             )
-        raise AssertionError("readiness preflight must stop at known blockers")
+        graph = """
+            <title>Data Reaper's Radar - Issue #355</title>
+            <script>function setup(canvas) {
+            var n = {"Card A": {radius: 1}, "Card B": {radius: 1}};
+            var e = [["Card A", "Card B", {weight: 1}]];
+            }</script>
+        """
+        return httpx.Response(
+            200,
+            text=graph,
+            request=httpx.Request("GET", url, headers=headers),
+        )
 
 
 class _RadarReadinessAsyncClient(_FakeAsyncClient):
@@ -160,6 +193,7 @@ class ViciousSyndicateFetchTest(unittest.TestCase):
         _RedirectAsyncClient.calls = 0
         _RedirectAsyncClient.last_kwargs = {}
         _PendingRadarAsyncClient.requested_urls = []
+        _RemovedThenReadyRadarAsyncClient.requested_urls = []
 
     def test_optional_fetch_404_does_not_use_error_logger(self) -> None:
         async def run() -> None:
@@ -585,6 +619,46 @@ class ViciousSyndicateFetchTest(unittest.TestCase):
                 f"<title>Data Reaper's Radar - Issue #356</title>{graph}",
                 pending=False,
             )
+        )
+
+    def test_readiness_404_does_not_delay_recovery_after_optional_radar_removal(
+        self,
+    ) -> None:
+        egg_url = (
+            "https://www.vicioussyndicate.com/wp-content/datareaper/radars/"
+            "Egg%20Death%20Knight/index.html"
+        )
+        mage_url = (
+            "https://www.vicioussyndicate.com/wp-content/datareaper/radars/"
+            "Mage/index.html"
+        )
+        status = {
+            "last_refresh_upstream_readiness": {
+                "latest_report_issue": "355",
+                "candidate_issue": "354",
+                "full_discovery_at": datetime.now(UTC).isoformat(),
+                "radar_urls": [egg_url, mage_url],
+                "blocking_radar_urls": [egg_url],
+            }
+        }
+
+        async def run() -> None:
+            with (
+                patch("app.vicious_syndicate.load_status", return_value=status),
+                patch(
+                    "app.vicious_syndicate.httpx.AsyncClient",
+                    _RemovedThenReadyRadarAsyncClient,
+                ),
+            ):
+                await preflight_known_pending_publication(
+                    "vicious_syndicate_radars",
+                    latest_issue="355",
+                )
+
+        asyncio.run(run())
+        self.assertEqual(
+            _RemovedThenReadyRadarAsyncClient.requested_urls,
+            [egg_url, mage_url],
         )
 
     def test_old_pending_status_forces_periodic_full_rediscovery(self) -> None:
