@@ -165,16 +165,17 @@ def validate_existing_publication_for_serving(
     provided its content still passes the current contract and semantic checks.
     """
 
-    from .scrapers.quality import validate_parsed_data
-
-    ok, reason = validate_parsed_data(source, parsed)
-    temporal_lkg = not ok and is_usable_vicious_temporal_lkg(source, parsed)
+    temporal_lkg = is_usable_vicious_temporal_lkg(source, parsed)
     if temporal_lkg:
         ok = True
         reason = (
             "existing complete Vicious snapshot is usable only as an explicit "
             "temporal LKG"
         )
+    else:
+        from .scrapers.quality import validate_parsed_data
+
+        ok, reason = validate_parsed_data(source, parsed)
     backend_allowed = not _is_unstructured_page_backend(backend) or (
         allows_browser_fallback(source.id, default=True)
     )

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 from datetime import UTC, datetime
+from unittest.mock import patch
 
 from app.publish_gate import (
     validate_candidate_for_publish,
@@ -175,15 +176,17 @@ class PublishGateTest(unittest.TestCase):
             parsed,
             backend="vicious_syndicate_api",
         )
-        existing = validate_existing_publication_for_serving(
-            source,
-            parsed,
-            backend="vicious_syndicate_api",
-        )
+        with patch("app.scrapers.quality._log_quality_action") as quality_log:
+            existing = validate_existing_publication_for_serving(
+                source,
+                parsed,
+                backend="vicious_syndicate_api",
+            )
 
         self.assertFalse(candidate.ok)
         self.assertTrue(existing.ok)
         self.assertTrue(existing.extra["lkg_temporal_grandfathered"])
+        quality_log.assert_not_called()
 
         for field, invalid_value in (
             ("nodes", []),
