@@ -61,9 +61,9 @@ def _is_finite_number(value: Any) -> bool:
     )
 
 
-def _is_percent(value: Any) -> bool:
+def _percent_number(value: Any) -> float | None:
     if isinstance(value, bool):
-        return False
+        return None
     if isinstance(value, (int, float)):
         number = float(value)
     elif isinstance(value, str):
@@ -73,10 +73,14 @@ def _is_percent(value: Any) -> bool:
         try:
             number = float(text.replace(",", "."))
         except ValueError:
-            return False
+            return None
     else:
-        return False
-    return math.isfinite(number) and 0.0 <= number <= 100.0
+        return None
+    return number if math.isfinite(number) and 0.0 <= number <= 100.0 else None
+
+
+def _is_percent(value: Any) -> bool:
+    return _percent_number(value) is not None
 
 
 def _is_aware_iso_timestamp(value: Any) -> bool:
@@ -440,15 +444,68 @@ def _validate_bg_minions(data: dict[str, Any]) -> None:
 def _validate_bg_compositions(data: dict[str, Any]) -> None:
     comps = data.get("compositions")
     _require(isinstance(comps, list), "bg_compositions.compositions must be a list")
+    strict = uses_completeness_schema(data)
+    composition_ids: list[int] = []
+    first_place_total = 0.0
     for idx, comp in enumerate(comps):
-        _require(isinstance(comp, dict), f"bg_compositions.compositions[{idx}] must be an object")
-        _require(comp.get("type"), f"bg_compositions.compositions[{idx}] missing type")
-        _require("avg_placement" in comp, f"bg_compositions.compositions[{idx}] missing avg_placement")
+        path = f"bg_compositions.compositions[{idx}]"
+        _require(isinstance(comp, dict), f"{path} must be an object")
+        _require(comp.get("type"), f"{path} missing type")
+        _require("avg_placement" in comp, f"{path} missing avg_placement")
+        if strict:
+            composition_id = comp.get("composition_id")
+            _require(
+                isinstance(composition_id, int)
+                and not isinstance(composition_id, bool)
+                and composition_id > 0,
+                f"{path}.composition_id must be a positive integer",
+            )
+            composition_ids.append(composition_id)
+            _require(
+                _is_finite_number(comp.get("avg_placement"))
+                and 1 <= float(comp["avg_placement"]) <= 8,
+                f"{path}.avg_placement must be finite in 1..8",
+            )
+            for field_name in ("first_place", "popularity"):
+                _require(
+                    _is_percent(comp.get(field_name)),
+                    f"{path}.{field_name} must be a percentage in 0..100",
+                )
+            first_place_total += _percent_number(comp["first_place"]) or 0.0
+            _require(
+                _is_non_negative_int(comp.get("games")),
+                f"{path}.games must be a non-negative integer",
+            )
         if comp.get("placement_distribution") is not None:
             _require(
                 isinstance(comp["placement_distribution"], list),
-                f"bg_compositions.compositions[{idx}].placement_distribution must be a list",
+                f"{path}.placement_distribution must be a list",
             )
+        if strict:
+            distribution = comp.get("placement_distribution")
+            _require(
+                isinstance(distribution, list) and len(distribution) == 8,
+                f"{path}.placement_distribution must contain exactly 8 buckets",
+            )
+            rates = [_percent_number(value) for value in distribution]
+            _require(
+                all(value is not None for value in rates),
+                f"{path}.placement_distribution must contain percentages in 0..100",
+            )
+            _require(
+                abs(sum(value or 0.0 for value in rates) - 100.0) <= 0.1,
+                f"{path}.placement_distribution must sum to 100",
+            )
+    if strict:
+        _require(
+            len(composition_ids) == len(set(composition_ids)),
+            "bg_compositions.composition_id values must be unique",
+        )
+        _require(
+            not comps or abs(first_place_total - 100.0) <= 0.1,
+            "bg_compositions.first_place values must sum to 100",
+        )
+    _validate_hsreplay_upstream_freshness(data, arena=False)
 
 
 def _validate_arena_card_tiers(data: dict[str, Any]) -> None:

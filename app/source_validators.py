@@ -1304,8 +1304,9 @@ def _validate_bg_minions(source_id: str, structured: dict[str, Any]) -> Validati
     return report
 
 
-def _validate_bg_compositions(_source_id: str, structured: dict[str, Any]) -> ValidationReport:
+def _validate_bg_compositions(source_id: str, structured: dict[str, Any]) -> ValidationReport:
     report = ValidationReport()
+    strict_completeness = uses_completeness_schema(structured)
     compositions = [
         row for row in (structured.get("compositions") or []) if isinstance(row, dict)
     ]
@@ -1319,6 +1320,80 @@ def _validate_bg_compositions(_source_id: str, structured: dict[str, Any]) -> Va
     report.metrics.update(
         {"compositions": len(compositions), "compositions_with_stats": with_stats}
     )
+    if strict_completeness and source_id == "hsreplay_battlegrounds_compositions":
+        identities = [row.get("composition_id") for row in compositions]
+        valid_identities = [
+            value
+            for value in identities
+            if isinstance(value, int) and not isinstance(value, bool) and value > 0
+        ]
+        if len(valid_identities) != len(compositions) or len(set(valid_identities)) != len(
+            valid_identities
+        ):
+            report.add_issue(
+                "bg_compositions.duplicate_ids",
+                "bg compositions require unique positive composition_id values",
+                field="composition_id",
+            )
+
+        invalid_rows = 0
+        first_place_values: list[float] = []
+        for row in compositions:
+            invalid = False
+            avg_placement = row.get("avg_placement")
+            if (
+                not _is_finite_numeric(avg_placement)
+                or not 1 <= float(avg_placement) <= 8
+            ):
+                invalid = True
+            for field_name in ("first_place", "popularity"):
+                value = _parse_arena_percent(row.get(field_name))
+                if value is None or not math.isfinite(value) or not 0 <= value <= 100:
+                    invalid = True
+                elif field_name == "first_place":
+                    first_place_values.append(value)
+            distribution = row.get("placement_distribution")
+            if not isinstance(distribution, list) or len(distribution) != 8:
+                invalid = True
+            else:
+                rates = [_parse_arena_percent(value) for value in distribution]
+                if (
+                    any(
+                        value is None
+                        or not math.isfinite(value)
+                        or not 0 <= value <= 100
+                        for value in rates
+                    )
+                    or abs(sum(value or 0.0 for value in rates) - 100.0) > 0.1
+                ):
+                    invalid = True
+            games = row.get("games")
+            if isinstance(games, bool) or not isinstance(games, int) or games < 0:
+                invalid = True
+            invalid_rows += int(invalid)
+        first_place_total = (
+            sum(first_place_values)
+            if len(first_place_values) == len(compositions)
+            else None
+        )
+        report.metrics.update(
+            {
+                "domain_error_rows": invalid_rows,
+                "first_place_total": first_place_total,
+            }
+        )
+        if invalid_rows:
+            report.add_issue(
+                "bg_compositions.impossible_metrics",
+                f"bg compositions contain physically impossible metrics ({invalid_rows} rows)",
+                field="avg_placement,first_place,popularity,placement_distribution,games",
+            )
+        if first_place_total is None or abs(first_place_total - 100.0) > 0.1:
+            report.add_issue(
+                "bg_compositions.first_place_total",
+                "global bg composition first_place share must sum to 100",
+                field="first_place",
+            )
     if len(compositions) < 5:
         report.add_issue(
             "bg_compositions.too_few_rows",
@@ -1335,6 +1410,7 @@ def _validate_bg_compositions(_source_id: str, structured: dict[str, Any]) -> Va
         (min(len(compositions) / 5.0, 1.0) + min(with_stats / 5.0, 1.0)) / 2,
         4,
     )
+    _validate_hsreplay_publication_freshness(report, source_id, structured)
     return report
 
 

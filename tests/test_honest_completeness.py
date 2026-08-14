@@ -17,7 +17,11 @@ from app.hsreplay_legendaries_api import (
     normalize_legendary_package,
 )
 from app.publish_gate import validate_candidate_for_publish
-from app.source_contracts import contract_quality_report, field_availability_status
+from app.source_contracts import (
+    FIELD_UNAVAILABLE_REASONS,
+    contract_quality_report,
+    field_availability_status,
+)
 from app.source_validators import validate_structured
 from app.sources import SOURCE_BY_ID
 from app.structured_schema import StructuredSchemaError, validate_structured_schema
@@ -75,6 +79,85 @@ def _fresh_bg_evidence() -> dict[str, object]:
         "response_headers": {},
         "body_as_of": "2026-08-14T02:19:00+00:00",
     }
+
+
+def _complete_bg_compositions(total: int = 10) -> list[dict[str, object]]:
+    first_place = 100.0 / total
+    return [
+        {
+            "composition_id": index + 1,
+            "type": f"Composition {index + 1}",
+            "first_place": f"{first_place:.2f}%",
+            "avg_placement": 4.0,
+            "popularity": f"{first_place:.2f}%",
+            "placement_distribution": ["12.50%"] * 8,
+            "games": 100,
+        }
+        for index in range(total)
+    ]
+
+
+def _strict_bg_compositions_payload() -> dict[str, object]:
+    compositions = _complete_bg_compositions()
+    return {
+        "type": "bg_compositions",
+        "completeness_schema_version": 1,
+        "population_completeness": "unverifiable",
+        "upstream_freshness": _fresh_bg_evidence(),
+        "row_retrieval": _complete_row_retrieval(len(compositions)),
+        "compositions": compositions,
+    }
+
+
+def test_strict_bg_compositions_contract_proves_complete_retrieval() -> None:
+    report = contract_quality_report(
+        "hsreplay_battlegrounds_compositions",
+        _strict_bg_compositions_payload(),
+    )
+
+    assert "hsreplay_battlegrounds_compositions" in FIELD_UNAVAILABLE_REASONS
+    assert report["ok"], report["warnings"]
+    assert report["retrieval_complete"] is True
+    assert report["retrieval_completeness_score"] == 1.0
+    assert report["identity_checks"]["compositions"]["complete"] is True
+    assert report["bg_composition_domain"]["invalid_rows"] == 0
+    assert report["bg_composition_domain"]["first_place_total"] == 100.0
+
+
+def test_strict_bg_compositions_contract_rejects_duplicate_and_bad_domain() -> None:
+    payload = _strict_bg_compositions_payload()
+    compositions = payload["compositions"]
+    assert isinstance(compositions, list)
+    compositions[-1]["composition_id"] = compositions[0]["composition_id"]
+    compositions[0]["avg_placement"] = 9.0
+
+    report = contract_quality_report(
+        "hsreplay_battlegrounds_compositions",
+        payload,
+    )
+
+    assert report["ok"] is False
+    assert report["retrieval_complete"] is False
+    assert report["identity_checks"]["compositions"]["duplicates"] == 1
+    assert report["bg_composition_domain"]["invalid_rows"] == 1
+
+
+def test_strict_bg_compositions_stale_snapshot_fails_publish_gate() -> None:
+    payload = _strict_bg_compositions_payload()
+    payload["upstream_freshness"] = {
+        **_fresh_bg_evidence(),
+        "status": "stale",
+        "reason": "upstream_snapshot_too_old",
+    }
+
+    gate = validate_candidate_for_publish(
+        SOURCE_BY_ID["hsreplay_battlegrounds_compositions"],
+        {"structured": payload},
+        backend=None,
+    )
+
+    assert gate.ok is False
+    assert "stale" in gate.reason.lower()
 
 
 def test_bg_empty_current_patch_aggregates_are_explicitly_unavailable() -> None:

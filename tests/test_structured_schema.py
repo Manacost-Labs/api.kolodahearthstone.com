@@ -1,11 +1,77 @@
 from __future__ import annotations
 
 import unittest
+from copy import deepcopy
 
 from app.structured_schema import StructuredSchemaError, validate_structured_schema
 
 
 class StructuredSchemaTest(unittest.TestCase):
+    @staticmethod
+    def _strict_bg_compositions() -> dict:
+        return {
+            "type": "bg_compositions",
+            "completeness_schema_version": 1,
+            "population_completeness": "unverifiable",
+            "upstream_freshness": {
+                "status": "fresh",
+                "reason": None,
+                "observed_at": "2026-08-14T02:20:00+00:00",
+                "age_seconds": 60,
+                "evidence": ["body_as_of"],
+                "response_headers": {},
+                "body_as_of": "2026-08-14T02:19:00+00:00",
+            },
+            "compositions": [
+                {
+                    "composition_id": 1,
+                    "type": "Beasts",
+                    "first_place": "60.00%",
+                    "avg_placement": 3.5,
+                    "popularity": "55.00%",
+                    "placement_distribution": ["12.50%"] * 8,
+                    "games": 120,
+                },
+                {
+                    "composition_id": 2,
+                    "type": "Mechs",
+                    "first_place": "40.00%",
+                    "avg_placement": 4.5,
+                    "popularity": "45.00%",
+                    "placement_distribution": ["12.50%"] * 8,
+                    "games": 80,
+                },
+            ],
+        }
+
+    def test_strict_bg_compositions_validate_complete_physical_domain(self) -> None:
+        result = validate_structured_schema(self._strict_bg_compositions())
+
+        self.assertTrue(result["validated"])
+
+    def test_strict_bg_compositions_reject_corrupt_metrics(self) -> None:
+        corruptions = (
+            ("composition_id", 0, "composition_id"),
+            ("avg_placement", 8.1, "avg_placement"),
+            ("first_place", "101%", "first_place"),
+            ("popularity", "-1%", "popularity"),
+            ("placement_distribution", ["20%"] * 7, "exactly 8"),
+            ("placement_distribution", ["20%"] * 8, "sum to 100"),
+            ("games", -1, "games"),
+        )
+        for field, value, message in corruptions:
+            payload = deepcopy(self._strict_bg_compositions())
+            payload["compositions"][0][field] = value
+            with self.subTest(field=field, value=value), self.assertRaisesRegex(
+                StructuredSchemaError, message
+            ):
+                validate_structured_schema(payload)
+
+        payload = self._strict_bg_compositions()
+        payload["compositions"][1]["first_place"] = "39.00%"
+        with self.assertRaisesRegex(StructuredSchemaError, "first_place.*sum to 100"):
+            validate_structured_schema(payload)
+
     def test_validates_card_stats_schema(self) -> None:
         result = validate_structured_schema(
             {

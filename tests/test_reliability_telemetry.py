@@ -769,6 +769,10 @@ def test_empty_report_never_claims_one_hundred_percent(tmp_path: Path) -> None:
     now = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
 
     report = build_reliability_report(now=now, path=tmp_path / "missing.sqlite3")
+    instrumented_source_ids, catalog_sources = (
+        reliability_telemetry._completeness_source_catalog()
+    )
+    instrumented_sources = len(instrumented_source_ids)
 
     assert report["coverage_started_at"] is None
     for window in report["windows"]:
@@ -782,14 +786,17 @@ def test_empty_report_never_claims_one_hundred_percent(tmp_path: Path) -> None:
         assert window["freshness_slo"]["objective_status"] == "collecting"
         assert window["freshness_slo"]["error_budget_consumed_pct"] is None
         assert window["verified_completeness"] == {
-            "instrumented_sources": 3,
-            "catalog_sources": 98,
-            "source_catalog_coverage_pct": 3.06,
+            "instrumented_sources": instrumented_sources,
+            "catalog_sources": catalog_sources,
+            "source_catalog_coverage_pct": round(
+                instrumented_sources / catalog_sources * 100,
+                2,
+            ),
             "observed_instrumented_sources": 0,
             "instrumented_source_observation_coverage_pct": 0.0,
             "sources_meeting_target": 0,
             "sources_below_target": 0,
-            "sources_without_observations": 3,
+            "sources_without_observations": instrumented_sources,
             "source_target_attainment_pct": 0.0,
             "macro_complete_fresh_rate_pct": 0.0,
             "macro_target_met": False,
@@ -1088,18 +1095,34 @@ def test_verified_completeness_window_folds_recovery_and_requires_fresh_data(
     verified = build_reliability_report(now=now, path=path)["windows"][0][
         "verified_completeness"
     ]
+    instrumented_sources = len(source_ids)
+    catalog_sources = len(SOURCE_BY_ID)
+    observed_sources = 4
+    target_sources = 1
 
     assert verified == {
-        "instrumented_sources": 4,
-        "catalog_sources": 99,
-        "source_catalog_coverage_pct": 4.04,
-        "observed_instrumented_sources": 4,
-        "instrumented_source_observation_coverage_pct": 100.0,
-        "sources_meeting_target": 1,
+        "instrumented_sources": instrumented_sources,
+        "catalog_sources": catalog_sources,
+        "source_catalog_coverage_pct": round(
+            instrumented_sources / catalog_sources * 100,
+            2,
+        ),
+        "observed_instrumented_sources": observed_sources,
+        "instrumented_source_observation_coverage_pct": round(
+            observed_sources / instrumented_sources * 100,
+            2,
+        ),
+        "sources_meeting_target": target_sources,
         "sources_below_target": 3,
-        "sources_without_observations": 0,
-        "source_target_attainment_pct": 25.0,
-        "macro_complete_fresh_rate_pct": 25.0,
+        "sources_without_observations": instrumented_sources - observed_sources,
+        "source_target_attainment_pct": round(
+            target_sources / instrumented_sources * 100,
+            2,
+        ),
+        "macro_complete_fresh_rate_pct": round(
+            target_sources / instrumented_sources * 100,
+            2,
+        ),
         "macro_target_met": False,
         "worst_observed_source_rate_pct": 0.0,
         "tracked_attempts": 4,
@@ -1216,7 +1239,10 @@ def test_verified_completeness_cannot_meet_target_for_partial_catalog_rollout(
 
     assert verified["instrumented_sources"] == len(tracked_sources)
     assert verified["catalog_sources"] == len(SOURCE_BY_ID)
-    assert verified["source_catalog_coverage_pct"] == 4.04
+    assert verified["source_catalog_coverage_pct"] == round(
+        len(tracked_sources) / len(SOURCE_BY_ID) * 100,
+        2,
+    )
     assert verified["observed_instrumented_sources"] == len(tracked_sources)
     assert verified["instrumented_source_observation_coverage_pct"] == 100.0
     assert verified["sources_meeting_target"] == len(tracked_sources)

@@ -836,6 +836,56 @@ class SourceValidatorsTest(unittest.TestCase):
             ).ok
         )
 
+    def test_strict_bg_compositions_reject_domain_and_identity_corruption(self) -> None:
+        compositions = [
+            {
+                "composition_id": idx + 1,
+                "type": f"Comp {idx}",
+                "first_place": "10.00%",
+                "avg_placement": 4.0,
+                "popularity": "10.00%",
+                "placement_distribution": ["12.50%"] * 8,
+                "games": 100,
+            }
+            for idx in range(10)
+        ]
+        payload = {
+            "type": "bg_compositions",
+            "completeness_schema_version": 1,
+            "population_completeness": "unverifiable",
+            "upstream_freshness": {
+                "status": "fresh",
+                "reason": None,
+                "observed_at": "2026-08-14T02:20:00+00:00",
+                "age_seconds": 60,
+                "evidence": ["body_as_of"],
+                "response_headers": {},
+                "body_as_of": "2026-08-14T02:19:00+00:00",
+            },
+            "compositions": compositions,
+        }
+        self.assertTrue(
+            validate_structured(
+                "hsreplay_battlegrounds_compositions",
+                payload,
+            ).ok
+        )
+
+        compositions[-1]["composition_id"] = compositions[0]["composition_id"]
+        compositions[0]["placement_distribution"] = ["20.00%"] * 8
+        compositions[0]["games"] = -1
+        compositions[1]["first_place"] = "9.00%"
+        report = validate_structured(
+            "hsreplay_battlegrounds_compositions",
+            payload,
+        )
+        issue_codes = {issue.code for issue in report.issues}
+
+        self.assertFalse(report.ok)
+        self.assertIn("bg_compositions.duplicate_ids", issue_codes)
+        self.assertIn("bg_compositions.impossible_metrics", issue_codes)
+        self.assertIn("bg_compositions.first_place_total", issue_codes)
+
     def test_arena_card_tiers_require_labels_for_hsreplay(self) -> None:
         cards = [{"name": f"Card {idx}"} for idx in range(100)]
         report = validate_structured(

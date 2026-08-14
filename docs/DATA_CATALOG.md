@@ -446,8 +446,9 @@ Source ID: `vicious_syndicate_radars`, тип `vicious_syndicate_radars`.
 
 ### Честная полнота v1
 
-У `hsreplay_battlegrounds_minions`, `hsreplay_arena_cards_advanced`,
-`hsreplay_arena_legendaries` и `firestone_standard` новый snapshot содержит
+У `hsreplay_battlegrounds_minions`, `hsreplay_battlegrounds_compositions`,
+`hsreplay_arena_cards_advanced`, `hsreplay_arena_legendaries` и
+`firestone_standard` новый snapshot содержит
 `completeness_schema_version=1`. Он включает два независимых доказательства:
 
 - `field_availability` у критичных полей отличает реальное значение,
@@ -493,7 +494,7 @@ gate. Rates Arena проверяются как конечные числа `0..
 неудачного refresh отдаётся LKG, основной quality относится к LKG, а качество
 отклонённого кандидата находится в `last_refresh_quality`.
 
-Три HSReplay v1-набора также публикуют
+Четыре HSReplay v1-набора также публикуют
 `population_completeness="unverifiable"`: upstream не сообщает полный размер
 популяции, поэтому число возвращённых строк нельзя честно назвать 100% всех
 существующих сущностей. Отдельный `upstream_freshness` имеет состояние
@@ -514,6 +515,10 @@ HTTP `Date` означает только время ответа и само п
 BG minions дополнительно проверяет физические домены: placements `1..8`,
 `impact` как разницу placements в `-7..7`, проценты `0..100`, целые
 неотрицательные counts и согласованность placement sums с количеством игр.
+BG compositions допускает небольшой post-patch набор (минимум 5 строк), но
+строго проверяет уникальные положительные ID, `avg_placement` в `1..8`, восемь
+placement buckets с суммой около 100%, проценты `0..100`, неотрицательные games
+и глобальную сумму first-place share около 100%.
 
 Агрегат `/v1/system/parsing-reliability` не смешивает доступность LKG с новым
 полным получением. Его `complete_fresh / tracked_attempts` — weighted rate по

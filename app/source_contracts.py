@@ -44,6 +44,10 @@ HSGURU_STREAMER_ROLLING_SOURCE_ID = "hsguru_streamer_decks_legend_1000"
 # makes it impossible for arbitrary provider text (or an LLM explanation) to
 # inflate retrieval completeness.
 FIELD_UNAVAILABLE_REASONS: dict[str, dict[str, frozenset[str]]] = {
+    # Composition metrics are required for every row.  The empty map opts the
+    # source into strict completeness telemetry without inventing an upstream
+    # absence that could hide missing data.
+    "hsreplay_battlegrounds_compositions": {},
     "hsreplay_battlegrounds_minions": {
         field: frozenset(
             {
@@ -82,6 +86,7 @@ EXPLAINED_ROW_DROP_REASONS: dict[str, frozenset[str]] = {
     source_id: frozenset()
     for source_id in (
         "hsreplay_battlegrounds_minions",
+        "hsreplay_battlegrounds_compositions",
         "hsreplay_arena_cards_advanced",
         "hsreplay_arena_legendaries",
         "firestone_standard",
@@ -90,6 +95,7 @@ EXPLAINED_ROW_DROP_REASONS: dict[str, frozenset[str]] = {
 HSREPLAY_FRESHNESS_GATED_SOURCE_IDS = frozenset(
     {
         "hsreplay_battlegrounds_minions",
+        "hsreplay_battlegrounds_compositions",
         "hsreplay_arena_cards_advanced",
         "hsreplay_arena_legendaries",
     }
@@ -877,6 +883,48 @@ def _strict_bg_minion_domain_errors(rows: list[dict[str, Any]]) -> int:
     return errors
 
 
+def _strict_bg_composition_domain(
+    rows: list[dict[str, Any]],
+) -> tuple[int, float | None]:
+    errors = 0
+    first_place_values: list[float] = []
+    for row in rows:
+        row_invalid = False
+        avg_placement = row.get("avg_placement")
+        if (
+            isinstance(avg_placement, bool)
+            or not isinstance(avg_placement, (int, float))
+            or not math.isfinite(float(avg_placement))
+            or not 1 <= float(avg_placement) <= 8
+        ):
+            row_invalid = True
+        for field in ("first_place", "popularity"):
+            value = _bounded_percent_value(row.get(field))
+            if value is None:
+                row_invalid = True
+            elif field == "first_place":
+                first_place_values.append(value)
+        distribution = row.get("placement_distribution")
+        if not isinstance(distribution, list) or len(distribution) != 8:
+            row_invalid = True
+        else:
+            rates = [_bounded_percent_value(value) for value in distribution]
+            if any(value is None for value in rates) or abs(
+                sum(value or 0.0 for value in rates) - 100.0
+            ) > 0.1:
+                row_invalid = True
+        games = row.get("games")
+        if isinstance(games, bool) or not isinstance(games, int) or games < 0:
+            row_invalid = True
+        errors += int(row_invalid)
+    first_place_total = (
+        round(sum(first_place_values), 4)
+        if len(first_place_values) == len(rows)
+        else None
+    )
+    return errors, first_place_total
+
+
 def completeness_schema_version(structured: dict[str, Any]) -> int | None:
     value = structured.get("completeness_schema_version")
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
@@ -1503,6 +1551,8 @@ def contract_quality_report(
             identity_specs.append(("cards", rows, "card_id"))
         elif source_id == "hsreplay_battlegrounds_minions":
             identity_specs.append(("minions", rows, "minion_dbf_id"))
+        elif source_id == "hsreplay_battlegrounds_compositions":
+            identity_specs.append(("compositions", rows, "composition_id"))
         elif source_id == "hsreplay_arena_legendaries":
             identity_specs.append(("groups", rows, "key_card.card_id"))
         elif source_id == "firestone_standard":
@@ -1556,6 +1606,29 @@ def contract_quality_report(
                 report["retrieval_complete"] = False
                 report["warnings"].append(
                     f"bg minion metrics have {domain_errors} physically invalid rows"
+                )
+        elif source_id == "hsreplay_battlegrounds_compositions":
+            domain_errors, first_place_total = _strict_bg_composition_domain(rows)
+            first_place_reconciles = (
+                first_place_total is not None
+                and abs(first_place_total - 100.0) <= 0.1
+            )
+            report["bg_composition_domain"] = {
+                "invalid_rows": domain_errors,
+                "total_rows": len(rows),
+                "first_place_total": first_place_total,
+                "first_place_reconciles": first_place_reconciles,
+            }
+            retrieval_rates.append(
+                (len(rows) - domain_errors) / len(rows) if rows else 0.0
+            )
+            retrieval_rates.append(1.0 if first_place_reconciles else 0.0)
+            if domain_errors or not first_place_reconciles:
+                report["ok"] = False
+                report["retrieval_complete"] = False
+                report["warnings"].append(
+                    "bg composition metrics are physically invalid or global "
+                    "first_place share does not sum to 100"
                 )
     if source_id == HSGURU_STREAMER_ROLLING_SOURCE_ID:
         total = len(rows)

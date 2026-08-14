@@ -39,6 +39,7 @@ COMPOSITION_RU_NAMES = {
     "Quilboar": "Свинобраз",
     "Undead": "Нежить",
 }
+_PERCENT_SUM_TOLERANCE = 0.1
 
 
 def _pct(value: float | int | None) -> str | None:
@@ -395,18 +396,63 @@ def _first_place_share(rows: list[dict[str, Any]]) -> dict[int, float]:
     weights: dict[int, float] = {}
     total = 0.0
     for row in rows:
-        comp_id = row.get("friendly_composition")
-        if comp_id is None or int(comp_id) < 0:
-            continue
-        distribution = row.get("final_placement_distribution") or []
-        if not isinstance(distribution, list) or not distribution:
-            continue
-        weight = float(row.get("popularity") or 0) / 100 * float(distribution[0] or 0) / 100
-        weights[int(comp_id)] = weight
+        comp_id, distribution, _avg_placement, popularity, _games = (
+            _composition_input(row)
+        )
+        weight = popularity / 100 * distribution[0] / 100
+        weights[comp_id] = weight
         total += weight
     if not total:
-        return {}
+        raise ValueError("battlegrounds composition first-place weight must be positive")
     return {comp_id: weight / total * 100 for comp_id, weight in weights.items()}
+
+
+def _composition_input(
+    row: dict[str, Any],
+) -> tuple[int, list[float], float, float, int]:
+    comp_id = row.get("friendly_composition")
+    if isinstance(comp_id, bool) or not isinstance(comp_id, int) or comp_id <= 0:
+        raise ValueError("friendly_composition must be a positive integer")
+    distribution = row.get("final_placement_distribution")
+    if not isinstance(distribution, list) or len(distribution) != 8:
+        raise ValueError("final_placement_distribution must contain exactly 8 buckets")
+    if any(
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(float(value))
+        or not 0 <= float(value) <= 100
+        for value in distribution
+    ):
+        raise ValueError("final_placement_distribution must contain percentages in 0..100")
+    normalized_distribution = [float(value) for value in distribution]
+    if abs(sum(normalized_distribution) - 100.0) > _PERCENT_SUM_TOLERANCE:
+        raise ValueError("final_placement_distribution must sum to 100")
+    avg_placement = row.get("avg_final_placement")
+    if (
+        isinstance(avg_placement, bool)
+        or not isinstance(avg_placement, (int, float))
+        or not math.isfinite(float(avg_placement))
+        or not 1 <= float(avg_placement) <= 8
+    ):
+        raise ValueError("avg_final_placement must be finite in 1..8")
+    popularity = row.get("popularity")
+    if (
+        isinstance(popularity, bool)
+        or not isinstance(popularity, (int, float))
+        or not math.isfinite(float(popularity))
+        or not 0 <= float(popularity) <= 100
+    ):
+        raise ValueError("popularity must be finite in 0..100")
+    games = row.get("num_games")
+    if isinstance(games, bool) or not isinstance(games, int) or games < 0:
+        raise ValueError("num_games must be a non-negative integer")
+    return (
+        comp_id,
+        normalized_distribution,
+        float(avg_placement),
+        float(popularity),
+        games,
+    )
 
 
 def _composition_row(
@@ -414,14 +460,8 @@ def _composition_row(
     names: dict[int, str],
     first_place_shares: dict[int, float] | None = None,
 ) -> dict[str, Any] | None:
-    comp_id = row.get("friendly_composition")
-    if comp_id is None or int(comp_id) < 0:
-        return None
-    distribution = row.get("final_placement_distribution") or []
-    if not isinstance(distribution, list):
-        distribution = []
-    first_raw = float(distribution[0] if distribution else 0)
-    popularity = float(row.get("popularity") or 0)
+    comp_id, distribution, avg_placement, popularity, games = _composition_input(row)
+    first_raw = distribution[0]
     first_place = (
         first_place_shares.get(int(comp_id))
         if first_place_shares is not None
@@ -431,32 +471,53 @@ def _composition_row(
         "composition_id": int(comp_id),
         "type": names.get(int(comp_id)) or f"Composition {comp_id}",
         "first_place": _pct(first_place),
-        "avg_placement": _round(row.get("avg_final_placement")),
+        "avg_placement": _round(avg_placement),
         "popularity": _pct(popularity),
         "placement_distribution": [_pct(value) for value in distribution],
-        "games": row.get("num_games"),
+        "games": games,
     }
 
 
 async def fetch_battlegrounds_compositions(source_id: str) -> dict[str, Any]:
     stats_url = _query_url("battlegrounds_comp_stats")
+    cache_key = f"bg:compositions:{BG_MMR}:{BG_TIME_RANGE}"
     payload = await fetch_hsreplay_json(
         stats_url,
         source_id=source_id,
-        cache_key=f"bg:compositions:{BG_MMR}:{BG_TIME_RANGE}",
+        cache_key=cache_key,
+    )
+    upstream_freshness = build_hsreplay_bg_upstream_freshness(
+        payload,
+        response_headers=get_hsreplay_json_target_headers(cache_key),
     )
     names = await _fetch_composition_names(source_id)
-    rows = _rows(payload)
-    first_place_shares = _first_place_share(rows)
+    raw_rows = _rows(payload)
+    eligible_rows = [row for row in raw_rows if isinstance(row, dict)]
+    first_place_shares = _first_place_share(eligible_rows)
     comps = [
         item
-        for row in rows
-        if isinstance(row, dict)
+        for row in eligible_rows
         if (item := _composition_row(row, names, first_place_shares)) is not None
     ]
+    composition_ids = [item.get("composition_id") for item in comps]
+    if len(set(composition_ids)) != len(composition_ids):
+        raise ValueError("battlegrounds composition payload contains duplicate composition_id")
     comps.sort(key=lambda item: _pct_number(item.get("first_place")), reverse=True)
     return {
         "type": "bg_compositions",
+        "completeness_schema_version": COMPLETENESS_SCHEMA_VERSION,
+        "upstream_freshness": upstream_freshness,
+        "population_completeness": "unverifiable",
+        "row_retrieval": row_retrieval_evidence(
+            raw_rows=len(raw_rows),
+            eligible_rows=len(eligible_rows),
+            normalized_rows=len(comps),
+            unexplained_reasons={
+                "non_object_row": len(raw_rows) - len(eligible_rows),
+                "normalizer_rejected": len(eligible_rows) - len(comps),
+            },
+            scope="current_patch_composition_rows",
+        ),
         "compositions": comps,
         "filters": {"mmr_percentile": BG_MMR, "time_range": BG_TIME_RANGE},
         "source": {
