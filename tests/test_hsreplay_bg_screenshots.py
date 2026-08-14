@@ -18,6 +18,7 @@ from app.hsreplay_bg_screenshots import (
     _public_capture_metadata,
     _write_screenshot,
     capture_compositions_screenshot,
+    compositions_screenshot_asset_quality_report,
     latest_compositions_screenshot,
     public_compositions_screenshot,
 )
@@ -452,3 +453,105 @@ def test_latest_falls_back_when_newest_image_is_a_blank_page_shell(
     assert loaded is not None
     assert loaded["image_path"] == old_payload["image_path"]
     assert loaded["captured_at"] == old_payload["captured_at"]
+
+
+def test_asset_quality_report_accepts_a_valid_png(tmp_path: Path) -> None:
+    image_path = tmp_path / "capture.png"
+    image_path.write_bytes(_valid_png_bytes())
+    (tmp_path / "latest.json").write_text(
+        json.dumps(
+            {
+                "ok": True,
+                "source_id": SCREENSHOT_SOURCE_ID,
+                "image_path": str(image_path),
+                "image_bytes": image_path.stat().st_size,
+                "image_mime": "image/png",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with patch("app.hsreplay_bg_screenshots._screenshot_dir", return_value=tmp_path):
+        report = compositions_screenshot_asset_quality_report()
+
+    assert report == {
+        "ok": True,
+        "reason": "ok",
+        "asset_type": "image",
+        "asset_mime": "image/png",
+        "asset_bytes": image_path.stat().st_size,
+        "captured_at": None,
+        "serving_cached_asset": False,
+    }
+
+
+@pytest.mark.parametrize(
+    ("filename", "raw"),
+    [
+        ("missing.png", None),
+        ("spoofed.png", b"\x89PNG\r\n\x1a\n<html>not an image</html>"),
+        ("undersized.png", None),
+    ],
+)
+def test_asset_quality_report_rejects_missing_spoofed_and_undersized_assets(
+    tmp_path: Path,
+    filename: str,
+    raw: bytes | None,
+) -> None:
+    image_path = tmp_path / filename
+    if filename == "undersized.png":
+        image = Image.new("RGB", (32, 32), color=(31, 24, 38))
+        image.save(image_path, format="PNG")
+    elif raw is not None:
+        image_path.write_bytes(raw)
+    (tmp_path / "latest.json").write_text(
+        json.dumps(
+            {
+                "ok": True,
+                "source_id": SCREENSHOT_SOURCE_ID,
+                "image_path": str(image_path),
+                "image_bytes": image_path.stat().st_size if image_path.exists() else 0,
+                "image_mime": "image/png",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with patch("app.hsreplay_bg_screenshots._screenshot_dir", return_value=tmp_path):
+        report = compositions_screenshot_asset_quality_report()
+
+    assert report == {
+        "ok": False,
+        "reason": "missing or invalid screenshot asset",
+        "asset_type": "image",
+        "asset_mime": None,
+        "asset_bytes": None,
+    }
+
+
+def test_asset_quality_report_marks_older_recovered_asset_as_cached(
+    tmp_path: Path,
+) -> None:
+    old_image = tmp_path / "older.png"
+    old_image.write_bytes(_valid_png_bytes())
+    (tmp_path / "20260801T010000Z.json").write_text(
+        json.dumps(
+            {
+                "ok": True,
+                "source_id": SCREENSHOT_SOURCE_ID,
+                "captured_at": "2026-08-01T01:00:00+00:00",
+                "image_path": str(old_image),
+                "image_bytes": old_image.stat().st_size,
+                "image_mime": "image/png",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "latest.json").write_text("{invalid", encoding="utf-8")
+
+    with patch("app.hsreplay_bg_screenshots._screenshot_dir", return_value=tmp_path):
+        report = compositions_screenshot_asset_quality_report()
+
+    assert report["ok"] is True
+    assert report["serving_cached_asset"] is True
+    assert report["captured_at"] == "2026-08-01T01:00:00+00:00"

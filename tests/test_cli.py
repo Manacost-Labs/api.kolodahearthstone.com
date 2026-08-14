@@ -608,6 +608,112 @@ class CliTest(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         resolved.assert_called_once_with(source.id)
 
+    def test_quality_check_validates_screenshot_asset_without_json_loader(self) -> None:
+        source = Source(
+            "hsreplay_battlegrounds_compositions_screenshot",
+            "https://hsreplay.net/battlegrounds/compositions/",
+            "hsreplay",
+            "battlegrounds",
+            kind="pipeline",
+        )
+        stdout = io.StringIO()
+        with patch("app.cli.SOURCE_BY_ID", {source.id: source}), patch(
+            "app.storage.load_status",
+            return_value={"state": "ok", "backend": "scrape_do_super"},
+        ), patch(
+            "app.parser_control.load_resolved_public_dataset",
+            side_effect=AssertionError("binary assets must not use the JSON loader"),
+        ) as json_loader, patch(
+            "app.hsreplay_bg_screenshots.compositions_screenshot_asset_quality_report",
+            return_value={
+                "ok": True,
+                "reason": "ok",
+                "asset_type": "image",
+                "asset_mime": "image/png",
+                "asset_bytes": 279_708,
+            },
+        ) as asset_quality, redirect_stdout(stdout):
+            exit_code = cli.main(["quality-check"])
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["bad_count"], 0)
+        asset_quality.assert_called_once_with()
+        json_loader.assert_not_called()
+
+    def test_quality_check_rejects_an_invalid_screenshot_asset(self) -> None:
+        source = Source(
+            "hsreplay_battlegrounds_compositions_screenshot",
+            "https://hsreplay.net/battlegrounds/compositions/",
+            "hsreplay",
+            "battlegrounds",
+            kind="pipeline",
+        )
+        stdout = io.StringIO()
+        with patch("app.cli.SOURCE_BY_ID", {source.id: source}), patch(
+            "app.storage.load_status",
+            return_value={"state": "ok", "backend": "scrape_do_super"},
+        ), patch(
+            "app.parser_control.load_resolved_public_dataset",
+            side_effect=AssertionError("binary assets must not use the JSON loader"),
+        ) as json_loader, patch(
+            "app.hsreplay_bg_screenshots.compositions_screenshot_asset_quality_report",
+            return_value={
+                "ok": False,
+                "reason": "missing or invalid screenshot asset",
+                "asset_type": "image",
+                "asset_mime": None,
+                "asset_bytes": None,
+            },
+        ), redirect_stdout(stdout):
+            exit_code = cli.main(["quality-check"])
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 1)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["bad_count"], 1)
+        self.assertEqual(
+            payload["bad_sources"][0]["validate_reason"],
+            "missing or invalid screenshot asset",
+        )
+        json_loader.assert_not_called()
+
+    def test_quality_check_reports_recovered_screenshot_as_cached_not_fresh(self) -> None:
+        source = Source(
+            "hsreplay_battlegrounds_compositions_screenshot",
+            "https://hsreplay.net/battlegrounds/compositions/",
+            "hsreplay",
+            "battlegrounds",
+            kind="pipeline",
+        )
+        stdout = io.StringIO()
+        with patch("app.cli.SOURCE_BY_ID", {source.id: source}), patch(
+            "app.storage.load_status",
+            return_value={"state": "ok", "backend": "scrape_do_super"},
+        ), patch(
+            "app.hsreplay_bg_screenshots.compositions_screenshot_asset_quality_report",
+            return_value={
+                "ok": True,
+                "reason": "valid cached fallback screenshot asset",
+                "asset_type": "image",
+                "asset_mime": "image/png",
+                "asset_bytes": 279_708,
+                "captured_at": "2026-08-01T01:00:00+00:00",
+                "serving_cached_asset": True,
+            },
+        ), redirect_stdout(stdout):
+            exit_code = cli.main(["quality-check"])
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 1)
+        self.assertFalse(payload["ok"])
+        self.assertTrue(payload["bad_sources"][0]["serving_cached_dataset"])
+        self.assertEqual(
+            payload["bad_sources"][0]["asset_captured_at"],
+            "2026-08-01T01:00:00+00:00",
+        )
+
     def test_rebuild_index_uses_derived_resource_lock(self) -> None:
         with patch("app.resource_locks.ResourceLockSet") as resource_locks, patch(
             "app.firecrawl_map.build_hsreplay_index",

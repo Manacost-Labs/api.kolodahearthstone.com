@@ -64,6 +64,7 @@ _PUBLIC_SCREENSHOT_FIELDS = frozenset(
         "metadata",
         "image_bytes",
         "image_mime",
+        "serving_cached_asset",
     }
 )
 
@@ -484,6 +485,7 @@ def latest_compositions_screenshot() -> dict[str, Any] | None:
             screenshot_dir=screenshot_dir,
         )
         if latest is not None:
+            latest["serving_cached_asset"] = False
             return latest
 
     # Recover serving availability after legacy false-success metadata by
@@ -497,5 +499,49 @@ def latest_compositions_screenshot() -> dict[str, Any] | None:
             screenshot_dir=screenshot_dir,
         )
         if payload is not None:
+            payload["serving_cached_asset"] = True
             return payload
     return None
+
+
+def compositions_screenshot_asset_quality_report() -> dict[str, Any]:
+    """Validate the resolved public screenshot as a binary image asset."""
+    screenshot = latest_compositions_screenshot()
+    if screenshot is None:
+        return {
+            "ok": False,
+            "reason": "missing or invalid screenshot asset",
+            "asset_type": "image",
+            "asset_mime": None,
+            "asset_bytes": None,
+        }
+
+    mime = screenshot.get("image_mime")
+    size = screenshot.get("image_bytes")
+    if (
+        mime not in _IMAGE_SUFFIXES
+        or isinstance(size, bool)
+        or not isinstance(size, int)
+        or size <= 0
+    ):
+        return {
+            "ok": False,
+            "reason": "missing or invalid screenshot asset",
+            "asset_type": "image",
+            "asset_mime": None,
+            "asset_bytes": None,
+        }
+
+    return {
+        "ok": True,
+        "reason": (
+            "valid cached fallback screenshot asset"
+            if screenshot.get("serving_cached_asset") is True
+            else "ok"
+        ),
+        "asset_type": "image",
+        "asset_mime": mime,
+        "asset_bytes": size,
+        "captured_at": screenshot.get("captured_at"),
+        "serving_cached_asset": screenshot.get("serving_cached_asset") is True,
+    }

@@ -727,6 +727,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "quality-check":
         from collections import Counter
 
+        from .hsreplay_bg_screenshots import (
+            SCREENSHOT_SOURCE_ID,
+            compositions_screenshot_asset_quality_report,
+        )
         from .parser_control import load_resolved_public_dataset
         from .scrapers.quality import quality_metrics, validate_parsed_data
         from .source_contracts import contract_quality_report, get_contract
@@ -737,32 +741,51 @@ def main(argv: list[str] | None = None) -> int:
         warn = []
         for source in SOURCE_BY_ID.values():
             status = load_status(source.id) or {}
-            dataset = load_resolved_public_dataset(source.id) or {}
+            is_screenshot_asset = source.id == SCREENSHOT_SOURCE_ID
+            dataset = (
+                {}
+                if is_screenshot_asset
+                else load_resolved_public_dataset(source.id) or {}
+            )
             data = dataset.get("data") or {}
             structured = data.get("structured") or data.get("hsreplay_extracted") or {}
             error_type = None
+            asset_report = None
             try:
-                metrics = quality_metrics(source, data) if data else {}
-                contract = get_contract(source.id)
-                contract_report = (
-                    contract_quality_report(source.id, structured)
-                    if contract is not None and structured
-                    else None
-                )
-                if source.kind == "pipeline":
+                if is_screenshot_asset:
+                    asset_report = compositions_screenshot_asset_quality_report()
+                    metrics = {}
+                    contract_report = None
                     state = status.get("state", SourceState.NEVER_FETCHED)
-                    validate_ok = state == SourceState.OK and bool(structured)
-                    reason = (
-                        "ok"
-                        if validate_ok
-                        else f"pipeline status/structured data invalid (state={state})"
+                    asset_ok = asset_report.get("ok") is True
+                    validate_ok = state == SourceState.OK and asset_ok
+                    reason = str(
+                        asset_report.get("reason")
+                        if state == SourceState.OK
+                        else f"pipeline status invalid (state={state})"
                     )
                 else:
-                    validate_ok, reason = (
-                        validate_parsed_data(source, data)
-                        if data
-                        else (False, "missing dataset")
+                    metrics = quality_metrics(source, data) if data else {}
+                    contract = get_contract(source.id)
+                    contract_report = (
+                        contract_quality_report(source.id, structured)
+                        if contract is not None and structured
+                        else None
                     )
+                    if source.kind == "pipeline":
+                        state = status.get("state", SourceState.NEVER_FETCHED)
+                        validate_ok = state == SourceState.OK and bool(structured)
+                        reason = (
+                            "ok"
+                            if validate_ok
+                            else f"pipeline status/structured data invalid (state={state})"
+                        )
+                    else:
+                        validate_ok, reason = (
+                            validate_parsed_data(source, data)
+                            if data
+                            else (False, "missing dataset")
+                        )
             except Exception as exc:
                 validate_ok = False
                 reason = f"quality-check raised {type(exc).__name__}: {exc}"
@@ -776,7 +799,13 @@ def main(argv: list[str] | None = None) -> int:
                 "category": source.category,
                 "state": status.get("state", SourceState.NEVER_FETCHED),
                 "backend": status.get("backend"),
-                "serving_cached_dataset": bool(status.get("serving_cached_dataset")),
+                "serving_cached_dataset": bool(
+                    status.get("serving_cached_dataset")
+                    or (
+                        asset_report
+                        and asset_report.get("serving_cached_asset") is True
+                    )
+                ),
                 "structured_type": structured.get("type"),
                 "rows_total": metrics.get("rows_total"),
                 "quality_score": quality_score,
@@ -785,6 +814,12 @@ def main(argv: list[str] | None = None) -> int:
                 "error_type": error_type,
                 "contract_ok": None if contract_report is None else contract_report.get("ok"),
                 "contract_warnings": None if contract_report is None else contract_report.get("warnings"),
+                "asset_type": None if asset_report is None else asset_report.get("asset_type"),
+                "asset_mime": None if asset_report is None else asset_report.get("asset_mime"),
+                "asset_bytes": None if asset_report is None else asset_report.get("asset_bytes"),
+                "asset_captured_at": None
+                if asset_report is None
+                else asset_report.get("captured_at"),
             }
             sources.append(row)
             low_score = isinstance(quality_score, (int, float)) and quality_score < args.min_quality_score
