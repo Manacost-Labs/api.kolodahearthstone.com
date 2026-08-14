@@ -15,6 +15,19 @@ CatalogRefresh = Callable[..., Awaitable[list[dict[str, Any]]]]
 CatalogJoin = Callable[[], dict[str, Any]]
 
 
+def _error_summary(exc: Exception) -> str:
+    return f"{type(exc).__name__}: {str(exc)[:500]}"
+
+
+def _partial_dataset(exc: HSGuruCatalogPartial) -> dict[str, Any]:
+    return {
+        "decks": len(exc.rows),
+        "state": "partial",
+        "missing_archetypes": len(exc.missing_archetypes),
+        "zero_sample_archetypes": len(exc.zero_sample_archetypes),
+    }
+
+
 async def refresh_all_deck_catalogs(
     *,
     refresh: CatalogRefresh = refresh_hsguru_deck_catalog,
@@ -22,14 +35,17 @@ async def refresh_all_deck_catalogs(
 ) -> dict[str, Any]:
     """Refresh every HSGuru catalog even when an independent slice fails.
 
-    Each catalog is persisted by ``refresh`` as soon as it succeeds. A single
-    upstream failure is therefore reported without preventing the other
-    format/rank combinations from becoming fresh.
+    Each catalog is persisted by ``refresh`` as soon as it succeeds. A partial
+    catalog receives one immediate continuation so its bounded retry queue can
+    advance without rerunning already successful format/rank combinations.
+    Other failures are reported without preventing independent combinations
+    from becoming fresh.
     """
     reset_hsguru_catalog_provider_state()
     run_period = current_hsguru_deck_period()
     datasets: dict[str, dict[str, Any]] = {}
     errors: dict[str, str] = {}
+    continuations: dict[str, dict[str, Any]] = {}
     specs = (
         ("standard", "legend"),
         ("wild", "legend"),
@@ -41,16 +57,34 @@ async def refresh_all_deck_catalogs(
         try:
             rows = await refresh(format_name, rank, period=run_period)
         except HSGuruCatalogPartial as exc:
-            datasets[key] = {
-                "decks": len(exc.rows),
-                "state": "partial",
-                "missing_archetypes": len(exc.missing_archetypes),
-                "zero_sample_archetypes": len(exc.zero_sample_archetypes),
+            initial_error = _error_summary(exc)
+            continuations[key] = {
+                "state": "pending",
+                "initial_error": initial_error,
             }
-            errors[key] = f"{type(exc).__name__}: {str(exc)[:500]}"
-            continue
+            try:
+                rows = await refresh(format_name, rank, period=run_period)
+            except HSGuruCatalogPartial as continuation_exc:
+                final_error = _error_summary(continuation_exc)
+                datasets[key] = _partial_dataset(continuation_exc)
+                errors[key] = final_error
+                continuations[key].update(
+                    state="partial",
+                    final_error=final_error,
+                )
+                continue
+            except Exception as continuation_exc:
+                final_error = _error_summary(continuation_exc)
+                datasets[key] = _partial_dataset(exc)
+                errors[key] = final_error
+                continuations[key].update(
+                    state="error",
+                    final_error=final_error,
+                )
+                continue
+            continuations[key]["state"] = "ok"
         except Exception as exc:
-            errors[key] = f"{type(exc).__name__}: {str(exc)[:500]}"
+            errors[key] = _error_summary(exc)
             continue
         datasets[key] = {"decks": len(rows), "state": "ok"}
 
@@ -71,6 +105,7 @@ async def refresh_all_deck_catalogs(
         "state": "ok" if not errors else "partial",
         "datasets": datasets,
         "errors": errors,
+        "continuations": continuations,
         "archetype_join": archetype_join,
         "period": run_period,
         **{f"{key}_decks": int(value["decks"]) for key, value in datasets.items()},

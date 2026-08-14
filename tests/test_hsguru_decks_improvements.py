@@ -351,6 +351,132 @@ class HsGuruDecksImprovementsTest(unittest.TestCase):
         self.assertEqual(result["archetype_join"], {"joined": True})
         self.assertIn("standard_all", result["errors"])
 
+    def test_partial_catalog_gets_one_continuation_and_recovers(self) -> None:
+        from app.hsguru_deck_catalog_refresh import refresh_all_deck_catalogs
+        from app.hsguru_decks import HSGuruCatalogPartial
+
+        calls: list[tuple[str, str]] = []
+
+        async def refresh(
+            format_name: str,
+            rank: str = "legend",
+            *,
+            period: str,
+        ) -> list[dict[str, str]]:
+            calls.append((format_name, rank))
+            if (format_name, rank) == ("standard", "all") and calls.count(
+                (format_name, rank)
+            ) == 1:
+                raise HSGuruCatalogPartial(
+                    format_name,
+                    [{"deck_code": "partial-standard-all"}],
+                    missing_archetypes=["Quiet Mage"],
+                    zero_sample_archetypes=[],
+                )
+            if (format_name, rank) == ("standard", "all"):
+                return [
+                    {"deck_code": "complete-standard-all-1"},
+                    {"deck_code": "complete-standard-all-2"},
+                ]
+            return [{"deck_code": f"{format_name}-{rank}-{period}"}]
+
+        result = asyncio.run(
+            refresh_all_deck_catalogs(
+                refresh=refresh,
+                join=lambda: {"joined": True},
+            )
+        )
+
+        self.assertEqual(
+            calls,
+            [
+                ("standard", "legend"),
+                ("wild", "legend"),
+                ("standard", "all"),
+                ("standard", "all"),
+                ("wild", "all"),
+            ],
+        )
+        self.assertEqual(result["state"], "ok")
+        self.assertEqual(result["errors"], {})
+        self.assertEqual(
+            result["datasets"]["standard_all"],
+            {"decks": 2, "state": "ok"},
+        )
+        self.assertEqual(
+            result["continuations"]["standard_all"]["state"],
+            "ok",
+        )
+        self.assertIn(
+            "HSGuruCatalogPartial",
+            result["continuations"]["standard_all"]["initial_error"],
+        )
+
+    def test_partial_catalog_stops_after_one_continuation(self) -> None:
+        from app.hsguru_deck_catalog_refresh import refresh_all_deck_catalogs
+        from app.hsguru_decks import HSGuruCatalogPartial
+
+        calls: list[tuple[str, str]] = []
+
+        async def refresh(
+            format_name: str,
+            rank: str = "legend",
+            *,
+            period: str,
+        ) -> list[dict[str, str]]:
+            calls.append((format_name, rank))
+            if (format_name, rank) == ("standard", "all"):
+                continuation = calls.count((format_name, rank)) == 2
+                raise HSGuruCatalogPartial(
+                    format_name,
+                    [
+                        {"deck_code": "partial-standard-all-1"},
+                        *(
+                            [{"deck_code": "partial-standard-all-2"}]
+                            if continuation
+                            else []
+                        ),
+                    ],
+                    missing_archetypes=(
+                        ["Still Quiet Mage"]
+                        if continuation
+                        else ["Quiet Mage", "Still Quiet Mage"]
+                    ),
+                    zero_sample_archetypes=["No Sample DK"],
+                )
+            return [{"deck_code": f"{format_name}-{rank}-{period}"}]
+
+        result = asyncio.run(
+            refresh_all_deck_catalogs(
+                refresh=refresh,
+                join=lambda: {"joined": True},
+            )
+        )
+
+        self.assertEqual(calls.count(("standard", "all")), 2)
+        self.assertEqual(calls.count(("standard", "legend")), 1)
+        self.assertEqual(calls.count(("wild", "legend")), 1)
+        self.assertEqual(calls.count(("wild", "all")), 1)
+        self.assertEqual(result["state"], "partial")
+        self.assertEqual(
+            result["datasets"]["standard_all"],
+            {
+                "decks": 2,
+                "state": "partial",
+                "missing_archetypes": 1,
+                "zero_sample_archetypes": 1,
+            },
+        )
+        self.assertEqual(
+            result["continuations"]["standard_all"]["state"],
+            "partial",
+        )
+        self.assertIn(
+            "1 archetypes remain unverified",
+            result["errors"]["standard_all"],
+        )
+        self.assertEqual(result["archetype_join"], {"joined": True})
+
     def test_catalog_rejects_cross_site_solver_redirect(self) -> None:
         from app import hsguru_decks
 
