@@ -164,6 +164,146 @@ def test_bg_hero_limit_cli_marks_run_as_diagnostic(
     assert classify_terminal_status(status) == "skipped"
 
 
+def test_scheduled_bg_minion_database_records_fresh_pipeline_telemetry(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    result: dict[str, object] = {
+        "ok": True,
+        "published": True,
+        "state": "ok",
+        "minions_total": 120,
+        "minions_ok": 120,
+        "export_path": "/tmp/bg-minions.json",
+    }
+    with (
+        patch(
+            "app.parser_control.is_source_scheduled_enabled",
+            return_value=True,
+        ),
+        patch(
+            "app.hsreplay_bg_minions_db.refresh_bg_minion_database_sync",
+            return_value=result,
+        ),
+        patch("app.reliability_telemetry.record_terminal_results") as record,
+    ):
+        exit_code = cli.main(["refresh-bg-minions-db", "--scheduled"])
+
+    assert exit_code == 0
+    assert json.loads(capsys.readouterr().out) == result
+    run_id, statuses = record.call_args.args
+    assert run_id.startswith("pipeline:hsreplay_battlegrounds_minions:")
+    assert statuses == [{**result, "source_id": "hsreplay_battlegrounds_minions"}]
+    assert classify_terminal_status(statuses[0]) == "fresh_published"
+
+
+def test_scheduled_bg_minion_database_records_failed_pipeline_telemetry(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    result: dict[str, object] = {
+        "ok": False,
+        "published": False,
+        "state": "partial",
+        "minions_total": 120,
+        "minions_ok": 80,
+        "quality_errors": ["incomplete snapshot"],
+        "export_path": "/tmp/bg-minions.json",
+    }
+    with (
+        patch(
+            "app.parser_control.is_source_scheduled_enabled",
+            return_value=True,
+        ),
+        patch(
+            "app.hsreplay_bg_minions_db.refresh_bg_minion_database_sync",
+            return_value=result,
+        ),
+        patch("app.reliability_telemetry.record_terminal_results") as record,
+    ):
+        exit_code = cli.main(["refresh-bg-minions-db", "--scheduled"])
+
+    assert exit_code == 1
+    assert json.loads(capsys.readouterr().out) == result
+    status = record.call_args.args[1][0]
+    assert status == {**result, "source_id": "hsreplay_battlegrounds_minions"}
+    assert classify_terminal_status(status) == "failed"
+
+
+def test_scheduled_bg_minion_database_records_timeout_before_reraising() -> None:
+    with (
+        patch(
+            "app.parser_control.is_source_scheduled_enabled",
+            return_value=True,
+        ),
+        patch(
+            "app.hsreplay_bg_minions_db.refresh_bg_minion_database_sync",
+            side_effect=TimeoutError("upstream timed out"),
+        ),
+        patch("app.reliability_telemetry.record_terminal_results") as record,
+        pytest.raises(TimeoutError, match="upstream timed out"),
+    ):
+        cli.main(["refresh-bg-minions-db", "--scheduled"])
+
+    status = record.call_args.args[1][0]
+    assert status == {
+        "source_id": "hsreplay_battlegrounds_minions",
+        "state": "timed_out",
+        "failure_reason_code": "timeout",
+    }
+    assert classify_terminal_status(status) == "timed_out"
+    assert classify_failure_reason(status) == "timeout"
+
+
+def test_disabled_scheduled_bg_minion_database_records_skipped_pipeline_telemetry(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with (
+        patch(
+            "app.parser_control.is_source_scheduled_enabled",
+            return_value=False,
+        ),
+        patch(
+            "app.hsreplay_bg_minions_db.refresh_bg_minion_database_sync",
+        ) as refresh,
+        patch("app.reliability_telemetry.record_terminal_results") as record,
+    ):
+        exit_code = cli.main(["refresh-bg-minions-db", "--scheduled"])
+
+    payload = {
+        "ok": True,
+        "skipped": True,
+        "reason": "section_disabled",
+        "source_id": "hsreplay_battlegrounds_minions",
+    }
+    assert exit_code == 0
+    assert json.loads(capsys.readouterr().out) == payload
+    refresh.assert_not_called()
+    assert record.call_args.args[1] == [payload]
+    assert classify_terminal_status(payload) == "skipped"
+
+
+def test_manual_bg_minion_database_keeps_cli_semantics_without_telemetry(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    result: dict[str, object] = {
+        "ok": False,
+        "published": False,
+        "state": "partial",
+        "quality_errors": ["incomplete snapshot"],
+    }
+    with (
+        patch(
+            "app.hsreplay_bg_minions_db.refresh_bg_minion_database_sync",
+            return_value=result,
+        ),
+        patch("app.reliability_telemetry.record_terminal_results") as record,
+    ):
+        exit_code = cli.main(["refresh-bg-minions-db"])
+
+    assert exit_code == 1
+    assert json.loads(capsys.readouterr().out) == result
+    record.assert_not_called()
+
+
 def test_pipeline_telemetry_failure_cannot_change_the_command_result() -> None:
     result: dict[str, object] = {"ok": True, "published": True, "state": "ok"}
 

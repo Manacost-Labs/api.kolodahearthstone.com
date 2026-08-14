@@ -1,14 +1,23 @@
 from __future__ import annotations
 
 import logging
+import math
 import re
 from typing import Any
 
 from .cards_index import card_from_id, resolve_card_name
-from .hsreplay_client import fetch_hsreplay_json
-from .parser_control import load_resolved_public_dataset
-from .sources import Source
+from .completeness import (
+    ARENA_LEGENDARY_EXPECTED_BUCKETS,
+    COMPLETENESS_SCHEMA_VERSION,
+    build_hsreplay_arena_upstream_freshness,
+    build_hsreplay_transport_evidence_unavailable,
+    row_retrieval_evidence,
+)
+from .hsreplay_client import fetch_hsreplay_json, get_hsreplay_json_target_headers
+from .publish_gate import validate_candidate_for_publish
+from .sources import SOURCE_BY_ID, Source
 from .structured import parse_legendary_groups
+from .structured_schema import validate_structured_schema
 
 logger = logging.getLogger(__name__)
 
@@ -47,8 +56,8 @@ HS_BUCKET_TO_CLASS_KEY = {
     "WARLOCK": "warlock",
     "WARRIOR": "warrior",
 }
+assert tuple(HS_BUCKET_TO_CLASS_KEY) == ARENA_LEGENDARY_EXPECTED_BUCKETS
 
-_PCT_RE = re.compile(r"(-?\d+(?:[.,]\d+)?)\s*%?")
 _JSON_PACKAGE_RE = re.compile(
     r'\{[^{}]*"package_key_card_id"\s*:\s*"[^"]+"[^{}]*\}',
     re.DOTALL,
@@ -65,39 +74,67 @@ def _class_name_from_card(card_id: str) -> str | None:
     return None
 
 
-def _format_pct(value: Any) -> str | None:
+def _percent_number(value: Any) -> float | None:
     if value is None:
+        return None
+    if isinstance(value, bool):
         return None
     if isinstance(value, str):
         text = value.strip()
         if not text:
             return None
-        if "%" in text:
-            return text.replace(",", ".")
-        match = _PCT_RE.fullmatch(text.replace(",", "."))
-        if match:
-            return f"{match.group(1)}%"
-        return text
+        if text.endswith("%"):
+            text = text[:-1].strip()
+        text = text.replace(",", ".")
     try:
-        num = float(value)
+        number = float(text if isinstance(value, str) else value)
     except (TypeError, ValueError):
         return None
-    return f"{num}%" if abs(num) <= 100 else f"{num:.2f}%"
+    if not math.isfinite(number) or not 0.0 <= number <= 100.0:
+        return None
+    return number
+
+
+def _format_pct(value: Any) -> str | None:
+    if value is None:
+        return None
+    number = _percent_number(value)
+    if number is None:
+        raise ValueError("percentage must be finite numeric in 0..100")
+    return f"{number}%"
 
 
 def _as_number(value: Any) -> float | None:
     if value is None:
         return None
-    if isinstance(value, (int, float)):
-        return float(value)
-    text = str(value).strip().replace(",", ".")
-    match = _PCT_RE.search(text)
-    if not match:
-        return None
+    if isinstance(value, bool):
+        raise TypeError("numeric value must be finite")
+    if isinstance(value, str):
+        value = value.strip().replace(",", ".")
+        if not value:
+            raise ValueError("numeric value must be finite")
     try:
-        return float(match.group(1))
-    except ValueError:
-        return None
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("numeric value must be finite") from exc
+    if not math.isfinite(number):
+        raise ValueError("numeric value must be finite")
+    return number
+
+
+def _winrate_availability(
+    *,
+    winrate: object,
+    pick_rate: object,
+) -> dict[str, object]:
+    if winrate not in (None, ""):
+        return {"available": True, "reason": None}
+    if _percent_number(pick_rate) == 0:
+        return {
+            "available": False,
+            "reason": "upstream_unavailable_at_zero_pick_rate",
+        }
+    return {"available": False, "reason": None}
 
 
 def _group_package_cards(card_ids: list[str], *, locale: str = "ruRU") -> list[dict[str, Any]]:
@@ -112,24 +149,54 @@ def _group_package_cards(card_ids: list[str], *, locale: str = "ruRU") -> list[d
     return list(grouped.values())
 
 
+def _required_package_card_ids(pkg: dict[str, Any]) -> list[str]:
+    value = pkg.get("package_card_ids")
+    if not isinstance(value, list):
+        raise TypeError("package_card_ids must be a list")
+    if not value:
+        raise ValueError("package_card_ids must not be empty")
+    if any(not isinstance(card_id, str) or not card_id.strip() for card_id in value):
+        raise ValueError("package_card_ids must contain non-empty strings")
+    return [card_id.strip() for card_id in value]
+
+
 def _metrics_from_package(pkg: dict[str, Any]) -> dict[str, Any]:
     pick_rate = pkg.get("pick_rate") if pkg.get("pick_rate") is not None else pkg.get("pickRate")
     offer_rate = pkg.get("offer_rate") if pkg.get("offer_rate") is not None else pkg.get("offerRate")
     score = pkg.get("score") if pkg.get("score") is not None else pkg.get("arenasmith_score")
+    winrate = _format_pct(pkg.get("win_rate"))
+    formatted_pick_rate = _format_pct(pick_rate)
     return {
-        "winrate": _format_pct(pkg.get("win_rate")),
-        "pick_rate": _format_pct(pick_rate),
+        "winrate": winrate,
+        "pick_rate": formatted_pick_rate,
         "offer_rate": _format_pct(offer_rate),
         "score": _as_number(score),
+        "field_availability": {
+            "winrate": _winrate_availability(
+                winrate=winrate,
+                pick_rate=formatted_pick_rate,
+            )
+        },
     }
+
+
+def _first_non_none(row: dict[str, Any], *fields: str) -> Any:
+    for field in fields:
+        if field in row and row[field] is not None:
+            return row[field]
+    return None
 
 
 def normalize_legendary_package(pkg: dict[str, Any], *, locale: str = "ruRU") -> dict[str, Any] | None:
     key_id = pkg.get("package_key_card_id")
-    if not key_id:
+    if not isinstance(key_id, str) or not key_id.strip():
         return None
-    key_card = {"card_id": key_id, **card_from_id(str(key_id), locale=locale)}
-    included = _group_package_cards(list(pkg.get("package_card_ids") or []), locale=locale)
+    key_id = key_id.strip()
+    key_card = {"card_id": key_id, **card_from_id(key_id, locale=locale)}
+    included = _group_package_cards(
+        _required_package_card_ids(pkg),
+        locale=locale,
+    )
     metrics = _metrics_from_package(pkg)
     return {
         "key_card": key_card,
@@ -166,23 +233,47 @@ def _stats_index_from_cards(cards: list[dict[str, Any]]) -> dict[str, dict[str, 
     return index
 
 
-async def _load_arena_card_stats_index(source_id: str) -> tuple[dict[str, dict[str, Any]], str]:
+async def _load_arena_card_stats_index(
+    source_id: str,
+    *,
+    expected_meta_period_id: int | None,
+) -> tuple[dict[str, dict[str, Any]], str]:
+    """Load enrichment only from a verified live snapshot in the same period."""
+
+    if (
+        isinstance(expected_meta_period_id, bool)
+        or not isinstance(expected_meta_period_id, int)
+        or expected_meta_period_id <= 0
+    ):
+        return {}, "none"
     try:
         from .hsreplay_arena_api import fetch_arena_card_tiers
 
         payload = await fetch_arena_card_tiers(source_id=source_id)
+        freshness = payload.get("upstream_freshness")
+        if (
+            not isinstance(freshness, dict)
+            or freshness.get("status") != "fresh"
+            or freshness.get("meta_period_id") != expected_meta_period_id
+            or payload.get("population_completeness") != "unverifiable"
+        ):
+            return {}, "none"
+        validate_structured_schema(payload)
+        gate = validate_candidate_for_publish(
+            SOURCE_BY_ID["hsreplay_arena_cards_advanced"],
+            {"structured": payload},
+            backend="hsreplay_api",
+        )
+        if not gate.ok:
+            return {}, "none"
         cards = [row for row in (payload.get("cards") or []) if isinstance(row, dict)]
         if cards:
-            return _stats_index_from_cards(cards), "hsreplay_arena_api"
+            return _stats_index_from_cards(cards), "verified_live_hsreplay_arena_api"
     except Exception as exc:
-        logger.warning("Live arena card stats unavailable for legendaries enrich: %s", exc)
-
-    dataset = load_resolved_public_dataset("hsreplay_arena_cards_advanced") or {}
-    data = dataset.get("data") or {}
-    structured = data.get("structured") or data.get("hsreplay_extracted") or {}
-    cards = [row for row in (structured.get("cards") or []) if isinstance(row, dict)]
-    if cards:
-        return _stats_index_from_cards(cards), "cached_hsreplay_arena_cards_advanced"
+        logger.warning(
+            "Verified live arena card stats unavailable for legendaries enrich (%s)",
+            type(exc).__name__,
+        )
     return {}, "none"
 
 
@@ -220,6 +311,13 @@ def enrich_legendary_groups(
             all_bucket["score"] = group["score"]
         if all_bucket.get("winrate") is None and group.get("winrate") is not None:
             all_bucket["winrate"] = group["winrate"]
+        group["field_availability"] = {
+            "winrate": _winrate_availability(
+                winrate=group.get("winrate"),
+                pick_rate=group.get("pick_rate"),
+            )
+        }
+        all_bucket["field_availability"] = group["field_availability"]
     return filled
 
 
@@ -236,9 +334,11 @@ def _groups_from_class_buckets(data: dict[str, Any], *, locale: str = "ruRU") ->
         for pkg in rows:
             if not isinstance(pkg, dict):
                 continue
-            key_id = str(pkg.get("package_key_card_id") or "")
-            if not key_id:
-                continue
+            package_card_ids = _required_package_card_ids(pkg)
+            raw_key_id = pkg.get("package_key_card_id")
+            if not isinstance(raw_key_id, str) or not raw_key_id.strip():
+                raise ValueError("package_key_card_id must be a non-empty string")
+            key_id = raw_key_id.strip()
             metrics = _metrics_from_package(pkg)
             group = groups_by_id.get(key_id)
             if group is None:
@@ -250,27 +350,117 @@ def _groups_from_class_buckets(data: dict[str, Any], *, locale: str = "ruRU") ->
             else:
                 # Prefer richer package_card_ids / metrics when ALL arrives later/earlier.
                 if class_key == "all":
-                    cards = _group_package_cards(list(pkg.get("package_card_ids") or []), locale=locale)
+                    cards = _group_package_cards(package_card_ids, locale=locale)
                     if cards:
                         group["cards"] = cards
                     for field, value in metrics.items():
+                        if field == "field_availability":
+                            continue
                         if value is not None:
                             group[field] = value
+                    group["field_availability"] = metrics["field_availability"]
             group.setdefault("by_class", {})[class_key] = metrics
 
     groups = list(groups_by_id.values())
     for group in groups:
         by_class = group.get("by_class") or {}
-        all_metrics = by_class.get("all") or {}
+        all_metrics = by_class.get("all")
         # Top-level metrics are always the global ALL slice.
-        for field in ("winrate", "pick_rate", "offer_rate", "score"):
-            if all_metrics.get(field) is not None:
-                group[field] = all_metrics[field]
-            elif group.get(field) is not None:
-                all_metrics[field] = group[field]
-        by_class["all"] = all_metrics
+        if isinstance(all_metrics, dict):
+            for field in ("winrate", "pick_rate", "offer_rate", "score"):
+                group[field] = all_metrics.get(field)
+            group["field_availability"] = all_metrics.get(
+                "field_availability",
+                {
+                    "winrate": _winrate_availability(
+                        winrate=group.get("winrate"),
+                        pick_rate=group.get("pick_rate"),
+                    )
+                },
+            )
+        else:
+            for field in ("winrate", "pick_rate", "offer_rate", "score"):
+                group[field] = None
+            group["field_availability"] = {
+                "winrate": {"available": False, "reason": None}
+            }
         group["by_class"] = by_class
     return groups
+
+
+def _bucket_coverage(data: dict[str, Any]) -> dict[str, list[str]]:
+    seen_bucket_package_keys: set[tuple[str, str]] = set()
+    duplicate_bucket_package_keys: set[str] = set()
+    for bucket, rows in data.items():
+        canonical_bucket = str(bucket).strip().upper()
+        if canonical_bucket not in HS_BUCKET_TO_CLASS_KEY or not isinstance(rows, list):
+            continue
+        for package in rows:
+            if not isinstance(package, dict):
+                continue
+            key = str(package.get("package_key_card_id") or "").strip()
+            if key:
+                pair = (canonical_bucket, key)
+                if pair in seen_bucket_package_keys:
+                    duplicate_bucket_package_keys.add(f"{canonical_bucket}:{key}")
+                seen_bucket_package_keys.add(pair)
+    expected_buckets = list(ARENA_LEGENDARY_EXPECTED_BUCKETS)
+    observed_buckets = [
+        expected
+        for expected in expected_buckets
+        if any(
+            str(bucket).strip().upper() == expected and isinstance(rows, list)
+            for bucket, rows in data.items()
+        )
+    ]
+    return {
+        "expected_buckets": expected_buckets,
+        "observed_buckets": observed_buckets,
+        "missing_buckets": [
+            bucket for bucket in expected_buckets if bucket not in observed_buckets
+        ],
+        "unknown_buckets": sorted(
+            {
+                str(bucket).strip().upper()
+                for bucket in data
+                if str(bucket).strip().upper() not in HS_BUCKET_TO_CLASS_KEY
+            }
+        ),
+        "duplicate_bucket_package_keys": sorted(duplicate_bucket_package_keys),
+    }
+
+
+def _package_row_retrieval(
+    data: dict[str, Any],
+    groups: list[dict[str, Any]],
+) -> dict[str, Any]:
+    unique_package_keys: set[str] = set()
+    invalid_rows = 0
+    for bucket, rows in data.items():
+        if str(bucket).strip().upper() not in HS_BUCKET_TO_CLASS_KEY or not isinstance(rows, list):
+            continue
+        for package in rows:
+            if not isinstance(package, dict):
+                invalid_rows += 1
+                continue
+            key = str(package.get("package_key_card_id") or "").strip()
+            if key:
+                unique_package_keys.add(key)
+            else:
+                invalid_rows += 1
+    normalizer_rejected = max(0, len(unique_package_keys) - len(groups))
+    evidence = row_retrieval_evidence(
+        raw_rows=len(unique_package_keys) + invalid_rows,
+        eligible_rows=len(unique_package_keys),
+        normalized_rows=len(groups),
+        unexplained_reasons={
+            "invalid_or_missing_package_key": invalid_rows,
+            "normalizer_rejected": normalizer_rejected,
+        },
+        scope="unique_package_keys_across_class_buckets",
+    )
+    evidence["bucket_coverage"] = _bucket_coverage(data)
+    return evidence
 
 
 def _payload_data(payload: dict[str, Any]) -> dict[str, Any]:
@@ -296,20 +486,25 @@ def _extract_packages_from_html(html: str) -> list[dict[str, Any]]:
 
 
 def _normalize_firecrawl_group(raw: dict[str, Any], *, locale: str = "ruRU") -> dict[str, Any] | None:
-    cards_raw = [row for row in (raw.get("cards") or []) if isinstance(row, dict)]
+    raw_cards = raw.get("cards")
+    if not isinstance(raw_cards, list) or not raw_cards:
+        return None
+    if any(not isinstance(row, dict) for row in raw_cards):
+        return None
+    cards_raw = raw_cards
     cards: list[dict[str, Any]] = []
     for row in cards_raw:
+        count = row.get("count", 1)
+        if isinstance(count, bool) or not isinstance(count, int) or count <= 0:
+            return None
         name = str(row.get("name") or "").strip()
         resolved = resolve_card_name(name) if name else {}
         card_id = resolved.get("card_id") or resolved.get("id") or row.get("card_id")
-        if not card_id and name:
-            cards.append({"count": int(row.get("count") or 1), "name": name, **resolved})
-            continue
         if not card_id:
-            continue
+            return None
         cards.append(
             {
-                "count": int(row.get("count") or 1),
+                "count": count,
                 "card_id": str(card_id),
                 **card_from_id(str(card_id), locale=locale),
                 "name": name or card_from_id(str(card_id), locale=locale).get("name"),
@@ -335,11 +530,21 @@ def _normalize_firecrawl_group(raw: dict[str, Any], *, locale: str = "ruRU") -> 
     if not key_card or not key_card.get("card_id"):
         return None
 
+    winrate = _format_pct(_first_non_none(raw, "winrate", "win_rate"))
+    pick_rate = _format_pct(_first_non_none(raw, "pick_rate", "pickRate"))
     metrics = {
-        "winrate": _format_pct(raw.get("winrate") or raw.get("win_rate")),
-        "pick_rate": _format_pct(raw.get("pick_rate") or raw.get("pickRate")),
-        "offer_rate": _format_pct(raw.get("offer_rate") or raw.get("offerRate")),
-        "score": _as_number(raw.get("score") or raw.get("arenasmith_score")),
+        "winrate": winrate,
+        "pick_rate": pick_rate,
+        "offer_rate": _format_pct(
+            _first_non_none(raw, "offer_rate", "offerRate")
+        ),
+        "score": _as_number(_first_non_none(raw, "score", "arenasmith_score")),
+        "field_availability": {
+            "winrate": _winrate_availability(
+                winrate=winrate,
+                pick_rate=pick_rate,
+            )
+        },
     }
     return {
         "key_card": key_card,
@@ -401,11 +606,13 @@ async def fetch_legendary_groups_via_firecrawl(
 
     packages = _extract_packages_from_html(scraped.html)
     groups: list[dict[str, Any]] = []
+    row_retrieval: dict[str, Any]
     parse_mode = "embedded_json"
     if packages:
         # Firecrawl usually captures a flat list; treat as ALL.
         fake_data = {"ALL": packages}
         groups = _groups_from_class_buckets(fake_data, locale=locale)
+        row_retrieval = _package_row_retrieval(fake_data, groups)
     else:
         parse_mode = "page_text"
         parsed = parse_legendary_groups(_lines_from_firecrawl(scraped.markdown, scraped.html))
@@ -413,17 +620,34 @@ async def fetch_legendary_groups_via_firecrawl(
             group = _normalize_firecrawl_group(raw, locale=locale)
             if group:
                 groups.append(group)
+        row_retrieval = row_retrieval_evidence(
+            raw_rows=len(parsed),
+            eligible_rows=len(parsed),
+            normalized_rows=len(groups),
+            unexplained_reasons={
+                "normalizer_rejected": len(parsed) - len(groups),
+            },
+            scope="firecrawl_page_groups",
+        )
+        row_retrieval["bucket_coverage"] = _bucket_coverage({"ALL": parsed})
 
     if len(groups) < 10:
         raise RuntimeError(
             f"Firecrawl legendaries fallback produced too few groups ({len(groups)}); mode={parse_mode}"
         )
 
-    stats_index, stats_backend = await _load_arena_card_stats_index(source_id)
+    # HTML fallback does not prove the card-package representation period, so
+    # mixing any secondary stats into it would create unverifiable provenance.
+    stats_index: dict[str, dict[str, Any]] = {}
+    stats_backend = "none"
     enrich_stats = enrich_legendary_groups(groups, stats_index)
 
     return {
         "type": "arena_legendary_groups",
+        "completeness_schema_version": COMPLETENESS_SCHEMA_VERSION,
+        "upstream_freshness": build_hsreplay_transport_evidence_unavailable(),
+        "population_completeness": "unverifiable",
+        "row_retrieval": row_retrieval,
         "groups": groups,
         "source": {
             "key": "hsreplay",
@@ -453,7 +677,9 @@ async def fetch_legendary_groups(
 ) -> dict[str, Any]:
     api_url = LEGENDARIES_API_URL
     groups: list[dict[str, Any]] = []
+    row_retrieval: dict[str, Any] | None = None
     backend = "hsreplay_api"
+    api_payload: dict[str, Any] = {}
 
     try:
         last_error: Exception | None = None
@@ -464,7 +690,9 @@ async def fetch_legendary_groups(
                 built = _groups_from_class_buckets(data, locale=locale)
                 if len(built) >= 10:
                     groups = built
+                    row_retrieval = _package_row_retrieval(data, groups)
                     api_url = url
+                    api_payload = candidate
                     break
                 last_error = RuntimeError(f"{url} returned too few groups ({len(built)})")
             except Exception as exc:
@@ -476,13 +704,41 @@ async def fetch_legendary_groups(
         logger.warning("HSReplay legendaries API failed (%s); trying Firecrawl fallback", exc)
         return await fetch_legendary_groups_via_firecrawl(source_id=source_id, locale=locale)
 
-    # Only enrich missing ALL metrics; never overwrite per-class package stats.
-    stats_index, stats_backend = await _load_arena_card_stats_index(source_id)
+    upstream_freshness = build_hsreplay_arena_upstream_freshness(
+        api_payload,
+        response_headers=get_hsreplay_json_target_headers(api_url),
+    )
+    expected_meta_period_id = (
+        upstream_freshness.get("meta_period_id")
+        if upstream_freshness.get("status") == "fresh"
+        else None
+    )
+    # Only enrich missing ALL metrics from a separately verified live card
+    # snapshot in the exact same Arena meta period.
+    stats_index, stats_backend = await _load_arena_card_stats_index(
+        source_id,
+        expected_meta_period_id=(
+            expected_meta_period_id
+            if isinstance(expected_meta_period_id, int)
+            and not isinstance(expected_meta_period_id, bool)
+            else None
+        ),
+    )
     enrich_stats = enrich_legendary_groups(groups, stats_index)
     class_bucket_count = max((len(g.get("by_class") or {}) for g in groups), default=0)
 
     return {
         "type": "arena_legendary_groups",
+        "completeness_schema_version": COMPLETENESS_SCHEMA_VERSION,
+        "upstream_freshness": upstream_freshness,
+        "population_completeness": "unverifiable",
+        "row_retrieval": row_retrieval
+        or row_retrieval_evidence(
+            raw_rows=len(groups),
+            eligible_rows=len(groups),
+            normalized_rows=len(groups),
+            scope="normalized_groups",
+        ),
         "groups": groups,
         "source": {
             "key": "hsreplay",

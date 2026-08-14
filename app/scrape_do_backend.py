@@ -6,7 +6,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .config import scrape_do_timeout_seconds, scrape_do_token
 
@@ -18,6 +18,17 @@ SCRAPE_DO_MAX_RETRY_TIMEOUT_MS = 55_000
 
 _TRANSIENT_HTTP_STATUSES = frozenset({408, 425, 429, 500, 502, 503, 504})
 _ACCOUNT_HTTP_STATUSES = frozenset({401})
+SAFE_TARGET_RESPONSE_HEADERS = frozenset(
+    {
+        "date",
+        "age",
+        "etag",
+        "last-modified",
+        "cache-control",
+        "cf-cache-status",
+    }
+)
+MAX_SAFE_TARGET_HEADER_VALUE_LENGTH = 512
 
 
 class ScrapeDoRequestError(RuntimeError):
@@ -60,6 +71,7 @@ class ScrapeDoScrape:
     credits_remaining: int | None
     super_proxy: bool
     screenshot: str | None = None
+    target_headers: dict[str, str] = field(default_factory=dict)
 
     @property
     def content_length(self) -> int:
@@ -93,6 +105,26 @@ def _retry_after_seconds(headers: Mapping[str, str]) -> float | None:
     except (TypeError, ValueError):
         return None
     return max(0.0, parsed)
+
+
+def _safe_target_response_headers(headers: Mapping[str, str]) -> dict[str, str]:
+    """Keep only bounded, non-secret target representation metadata."""
+
+    safe: dict[str, str] = {}
+    for raw_name, raw_value in headers.items():
+        name = str(raw_name).strip().lower()
+        if name not in SAFE_TARGET_RESPONSE_HEADERS or not isinstance(raw_value, str):
+            continue
+        value = raw_value.strip()
+        if (
+            not value
+            or len(value) > MAX_SAFE_TARGET_HEADER_VALUE_LENGTH
+            or "\r" in value
+            or "\n" in value
+        ):
+            continue
+        safe[name] = value
+    return safe
 
 
 def _clamp_timeout_ms(timeout_ms: int) -> int:
@@ -211,6 +243,7 @@ def scrape_url_sync(
             super_proxy=super_proxy,
         ) from exc
     body = raw.decode("utf-8", errors="replace")
+    target_headers = _safe_target_response_headers(response_headers)
     request_cost = _header_int(response_headers, "scrape.do-request-cost")
     if request_cost is None:
         request_cost = (
@@ -230,6 +263,7 @@ def scrape_url_sync(
                     "scrape.do-remaining-credits",
                 ),
                 super_proxy=super_proxy,
+                target_headers=target_headers,
             ),
         )
 
@@ -266,6 +300,7 @@ def scrape_url_sync(
         ),
         super_proxy=super_proxy,
         screenshot=image,
+        target_headers=target_headers,
     )
 
 

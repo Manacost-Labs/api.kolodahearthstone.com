@@ -4,6 +4,7 @@ import asyncio
 import logging
 import sys
 from types import ModuleType, SimpleNamespace
+from typing import Self
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -18,11 +19,16 @@ from app.hsreplay_client import (
     extract_json_payload,
     fetch_hsreplay_json,
     fetch_text_via_curl_cffi,
+    get_hsreplay_json_target_headers,
     hsreplay_proxy_circuit_is_open,
     reset_hsreplay_refresh_state,
 )
 from app.proxy_errors import ProxyPaymentRequiredError, proxy_tunnel_error
-from app.scrape_do_backend import ScrapeDoRequestError, ScrapeDoScrape
+from app.scrape_do_backend import (
+    ScrapeDoContentError,
+    ScrapeDoRequestError,
+    ScrapeDoScrape,
+)
 from app.scrapers.rotator import (
     reset_backend_circuits,
     residential_proxy_circuit_error,
@@ -463,6 +469,189 @@ def test_hsreplay_json_records_successful_scrape_do_transport() -> None:
         )
 
     assert consume_hsreplay_json_transport_backend("transport-test") == "scrape_do"
+
+
+def test_scrape_do_target_headers_follow_the_successful_payload_cache_key() -> None:
+    cache: dict[str, dict[str, object]] = {}
+    scrape = AsyncMock(
+        return_value=ScrapeDoScrape(
+            html='{"data": [{"id": 1}]}',
+            status_code=200,
+            final_url="https://hsreplay.net/api/test",
+            request_cost=1,
+            credits_remaining=100,
+            super_proxy=False,
+            target_headers={
+                "last-modified": "Fri, 14 Aug 2026 02:10:32 GMT",
+                "etag": 'W/"safe"',
+            },
+        )
+    )
+
+    async def run() -> None:
+        await fetch_hsreplay_json(
+            "https://hsreplay.net/api/test",
+            source_id="evidence-first",
+            cache_key="shared-evidence",
+        )
+        await fetch_hsreplay_json(
+            "https://hsreplay.net/api/test",
+            source_id="evidence-cache-hit",
+            cache_key="shared-evidence",
+        )
+
+    with (
+        patch(
+            "app.hsreplay_client._channel_urls",
+            return_value=[("scrape_do", "https://hsreplay.net/api/test")],
+        ),
+        patch("app.hsreplay_client.scrape_url", scrape),
+        patch("app.hsreplay_client.hsreplay_cookies_for_fetch", return_value=[]),
+        patch(
+            "app.hsreplay_client.get_cached_hsreplay_json",
+            side_effect=lambda key: cache.get(key),
+        ),
+        patch(
+            "app.hsreplay_client.set_cached_hsreplay_json",
+            side_effect=lambda key, value: cache.__setitem__(key, value),
+        ),
+    ):
+        asyncio.run(run())
+
+    assert scrape.await_count == 1
+    assert get_hsreplay_json_target_headers("shared-evidence") == {
+        "last-modified": "Fri, 14 Aug 2026 02:10:32 GMT",
+        "etag": 'W/"safe"',
+    }
+
+
+def test_non_scrape_do_json_channel_has_no_invented_target_headers() -> None:
+    with (
+        patch(
+            "app.hsreplay_client._channel_urls",
+            return_value=[("flaresolverr", "https://hsreplay.net/api/test")],
+        ),
+        patch(
+            "app.hsreplay_client._channel_uses_residential_proxy",
+            return_value=False,
+        ),
+        patch(
+            "app.hsreplay_client._fetch_body_for_channel",
+            new=AsyncMock(return_value='{"data": [{"id": 1}]}'),
+        ),
+        patch("app.hsreplay_client.get_cached_hsreplay_json", return_value=None),
+        patch("app.hsreplay_client.set_cached_hsreplay_json"),
+    ):
+        asyncio.run(
+            fetch_hsreplay_json(
+                "https://hsreplay.net/api/test",
+                source_id="unknown-evidence",
+                cache_key="unknown-evidence",
+            )
+        )
+
+    assert get_hsreplay_json_target_headers("unknown-evidence") == {}
+
+
+def test_flaresolverr_solution_headers_follow_successful_json_cache_key() -> None:
+    class Response:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {
+                "status": "ok",
+                "solution": {
+                    "status": 200,
+                    "response": '{"data": [{"id": 1}]}',
+                    "headers": {
+                        "Last-Modified": "Fri, 14 Aug 2026 02:10:32 GMT",
+                        "Age": "42",
+                        "Set-Cookie": "must-not-survive",
+                    },
+                },
+            }
+
+    class Client:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        async def __aenter__(self) -> Self:
+            return self
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+        async def post(self, *_args: object, **_kwargs: object) -> Response:
+            return Response()
+
+    with (
+        patch(
+            "app.hsreplay_client._channel_urls",
+            return_value=[("flaresolverr", "https://hsreplay.net/api/test")],
+        ),
+        patch("app.hsreplay_client._channel_uses_residential_proxy", return_value=False),
+        patch("app.hsreplay_client.httpx.AsyncClient", Client),
+        patch("app.hsreplay_client.hsreplay_cookies_for_fetch", return_value=[]),
+        patch("app.scrapers.proxy.proxy_dict_for_flaresolverr", return_value=None),
+        patch("app.hsreplay_client.get_cached_hsreplay_json", return_value=None),
+        patch("app.hsreplay_client.set_cached_hsreplay_json"),
+        patch("app.hsreplay_client.log_action"),
+    ):
+        asyncio.run(
+            fetch_hsreplay_json(
+                "https://hsreplay.net/api/test",
+                source_id="flare-evidence",
+                cache_key="flare-evidence",
+            )
+        )
+
+    assert get_hsreplay_json_target_headers("flare-evidence") == {
+        "last-modified": "Fri, 14 Aug 2026 02:10:32 GMT",
+        "age": "42",
+    }
+
+
+def test_curl_cffi_headers_are_whitelisted_for_successful_json_cache_key() -> None:
+    response = SimpleNamespace(
+        status_code=200,
+        text='{"data": [{"id": 1}]}',
+        headers={
+            "ETag": 'W/"safe"',
+            "CF-Cache-Status": "DYNAMIC",
+            "Authorization": "must-not-survive",
+        },
+    )
+    curl_module = ModuleType("curl_cffi")
+    curl_module.requests = SimpleNamespace(get=lambda *_args, **_kwargs: response)  # type: ignore[attr-defined]
+
+    with (
+        patch.dict(sys.modules, {"curl_cffi": curl_module}),
+        patch(
+            "app.hsreplay_client._channel_urls",
+            return_value=[("curl_cffi", "https://hsreplay.net/api/test")],
+        ),
+        patch("app.hsreplay_client._channel_uses_residential_proxy", return_value=False),
+        patch("app.hsreplay_client.assert_proxy_configured"),
+        patch("app.hsreplay_client.proxy_url_for_source", return_value=None),
+        patch("app.hsreplay_client.hsreplay_cookies_for_fetch", return_value=[]),
+        patch("app.hsreplay_client.http_retry_attempts", return_value=1),
+        patch("app.hsreplay_client.get_cached_hsreplay_json", return_value=None),
+        patch("app.hsreplay_client.set_cached_hsreplay_json"),
+        patch("app.hsreplay_client.log_action"),
+    ):
+        asyncio.run(
+            fetch_hsreplay_json(
+                "https://hsreplay.net/api/test",
+                source_id="curl-evidence",
+                cache_key="curl-evidence",
+            )
+        )
+
+    assert get_hsreplay_json_target_headers("curl-evidence") == {
+        "etag": 'W/"safe"',
+        "cf-cache-status": "DYNAMIC",
+    }
 
 
 def test_hsreplay_json_single_flights_concurrent_shared_cache_key() -> None:
@@ -982,7 +1171,7 @@ def test_scrape_do_budget_exhaustion_makes_zero_provider_calls(
     scrape.assert_not_awaited()
 
 
-def test_scrape_do_concurrency_cap_is_refresh_scoped_and_atomic(
+def test_scrape_do_credit_accounting_serializes_physical_calls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("HS_HSREPLAY_SCRAPE_DO_MAX_CONCURRENCY", "2")
@@ -1020,7 +1209,49 @@ def test_scrape_do_concurrency_cap_is_refresh_scoped_and_atomic(
     with patch("app.hsreplay_client.scrape_url", side_effect=scrape):
         asyncio.run(run())
 
-    assert maximum_active == 2
+    assert maximum_active == 1
+
+
+def test_scrape_do_serialization_blocks_parallel_billed_budget_overshoot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HS_HSREPLAY_SCRAPE_DO_MAX_CONCURRENCY", "2")
+    monkeypatch.setenv("HS_HSREPLAY_SCRAPE_DO_MAX_REQUESTS", "10")
+    monkeypatch.setenv("HS_HSREPLAY_SCRAPE_DO_MAX_CREDITS", "5")
+    reset_hsreplay_refresh_state()
+    provider_calls = 0
+
+    async def scrape(url: str, **_kwargs: object) -> SimpleNamespace:
+        nonlocal provider_calls
+        provider_calls += 1
+        await asyncio.sleep(0.01)
+        return SimpleNamespace(
+            html='{"ok": true}',
+            request_cost=5,
+            status_code=200,
+            content_length=12,
+            final_url=url,
+        )
+
+    async def run() -> list[object]:
+        return await asyncio.gather(
+            _fetch_text_via_scrape_do(
+                "https://hsreplay.net/api/first",
+                source_id="parallel-budget-first",
+            ),
+            _fetch_text_via_scrape_do(
+                "https://hsreplay.net/api/second",
+                source_id="parallel-budget-second",
+            ),
+            return_exceptions=True,
+        )
+
+    with patch("app.hsreplay_client.scrape_url", side_effect=scrape):
+        results = asyncio.run(run())
+
+    assert provider_calls == 1
+    assert sum(isinstance(result, HsReplayScrapeDoBudgetError) for result in results) == 1
+    assert sum(result == '{"ok": true}' for result in results) == 1
 
 
 def test_failed_scrape_do_call_keeps_its_budget_reservation(
@@ -1040,6 +1271,141 @@ def test_failed_scrape_do_call_keeps_its_budget_reservation(
             await _fetch_text_via_scrape_do(
                 "https://hsreplay.net/api/second",
                 source_id="test",
+            )
+
+    with patch("app.hsreplay_client.scrape_url", scrape):
+        asyncio.run(run())
+
+    assert scrape.await_count == 1
+
+
+def test_scrape_do_request_error_reconciles_reported_cost_before_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HS_HSREPLAY_SCRAPE_DO_MAX_REQUESTS", "10")
+    monkeypatch.setenv("HS_HSREPLAY_SCRAPE_DO_MAX_CREDITS", "5")
+    reset_hsreplay_refresh_state()
+    scrape = AsyncMock(
+        side_effect=ScrapeDoRequestError(
+            "temporary target rejection",
+            status_code=403,
+            request_cost=5,
+        )
+    )
+
+    with (
+        patch("app.hsreplay_client.scrape_url", scrape),
+        patch("app.hsreplay_client.api_json_attempts_per_channel", return_value=2),
+        patch("app.hsreplay_client.api_json_retry_delay_seconds", return_value=0),
+        pytest.raises(HsReplayScrapeDoBudgetError),
+    ):
+        asyncio.run(
+            _fetch_text_via_scrape_do(
+                "https://hsreplay.net/api/test",
+                source_id="request-cost-test",
+            )
+        )
+
+    assert scrape.await_count == 1
+
+
+def test_scrape_do_error_without_reported_cost_keeps_one_credit_reservation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HS_HSREPLAY_SCRAPE_DO_MAX_REQUESTS", "10")
+    monkeypatch.setenv("HS_HSREPLAY_SCRAPE_DO_MAX_CREDITS", "1")
+    reset_hsreplay_refresh_state()
+    scrape = AsyncMock(
+        side_effect=ScrapeDoRequestError(
+            "target rejected request",
+            status_code=400,
+        )
+    )
+
+    async def run() -> None:
+        with pytest.raises(ScrapeDoRequestError):
+            await _fetch_text_via_scrape_do(
+                "https://hsreplay.net/api/first",
+                source_id="unknown-cost-test",
+            )
+        with pytest.raises(HsReplayScrapeDoBudgetError):
+            await _fetch_text_via_scrape_do(
+                "https://hsreplay.net/api/second",
+                source_id="unknown-cost-test",
+            )
+
+    with patch("app.hsreplay_client.scrape_url", scrape):
+        asyncio.run(run())
+
+    assert scrape.await_count == 1
+
+
+def test_scrape_do_content_error_reconciles_reported_cost_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HS_HSREPLAY_SCRAPE_DO_MAX_REQUESTS", "10")
+    monkeypatch.setenv("HS_HSREPLAY_SCRAPE_DO_MAX_CREDITS", "5")
+    reset_hsreplay_refresh_state()
+    billed_response = ScrapeDoScrape(
+        html="",
+        status_code=200,
+        final_url="https://hsreplay.net/api/first",
+        request_cost=5,
+        credits_remaining=100,
+        super_proxy=False,
+    )
+    scrape = AsyncMock(
+        side_effect=ScrapeDoContentError(
+            "Scrape.do returned an empty body",
+            scrape=billed_response,
+        )
+    )
+
+    async def run() -> None:
+        with pytest.raises(ScrapeDoContentError):
+            await _fetch_text_via_scrape_do(
+                "https://hsreplay.net/api/first",
+                source_id="content-cost-test",
+            )
+        with pytest.raises(HsReplayScrapeDoBudgetError):
+            await _fetch_text_via_scrape_do(
+                "https://hsreplay.net/api/second",
+                source_id="content-cost-test",
+            )
+
+    with patch("app.hsreplay_client.scrape_url", scrape):
+        asyncio.run(run())
+
+    assert scrape.await_count == 1
+
+
+def test_scrape_do_success_reconciles_cost_before_final_url_validation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HS_HSREPLAY_SCRAPE_DO_MAX_REQUESTS", "10")
+    monkeypatch.setenv("HS_HSREPLAY_SCRAPE_DO_MAX_CREDITS", "5")
+    reset_hsreplay_refresh_state()
+    scrape = AsyncMock(
+        return_value=ScrapeDoScrape(
+            html='{"ok": true}',
+            status_code=200,
+            final_url="https://example.com/not-hsreplay",
+            request_cost=5,
+            credits_remaining=100,
+            super_proxy=False,
+        )
+    )
+
+    async def run() -> None:
+        with pytest.raises(ValueError, match="exact HSReplay HTTPS URL"):
+            await _fetch_text_via_scrape_do(
+                "https://hsreplay.net/api/first",
+                source_id="redirect-cost-test",
+            )
+        with pytest.raises(HsReplayScrapeDoBudgetError):
+            await _fetch_text_via_scrape_do(
+                "https://hsreplay.net/api/second",
+                source_id="redirect-cost-test",
             )
 
     with patch("app.hsreplay_client.scrape_url", scrape):

@@ -794,6 +794,14 @@ class SourceValidatorsTest(unittest.TestCase):
         self.assertFalse(report.ok)
         self.assertIn("bg_minions.missing_stats", {issue.code for issue in report.issues})
         minions[39].update({"impact": 0.2, "win_share": "50%", "popularity": "5%"})
+        for minion in minions[40:]:
+            minion["field_availability"] = {
+                field: {
+                    "available": False,
+                    "reason": "no_current_patch_aggregates",
+                }
+                for field in ("impact", "win_share", "popularity")
+            }
         self.assertTrue(
             validate_structured(
                 "hsreplay_battlegrounds_minions",

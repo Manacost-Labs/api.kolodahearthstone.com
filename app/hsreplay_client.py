@@ -6,6 +6,7 @@ import logging
 import re
 import threading
 import time
+from collections.abc import Mapping
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any
@@ -20,7 +21,6 @@ from .config import (
     flaresolverr_url,
     hsreplay_json_channels,
     hsreplay_markdown_channels,
-    hsreplay_scrape_do_max_concurrency,
     hsreplay_scrape_do_max_credits,
     hsreplay_scrape_do_max_requests,
     http_retry_attempts,
@@ -32,7 +32,7 @@ from .hsreplay_auth import hsreplay_cookies_for_fetch
 from .proxy_errors import ProxyPaymentRequiredError, proxy_tunnel_error
 from .refresh_context import get_cached_hsreplay_json, set_cached_hsreplay_json
 from .refresh_log import log_action
-from .scrape_do_backend import ScrapeDoRequestError, scrape_url
+from .scrape_do_backend import ScrapeDoContentError, ScrapeDoRequestError, scrape_url
 from .scrapers.http_resilience import (
     DEFAULT_BACKOFF_SECONDS,
     build_fetch_headers,
@@ -53,6 +53,10 @@ JINA_PREFIX = "https://r.jina.ai/"
 _COOKIE_NAME = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
 _SCRAPE_DO_STANDARD_CREDIT_RESERVATION = 1
 _SCRAPE_DO_MAX_RETRY_DELAY_SECONDS = 30.0
+_SAFE_TARGET_RESPONSE_HEADERS = frozenset(
+    {"date", "age", "etag", "last-modified", "cache-control", "cf-cache-status"}
+)
+_MAX_TARGET_HEADER_VALUE_LENGTH = 512
 
 
 class HsReplayScrapeDoBudgetError(RuntimeError):
@@ -79,12 +83,17 @@ class _HsReplayTransportState:
     scrape_do_requests_reserved: int = 0
     scrape_do_credits_reserved: int = 0
     json_cache_transports: dict[str, str] = field(default_factory=dict)
+    json_cache_target_headers: dict[str, dict[str, str]] = field(default_factory=dict)
     json_key_locks: dict[str, asyncio.Lock] = field(default_factory=dict)
     source_json_transports: dict[str, set[str]] = field(default_factory=dict)
+    pending_target_headers: dict[tuple[str, str], dict[str, str]] = field(
+        default_factory=dict
+    )
+    # Cost is authoritative only after the provider responds. Keep exactly one
+    # physical call in flight so concurrent responses cannot overshoot the
+    # refresh stop threshold together.
     scrape_do_semaphore: asyncio.Semaphore = field(
-        default_factory=lambda: asyncio.Semaphore(
-            hsreplay_scrape_do_max_concurrency()
-        )
+        default_factory=lambda: asyncio.Semaphore(1)
     )
 
 
@@ -181,6 +190,7 @@ def _record_json_transport(
     cache_key: str,
     source_id: str,
     transport_backend: str,
+    target_headers: dict[str, str] | None = None,
 ) -> None:
     state = _current_transport_state()
     with state.lock:
@@ -188,6 +198,56 @@ def _record_json_transport(
         state.source_json_transports.setdefault(source_id, set()).add(
             transport_backend
         )
+        if target_headers:
+            state.json_cache_target_headers[cache_key] = dict(target_headers)
+
+
+def _safe_target_headers(headers: Mapping[str, object] | None) -> dict[str, str]:
+    safe: dict[str, str] = {}
+    for raw_name, raw_value in (headers or {}).items():
+        name = str(raw_name).strip().lower()
+        if name not in _SAFE_TARGET_RESPONSE_HEADERS or not isinstance(raw_value, str):
+            continue
+        value = raw_value.strip()
+        if (
+            not value
+            or len(value) > _MAX_TARGET_HEADER_VALUE_LENGTH
+            or "\r" in value
+            or "\n" in value
+        ):
+            continue
+        safe[name] = value
+    return safe
+
+
+def _record_pending_target_headers(
+    source_id: str,
+    url: str,
+    headers: Mapping[str, object] | None,
+) -> None:
+    safe = _safe_target_headers(headers)
+    if not safe:
+        return
+    state = _current_transport_state()
+    with state.lock:
+        state.pending_target_headers[(source_id, url)] = safe
+
+
+def _take_pending_target_headers(
+    source_id: str,
+    url: str,
+) -> dict[str, str]:
+    state = _current_transport_state()
+    with state.lock:
+        return state.pending_target_headers.pop((source_id, url), {})
+
+
+def get_hsreplay_json_target_headers(cache_key: str) -> dict[str, str]:
+    """Return safe target headers retained for a successful refresh cache key."""
+
+    state = _current_transport_state()
+    with state.lock:
+        return dict(state.json_cache_target_headers.get(cache_key, {}))
 
 
 def _json_key_gate(cache_key: str) -> asyncio.Lock:
@@ -445,6 +505,13 @@ def _fetch_text_via_curl_cffi_sync(url: str, source_id: str | None) -> str:
                 )
             if response.status_code >= 400:
                 response.raise_for_status()
+            if source_id:
+                response_headers = getattr(response, "headers", None)
+                _record_pending_target_headers(
+                    source_id,
+                    url,
+                    response_headers if isinstance(response_headers, Mapping) else None,
+                )
             return response.text
         except ProxyPaymentRequiredError as exc:
             if proxies:
@@ -540,6 +607,13 @@ async def fetch_text_via_flaresolverr(url: str, *, source_id: str | None = None)
         raise RuntimeError(f"FlareSolverr origin returned HTTP {status}")
     if not text.strip():
         raise RuntimeError("FlareSolverr returned empty response")
+    if source_id:
+        solution_headers = solution.get("headers")
+        _record_pending_target_headers(
+            source_id,
+            url,
+            solution_headers if isinstance(solution_headers, Mapping) else None,
+        )
     log_action(
         "http.request.ok",
         source_id=source_id,
@@ -601,15 +675,27 @@ async def _fetch_text_via_scrape_do(url: str, *, source_id: str) -> str:
         try:
             async with _scrape_do_gate():
                 _reserve_scrape_do_request()
-                result = await scrape_url(
-                    url,
-                    render=False,
-                    super_proxy=False,
-                    headers=headers,
-                    forward_headers=False,
-                )
+                try:
+                    result = await scrape_url(
+                        url,
+                        render=False,
+                        super_proxy=False,
+                        headers=headers,
+                        forward_headers=False,
+                    )
+                except ScrapeDoRequestError as exc:
+                    _account_scrape_do_actual_cost(exc.request_cost)
+                    raise
+                except ScrapeDoContentError as exc:
+                    _account_scrape_do_actual_cost(exc.scrape.request_cost)
+                    raise
+                _account_scrape_do_actual_cost(result.request_cost)
             _assert_exact_hsreplay_https_url(result.final_url)
-            _account_scrape_do_actual_cost(result.request_cost)
+            _record_pending_target_headers(
+                source_id,
+                url,
+                getattr(result, "target_headers", {}),
+            )
             log_action(
                 "provider.scrape_do.hsreplay_json.transport_ok",
                 source_id=source_id,
@@ -909,6 +995,10 @@ async def _fetch_hsreplay_json_serialized(
                 source_id=source_id,
                 proxy_backed=proxy_backed,
             )
+            target_headers = _take_pending_target_headers(
+                source_id,
+                fetch_url,
+            )
             payload = extract_json_payload(body)
             if isinstance(payload, (dict, list)):
                 result = _payload_to_dict(payload)
@@ -919,6 +1009,7 @@ async def _fetch_hsreplay_json_serialized(
                         label,
                         proxy_backed=proxy_backed,
                     ),
+                    target_headers=target_headers,
                 )
                 log_action(
                     "api.route.ok",

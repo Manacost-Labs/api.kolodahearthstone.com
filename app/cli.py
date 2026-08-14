@@ -11,6 +11,7 @@ import uuid
 from collections.abc import Callable
 from pathlib import Path
 
+from .config import source_operationally_enabled
 from .exit_codes import ExitCode
 from .fetcher import refresh_sources
 from .source_state import SourceState
@@ -40,6 +41,7 @@ def _run_pipeline_command_with_telemetry(
     *,
     diagnostic: bool = False,
     refresh_window_id: str | None = None,
+    allow_scrape_source: bool = False,
 ) -> dict[str, object]:
     """Run one dedicated pipeline and persist its terminal outcome best-effort.
 
@@ -55,7 +57,10 @@ def _run_pipeline_command_with_telemetry(
             from .reliability_telemetry import record_terminal_results
 
             source = SOURCE_BY_ID.get(source_id)
-            if source is None or source.kind != "pipeline":
+            if source is None or (
+                source.kind != "pipeline"
+                and not (allow_scrape_source and source.kind == "scrape")
+            ):
                 raise ValueError(f"Unregistered pipeline source: {source_id}")
             if refresh_window_id is None:
                 record_terminal_results(run_id, [status])
@@ -247,6 +252,7 @@ def load_env_file(path: Path = DEFAULT_ENV_FILE) -> None:
                 "HS_API_",
                 "HS_BRIGHTDATA_",
                 "HS_FETCH_",
+                "HS_FIRESTONE_",
                 "HS_HSGURU_",
                 "HS_FLARESOLVERR_",
                 "HS_IPROYAL_",
@@ -934,20 +940,33 @@ def main(argv: list[str] | None = None) -> int:
             return int(ExitCode.DEGRADED)
         return 0 if result.get("ok") else 1
     if args.command == "refresh-bg-minions-db":
+        source_id = "hsreplay_battlegrounds_minions"
         if args.scheduled:
             from .parser_control import is_source_scheduled_enabled
 
-            if not is_source_scheduled_enabled("hsreplay_battlegrounds_minions"):
-                print(json.dumps({
-                    "ok": True,
-                    "skipped": True,
-                    "reason": "section_disabled",
-                    "source_id": "hsreplay_battlegrounds_minions",
-                }, ensure_ascii=False, indent=2))
+            if not is_source_scheduled_enabled(source_id):
+                result = _run_pipeline_command_with_telemetry(
+                    source_id,
+                    lambda: {
+                        "ok": True,
+                        "skipped": True,
+                        "reason": "section_disabled",
+                        "source_id": source_id,
+                    },
+                    allow_scrape_source=True,
+                )
+                print(json.dumps(result, ensure_ascii=False, indent=2))
                 return 0
         from .hsreplay_bg_minions_db import refresh_bg_minion_database_sync
 
-        result = refresh_bg_minion_database_sync()
+        if args.scheduled:
+            result = _run_pipeline_command_with_telemetry(
+                source_id,
+                refresh_bg_minion_database_sync,
+                allow_scrape_source=True,
+            )
+        else:
+            result = refresh_bg_minion_database_sync()
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0 if result.get("ok") else 1
     if args.command == "refresh-bg-hero-details":
@@ -1363,6 +1382,7 @@ def main(argv: list[str] | None = None) -> int:
                     source_id
                     for source_id, source in SOURCE_BY_ID.items()
                     if source.kind == "scrape"
+                    and source_operationally_enabled(source_id)
                 }
             if args.scheduled and expected_ids:
                 from .parser_control import filter_scheduled_source_ids

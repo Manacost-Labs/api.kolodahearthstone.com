@@ -36,6 +36,7 @@ def _arena_cards(count: int) -> list[dict]:
             "winrate_when_played": "53.0%",
             "in_runs": "1.0%",
             "avg_copies": 1.1,
+            "times_played": 10,
         }
         for idx in range(count)
     ]
@@ -451,7 +452,7 @@ class PostPatchPolicyTest(unittest.TestCase):
 
     def test_short_arena_list_accepts_numeric_zero_percentages(self) -> None:
         cards = _arena_cards(20)
-        cards[0]["deck_winrate"] = None
+        cards[0]["deck_winrate"] = 0.0
         cards[0]["win_rate"] = 0.0
         cards[0]["pick_rate"] = 0
 

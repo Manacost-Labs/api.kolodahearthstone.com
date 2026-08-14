@@ -11,10 +11,48 @@ from unittest.mock import AsyncMock, patch
 
 from app import cli
 from app.resource_locks import ResourceLocked
-from app.sources import Source
+from app.sources import SOURCES, Source
 
 
 class CliTest(unittest.TestCase):
+    def test_env_loader_accepts_firestone_authorization_opt_in(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "app.env"
+            path.write_text(
+                "HS_FIRESTONE_STANDARD_AUTHORIZED=true\n",
+                encoding="utf-8",
+            )
+            with patch.dict(
+                os.environ,
+                {"HS_FIRESTONE_STANDARD_AUTHORIZED": "false"},
+                clear=True,
+            ):
+                cli.load_env_file(path)
+                self.assertEqual(
+                    os.environ.get("HS_FIRESTONE_STANDARD_AUTHORIZED"),
+                    "true",
+                )
+
+    def test_manual_refresh_all_does_not_require_disabled_firestone(self) -> None:
+        active_source_ids = [
+            source.id
+            for source in SOURCES
+            if source.kind == "scrape" and source.id != "firestone_standard"
+        ]
+        results = [
+            {"source_id": source_id, "state": "ok"}
+            for source_id in active_source_ids
+        ]
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch("app.cli.load_env_file"),
+            patch("app.cli.refresh_sources", AsyncMock(return_value=results)),
+            redirect_stdout(io.StringIO()),
+        ):
+            exit_code = cli.main(["refresh", "--all", "--require-all-ok"])
+
+        self.assertEqual(exit_code, 0)
+
     def test_brightdata_usage_bootstrap_uses_configured_limit(self) -> None:
         snapshot = type(
             "Snapshot",

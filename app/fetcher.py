@@ -47,6 +47,7 @@ from .config import (
     refresh_parallel_stagger_min,
     request_delay_seconds,
     request_timeout_seconds,
+    source_operationally_enabled,
     user_agent,
 )
 from .dataset_regression import check_dataset_regression, estimate_metric_count
@@ -868,6 +869,18 @@ def _status_payload(
         payload["quality"] = quality
         if quality.get("quality_score") is not None:
             payload["quality_score"] = quality.get("quality_score")
+        if quality.get("metric_availability_score") is not None:
+            payload["metric_availability_score"] = quality.get(
+                "metric_availability_score"
+            )
+        if quality.get("retrieval_completeness_score") is not None:
+            payload["retrieval_completeness_score"] = quality.get(
+                "retrieval_completeness_score"
+            )
+        if quality.get("retrieval_complete") is None and "retrieval_complete" in quality:
+            payload["retrieval_complete"] = None
+        elif isinstance(quality.get("retrieval_complete"), bool):
+            payload["retrieval_complete"] = quality["retrieval_complete"]
         if quality.get("rows_total") is not None:
             payload["rows_total"] = quality.get("rows_total")
     return payload
@@ -1010,6 +1023,15 @@ def _preserve_cached_ok_status(source: Source, failed_status: dict[str, Any]) ->
             else None
         )
     )
+    try:
+        cached_quality = quality_metrics(source, parsed)
+    except Exception as exc:
+        logger.warning(
+            "Could not calculate cached publication quality for %s: %s",
+            source.id,
+            exc,
+        )
+        cached_quality = None
     status = _status_payload(
         source,
         SourceState.OK,
@@ -1020,6 +1042,7 @@ def _preserve_cached_ok_status(source: Source, failed_status: dict[str, Any]) ->
         backend=dataset.get("backend"),
         transport_backend=transport_backend,
         used_residential_proxy=used_residential_proxy,
+        quality=cached_quality,
         detail="Serving cached dataset; latest live refresh failed.",
     )
     _attach_provisional_status(status, _provisional_metadata_from_parsed(parsed))
@@ -1038,6 +1061,8 @@ def _preserve_cached_ok_status(source: Source, failed_status: dict[str, Any]) ->
     status["last_refresh_error"] = (
         failed_status.get("detail") or failed_status.get("error") or "live refresh failed"
     )
+    if isinstance(failed_status.get("quality"), dict):
+        status["last_refresh_quality"] = dict(failed_status["quality"])
     if isinstance(failed_status.get("ai_review"), dict):
         status["latest_ai_review"] = failed_status["ai_review"]
     if isinstance(failed_status.get("ai_diagnosis"), dict):
@@ -3514,24 +3539,29 @@ async def _refresh_sources_unlocked(
     )
 
     canonical_scrape_source_ids = {
-        source.id for source in SOURCES if source.kind == "scrape"
+        source.id
+        for source in SOURCES
+        if source.kind == "scrape" and source_operationally_enabled(source.id)
     }
-    selected = list(SOURCES)
+    selected = [
+        source for source in SOURCES if source_operationally_enabled(source.id)
+    ]
     if source_ids:
         selected = [SOURCE_BY_ID[source_id] for source_id in source_ids]
 
     if respect_section_controls:
-        from .parser_control import enabled_section_ids
-        from .parser_control_registry import SOURCE_TO_SECTION
+        from .parser_control import filter_scheduled_source_ids
 
-        enabled_sections = enabled_section_ids()
+        enabled_source_ids = set(
+            filter_scheduled_source_ids([source.id for source in selected])
+        )
         disabled = [
             source.id for source in selected
-            if SOURCE_TO_SECTION.get(source.id) not in enabled_sections
+            if source.id not in enabled_source_ids
         ]
         selected = [
             source for source in selected
-            if SOURCE_TO_SECTION.get(source.id) in enabled_sections
+            if source.id in enabled_source_ids
         ]
         if disabled:
             log_action(

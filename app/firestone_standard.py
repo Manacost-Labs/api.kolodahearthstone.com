@@ -8,6 +8,8 @@ from typing import Any
 
 import httpx
 
+from .completeness import COMPLETENESS_SCHEMA_VERSION, row_retrieval_evidence
+from .config import source_operationally_enabled
 from .firestone_comps import _get_static_json
 from .sources import Source
 
@@ -56,24 +58,38 @@ def _string_list(value: Any) -> list[str]:
     return [item.strip() for item in value if isinstance(item, str) and item.strip()]
 
 
+def _required_string_list(value: Any, *, field: str) -> list[str]:
+    if not isinstance(value, list):
+        raise TypeError(f"{field} must be a list")
+    if any(not isinstance(item, str) or not item.strip() for item in value):
+        raise ValueError(f"{field} must contain non-empty card ids")
+    return [item.strip() for item in value]
+
+
 def _non_negative_int(value: Any) -> int | None:
-    if isinstance(value, bool):
+    if isinstance(value, bool) or not isinstance(value, int):
         return None
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return None
-    return parsed if parsed >= 0 else None
+    return value if value >= 0 else None
 
 
 def _rate(value: Any) -> float | None:
-    if isinstance(value, bool):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    try:
-        parsed = float(value)
-    except (TypeError, ValueError):
-        return None
-    return parsed if math.isfinite(parsed) else None
+    parsed = float(value)
+    return parsed if math.isfinite(parsed) and 0.0 <= parsed <= 1.0 else None
+
+
+def _require_unique_identity(
+    rows: list[dict[str, Any]],
+    *,
+    field: str,
+    collection: str,
+) -> None:
+    identities = [row.get(field) for row in rows]
+    if any(value in (None, "") for value in identities):
+        raise ValueError(f"Firestone {collection} contains a missing {field}")
+    if len(set(identities)) != len(identities):
+        raise ValueError(f"Firestone {collection} contains duplicate {field}")
 
 
 def _metadata(payload: dict[str, Any]) -> dict[str, Any]:
@@ -99,7 +115,10 @@ def _normalize_deck(row: dict[str, Any]) -> dict[str, Any]:
         "games": _non_negative_int(row.get("totalGames")),
         "wins": _non_negative_int(row.get("totalWins")),
         "winrate": _rate(row.get("winrate")),
-        "core_cards": _string_list(row.get("archetypeCoreCards")),
+        "core_cards": _required_string_list(
+            row.get("archetypeCoreCards"),
+            field="archetypeCoreCards",
+        ),
         "card_variations": {
             "added": _string_list(variations.get("added")),
             "removed": _string_list(variations.get("removed")),
@@ -120,14 +139,68 @@ def _normalize_archetype(row: dict[str, Any]) -> dict[str, Any]:
         "games": _non_negative_int(row.get("totalGames")),
         "wins": _non_negative_int(row.get("totalWins")),
         "winrate": _rate(row.get("winrate")),
-        "core_cards": _string_list(row.get("coreCards")),
+        "core_cards": _required_string_list(
+            row.get("coreCards"),
+            field="coreCards",
+        ),
         "hero_card_ids": _string_list(row.get("heroCardIds")),
         "format": str(row.get("format") or "").strip() or None,
     }
 
 
+def _annotate_core_card_availability(
+    decks: list[dict[str, Any]],
+    archetypes: list[dict[str, Any]],
+) -> None:
+    observed_archetype_ids = {
+        row.get("archetype_id")
+        for row in decks
+        if row.get("archetype_id") is not None
+    }
+    for row in decks:
+        has_core_cards = bool(row.get("core_cards"))
+        row["field_availability"] = {
+            "core_cards": {
+                "available": has_core_cards,
+                "reason": (
+                    None
+                    if has_core_cards
+                    else "empty_core_cards_without_deterministic_explanation"
+                ),
+            }
+        }
+    for row in archetypes:
+        has_core_cards = bool(row.get("core_cards"))
+        no_observed_cluster = row.get("archetype_id") not in observed_archetype_ids
+        archetype_name = str(row.get("archetype_name") or "").strip().casefold()
+        player_class = str(row.get("player_class") or "").strip().casefold()
+        generic_class_bucket = bool(archetype_name) and archetype_name == player_class
+        explained_empty = (
+            not has_core_cards and generic_class_bucket and no_observed_cluster
+        )
+        row["field_availability"] = {
+            "core_cards": {
+                "available": has_core_cards,
+                "reason": (
+                    None
+                    if has_core_cards
+                    else (
+                        "generic_class_bucket_without_observed_deck_cluster"
+                        if explained_empty
+                        else "empty_core_cards_without_deterministic_explanation"
+                    )
+                ),
+            }
+        }
+
+
 async def fetch_firestone_standard(source: Source) -> dict[str, Any]:
     """Fetch the Standard Legend last-patch deck and archetype overviews."""
+    if not source_operationally_enabled(source.id):
+        raise PermissionError(
+            "Firestone Standard requires written authorization and explicit "
+            "HS_FIRESTONE_STANDARD_AUTHORIZED=true opt-in"
+        )
     headers = {
         "accept": "application/json,text/plain,*/*",
         "user-agent": "KolodaHS MetaCrawler/1.0 (+https://kolodahs.ru)",
@@ -149,13 +222,33 @@ async def fetch_firestone_standard(source: Source) -> dict[str, Any]:
         archetypes_response,
         label="archetypes",
     )
-    decks = [_normalize_deck(row) for row in _object_rows(decks_payload, "deckStats")]
+    raw_decks = _object_rows(decks_payload, "deckStats")
+    raw_archetypes = _object_rows(archetypes_payload, "archetypeStats")
+    decks = [_normalize_deck(row) for row in raw_decks]
     archetypes = [
         _normalize_archetype(row)
-        for row in _object_rows(archetypes_payload, "archetypeStats")
+        for row in raw_archetypes
     ]
+    _require_unique_identity(
+        decks,
+        field="decklist",
+        collection="deckStats",
+    )
+    _require_unique_identity(
+        archetypes,
+        field="archetype_id",
+        collection="archetypeStats",
+    )
+    _annotate_core_card_availability(decks, archetypes)
     return {
         "type": "firestone_standard",
+        "completeness_schema_version": COMPLETENESS_SCHEMA_VERSION,
+        "row_retrieval": row_retrieval_evidence(
+            raw_rows=len(raw_decks) + len(raw_archetypes),
+            eligible_rows=len(raw_decks) + len(raw_archetypes),
+            normalized_rows=len(decks) + len(archetypes),
+            scope="decks+archetypes",
+        ),
         "format": "standard",
         "rank_bracket": "legend",
         "time_period": "last-patch",

@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import httpx
+from fastapi.testclient import TestClient
 
 from app.api_only_sources import blocks_browser_fallback
 from app.dataset_regression import (
@@ -16,13 +17,18 @@ from app.dataset_regression import (
     estimate_filled_metric_count,
     estimate_metric_count,
 )
+from app.demo import build_demo_view
 from app.fetch_routes import _PROXYLESS_API_SOURCE_IDS
-from app.fetcher import _fetch_hsreplay_api_source
+from app.fetcher import _fetch_hsreplay_api_source, _refresh_sources_unlocked
 from app.firestone_standard import (
     FIRESTONE_STANDARD_ARCHETYPES_URL,
     FIRESTONE_STANDARD_DECKS_URL,
+    _non_negative_int,
+    _rate,
     fetch_firestone_standard,
 )
+from app.main import app
+from app.parser_control import filter_scheduled_source_ids, resolve_public_dataset
 from app.parser_control_registry import SOURCE_LABELS_RU, SOURCE_TO_SECTION
 from app.source_contracts import contract_quality_report, get_contract
 from app.source_tiers import LIGHT_API_IDS
@@ -95,6 +101,16 @@ def _normalized_payload(*, deck_count: int = 20, archetype_count: int = 20) -> d
 
 
 class FirestoneStandardFetchTest(unittest.IsolatedAsyncioTestCase):
+    def test_raw_numeric_normalizers_do_not_coerce_schema_drift(self) -> None:
+        self.assertIsNone(_non_negative_int(1.5))
+        self.assertIsNone(_non_negative_int("1"))
+        self.assertIsNone(_non_negative_int(True))
+        self.assertEqual(_non_negative_int(1), 1)
+        self.assertIsNone(_rate(1.01))
+        self.assertIsNone(_rate(float("nan")))
+        self.assertIsNone(_rate("0.5"))
+        self.assertEqual(_rate(0.5), 0.5)
+
     async def test_fetches_both_official_snapshots_and_normalizes_stable_schema(
         self,
     ) -> None:
@@ -108,7 +124,13 @@ class FirestoneStandardFetchTest(unittest.IsolatedAsyncioTestCase):
         )
         fetch = AsyncMock(side_effect=[decks, archetypes])
 
-        with patch("app.firestone_standard._get_static_json", fetch):
+        with (
+            patch.dict(
+                "os.environ",
+                {"HS_FIRESTONE_STANDARD_AUTHORIZED": "true"},
+            ),
+            patch("app.firestone_standard._get_static_json", fetch),
+        ):
             result = await fetch_firestone_standard(SOURCE)
 
         self.assertEqual(
@@ -116,6 +138,10 @@ class FirestoneStandardFetchTest(unittest.IsolatedAsyncioTestCase):
             {FIRESTONE_STANDARD_DECKS_URL, FIRESTONE_STANDARD_ARCHETYPES_URL},
         )
         self.assertEqual(result["type"], "firestone_standard")
+        self.assertEqual(result["completeness_schema_version"], 1)
+        self.assertEqual(result["row_retrieval"]["raw_rows"], 4)
+        self.assertEqual(result["row_retrieval"]["normalized_rows"], 4)
+        self.assertEqual(result["row_retrieval"]["unexplained_drops"], 0)
         self.assertEqual(result["total_decks"], 2)
         self.assertEqual(result["total_archetypes"], 2)
         self.assertEqual(result["metadata"]["decks"]["data_points"], 55_393)
@@ -133,6 +159,93 @@ class FirestoneStandardFetchTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["_fetch_backend"], "proxyless_direct")
         self.assertTrue(validate_structured_schema(result)["validated"])
 
+    async def test_rejects_duplicate_dataset_identities(self) -> None:
+        decks_payload = _fixture("firestone_standard_decks.json")
+        archetypes_payload = _fixture("firestone_standard_archetypes.json")
+        decks_payload["deckStats"][1]["decklist"] = decks_payload["deckStats"][0][
+            "decklist"
+        ]
+        fetch = AsyncMock(
+            side_effect=[
+                httpx.Response(200, content=json.dumps(decks_payload).encode()),
+                httpx.Response(200, content=json.dumps(archetypes_payload).encode()),
+            ]
+        )
+
+        with (
+            patch.dict(
+                "os.environ",
+                {"HS_FIRESTONE_STANDARD_AUTHORIZED": "true"},
+            ),
+            patch("app.firestone_standard._get_static_json", fetch),
+            self.assertRaisesRegex(ValueError, "duplicate decklist"),
+        ):
+            await fetch_firestone_standard(SOURCE)
+
+    async def test_default_disabled_fails_before_any_network_request(self) -> None:
+        fetch = AsyncMock()
+
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch("app.firestone_standard._get_static_json", fetch),
+            self.assertRaisesRegex(PermissionError, "written authorization"),
+        ):
+            await fetch_firestone_standard(SOURCE)
+
+        fetch.assert_not_awaited()
+
+    async def test_scheduled_refresh_skips_disabled_source_before_dispatch(
+        self,
+    ) -> None:
+        dispatch = AsyncMock()
+
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch(
+                "app.preflight.ensure_refresh_preflight",
+                AsyncMock(return_value={"ok": True}),
+            ),
+            patch(
+                "app.cards_index.prefetch_hearthstonejson_async",
+                AsyncMock(),
+            ),
+            patch("app.fetcher._fetch_hsreplay_api_source", dispatch),
+            patch("app.fetcher._record_reliability_results_best_effort"),
+            patch("app.fetcher._flush_deferred_ai_jobs", AsyncMock()),
+            patch("app.fetcher.log_action"),
+        ):
+            result = await _refresh_sources_unlocked(
+                [SOURCE.id],
+                respect_section_controls=True,
+            )
+
+        self.assertEqual(result, [])
+        dispatch.assert_not_awaited()
+
+    async def test_implicit_manual_refresh_all_excludes_disabled_source(self) -> None:
+        dispatch = AsyncMock()
+
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch("app.fetcher.SOURCES", (SOURCE,)),
+            patch(
+                "app.preflight.ensure_refresh_preflight",
+                AsyncMock(return_value={"ok": True}),
+            ),
+            patch(
+                "app.cards_index.prefetch_hearthstonejson_async",
+                AsyncMock(),
+            ),
+            patch("app.fetcher._fetch_hsreplay_api_source", dispatch),
+            patch("app.fetcher._record_reliability_results_best_effort"),
+            patch("app.fetcher._flush_deferred_ai_jobs", AsyncMock()),
+            patch("app.fetcher.log_action"),
+        ):
+            result = await _refresh_sources_unlocked(None)
+
+        self.assertEqual(result, [])
+        dispatch.assert_not_awaited()
+
     async def test_fetch_dispatch_publishes_firestone_api_backend(self) -> None:
         structured = _normalized_payload()
         with patch(
@@ -149,6 +262,68 @@ class FirestoneStandardFetchTest(unittest.IsolatedAsyncioTestCase):
 
 
 class FirestoneStandardIntegrationTest(unittest.TestCase):
+    def test_scheduled_selection_requires_explicit_authorized_opt_in(self) -> None:
+        selected = [SOURCE.id, "hsreplay_arena_cards_advanced"]
+
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(
+                filter_scheduled_source_ids(selected),
+                ["hsreplay_arena_cards_advanced"],
+            )
+        with patch.dict(
+            "os.environ",
+            {"HS_FIRESTONE_STANDARD_AUTHORIZED": "true"},
+            clear=True,
+        ):
+            self.assertEqual(filter_scheduled_source_ids(selected), selected)
+
+    def test_publication_gate_hides_old_cache_until_explicit_opt_in(self) -> None:
+        cached = {
+            "source_id": SOURCE.id,
+            "fetched_at": "2026-08-13T00:00:00+00:00",
+            "data": {"structured": _normalized_payload()},
+        }
+
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertIsNone(resolve_public_dataset(SOURCE.id, cached))
+            with (
+                patch("app.main.load_dataset", return_value=cached),
+                patch("app.public_cache.load_dataset", return_value=cached),
+            ):
+                response = TestClient(app).get(f"/datasets/{SOURCE.id}?policy=disabled")
+            self.assertEqual(response.status_code, 404)
+
+        with patch.dict(
+            "os.environ",
+            {"HS_FIRESTONE_STANDARD_AUTHORIZED": "true"},
+            clear=True,
+        ):
+            self.assertIs(resolve_public_dataset(SOURCE.id, cached), cached)
+            with (
+                patch("app.main.load_dataset", return_value=cached),
+                patch("app.public_cache.load_dataset", return_value=cached),
+            ):
+                response = TestClient(app).get(f"/datasets/{SOURCE.id}?policy=enabled")
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["source_id"], SOURCE.id)
+
+    def test_disabled_source_does_not_leak_old_cache_through_demo(self) -> None:
+        cached = {
+            "source_id": SOURCE.id,
+            "fetched_at": "2026-08-13T00:00:00+00:00",
+            "data": {"structured": _normalized_payload()},
+        }
+
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch("app.demo.load_dataset", return_value=cached),
+            patch("app.demo.load_status", return_value={"state": "ok"}),
+        ):
+            result = build_demo_view(SOURCE.id)
+
+        self.assertFalse(result["ok"])
+        self.assertNotIn("view", result)
+
     def test_source_is_api_only_proxyless_and_admin_visible(self) -> None:
         self.assertIn(SOURCE.id, LIGHT_API_IDS)
         self.assertIn(SOURCE.id, _PROXYLESS_API_SOURCE_IDS)

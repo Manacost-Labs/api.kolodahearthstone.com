@@ -1321,6 +1321,66 @@ class RefreshStabilityTest(unittest.TestCase):
                 self.assertFalse(out["fresh_candidate_published"])
                 self.assertEqual(load_status(source.id), out)
 
+    def test_preserved_lkg_reports_cached_quality_separately_from_failed_candidate(
+        self,
+    ) -> None:
+        source = Source(
+            id="hsreplay_arena_cards_advanced",
+            site="hsreplay",
+            category="arena",
+            url="https://hsreplay.net/arena/cards/",
+        )
+        cached = {
+            "fetched_at": "2026-08-14T00:00:00+00:00",
+            "backend": "hsreplay_api",
+            "data": {
+                "structured": {
+                    "type": "arena_card_tiers",
+                    "cards": [{"name": "Cached card"}],
+                }
+            },
+        }
+        cached_quality = {
+            "quality_score": 0.97,
+            "metric_availability_score": 0.97,
+            "retrieval_completeness_score": None,
+            "retrieval_complete": None,
+        }
+        failed_candidate_quality = {
+            "quality_score": 0.42,
+            "retrieval_completeness_score": 0.2,
+            "retrieval_complete": False,
+        }
+        failed = {
+            "state": "quality_error",
+            "fetched_at": "2026-08-14T01:00:00+00:00",
+            "detail": "candidate incomplete",
+            "quality": failed_candidate_quality,
+        }
+        gate = SimpleNamespace(ok=True, reason="ok", extra={})
+
+        with (
+            patch(
+                "app.parser_control.load_resolved_public_dataset",
+                return_value=cached,
+            ),
+            patch(
+                "app.fetcher.validate_existing_publication_for_serving",
+                return_value=gate,
+            ),
+            patch("app.fetcher.quality_metrics", return_value=cached_quality),
+            patch("app.fetcher.save_status"),
+            patch("app.fetcher.log_action"),
+        ):
+            out = _preserve_cached_ok_status(source, failed)
+
+        self.assertIsNotNone(out)
+        assert out is not None
+        self.assertEqual(out["quality"], cached_quality)
+        self.assertEqual(out["quality_score"], 0.97)
+        self.assertIsNone(out["retrieval_complete"])
+        self.assertEqual(out["last_refresh_quality"], failed_candidate_quality)
+
     def test_preserved_lkg_keeps_bounded_upstream_failure_metadata(self) -> None:
         source = Source(
             id="vicious_syndicate_radars",

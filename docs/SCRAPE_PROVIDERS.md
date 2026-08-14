@@ -163,8 +163,8 @@ docker exec hs-data-api python -m app.cli brightdata-init-usage --billed-request
 | `HS_SCRAPE_DO_TIMEOUT_SECONDS` | Wall timeout Scrape.do, `120`. |
 | `HS_HSREPLAY_JSON_CHANNELS` | Каскад HSReplay JSON; default `flaresolverr,scrape_do,curl_cffi`: бесплатный локальный solver, затем оплаченная подписка Scrape.do, затем residential `curl_cffi`. Предпочтения контракта идут первыми, затем добавляются настроенные каналы без дублей. |
 | `HS_HSREPLAY_SCRAPE_DO_MAX_REQUESTS` | Атомарный лимит зарезервированных HSReplay JSON-вызовов Scrape.do на refresh, default `120`. Этого достаточно для текущего полного набора архетипов с запасом. |
-| `HS_HSREPLAY_SCRAPE_DO_MAX_CREDITS` | Атомарный credit ceiling HSReplay JSON на refresh, default `160`. Ошибочные и отклонённые вызовы не возвращают резерв. |
-| `HS_HSREPLAY_SCRAPE_DO_MAX_CONCURRENCY` | Параллельные HSReplay JSON-вызовы Scrape.do, default `2`. |
+| `HS_HSREPLAY_SCRAPE_DO_MAX_CREDITS` | Атомарный stop threshold HSReplay JSON на refresh, default `160`. Ошибочные и отклонённые вызовы не возвращают резерв. Фактическая цена известна только из ответа, поэтому один уже выполненный вызов может превысить threshold; следующий вызов будет заблокирован. |
+| `HS_HSREPLAY_SCRAPE_DO_MAX_CONCURRENCY` | Устаревшая настройка совместимости. Физические HSReplay JSON-вызовы принудительно сериализованы (`1` in-flight), чтобы несколько ответов не превышали credit threshold одновременно. |
 | `HS_FIRECRAWL_API_KEYS` | Ротируемый пул Firecrawl. |
 | `HS_FIRECRAWL_KEY_ROTATION_CREDITS` | Локальный credit ceiling на ключ. |
 | `HS_SCRAPFLY_API_KEYS` | Ротируемый пул Scrapfly. |

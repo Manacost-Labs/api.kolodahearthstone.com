@@ -17,7 +17,7 @@ from typing import Any
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
-from .config import data_dir
+from .config import data_dir, source_operationally_enabled
 from .parser_control_registry import (
     EARLY_SOURCE_IDS,
     SECTION_BY_ID,
@@ -1450,7 +1450,11 @@ def is_source_scheduled_enabled(
     source_id: str, *, store: ParserControlStore | None = None
 ) -> bool:
     section_id = SOURCE_TO_SECTION.get(source_id)
-    return bool(section_id and section_id in enabled_section_ids(store=store))
+    return bool(
+        source_operationally_enabled(source_id)
+        and section_id
+        and section_id in enabled_section_ids(store=store)
+    )
 
 
 def filter_scheduled_source_ids(
@@ -1463,7 +1467,8 @@ def filter_scheduled_source_ids(
     return [
         source_id
         for source_id in candidates
-        if SOURCE_TO_SECTION.get(source_id) in enabled
+        if source_operationally_enabled(source_id)
+        and SOURCE_TO_SECTION.get(source_id) in enabled
     ]
 
 
@@ -1488,6 +1493,8 @@ def resolve_public_dataset(
     store: ParserControlStore | None = None,
     effective_mode: str | None = None,
 ) -> dict[str, Any] | None:
+    if not source_operationally_enabled(source_id):
+        return None
     if not _is_provisional_dataset(dataset):
         return dataset
     mode = effective_mode or effective_publication_mode(

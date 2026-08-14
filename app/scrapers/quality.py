@@ -68,6 +68,24 @@ def quality_metrics(source: Source, parsed: dict[str, Any]) -> dict[str, Any]:
     radars = structured.get("radars") or []
     contract_report = contract_quality_report(source.id, structured) if structured else {}
     semantic_report = validate_structured(source.id, structured) if structured else None
+    upstream_freshness = structured.get("upstream_freshness")
+    safe_freshness: dict[str, Any] | None = None
+    if isinstance(upstream_freshness, dict):
+        safe_freshness = {
+            field: upstream_freshness.get(field)
+            for field in (
+                "status",
+                "reason",
+                "observed_at",
+                "age_seconds",
+                "evidence",
+                "body_as_of",
+                "meta_period_id",
+                "selected_params",
+                "filters_match",
+            )
+            if field in upstream_freshness
+        }
     return {
         "table_rows": sum(len(t.get("objects") or t.get("rows") or []) for t in tables),
         "deck_codes": len(parsed.get("deck_codes") or []),
@@ -84,6 +102,24 @@ def quality_metrics(source: Source, parsed: dict[str, Any]) -> dict[str, Any]:
         "rows_total": contract_report.get("rows_total"),
         "critical_fields": contract_report.get("critical_fields"),
         "quality_score": contract_report.get("quality_score"),
+        "metric_availability_score": contract_report.get(
+            "metric_availability_score"
+        ),
+        "retrieval_completeness_score": contract_report.get(
+            "retrieval_completeness_score"
+        ),
+        "retrieval_complete": contract_report.get("retrieval_complete"),
+        "completeness_schema_version": contract_report.get(
+            "completeness_schema_version"
+        ),
+        "upstream_freshness": safe_freshness,
+        "upstream_freshness_status": contract_report.get(
+            "upstream_freshness_status"
+        ),
+        "population_completeness": contract_report.get(
+            "population_completeness"
+        ),
+        "row_retrieval": contract_report.get("row_retrieval"),
         "missing_critical_fields": contract_report.get("warnings"),
         "semantic_score": semantic_report.score if semantic_report else None,
         "semantic_metrics": semantic_report.metrics if semantic_report else None,

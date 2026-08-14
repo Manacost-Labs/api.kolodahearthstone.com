@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
-from .config import data_dir
+from .config import data_dir, source_operationally_enabled
 from .hsreplay_card_periods import HSREPLAY_CARD_PERIOD_SOURCE_IDS
 from .parser_control_registry import SOURCE_TO_SECTION
 from .source_tiers import LIGHT_API_IDS, MEDIUM_API_IDS
@@ -858,7 +858,11 @@ def build_schedule_inventory(
     runtime_complete = runtime_probe.get("status") == "ok"
     schedule_rows: list[dict[str, Any]] = []
     for spec in _SCHEDULES:
-        source_ids = sorted(spec.source_ids)
+        source_ids = sorted(
+            source_id
+            for source_id in spec.source_ids
+            if source_operationally_enabled(source_id)
+        )
         nominal_next_run = _next_run(spec, at=moment)
         runtime = runtime_units.get(spec.systemd_unit)
         if not isinstance(runtime, dict):

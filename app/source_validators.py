@@ -21,7 +21,13 @@ from .post_patch_policy import (
     policy_for,
 )
 from .quality_thresholds import threshold_for
-from .source_contracts import is_decodable_deck_code
+from .source_contracts import (
+    HSREPLAY_FRESHNESS_GATED_SOURCE_IDS,
+    HSREPLAY_UNVERIFIED_PUBLISH_REASONS,
+    field_availability_status,
+    is_decodable_deck_code,
+    uses_completeness_schema,
+)
 from .trinket_slices import TRINKET_SLICE_SOURCE_IDS
 
 ARENA_PERCENT_FIELDS = (
@@ -68,6 +74,54 @@ def _parse_arena_percent(value: Any) -> float | None:
     if isinstance(value, (int, float)):
         return float(value)
     return parse_percent(value)
+
+
+def _is_valid_arena_percent(value: Any) -> bool:
+    parsed = _parse_arena_percent(value)
+    return parsed is not None and math.isfinite(parsed) and 0.0 <= parsed <= 100.0
+
+
+def _is_finite_numeric(value: Any) -> bool:
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(float(value))
+    )
+
+
+def _validate_hsreplay_publication_freshness(
+    report: ValidationReport,
+    source_id: str,
+    structured: dict[str, Any],
+) -> None:
+    if (
+        source_id not in HSREPLAY_FRESHNESS_GATED_SOURCE_IDS
+        or not uses_completeness_schema(structured)
+    ):
+        return
+    freshness = structured.get("upstream_freshness")
+    if not isinstance(freshness, dict):
+        return  # The structured schema owns missing/malformed evidence.
+    status = freshness.get("status")
+    reason = freshness.get("reason")
+    if status == "stale":
+        report.add_issue(
+            "hsreplay_upstream.stale",
+            "HSReplay upstream snapshot is known stale",
+            field="upstream_freshness",
+        )
+    elif status == "unknown" and reason not in HSREPLAY_UNVERIFIED_PUBLISH_REASONS:
+        report.add_issue(
+            "hsreplay_upstream.invalid_evidence",
+            f"HSReplay freshness evidence failed closed ({reason or 'unknown_reason'})",
+            field="upstream_freshness",
+        )
+    elif status not in {"fresh", "unknown"}:
+        report.add_issue(
+            "hsreplay_upstream.invalid_status",
+            "HSReplay freshness status is invalid",
+            field="upstream_freshness.status",
+        )
 
 
 @dataclass(frozen=True)
@@ -707,14 +761,95 @@ def _validate_arena_winning_decks(_source_id: str, structured: dict[str, Any]) -
     return report
 
 
-def _validate_arena_legendary_groups(_source_id: str, structured: dict[str, Any]) -> ValidationReport:
+def _validate_arena_legendary_groups(source_id: str, structured: dict[str, Any]) -> ValidationReport:
     report = ValidationReport()
+    strict_completeness = uses_completeness_schema(structured)
     groups = [row for row in (structured.get("groups") or []) if isinstance(row, dict)]
     with_key_card = sum(1 for row in groups if row.get("key_card"))
     with_pick = sum(1 for row in groups if row.get("pick_rate") not in (None, ""))
     with_offer = sum(1 for row in groups if row.get("offer_rate") not in (None, ""))
     with_score = sum(1 for row in groups if row.get("score") is not None)
     with_winrate = sum(1 for row in groups if row.get("winrate") not in (None, ""))
+    winrate_statuses = [
+        field_availability_status(
+            source_id,
+            row,
+            "winrate",
+            require_descriptor=strict_completeness,
+        )
+        for row in groups
+    ]
+    unexplained_winrates = sum(
+        1
+        for status, _reason in winrate_statuses
+        if status in {"unexplained_missing", "availability_conflict"}
+    )
+    incoherent_zero_pick_reasons = sum(
+        1
+        for row, (status, _reason) in zip(groups, winrate_statuses, strict=True)
+        if status == "explained_unavailable"
+        and _parse_arena_percent(row.get("pick_rate")) != 0.0
+    )
+    by_class_unexplained_winrates = 0
+    by_class_incoherent_zero_pick_reasons = 0
+    invalid_metrics = 0
+    invalid_package_cards = 0
+    if strict_completeness:
+        for group in groups:
+            cards = group.get("cards")
+            if (
+                not isinstance(cards, list)
+                or not cards
+                or any(
+                    not isinstance(card, dict)
+                    or not isinstance(card.get("card_id"), str)
+                    or not card["card_id"].strip()
+                    or isinstance(card.get("count"), bool)
+                    or not isinstance(card.get("count"), int)
+                    or card["count"] <= 0
+                    for card in cards
+                )
+            ):
+                invalid_package_cards += 1
+            if (
+                (group.get("winrate") is not None and not _is_valid_arena_percent(group.get("winrate")))
+                or not _is_valid_arena_percent(group.get("pick_rate"))
+                or not _is_valid_arena_percent(group.get("offer_rate"))
+                or not _is_finite_numeric(group.get("score"))
+            ):
+                invalid_metrics += 1
+            by_class = group.get("by_class")
+            if not isinstance(by_class, dict) or not by_class:
+                by_class_unexplained_winrates += 1
+                continue
+            for metrics in by_class.values():
+                if not isinstance(metrics, dict):
+                    by_class_unexplained_winrates += 1
+                    invalid_metrics += 1
+                    continue
+                if (
+                    (
+                        metrics.get("winrate") is not None
+                        and not _is_valid_arena_percent(metrics.get("winrate"))
+                    )
+                    or not _is_valid_arena_percent(metrics.get("pick_rate"))
+                    or not _is_valid_arena_percent(metrics.get("offer_rate"))
+                    or not _is_finite_numeric(metrics.get("score"))
+                ):
+                    invalid_metrics += 1
+                status, _reason = field_availability_status(
+                    source_id,
+                    metrics,
+                    "winrate",
+                    require_descriptor=True,
+                )
+                if status in {"unexplained_missing", "availability_conflict"}:
+                    by_class_unexplained_winrates += 1
+                elif (
+                    status == "explained_unavailable"
+                    and _parse_arena_percent(metrics.get("pick_rate")) != 0.0
+                ):
+                    by_class_incoherent_zero_pick_reasons += 1
     report.metrics.update(
         {
             "groups": len(groups),
@@ -723,6 +858,18 @@ def _validate_arena_legendary_groups(_source_id: str, structured: dict[str, Any]
             "groups_with_pick_rate": with_pick,
             "groups_with_offer_rate": with_offer,
             "groups_with_score": with_score,
+            "explained_unavailable_winrates": sum(
+                1 for status, _reason in winrate_statuses
+                if status == "explained_unavailable"
+            ),
+            "unexplained_winrates": unexplained_winrates,
+            "incoherent_zero_pick_reasons": incoherent_zero_pick_reasons,
+            "by_class_unexplained_winrates": by_class_unexplained_winrates,
+            "by_class_incoherent_zero_pick_reasons": (
+                by_class_incoherent_zero_pick_reasons
+            ),
+            "invalid_metrics": invalid_metrics,
+            "invalid_package_cards": invalid_package_cards,
         }
     )
     if len(groups) < 10:
@@ -757,6 +904,49 @@ def _validate_arena_legendary_groups(_source_id: str, structured: dict[str, Any]
             f"legendary offer_rate fill too low ({with_offer}/{len(groups)}; minimum {metrics_floor})",
             field="offer_rate",
         )
+    if strict_completeness and source_id == "hsreplay_arena_legendaries" and (
+        unexplained_winrates or incoherent_zero_pick_reasons
+    ):
+        report.add_issue(
+            "arena_legendary_groups.unexplained_winrate",
+            (
+                "legendary winrate availability is not coherent "
+                f"(unexplained/conflicts={unexplained_winrates}, "
+                f"invalid zero-pick reasons={incoherent_zero_pick_reasons})"
+            ),
+            field="winrate,field_availability.winrate,pick_rate",
+        )
+    if strict_completeness and source_id == "hsreplay_arena_legendaries" and (
+        by_class_unexplained_winrates
+        or by_class_incoherent_zero_pick_reasons
+    ):
+        report.add_issue(
+            "arena_legendary_groups.unexplained_by_class_winrate",
+            (
+                "legendary per-class winrate availability is not coherent "
+                f"(unexplained/conflicts={by_class_unexplained_winrates}, "
+                "invalid zero-pick reasons="
+                f"{by_class_incoherent_zero_pick_reasons})"
+            ),
+            field="by_class.*.winrate,by_class.*.field_availability.winrate",
+        )
+    if strict_completeness and source_id == "hsreplay_arena_legendaries" and invalid_metrics:
+        report.add_issue(
+            "arena_legendary_groups.invalid_metrics",
+            f"legendary top-level or per-class metrics are invalid ({invalid_metrics})",
+            field="winrate,pick_rate,offer_rate,score,by_class",
+        )
+    if (
+        strict_completeness
+        and source_id == "hsreplay_arena_legendaries"
+        and invalid_package_cards
+    ):
+        report.add_issue(
+            "arena_legendary_groups.invalid_package_cards",
+            f"legendary groups contain invalid package cards ({invalid_package_cards})",
+            field="cards.card_id,cards.count",
+        )
+    _validate_hsreplay_publication_freshness(report, source_id, structured)
     fill_score = (
         min(with_pick / max(len(groups), 1), 1.0)
         + min(with_offer / max(len(groups), 1), 1.0)
@@ -934,27 +1124,127 @@ def _validate_bg_trinkets(source_id: str, structured: dict[str, Any]) -> Validat
     return report
 
 
-def _validate_bg_minions(_source_id: str, structured: dict[str, Any]) -> ValidationReport:
+def _validate_bg_minions(source_id: str, structured: dict[str, Any]) -> ValidationReport:
     report = ValidationReport()
+    strict_completeness = uses_completeness_schema(structured)
     minions = [row for row in (structured.get("minions") or []) if isinstance(row, dict)]
     with_stats = sum(
         1
         for row in minions
         if row.get("impact") is not None and row.get("win_share") and row.get("popularity")
     )
-    report.metrics.update({"minions": len(minions), "minions_with_stats": with_stats})
+    availability_fields = ("impact", "win_share", "popularity")
+    row_availability_statuses = [
+        [
+            field_availability_status(
+                source_id,
+                row,
+                field_name,
+                require_descriptor=strict_completeness,
+            )[0]
+            for field_name in availability_fields
+        ]
+        for row in minions
+    ]
+    availability_statuses = [
+        status for statuses in row_availability_statuses for status in statuses
+    ]
+    retrieved_stat_rows = sum(
+        1
+        for statuses in row_availability_statuses
+        if all(status in {"available", "explained_unavailable"} for status in statuses)
+    )
+    domain_errors = 0
+    if strict_completeness and source_id == "hsreplay_battlegrounds_minions":
+        for row in minions:
+            invalid = False
+            for field_name, minimum, maximum in (
+                ("avg_placement_with", 1.0, 8.0),
+                ("avg_placement_without", 1.0, 8.0),
+                ("impact", -7.0, 7.0),
+            ):
+                value = row.get(field_name)
+                if value is not None and (
+                    not _is_finite_numeric(value)
+                    or not minimum <= float(value) <= maximum
+                ):
+                    invalid = True
+            for field_name in ("win_share", "popularity"):
+                value = row.get(field_name)
+                if value is not None and not _is_valid_arena_percent(value):
+                    invalid = True
+            for field_name in ("games_with_minion", "games_without_minion"):
+                value = row.get(field_name)
+                if value is not None and (
+                    isinstance(value, bool)
+                    or not isinstance(value, int)
+                    or value < 0
+                ):
+                    invalid = True
+            avg_with = row.get("avg_placement_with")
+            avg_without = row.get("avg_placement_without")
+            impact = row.get("impact")
+            if all(
+                _is_finite_numeric(value)
+                for value in (avg_with, avg_without, impact)
+            ) and abs(
+                float(impact) - (float(avg_without) - float(avg_with))
+            ) > 0.03:
+                invalid = True
+            domain_errors += int(invalid)
+    explained_unavailable = availability_statuses.count("explained_unavailable")
+    unexplained_missing = availability_statuses.count("unexplained_missing")
+    availability_conflicts = availability_statuses.count("availability_conflict")
+    report.metrics.update(
+        {
+            "minions": len(minions),
+            "minions_with_stats": with_stats,
+            "retrieved_stat_rows": retrieved_stat_rows,
+            "explained_unavailable_metrics": explained_unavailable,
+            "unexplained_missing_metrics": unexplained_missing,
+            "availability_conflicts": availability_conflicts,
+            "domain_error_rows": domain_errors,
+        }
+    )
     if len(minions) < 50:
         report.add_issue(
             "bg_minions.too_few_rows",
             f"bg minions too few ({len(minions)} < 50)",
             field="minions",
         )
-    if with_stats < 40:
+    stats_gate_count = (
+        retrieved_stat_rows
+        if strict_completeness and source_id == "hsreplay_battlegrounds_minions"
+        else with_stats
+    )
+    if stats_gate_count < 40:
         report.add_issue(
             "bg_minions.missing_stats",
-            f"bg minions missing stats ({with_stats}/{len(minions)}; minimum 40)",
+            f"bg minions missing stats ({stats_gate_count}/{len(minions)}; minimum 40)",
             field="impact,win_share,popularity",
         )
+    if strict_completeness and source_id == "hsreplay_battlegrounds_minions" and (
+        unexplained_missing or availability_conflicts
+    ):
+        report.add_issue(
+            "bg_minions.unexplained_missing_stats",
+            (
+                "bg minion stats contain unexplained missing values or "
+                f"availability conflicts ({unexplained_missing} missing, "
+                f"{availability_conflicts} conflicts)"
+            ),
+            field="impact,win_share,popularity,field_availability",
+        )
+    if domain_errors:
+        report.add_issue(
+            "bg_minions.impossible_metrics",
+            f"bg minions contain physically impossible metrics ({domain_errors} rows)",
+            field=(
+                "impact,avg_placement_with,avg_placement_without,win_share,"
+                "popularity,games_with_minion,games_without_minion"
+            ),
+        )
+    _validate_hsreplay_publication_freshness(report, source_id, structured)
     report.score = round(
         (min(len(minions) / 50.0, 1.0) + min(with_stats / 40.0, 1.0)) / 2,
         4,
@@ -998,6 +1288,7 @@ def _validate_bg_compositions(_source_id: str, structured: dict[str, Any]) -> Va
 
 def _validate_arena_card_tiers(source_id: str, structured: dict[str, Any]) -> ValidationReport:
     report = ValidationReport()
+    strict_completeness = uses_completeness_schema(structured)
     cards = [row for row in (structured.get("cards") or []) if isinstance(row, dict)]
     default_min = 20 if "legendary" in source_id else 100
     configured_minimum = int(threshold_for(source_id, "arena_card_tiers_min", default_min))
@@ -1049,6 +1340,58 @@ def _validate_arena_card_tiers(source_id: str, structured: dict[str, Any]) -> Va
             parsed_value = _parse_arena_percent(raw_value)
             if parsed_value is None or not 0.0 <= parsed_value <= 100.0:
                 invalid_percent_values.append((field_name, raw_value))
+    availability_fields = (
+        "deck_winrate",
+        "winrate_when_drawn",
+        "winrate_when_played",
+    )
+    row_availability_statuses = [
+        [
+            field_availability_status(
+                source_id,
+                row,
+                field_name,
+                require_descriptor=strict_completeness,
+            )[0]
+            for field_name in availability_fields
+        ]
+        for row in cards
+    ]
+    availability_statuses = [
+        status for statuses in row_availability_statuses for status in statuses
+    ]
+    retrieved_winrates = sum(
+        1
+        for statuses in row_availability_statuses
+        if statuses
+        and statuses[0] in {"available", "explained_unavailable"}
+    )
+    if (
+        strict_completeness
+        and source_id == "hsreplay_arena_cards_advanced"
+        and cards
+        and all(
+            all(status in {"available", "explained_unavailable"} for status in statuses)
+            for statuses in row_availability_statuses
+        )
+    ):
+        has_tier_labels = True
+    unexplained_missing_metrics = availability_statuses.count("unexplained_missing")
+    availability_conflicts = availability_statuses.count("availability_conflict")
+    sample_coherency_errors = 0
+    if strict_completeness and source_id == "hsreplay_arena_cards_advanced":
+        for row, statuses in zip(cards, row_availability_statuses, strict=True):
+            sample_size = row.get("times_played")
+            if (
+                isinstance(sample_size, bool)
+                or not isinstance(sample_size, int)
+                or sample_size < 0
+            ):
+                sample_coherency_errors += 1
+                continue
+            expected_status = "explained_unavailable" if sample_size == 0 else "available"
+            if any(status != expected_status for status in statuses):
+                sample_coherency_errors += 1
     report.metrics.update(
         {
             "cards": len(cards),
@@ -1057,11 +1400,18 @@ def _validate_arena_card_tiers(source_id: str, structured: dict[str, Any]) -> Va
             "unique_card_ids": len(unique_card_ids),
             "duplicate_card_ids": duplicate_card_ids,
             "valid_winrates": valid_winrates,
+            "retrieved_winrates": retrieved_winrates,
             "invalid_winrates": invalid_winrates,
             "invalid_percent_values": len(invalid_percent_values),
             "invalid_percent_fields": sorted(
                 {field_name for field_name, _ in invalid_percent_values}
             ),
+            "explained_unavailable_metrics": availability_statuses.count(
+                "explained_unavailable"
+            ),
+            "unexplained_missing_metrics": unexplained_missing_metrics,
+            "availability_conflicts": availability_conflicts,
+            "sample_coherency_errors": sample_coherency_errors,
         }
     )
     if len(cards) < minimum_cards:
@@ -1075,6 +1425,25 @@ def _validate_arena_card_tiers(source_id: str, structured: dict[str, Any]) -> Va
             "arena_card_tiers.missing_tier_labels",
             "arena card tiers missing tier labels",
             field="tier,win_rate,deck_winrate",
+        )
+    if strict_completeness and source_id == "hsreplay_arena_cards_advanced" and (
+        unexplained_missing_metrics
+        or availability_conflicts
+        or sample_coherency_errors
+    ):
+        report.add_issue(
+            "arena_card_tiers.unexplained_missing_metrics",
+            (
+                "arena card metrics contain unexplained missing values or "
+                "sample/availability contradictions "
+                f"({unexplained_missing_metrics} missing, "
+                f"{availability_conflicts} conflicts, "
+                f"{sample_coherency_errors} incoherent rows)"
+            ),
+            field=(
+                "deck_winrate,winrate_when_drawn,winrate_when_played,"
+                "times_played,field_availability"
+            ),
         )
     if policy is not None:
         required_valid_rows = max(1, math.ceil(len(cards) * 0.80))
@@ -1093,12 +1462,18 @@ def _validate_arena_card_tiers(source_id: str, structured: dict[str, Any]) -> Va
                 f"arena card tiers contain duplicate card ids ({duplicate_card_ids})",
                 field="card_id,id",
             )
-        if valid_winrates < required_valid_rows:
+        winrate_gate_rows = (
+            retrieved_winrates
+            if strict_completeness
+            and source_id == "hsreplay_arena_cards_advanced"
+            else valid_winrates
+        )
+        if winrate_gate_rows < required_valid_rows:
             report.add_issue(
                 "arena_card_tiers.invalid_winrates",
                 (
                     "arena card tiers valid winrates too low "
-                    f"({valid_winrates} < {required_valid_rows})"
+                    f"({winrate_gate_rows} < {required_valid_rows})"
                 ),
                 field="deck_winrate,win_rate",
             )
@@ -1141,6 +1516,7 @@ def _validate_arena_card_tiers(source_id: str, structured: dict[str, Any]) -> Va
                     ),
                     field="total_games,times_played",
                 )
+    _validate_hsreplay_publication_freshness(report, source_id, structured)
     report.score = round(
         (min(len(cards) / max(minimum_cards, 1), 1.0) + float(has_tier_labels)) / 2,
         4,
@@ -1823,12 +2199,13 @@ def _validate_hearthstone_decks(
 
 
 def _validate_firestone_standard(
-    _source_id: str,
+    source_id: str,
     structured: dict[str, Any],
 ) -> ValidationReport:
     from .deck_decode import decode_deck_code
 
     report = ValidationReport()
+    strict_completeness = uses_completeness_schema(structured)
     decks = [row for row in (structured.get("decks") or []) if isinstance(row, dict)]
     archetypes = [
         row for row in (structured.get("archetypes") or []) if isinstance(row, dict)
@@ -1875,6 +2252,54 @@ def _validate_firestone_standard(
     )
     invalid_archetype_scope = sum(
         1 for row in archetypes if row.get("format") != "standard"
+    )
+    core_card_statuses = [
+        field_availability_status(
+            source_id,
+            row,
+            "core_cards",
+            require_descriptor=strict_completeness,
+        )
+        for row in [*decks, *archetypes]
+    ]
+    unexplained_core_cards = sum(
+        1
+        for status, _reason in core_card_statuses
+        if status == "unexplained_missing"
+    )
+    core_card_conflicts = sum(
+        1
+        for status, _reason in core_card_statuses
+        if status == "availability_conflict"
+    )
+    deck_archetype_ids = {
+        row.get("archetype_id")
+        for row in decks
+        if row.get("archetype_id") is not None
+    }
+    incoherent_unclustered_reasons = sum(
+        1
+        for row in archetypes
+        if field_availability_status(
+            source_id,
+            row,
+            "core_cards",
+            require_descriptor=strict_completeness,
+        )[0]
+        == "explained_unavailable"
+        and (
+            row.get("archetype_id") in deck_archetype_ids
+            or re.sub(
+                r"[-_\s]+",
+                "-",
+                str(row.get("archetype_name") or "").strip().casefold(),
+            )
+            != re.sub(
+                r"[-_\s]+",
+                "-",
+                str(row.get("player_class") or "").strip().casefold(),
+            )
+        )
     )
 
     metadata = structured.get("metadata")
@@ -1958,6 +2383,13 @@ def _validate_firestone_standard(
             "metadata_age_hours": metadata_age_hours,
             "invalid_deck_scope_rows": invalid_deck_scope,
             "invalid_archetype_scope_rows": invalid_archetype_scope,
+            "explained_unavailable_core_cards": sum(
+                1 for status, _reason in core_card_statuses
+                if status == "explained_unavailable"
+            ),
+            "unexplained_core_cards": unexplained_core_cards,
+            "core_card_availability_conflicts": core_card_conflicts,
+            "incoherent_unclustered_reasons": incoherent_unclustered_reasons,
         }
     )
     if len(decks) < 10:
@@ -2037,6 +2469,21 @@ def _validate_firestone_standard(
                 f"({invalid_archetype_scope})"
             ),
             field="archetypes.format",
+        )
+    if strict_completeness and source_id == "firestone_standard" and (
+        unexplained_core_cards
+        or core_card_conflicts
+        or incoherent_unclustered_reasons
+    ):
+        report.add_issue(
+            "firestone_standard.unexplained_core_cards",
+            (
+                "Firestone Standard core-card availability is not coherent "
+                f"({unexplained_core_cards} unexplained, "
+                f"{core_card_conflicts} conflicts, "
+                f"{incoherent_unclustered_reasons} invalid cluster reasons)"
+            ),
+            field="core_cards,field_availability.core_cards,archetype_id",
         )
 
     report.score = round(

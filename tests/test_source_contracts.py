@@ -184,7 +184,19 @@ class SourceContractsTest(unittest.TestCase):
 
         self.assertEqual(
             labels[:3],
-            ["flaresolverr", "scrape_do", "curl_cffi"],
+            ["scrape_do", "flaresolverr", "curl_cffi"],
+        )
+
+        legendary_labels = [
+            label
+            for label, _ in _channel_urls(
+                "https://hsreplay.net/api/v1/arena/card_packages/",
+                source_id="hsreplay_arena_legendaries",
+            )
+        ]
+        self.assertEqual(
+            legendary_labels[:3],
+            ["scrape_do", "flaresolverr", "curl_cffi"],
         )
 
     def test_contract_field_fill_rejects_missing_hidden_columns(self) -> None:
@@ -330,6 +342,11 @@ class SourceContractsTest(unittest.TestCase):
 
         self.assertEqual(metrics["rows_total"], 900)
         self.assertEqual(metrics["quality_score"], 1.0)
+        self.assertEqual(metrics["metric_availability_score"], 1.0)
+        self.assertIsNone(metrics["retrieval_completeness_score"])
+        self.assertIsNone(metrics["retrieval_complete"])
+        self.assertIsNone(metrics["completeness_schema_version"])
+        self.assertIsNone(metrics["row_retrieval"])
         self.assertIn("deck_winrate", metrics["critical_fields"])
 
     def test_structured_api_candidate_does_not_require_html_title(self) -> None:

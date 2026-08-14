@@ -1,14 +1,20 @@
 from __future__ import annotations
 
 import logging
+import math
 from datetime import datetime
 from typing import Any
 
 from hearthstone.enums import CardClass
 
 from .cards_index import card_from_id
+from .completeness import (
+    COMPLETENESS_SCHEMA_VERSION,
+    build_hsreplay_arena_upstream_freshness,
+    row_retrieval_evidence,
+)
 from .deck_decode import decode_deck_code
-from .hsreplay_client import fetch_hsreplay_json
+from .hsreplay_client import fetch_hsreplay_json, get_hsreplay_json_target_headers
 from .storage import load_dataset
 
 logger = logging.getLogger(__name__)
@@ -56,13 +62,52 @@ def winrate_to_tier(win_rate: float | None) -> str | None:
     return "F"
 
 
-def _pct(value: float | int | str | None) -> str | None:
-    if value is None:
+def _arena_percent_number(value: Any) -> float | None:
+    if value is None or isinstance(value, bool):
         return None
+    if isinstance(value, str):
+        value = value.strip()
+        if value.endswith("%"):
+            value = value[:-1].strip()
+        value = value.replace(",", ".")
+        if not value:
+            return None
     try:
-        return f"{float(value):.2f}%"
+        number = float(value)
     except (TypeError, ValueError):
         return None
+    if not math.isfinite(number) or not 0.0 <= number <= 100.0:
+        return None
+    return number
+
+
+def _pct(value: Any) -> str | None:
+    number = _arena_percent_number(value)
+    return f"{number:.2f}%" if number is not None else None
+
+
+def _strict_optional_percent(value: Any, *, field: str) -> float | None:
+    if value is None:
+        return None
+    number = _arena_percent_number(value)
+    if number is None:
+        raise ValueError(f"{field} must be a finite percentage in 0..100")
+    return number
+
+
+def _strict_optional_non_negative_number(
+    value: Any,
+    *,
+    field: str,
+) -> float | int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError(f"{field} must be a finite non-negative number")
+    number = float(value)
+    if not math.isfinite(number) or number < 0:
+        raise ValueError(f"{field} must be a finite non-negative number")
+    return value
 
 
 def _win_rate_sort_key(row: dict[str, Any]) -> float:
@@ -77,6 +122,18 @@ def _first_present(row: dict[str, Any], *keys: str) -> Any:
         if key in row and row[key] is not None:
             return row[key]
     return None
+
+
+def _required_non_negative_int(value: Any, *, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"{field} must be a non-negative integer")
+    return value
+
+
+def _arena_rate_availability(*, sample_size: int) -> dict[str, object]:
+    if sample_size > 0:
+        return {"available": True, "reason": None}
+    return {"available": False, "reason": "no_games_in_window"}
 
 
 def _class_name(class_id: int | str | None) -> str | None:
@@ -198,27 +255,11 @@ def normalize_arena_card_row(row: dict[str, Any], *, locale: str = "ruRU") -> di
         return None
 
     meta = card_from_id(card_id, locale=locale)
-    win_rate = row.get("win_rate")
-    if isinstance(win_rate, str):
-        try:
-            win_rate = float(win_rate.replace("%", "").strip())
-        except ValueError:
-            win_rate = None
-
-    return {
-        **meta,
-        "card_id": card_id,
-        "tier": winrate_to_tier(win_rate if isinstance(win_rate, (int, float)) else None),
-        "deck_winrate": _pct(win_rate),
-        "win_rate": win_rate,
-        "pick_rate": row.get("pick_rate"),
-        "offer_rate": row.get("offer_rate"),
-        "offer_bin": row.get("offer_bin"),
-        "popularity": row.get("popularity"),
-        "in_runs": _pct(_first_present(row, "popularity", "in_runs", "in_runs_pct", "run_popularity")),
-        "avg_copies": row.get("avg_copies_in_deck"),
-        "times_played": row.get("num_games"),
-        "winrate_when_drawn": _pct(
+    win_rate = _strict_optional_percent(row.get("win_rate"), field="win_rate")
+    sample_size = _required_non_negative_int(row.get("num_games"), field="num_games")
+    deck_winrate = _pct(win_rate)
+    winrate_when_drawn = _pct(
+        _strict_optional_percent(
             _first_present(
                 row,
                 "winrate_when_drawn",
@@ -226,9 +267,12 @@ def normalize_arena_card_row(row: dict[str, Any], *, locale: str = "ruRU") -> di
                 "drawn_winrate",
                 "drawn_win_rate",
                 "drawn_wr",
-            )
-        ),
-        "winrate_when_played": _pct(
+            ),
+            field="winrate_when_drawn",
+        )
+    )
+    winrate_when_played = _pct(
+        _strict_optional_percent(
             _first_present(
                 row,
                 "winrate_when_played",
@@ -236,9 +280,49 @@ def normalize_arena_card_row(row: dict[str, Any], *, locale: str = "ruRU") -> di
                 "played_winrate",
                 "played_win_rate",
                 "played_wr",
-            )
+            ),
+            field="winrate_when_played",
+        )
+    )
+    popularity = _strict_optional_percent(
+        _first_present(
+            row,
+            "popularity",
+            "in_runs",
+            "in_runs_pct",
+            "run_popularity",
         ),
+        field="popularity",
+    )
+    avg_copies = _strict_optional_non_negative_number(
+        row.get("avg_copies_in_deck"),
+        field="avg_copies_in_deck",
+    )
+
+    return {
+        **meta,
+        "card_id": card_id,
+        "tier": winrate_to_tier(win_rate),
+        "deck_winrate": deck_winrate,
+        "win_rate": win_rate,
+        "pick_rate": row.get("pick_rate"),
+        "offer_rate": row.get("offer_rate"),
+        "offer_bin": row.get("offer_bin"),
+        "popularity": row.get("popularity"),
+        "in_runs": _pct(popularity),
+        "avg_copies": avg_copies,
+        "times_played": sample_size,
+        "winrate_when_drawn": winrate_when_drawn,
+        "winrate_when_played": winrate_when_played,
         "score": row.get("score"),
+        "field_availability": {
+            field: _arena_rate_availability(sample_size=sample_size)
+            for field in (
+                "deck_winrate",
+                "winrate_when_drawn",
+                "winrate_when_played",
+            )
+        },
     }
 
 
@@ -272,6 +356,21 @@ def _parse_arena_cards_payload(payload: dict[str, Any], *, locale: str = "ruRU")
             parsed.sort(key=_win_rate_sort_key, reverse=True)
             by_class["ALL"] = parsed
     return by_class
+
+
+def _selected_arena_rows(
+    payload: dict[str, Any],
+    primary_class: str,
+) -> tuple[str, list[Any]]:
+    raw = payload.get("data")
+    if isinstance(raw, list):
+        return ("ALL", raw) if primary_class == "ALL" else (primary_class, [])
+    if not isinstance(raw, dict):
+        return primary_class, []
+    rows = raw.get(primary_class)
+    if isinstance(rows, list):
+        return primary_class, rows
+    return primary_class, []
 
 
 async def _fetch_arena_cards_payload(source_id: str) -> tuple[dict[str, Any], str]:
@@ -324,15 +423,35 @@ async def fetch_arena_card_tiers(
     try:
         payload, api_url = await _fetch_arena_cards_payload(source_id)
         by_class = _parse_arena_cards_payload(payload, locale=locale)
-        cards = by_class.get(primary_class) or by_class.get("ALL") or next(iter(by_class.values()), [])
+        selected_class, raw_rows = _selected_arena_rows(payload, primary_class)
+        cards = by_class.get(selected_class) or []
         if not cards:
             raise RuntimeError("arena card stats payload empty")
+        eligible_rows = sum(1 for row in raw_rows if isinstance(row, dict))
+        upstream_freshness = build_hsreplay_arena_upstream_freshness(
+            payload,
+            response_headers=get_hsreplay_json_target_headers(api_url),
+        )
         return {
             "type": "arena_card_tiers",
+            "completeness_schema_version": COMPLETENESS_SCHEMA_VERSION,
+            "upstream_freshness": upstream_freshness,
+            "population_completeness": "unverifiable",
+            "row_retrieval": row_retrieval_evidence(
+                raw_rows=len(raw_rows),
+                eligible_rows=eligible_rows,
+                normalized_rows=len(cards),
+                unexplained_reasons={
+                    "non_object_row": len(raw_rows) - eligible_rows,
+                    "normalizer_rejected": eligible_rows - len(cards),
+                },
+                scope=f"primary_class:{selected_class}",
+            ),
             "cards": cards,
             "by_class": {key: len(rows) for key, rows in by_class.items()},
             "total_cards": len(cards),
             "primary_class": primary_class,
+            "selected_class": selected_class,
             "source": {
                 "key": "hsreplay",
                 "url": ARENA_CARDS_PAGE_URL,

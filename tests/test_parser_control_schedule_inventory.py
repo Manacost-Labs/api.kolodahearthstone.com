@@ -46,10 +46,30 @@ def test_schedule_inventory_is_versioned_and_covers_every_parser_source_and_sect
         for section_id in schedule["sectionIds"]
     }
 
-    assert scheduled_sources == set(SOURCE_BY_ID)
+    assert scheduled_sources == set(SOURCE_BY_ID) - {"firestone_standard"}
     assert scheduled_sections == set(SECTION_BY_ID)
     assert set(inventory["sources"]) == set(SOURCE_TO_SECTION)
     assert set(inventory["sections"]) == set(SECTION_BY_ID)
+
+
+def test_schedule_inventory_adds_firestone_standard_only_after_authorized_opt_in() -> None:
+    with patch.dict(
+        "os.environ",
+        {"HS_FIRESTONE_STANDARD_AUTHORIZED": "true"},
+        clear=True,
+    ):
+        inventory = build_schedule_inventory(
+            at=datetime(2026, 7, 21, 0, 0, tzinfo=UTC),
+            include_runtime=False,
+        )
+
+    scheduled_sources = {
+        source_id
+        for schedule in inventory["schedules"]
+        for source_id in schedule["sourceIds"]
+    }
+    assert "firestone_standard" in scheduled_sources
+    assert inventory["sources"]["firestone_standard"]["nextRunAt"] is not None
 
 
 def test_schedule_inventory_calculates_nominal_next_runs_in_utc() -> None:

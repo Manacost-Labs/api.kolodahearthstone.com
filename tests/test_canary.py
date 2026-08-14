@@ -26,8 +26,10 @@ class CanaryTest(unittest.IsolatedAsyncioTestCase):
                     "card_id": f"CARD_{index}",
                     "deck_winrate": "52%",
                     "winrate_when_drawn": "51%",
+                    "winrate_when_played": "53%",
                     "tier": "B",
                     "total_games": 10,
+                    "times_played": 10,
                 }
                 for index in range(count)
             ],

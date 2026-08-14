@@ -1,13 +1,23 @@
 from __future__ import annotations
 
 import json
+import math
 from typing import Any
 
 from bs4 import BeautifulSoup
 
 from .cards_index import card_label, cards_by_dbfid
+from .completeness import (
+    COMPLETENESS_SCHEMA_VERSION,
+    build_hsreplay_bg_upstream_freshness,
+    row_retrieval_evidence,
+)
 from .firecrawl_backend import scrape_source
-from .hsreplay_client import fetch_hsreplay_json, fetch_text_via_flaresolverr
+from .hsreplay_client import (
+    fetch_hsreplay_json,
+    fetch_text_via_flaresolverr,
+    get_hsreplay_json_target_headers,
+)
 from .sources import Source
 
 BG_MMR = "TOP_50_PERCENT"
@@ -58,6 +68,57 @@ def _pct_float(value: float | int | None) -> float | None:
     return round(float(value), 2)
 
 
+def _metric_availability(
+    value: object,
+    *,
+    aggregates: list[dict[str, Any]],
+) -> dict[str, object]:
+    if value is not None:
+        return {"available": True, "reason": None}
+    reason = (
+        "no_current_patch_aggregates"
+        if not aggregates
+        else "insufficient_current_patch_sample"
+    )
+    return {"available": False, "reason": reason}
+
+
+def _required_non_negative_number(row: dict[str, Any], field: str) -> float:
+    value = row.get(field)
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(float(value))
+        or value < 0
+    ):
+        raise ValueError(f"normal_aggregates.{field} must be a non-negative number")
+    return float(value)
+
+
+def _required_non_negative_int(row: dict[str, Any], field: str) -> int:
+    value = row.get(field)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"normal_aggregates.{field} must be a non-negative integer")
+    return value
+
+
+def _placement_sum(
+    row: dict[str, Any],
+    *,
+    field: str,
+    count: int,
+) -> float:
+    value = _required_non_negative_number(row, field)
+    if (count == 0 and value != 0) or (
+        count > 0 and not float(count) <= value <= float(count * 8)
+    ):
+        raise ValueError(
+            f"normal_aggregates.{field} must reconcile with a 1..8 placement "
+            "for every counted game"
+        )
+    return value
+
+
 def _query_url(key: str) -> str:
     return (
         f"{BG_ANALYTICS_BASE}/{key}/"
@@ -78,12 +139,16 @@ def _minion_stats(row: dict[str, Any]) -> dict[str, Any] | None:
     dbf_id = row.get("minion_dbf_id")
     if dbf_id is None:
         return None
-    card = _card_from_dbf(int(dbf_id))
+    if isinstance(dbf_id, bool) or not isinstance(dbf_id, int) or dbf_id <= 0:
+        raise ValueError("minion_dbf_id must be a positive integer")
+    card = _card_from_dbf(dbf_id)
     if not card.get("id"):
         return None
-    aggregates = row.get("normal_aggregates") or []
+    aggregates = row.get("normal_aggregates")
     if not isinstance(aggregates, list):
-        aggregates = []
+        raise TypeError("normal_aggregates must be a list")
+    if any(not isinstance(item, dict) for item in aggregates):
+        raise TypeError("normal_aggregates entries must be objects")
 
     with_count = 0.0
     without_count = 0.0
@@ -94,17 +159,27 @@ def _minion_stats(row: dict[str, Any]) -> dict[str, Any] | None:
     combat_rounds: list[dict[str, Any]] = []
 
     for item in aggregates:
-        if not isinstance(item, dict):
-            continue
         combat_round = item.get("combat_round")
-        if isinstance(combat_round, int) and not 1 <= combat_round <= 16:
-            continue
-        c_with = float(item.get("count_of_games_with_minion") or 0)
-        c_without = float(item.get("count_of_games_without_minion") or 0)
-        round_with_places = float(item.get("sum_of_placements_for_players_with_minion") or 0)
-        round_without_places = float(item.get("sum_of_placements_for_players_without_minion") or 0)
-        round_wins = float(item.get("total_wins") or 0)
-        round_losses = float(item.get("total_losses") or 0)
+        if combat_round is not None and (
+            isinstance(combat_round, bool)
+            or not isinstance(combat_round, int)
+            or not 1 <= combat_round <= 16
+        ):
+            raise ValueError("normal_aggregates.combat_round must be 1..16 or null")
+        c_with = _required_non_negative_int(item, "count_of_games_with_minion")
+        c_without = _required_non_negative_int(item, "count_of_games_without_minion")
+        round_with_places = _placement_sum(
+            item,
+            field="sum_of_placements_for_players_with_minion",
+            count=c_with,
+        )
+        round_without_places = _placement_sum(
+            item,
+            field="sum_of_placements_for_players_without_minion",
+            count=c_without,
+        )
+        round_wins = _required_non_negative_int(item, "total_wins")
+        round_losses = _required_non_negative_int(item, "total_losses")
         round_avg_with = round_with_places / c_with if c_with else None
         round_avg_without = round_without_places / c_without if c_without else None
         round_impact = (
@@ -142,19 +217,22 @@ def _minion_stats(row: dict[str, Any]) -> dict[str, Any] | None:
     )
     combat_winrate = wins / (wins + losses) * 100 if wins + losses else None
     popularity = with_count / (with_count + without_count) * 100 if with_count + without_count else None
+    impact_value = _round(impact)
+    win_share = _pct(combat_winrate)
+    popularity_pct = _pct(popularity)
 
     return {
         **card,
         "minion": card.get("name"),
         "minion_dbf_id": int(dbf_id),
         "tavern_tier": row.get("minion_tier") or card.get("techLevel"),
-        "impact": _round(impact),
+        "impact": impact_value,
         "avg_placement_with": _round(avg_with),
         "avg_placement_without": _round(avg_without),
         "combat_winrate": _pct(combat_winrate),
         "combat_winrate_value": _pct_float(combat_winrate),
-        "win_share": _pct(combat_winrate),
-        "popularity": _pct(popularity),
+        "win_share": win_share,
+        "popularity": popularity_pct,
         "popularity_value": _pct_float(popularity),
         "games_with_minion": int(with_count) if with_count else None,
         "games_without_minion": int(without_count) if without_count else None,
@@ -162,11 +240,26 @@ def _minion_stats(row: dict[str, Any]) -> dict[str, Any] | None:
             [item for item in combat_rounds if item.get("combat_round") is not None],
             key=lambda item: int(item["combat_round"]),
         ),
+        "field_availability": {
+            "impact": _metric_availability(
+                impact_value,
+                aggregates=aggregates,
+            ),
+            "win_share": _metric_availability(
+                win_share,
+                aggregates=aggregates,
+            ),
+            "popularity": _metric_availability(
+                popularity_pct,
+                aggregates=aggregates,
+            ),
+        },
     }
 
 
 async def fetch_battlegrounds_minions(source_id: str) -> dict[str, Any]:
     url = _query_url("battlegrounds_minion_list")
+    cache_key = f"bg:minions:{BG_MMR}:{BG_TIME_RANGE}"
     firecrawl_page: dict[str, Any] = {}
     try:
         scraped = await scrape_source(
@@ -190,14 +283,38 @@ async def fetch_battlegrounds_minions(source_id: str) -> dict[str, Any]:
     payload = await fetch_hsreplay_json(
         url,
         source_id=source_id,
-        cache_key=f"bg:minions:{BG_MMR}:{BG_TIME_RANGE}",
+        cache_key=cache_key,
     )
+    upstream_freshness = build_hsreplay_bg_upstream_freshness(
+        payload,
+        response_headers=get_hsreplay_json_target_headers(cache_key),
+    )
+    raw_rows = _rows(payload)
+    eligible_rows = [row for row in raw_rows if isinstance(row, dict)]
     minions = [
-        item for row in _rows(payload) if (item := _minion_stats(row)) is not None
+        item
+        for row in eligible_rows
+        if (item := _minion_stats(row)) is not None
     ]
+    minion_ids = [item.get("minion_dbf_id") for item in minions]
+    if len(set(minion_ids)) != len(minion_ids):
+        raise ValueError("battlegrounds minion payload contains duplicate minion_dbf_id")
     minions.sort(key=lambda item: _pct_number(item.get("popularity")), reverse=True)
     return {
         "type": "bg_minions",
+        "completeness_schema_version": COMPLETENESS_SCHEMA_VERSION,
+        "upstream_freshness": upstream_freshness,
+        "population_completeness": "unverifiable",
+        "row_retrieval": row_retrieval_evidence(
+            raw_rows=len(raw_rows),
+            eligible_rows=len(eligible_rows),
+            normalized_rows=len(minions),
+            unexplained_reasons={
+                "non_object_row": len(raw_rows) - len(eligible_rows),
+                "normalizer_rejected": len(eligible_rows) - len(minions),
+            },
+            scope="current_patch_minion_rows",
+        ),
         "minions": minions,
         "filters": {"mmr_percentile": BG_MMR, "time_range": BG_TIME_RANGE, "turns": "1-16"},
         "source": {

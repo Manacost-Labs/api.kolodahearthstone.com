@@ -198,6 +198,25 @@ def fetch_direct_enabled() -> bool:
     }
 
 
+def firestone_standard_authorized() -> bool:
+    """Require an explicit operator assertion before using Firestone Standard."""
+
+    return os.environ.get(
+        "HS_FIRESTONE_STANDARD_AUTHORIZED", "false"
+    ).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def source_operationally_enabled(source_id: str) -> bool:
+    """Apply fail-closed source-specific authorization policy."""
+
+    return source_id != "firestone_standard" or firestone_standard_authorized()
+
+
 def fetch_backends() -> list[str]:
     raw = os.environ.get("HS_FETCH_BACKENDS", DEFAULT_BACKENDS)
     return [part.strip() for part in raw.split(",") if part.strip()]

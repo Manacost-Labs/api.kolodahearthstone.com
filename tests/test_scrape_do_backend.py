@@ -149,3 +149,37 @@ def test_retry_timeout_is_only_sent_for_non_render_requests() -> None:
         )
 
     assert "retryTimeout=5000" in urlopen.call_args.args[0].full_url
+
+
+def test_response_keeps_only_bounded_safe_target_headers() -> None:
+    response = _response()
+    for name, value in {
+        "Date": "Fri, 14 Aug 2026 02:20:02 GMT",
+        "Age": "38",
+        "ETag": 'W/"safe"',
+        "Last-Modified": "Fri, 14 Aug 2026 02:10:32 GMT",
+        "Cache-Control": "public, max-age=60",
+        "CF-Cache-Status": "HIT",
+        "Set-Cookie": "secret=must-not-survive",
+        "Scrape.do-Cookies": "secret=must-not-survive",
+        "X-Untrusted": "must-not-survive",
+        "Expires": "x" * 600,
+    }.items():
+        response.headers[name] = value
+    with (
+        patch("app.scrape_do_backend.scrape_do_token", return_value="secret"),
+        patch(
+            "app.scrape_do_backend.urllib.request.urlopen",
+            return_value=response,
+        ),
+    ):
+        result = scrape_url_sync("https://example.com")
+
+    assert result.target_headers == {
+        "date": "Fri, 14 Aug 2026 02:20:02 GMT",
+        "age": "38",
+        "etag": 'W/"safe"',
+        "last-modified": "Fri, 14 Aug 2026 02:10:32 GMT",
+        "cache-control": "public, max-age=60",
+        "cf-cache-status": "HIT",
+    }
