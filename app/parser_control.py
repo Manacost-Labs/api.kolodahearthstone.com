@@ -766,7 +766,20 @@ class ParserControlStore:
                     status.get("state") or ("ready" if dataset else "missing")
                 )
                 serving_cached = bool(status.get("serving_cached_dataset"))
-                if serving_cached or source_state == "partial":
+                upstream_state = str(
+                    status.get("last_refresh_upstream_state")
+                    or status.get("upstream_state")
+                    or ""
+                )
+                upstream_publication_pending = (
+                    source_id == "vicious_syndicate_radars"
+                    and serving_cached
+                    and status.get("cached_content_temporally_grandfathered") is True
+                    and upstream_state == "upstream_publication_pending"
+                )
+                if upstream_publication_pending:
+                    health = "upstream_pending"
+                elif serving_cached or source_state == "partial":
                     health = "warning"
                 elif source_state in {"ok", "ready"}:
                     health = "ok"
@@ -792,6 +805,8 @@ class ParserControlStore:
                         "state": health,
                         "health": health,
                         "sourceState": source_state,
+                        "upstreamState": upstream_state or None,
+                        "servingCachedDataset": serving_cached,
                         "lastSuccessAt": published_fetched_at,
                         "lastAttemptAt": last_attempt_at,
                         "lastError": last_error,

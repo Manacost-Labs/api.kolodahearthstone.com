@@ -1,8 +1,11 @@
 [Unit]
-Description=Capture HSReplay Battlegrounds compositions Firecrawl screenshot daily
+Description=Retry stale HSReplay Battlegrounds compositions screenshot every six hours
 
 [Timer]
 OnCalendar=*-*-* 04:10:00 Europe/Warsaw
+OnCalendar=*-*-* 10:10:00 Europe/Warsaw
+OnCalendar=*-*-* 16:10:00 Europe/Warsaw
+OnCalendar=*-*-* 22:10:00 Europe/Warsaw
 AccuracySec=10min
 Persistent=true
 

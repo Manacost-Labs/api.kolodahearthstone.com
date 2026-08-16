@@ -44,6 +44,10 @@ The schedule contract is additive and versioned independently:
   `systemd` enabled/active state are not included.
 - Every section and source has `scheduleIds`, a short `schedule` label, and an
   effective `nextRunAt`.
+- Source health `upstream_pending` means a previously validated dataset is
+  still being served while the publisher has not released the next expected
+  artifact. It is operationally healthy in the panel but is not reported as a
+  fresh dataset by freshness diagnostics.
 - A disabled section keeps its schedule metadata but its own and its sources'
   effective `nextRunAt` values are `null`, because scheduled commands honour
   the section switch.

@@ -4,8 +4,9 @@ import io
 import json
 import math
 import os
+import re
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -19,9 +20,10 @@ from .firecrawl_backend import (
     scrape_source_with_options,
 )
 from .hsreplay_auth import hsreplay_cookies_for_fetch
+from .refresh_log import log_action
 from .resource_locks import ResourceLocked, ResourceLockSet
-from .sources import Source
 from .source_state import SourceState
+from .sources import Source
 from .storage import save_status
 
 COMPOSITIONS_URL = "https://hsreplay.net/battlegrounds/compositions/"
@@ -49,6 +51,8 @@ _BLANK_MIN_ACTIVE_BANDS = 2
 _ACTIVE_TILE_MIN_STDDEV = 6.0
 _ACTIVE_TILE_MIN_EDGE_FRACTION = 0.015
 _EDGE_VALUE_THRESHOLD = 17
+_SCREENSHOT_RETRY_MIN_AGE = timedelta(hours=23)
+_SAFE_TELEMETRY_TOKEN = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,63}$")
 _PUBLIC_CAPTURE_BACKENDS = frozenset(
     {"firecrawl", "scrape_do", "scrape_do_super", "scrapfly"}
 )
@@ -324,9 +328,145 @@ def _capture_source_status(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _capture_is_fresh(payload: dict[str, Any]) -> bool:
+    captured_at = payload.get("captured_at")
+    if not isinstance(captured_at, str) or not captured_at.strip():
+        return False
+    try:
+        captured = datetime.fromisoformat(captured_at.replace("Z", "+00:00"))
+        current = datetime.fromisoformat(_now().replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if captured.tzinfo is None or current.tzinfo is None:
+        return False
+    age = current.astimezone(timezone.utc) - captured.astimezone(timezone.utc)
+    return timedelta(0) <= age < _SCREENSHOT_RETRY_MIN_AGE
+
+
+def _capture_failure_code(exc: Exception) -> str:
+    if isinstance(exc, ValueError):
+        return "invalid_screenshot_asset"
+    if isinstance(exc, TimeoutError):
+        return "capture_timeout"
+
+    # Only match a closed set of provider states. The untrusted exception text
+    # is never persisted or logged.
+    detail = str(exc)
+    if "AUTHENTICATION_FAILED" in detail:
+        return "provider_authentication_failed"
+    if "PAYMENT_REQUIRED" in detail:
+        return "provider_credits_exhausted"
+    if "RATE_LIMITED" in detail or "CONCURRENT_REQUEST_LIMIT" in detail:
+        return "provider_rate_limited"
+    if "ROTATION_FAILED" in detail:
+        return "provider_rotation_failed"
+    if "response failed content validation" in detail:
+        return "content_validation_failed"
+    if "did not include screenshot" in detail:
+        return "missing_screenshot"
+    if "no scrape providers configured" in detail:
+        return "providers_unconfigured"
+    if isinstance(exc, RuntimeError):
+        return "provider_chain_failed"
+    return "unexpected_capture_failure"
+
+
+def _capture_failure_type(exc: Exception) -> str:
+    if isinstance(exc, ValueError):
+        return "ScreenshotValidationError"
+    if isinstance(exc, TimeoutError):
+        return "ScreenshotTimeout"
+    if isinstance(exc, RuntimeError):
+        return "ProviderChainError"
+    return "ScreenshotCaptureError"
+
+
+def _sanitized_capture_exception(exc: Exception, error_code: str) -> Exception:
+    message = f"live screenshot capture failed (code={error_code})"
+    if isinstance(exc, ValueError):
+        return ValueError(message)
+    return RuntimeError(message)
+
+
+def _safe_telemetry_token(value: object, *, default: str = "unknown") -> str:
+    normalized = str(value or "").strip()
+    if _SAFE_TELEMETRY_TOKEN.fullmatch(normalized):
+        return normalized
+    return default
+
+
+def _safe_telemetry_int(
+    value: object,
+    *,
+    minimum: int = 0,
+    maximum: int = 10_000,
+) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+        return None
+    try:
+        normalized = int(value)
+    except (OverflowError, ValueError):
+        return None
+    return normalized if minimum <= normalized <= maximum else None
+
+
+def _observe_capture_result(scraped: Any, accepted: bool) -> None:
+    metadata = getattr(scraped, "metadata", None)
+    public_metadata = _public_capture_metadata(
+        metadata if isinstance(metadata, dict) else {}
+    )
+    status = _safe_telemetry_int(
+        getattr(scraped, "status_code", None),
+        minimum=100,
+        maximum=599,
+    )
+    request_credits = _safe_telemetry_int(getattr(scraped, "request_credits", None))
+    log_action(
+        "screenshot.provider.result",
+        source_id=SCREENSHOT_SOURCE_ID,
+        state=SourceState.OK if accepted else SourceState.PARTIAL,
+        backend=public_metadata["backend"],
+        http_status=status,
+        extra={
+            "accepted": bool(accepted),
+            "request_credits": request_credits or 0,
+            "error_code": "accepted" if accepted else "content_rejected",
+        },
+    )
+
+
+def _observe_capture_failure(event: dict[str, Any]) -> None:
+    backend = str(event.get("backend") or "").strip().casefold()
+    safe_extra: dict[str, Any] = {
+        "error_code": _safe_telemetry_token(event.get("error_code")),
+        "request_credits": _safe_telemetry_int(event.get("request_credits")) or 0,
+    }
+    for key in ("profile_attempt", "provider_attempt"):
+        value = _safe_telemetry_int(event.get(key), minimum=1, maximum=100)
+        if value is not None:
+            safe_extra[key] = value
+    if isinstance(event.get("super_proxy"), bool):
+        safe_extra["super_proxy"] = event["super_proxy"]
+
+    log_action(
+        "screenshot.provider.fail",
+        source_id=SCREENSHOT_SOURCE_ID,
+        state=SourceState.FETCH_ERROR,
+        backend=backend if backend in _PUBLIC_CAPTURE_BACKENDS else "unknown",
+        http_status=_safe_telemetry_int(
+            event.get("http_status"),
+            minimum=100,
+            maximum=599,
+        ),
+        error_type=_safe_telemetry_token(event.get("error_type")),
+        extra=safe_extra,
+    )
+
+
 async def capture_compositions_screenshot(
     *,
     allow_cached_on_failure: bool = False,
+    stale_only: bool = False,
 ) -> dict[str, Any]:
     locks = ResourceLockSet(
         [SCREENSHOT_SOURCE_ID],
@@ -343,11 +483,34 @@ async def capture_compositions_screenshot(
         }
 
     try:
+        if stale_only:
+            cached = latest_compositions_screenshot()
+            if cached is not None and _capture_is_fresh(cached):
+                return {
+                    "ok": True,
+                    "published": False,
+                    "skipped": True,
+                    "reason": "fresh_screenshot",
+                    "source_id": SCREENSHOT_SOURCE_ID,
+                    "state": SourceState.OK,
+                    "captured_at": cached.get("captured_at"),
+                }
         try:
             captured = await _capture_compositions_screenshot_unlocked()
-        except Exception:  # noqa: BLE001 - status and scheduled LKG are intentional
+        except Exception as exc:  # noqa: BLE001 - provider boundary is sanitized below
             refreshed_at = _now()
             cached = latest_compositions_screenshot()
+            error_code = _capture_failure_code(exc)
+            log_action(
+                "screenshot.capture.fail",
+                source_id=SCREENSHOT_SOURCE_ID,
+                state=SourceState.FETCH_ERROR,
+                error_type=_capture_failure_type(exc),
+                extra={
+                    "error_code": error_code,
+                    "cached_available": cached is not None,
+                },
+            )
             if not allow_cached_on_failure or cached is None:
                 save_status(
                     SCREENSHOT_SOURCE_ID,
@@ -358,9 +521,10 @@ async def capture_compositions_screenshot(
                         "last_refresh_state": SourceState.FETCH_ERROR,
                         "last_refresh_at": refreshed_at,
                         "last_refresh_error": "live screenshot capture failed",
+                        "last_refresh_error_code": error_code,
                     },
                 )
-                raise
+                raise _sanitized_capture_exception(exc, error_code) from None
             status = _capture_source_status(cached)
             status.update(
                 {
@@ -369,6 +533,7 @@ async def capture_compositions_screenshot(
                     "last_refresh_state": SourceState.FETCH_ERROR,
                     "last_refresh_at": refreshed_at,
                     "last_refresh_error": "live screenshot capture failed",
+                    "last_refresh_error_code": error_code,
                 }
             )
             save_status(SCREENSHOT_SOURCE_ID, status)
@@ -405,6 +570,8 @@ async def _capture_compositions_screenshot_unlocked() -> dict[str, Any]:
             "Accept-Language": "en-US,en;q=0.9",
         },
         accept_result=_accept_compositions_capture,
+        attempt_observer=_observe_capture_result,
+        failure_observer=_observe_capture_failure,
     )
     if not scraped.screenshot:
         raise RuntimeError("Firecrawl response did not include screenshot")

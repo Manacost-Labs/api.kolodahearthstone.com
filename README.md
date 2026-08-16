@@ -175,7 +175,8 @@ coverage помечается как `unverifiable`. Реально отсутс
 разрешения Firestone/ZeroToHeroes оператор может явно установить
 `HS_FIRESTONE_STANDARD_AUTHORIZED=true`. Пока флаг выключен, источник не делает
 сетевых запросов, исключён из scheduled refresh и denominator проверки 99%, а
-ранее сохранённый snapshot скрыт из raw dataset, demo и REST v1.
+ранее сохранённый snapshot скрыт из raw dataset, demo и REST v1. Операционный
+health и stale-monitor также не считают такой источник неисправным.
 
 `/health` проверяет доступность API, но не гарантирует свежесть всех datasets.
 Для freshness используйте `/v1/sources` или `/v1/health`.

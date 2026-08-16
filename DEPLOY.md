@@ -69,7 +69,7 @@ curl -s -H "X-API-Key: ${HS_API_KEY}" http://127.0.0.1:8000/ops/health | jq .
 
 `/health` — лёгкий публичный liveness. Подробная диагностика источников, stale/cache state и filesystem path теперь находится в admin-only `/ops/health`.
 
-Скрипт `audit.sh` повторно прогоняет единый `validate_candidate_for_publish` по кэшу и показывает источники с расхождением статуса и качества данных. `freshness-check` возвращает non-zero, если есть stale или `cached-after-failure` источники; это отдельный сигнал, потому что refresh job может завершиться systemd-success и при этом оставить старый кэш видимым для API. `quality-check` проверяет все cached datasets через parser validation, source contracts и quality score; scores ниже `--min-quality-score` валят команду, а диапазон до `--warn-quality-score` попадает в warning list.
+Скрипт `audit.sh` повторно прогоняет единый `validate_candidate_for_publish` по кэшу и показывает источники с расхождением статуса и качества данных. `freshness-check` возвращает non-zero, если есть stale или `cached-after-failure` источники; это отдельный сигнал, потому что refresh job может завершиться systemd-success и при этом оставить старый кэш видимым для API. `quality-check` проверяет все доступные datasets через parser validation, source contracts и quality score. Операционно отключённые источники исключаются. Полный Vicious radar LKG при подтверждённом `upstream_publication_pending` проходит повторную структурную проверку и попадает в warnings, но продолжает считаться несвежим в `freshness-check`. Scores ниже `--min-quality-score` валят команду, а диапазон до `--warn-quality-score` попадает в warning list.
 
 ## Структура на сервере
 
@@ -151,10 +151,14 @@ Production refresh schedule:
   `03:20 Europe/Warsaw`. An incomplete checkpoint younger than 12 hours is
   resumed at `:45` by a non-persistent recovery timer in batches of at most 20
   targets with a strict four-provider-failure budget per recovery run.
-- `hs-data-api-docker-bg-compositions-screenshot.timer`: daily at
-  `04:10 Europe/Warsaw`. A capture is published only after MIME, image decoder,
-  dimensions, redaction and crop checks; the last valid image remains available
-  after a failed or concurrent capture.
+- `hs-data-api-docker-bg-compositions-screenshot.timer`: checks at
+  `04:10`, `10:10`, `16:10` and `22:10 Europe/Warsaw`. It skips provider calls
+  while the latest validated image is younger than 23 hours, then retries every
+  six hours until a fresh capture succeeds. A capture is published only after
+  MIME, image decoder, dimensions, redaction and crop checks; the last valid
+  image remains available after a failed or concurrent capture. Failure status
+  stores only a bounded error code; provider URLs, cookies and raw errors are
+  not written to telemetry.
 - The HSGuru matrix carries forward an unavailable slice and an unavailable
   Standard/Wild current catalog only from the last published snapshot for the
   same patch. The refresh remains `partial`, exposes `cached_slices` and
@@ -240,11 +244,16 @@ cd /srv/hs-data-api
 ./venv/bin/python -m app.cli quality-check
 ```
 
-Нормальный результат — `upstream_state=ready`. Live-состояния
-`upstream_unclassified` и `upstream_unavailable` оставляют последний валидный
-cache. Для radar `upstream_stale` означает, что API публикует последний
-полноценный граф с явными номерами radar/report issue и автоматически заменит
-его после появления нового. Пустые/повреждённые графы не публикуются.
+Нормальный результат — `upstream_state=ready`. Live Beta сначала использует
+согласованное непустое окно `lastDay`, затем `last3Days`, `lastWeek` или
+`last2Weeks`; ladder и matchup всегда относятся к одному фактическому окну.
+Если все окна пусты, `upstream_temporarily_empty` оставляет последний валидный
+cache и не запускает бессмысленный browser fallback. Для radar
+`upstream_publication_pending` означает, что API публикует последний полный
+граф с явными номерами radar/report issue и автоматически заменит его после
+появления нового. Панель показывает это как ожидание upstream, а не ошибку
+парсера; `freshness-check` всё равно остаётся строгим. Пустые/повреждённые графы
+не публикуются.
 
 Timer `hs-data-api-docker-refresh-vicious-syndicate.timer` проверяет Vicious
 каждые два часа с jitter до 10 минут. Никогда не ослабляйте структурный

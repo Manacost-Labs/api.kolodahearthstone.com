@@ -653,6 +653,61 @@ class ParserControlStoreTest(unittest.TestCase):
             self.assertTrue(row["stableBaselineAvailable"])
             self.assertEqual(row["rowsTotal"], 1)
 
+    def test_snapshot_distinguishes_confirmed_upstream_publication_pending(self) -> None:
+        source_id = "vicious_syndicate_radars"
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = ParserControlStore(root)
+            (root / "datasets").mkdir(parents=True)
+            (root / "statuses").mkdir(parents=True)
+            (root / "datasets" / f"{source_id}.json").write_text(
+                '{"fetched_at":"2026-08-13T22:28:58+00:00","data":{"structured":{"type":"vicious_syndicate_radars","radars":[]}}}',
+                encoding="utf-8",
+            )
+            (root / "statuses" / f"{source_id}.json").write_text(
+                '{"state":"ok","fetched_at":"2026-08-13T22:28:58+00:00","serving_cached_dataset":true,"cached_content_temporally_grandfathered":true,"last_refresh_state":"quality_error","last_refresh_at":"2026-08-16T20:23:09+00:00","last_refresh_error":"Vicious upstream publication pending","upstream_state":"upstream_publication_pending","last_refresh_upstream_state":"upstream_publication_pending"}',
+                encoding="utf-8",
+            )
+
+            snapshot = store.snapshot()
+            row = next(
+                source
+                for section in snapshot["sections"]
+                for source in section["sources"]
+                if source["id"] == source_id
+            )
+
+        self.assertEqual(row["state"], "upstream_pending")
+        self.assertEqual(row["health"], "upstream_pending")
+        self.assertEqual(row["sourceState"], "ok")
+        self.assertTrue(row["servingCachedDataset"])
+
+    def test_snapshot_keeps_unverified_upstream_pending_cache_as_warning(self) -> None:
+        source_id = "vicious_syndicate_radars"
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = ParserControlStore(root)
+            (root / "datasets").mkdir(parents=True)
+            (root / "statuses").mkdir(parents=True)
+            (root / "datasets" / f"{source_id}.json").write_text(
+                '{"fetched_at":"2026-08-13T22:28:58+00:00","data":{"structured":{"type":"vicious_syndicate_radars","radars":[]}}}',
+                encoding="utf-8",
+            )
+            (root / "statuses" / f"{source_id}.json").write_text(
+                '{"state":"ok","serving_cached_dataset":true,"last_refresh_upstream_state":"upstream_publication_pending"}',
+                encoding="utf-8",
+            )
+
+            snapshot = store.snapshot()
+            row = next(
+                source
+                for section in snapshot["sections"]
+                for source in section["sources"]
+                if source["id"] == source_id
+            )
+
+        self.assertEqual(row["health"], "warning")
+
 
 class ParserPipelineStateTest(unittest.IsolatedAsyncioTestCase):
     async def test_bg_minion_aggregate_preserves_database_diagnostics(self) -> None:

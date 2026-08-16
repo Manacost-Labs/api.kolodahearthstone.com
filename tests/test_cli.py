@@ -674,6 +674,55 @@ class CliTest(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
 
+    def test_quality_check_warns_for_verified_upstream_pending_temporal_lkg(self) -> None:
+        source = Source(
+            "vicious_syndicate_radars",
+            "https://www.vicioussyndicate.com/",
+            "vicious_syndicate",
+            "matchups",
+        )
+        dataset = {
+            "data": {
+                "structured": {
+                    "type": "vicious_syndicate_radars",
+                    "radars": [{"issue": "354"}],
+                }
+            }
+        }
+        status = {
+            "state": "ok",
+            "backend": "vicious_syndicate_api",
+            "serving_cached_dataset": True,
+            "cached_content_temporally_grandfathered": True,
+            "last_refresh_upstream_state": "upstream_publication_pending",
+        }
+        stdout = io.StringIO()
+        with (
+            patch("app.cli.SOURCE_BY_ID", {source.id: source}),
+            patch("app.storage.load_status", return_value=status),
+            patch(
+                "app.parser_control.load_resolved_public_dataset",
+                return_value=dataset,
+            ),
+            patch(
+                "app.publish_gate.is_usable_vicious_temporal_lkg",
+                return_value=True,
+            ),
+            patch("app.source_contracts.get_contract", return_value=None),
+            redirect_stdout(stdout),
+        ):
+            exit_code = cli.main(["quality-check"])
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["bad_count"], 0)
+        self.assertEqual(payload["warn_count"], 1)
+        self.assertEqual(
+            payload["warn_sources"][0]["classification"],
+            "upstream_publication_pending",
+        )
+
     def test_quality_check_reports_validation_exception_as_bad_source(self) -> None:
         source = Source("raises_source", "https://example.test", "hsreplay", "arena")
         with patch("app.cli.SOURCE_BY_ID", {"raises_source": source}), patch(

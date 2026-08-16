@@ -31,6 +31,24 @@ test('builds action-oriented parser summary', () => {
     assert.equal(summary.activeRun.id, 'run-1');
 });
 
+test('treats confirmed upstream publication wait as operationally healthy', () => {
+    const waiting = {
+        sections: [{
+            id: 'matchups', label: 'Матчапы', enabled: true, sources: [
+                { id: 'radars', health: 'upstream_pending', rowsTotal: 21 },
+            ],
+        }],
+    };
+
+    const summary = view.buildSummary(waiting);
+
+    assert.deepEqual(view.statusMeta('upstream_pending'), {
+        key: 'upstream_pending', label: 'Ожидает публикации', tone: 'info',
+    });
+    assert.equal(summary.healthy, 1);
+    assert.equal(summary.issues, 0);
+});
+
 test('formats state and run progress without optimistic defaults', () => {
     assert.deepEqual(view.statusMeta('failed'), { key: 'failed', label: 'Ошибка', tone: 'bad' });
     assert.deepEqual(view.runProgress({ totalSources: 4, completedSources: 2, failedSources: 1 }), {

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from .config import stale_dataset_hours
+from .config import source_operationally_enabled, stale_dataset_hours
 from .parser_control import resolve_public_dataset
 from .source_state import SourceState
 from .sources import SOURCES
@@ -34,6 +34,8 @@ def find_stale_sources(*, include_ok: bool = True) -> list[dict[str, Any]]:
     configured = {s.id for s in SOURCES}
 
     for source in SOURCES:
+        if not source_operationally_enabled(source.id):
+            continue
         limit_h = getattr(source, "stale_hours", None) or default_limit_h
         corrupt_parts: list[str] = []
         try:

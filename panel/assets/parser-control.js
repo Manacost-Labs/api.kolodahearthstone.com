@@ -106,7 +106,7 @@
         const status = statusFilter?.value || 'all';
         const statusMatches = status === 'all'
             || (status === 'issues' && issues.has(state))
-            || (status === 'ok' && ['ok', 'ready'].includes(state) && enabled)
+            || (status === 'ok' && ['ok', 'ready', 'upstream_pending'].includes(state) && enabled)
             || (status === 'disabled' && !enabled);
         const haystack = `${source.label || ''} ${source.id || ''} ${source.sectionLabel || ''}`.toLocaleLowerCase('ru-RU');
         return statusMatches

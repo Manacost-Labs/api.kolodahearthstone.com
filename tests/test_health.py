@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from datetime import UTC, datetime
@@ -71,6 +72,27 @@ class HealthEndpointTest(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertNotIn("data_dir", payload)
         self.assertNotIn("stale_sources", payload)
+
+    def test_ops_health_excludes_operationally_disabled_source(self) -> None:
+        source = SOURCE_BY_ID["firestone_standard"]
+
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {"HS_FIRESTONE_STANDARD_AUTHORIZED": "false"},
+            clear=False,
+        ), patch.object(main, "SOURCES", [source]), patch.object(
+            main, "load_status", return_value=None
+        ), patch.object(main, "load_dataset", return_value=None), patch.object(
+            main, "root_dir", return_value=Path(tmp)
+        ), patch(
+            "app.stale_monitor.find_stale_sources", return_value=[]
+        ):
+            payload = main.build_health_diagnostics()
+
+        self.assertTrue(payload["serving_ok"])
+        self.assertTrue(payload["freshness_ok"])
+        self.assertEqual(payload["operationally_disabled_sources"], [source.id])
+        self.assertEqual(payload["hard_failed_sources"], [])
 
     def test_ops_health_reports_stale_cached_source(self) -> None:
         source = type("SourceStub", (), {"id": "src1"})()

@@ -33,6 +33,7 @@ from .config import (
     cors_allowed_origins,
     orchestrator_api_key,
     python_environment,
+    source_operationally_enabled,
 )
 from .demo import build_demo_view, build_overview
 from .fetcher import refresh_sources
@@ -804,9 +805,14 @@ def build_health_diagnostics() -> dict:
     publication_failures: list[dict[str, Any]] = []
     publication_stale_sources: list[str] = []
     publication_stale_details: list[dict[str, Any]] = []
+    operationally_disabled_sources: list[str] = []
     for source, status, status_error in zip(
         SOURCES, statuses, status_errors, strict=True
     ):
+        if not source_operationally_enabled(source.id):
+            operationally_disabled_sources.append(source.id)
+            states["disabled"] = states.get("disabled", 0) + 1
+            continue
         dataset_error: Exception | None = None
         try:
             dataset = load_dataset(source.id)
@@ -924,6 +930,7 @@ def build_health_diagnostics() -> dict:
         "degraded": not (serving_ok and freshness_ok),
         "data_dir": str(root_dir()),
         "sources": len(SOURCES),
+        "operationally_disabled_sources": operationally_disabled_sources,
         "states": states,
         "hard_failed_sources": hard_failed_sources,
         "semantic_failed_sources": semantic_failed_sources,

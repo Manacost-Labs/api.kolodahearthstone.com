@@ -15,6 +15,7 @@ from app import cli
 from app.hsreplay_bg_screenshots import (
     SCREENSHOT_SOURCE_ID,
     _accept_compositions_capture,
+    _capture_compositions_screenshot_unlocked,
     _public_capture_metadata,
     _write_screenshot,
     capture_compositions_screenshot,
@@ -173,7 +174,7 @@ def test_capture_failure_preserves_last_known_good_latest(tmp_path: Path) -> Non
             "app.hsreplay_bg_screenshots._safe_stamp",
             return_value="20260812T021000Z",
         ),
-        pytest.raises(ValueError, match="valid screenshot image"),
+        pytest.raises(ValueError, match="invalid_screenshot_asset"),
     ):
         asyncio.run(capture_compositions_screenshot())
 
@@ -269,8 +270,182 @@ def test_scheduled_capture_records_cached_failure_status() -> None:
             "last_refresh_state": "fetch_error",
             "last_refresh_at": "2026-08-12T15:35:09+00:00",
             "last_refresh_error": "live screenshot capture failed",
+            "last_refresh_error_code": "provider_chain_failed",
         },
     )
+
+
+def test_capture_failure_logs_only_a_bounded_error_code() -> None:
+    secret = (
+        "token=private-value Cookie=session-private https://signed.example/private "
+        "response failed content validation"
+    )
+    with (
+        patch(
+            "app.hsreplay_bg_screenshots._capture_compositions_screenshot_unlocked",
+            new=AsyncMock(side_effect=RuntimeError(secret)),
+        ),
+        patch(
+            "app.hsreplay_bg_screenshots.latest_compositions_screenshot",
+            return_value=None,
+        ),
+        patch("app.hsreplay_bg_screenshots.save_status") as save_status,
+        patch("app.hsreplay_bg_screenshots.log_action") as log_action,
+        pytest.raises(RuntimeError, match="content_validation_failed") as raised,
+    ):
+        asyncio.run(capture_compositions_screenshot())
+
+    status = save_status.call_args.args[1]
+    assert status["last_refresh_error_code"] == "content_validation_failed"
+    logged = log_action.call_args.kwargs
+    assert logged["extra"] == {
+        "error_code": "content_validation_failed",
+        "cached_available": False,
+    }
+    assert secret not in repr(save_status.call_args)
+    assert secret not in repr(log_action.call_args)
+    assert secret not in str(raised.value)
+    assert raised.value.__suppress_context__ is True
+
+
+def test_capture_provider_telemetry_is_structured_and_drops_untrusted_fields() -> None:
+    secret = "token=private-value Cookie=session-private https://signed.example/private"
+
+    async def fail_after_observing(_source: object, **kwargs: object) -> None:
+        kwargs["attempt_observer"](
+            SimpleNamespace(
+                metadata={"backend": "scrape_do", "signed_url": secret},
+                status_code=200,
+                request_credits=1,
+            ),
+            False,
+        )
+        kwargs["failure_observer"](
+            {
+                "backend": "scrape_do",
+                "state": "failed",
+                "http_status": 401,
+                "request_credits": 1,
+                "error_type": "ScrapeDoRequestError",
+                "error_code": "AUTHENTICATION_FAILED",
+                "provider_attempt": 2,
+                "detail": secret,
+                "url": secret,
+            }
+        )
+        raise RuntimeError(secret)
+
+    with (
+        patch(
+            "app.hsreplay_bg_screenshots.scrape_source_with_options",
+            new=AsyncMock(side_effect=fail_after_observing),
+        ),
+        patch("app.hsreplay_bg_screenshots._hsreplay_cookie_header", return_value=""),
+        patch("app.hsreplay_bg_screenshots.log_action") as log_action,
+        pytest.raises(RuntimeError, match="private-value"),
+    ):
+        asyncio.run(_capture_compositions_screenshot_unlocked())
+
+    assert [call.args[0] for call in log_action.call_args_list] == [
+        "screenshot.provider.result",
+        "screenshot.provider.fail",
+    ]
+    rejected = log_action.call_args_list[0].kwargs
+    assert rejected["backend"] == "scrape_do"
+    assert rejected["http_status"] == 200
+    assert rejected["extra"] == {
+        "accepted": False,
+        "request_credits": 1,
+        "error_code": "content_rejected",
+    }
+    failed = log_action.call_args_list[1].kwargs
+    assert failed["backend"] == "scrape_do"
+    assert failed["http_status"] == 401
+    assert failed["error_type"] == "ScrapeDoRequestError"
+    assert failed["extra"] == {
+        "error_code": "AUTHENTICATION_FAILED",
+        "request_credits": 1,
+        "provider_attempt": 2,
+    }
+    assert secret not in repr(log_action.call_args_list)
+
+
+def test_stale_only_capture_skips_provider_when_latest_is_recent() -> None:
+    cached = {
+        "ok": True,
+        "source_id": SCREENSHOT_SOURCE_ID,
+        "captured_at": "2026-08-12T12:19:00+00:00",
+    }
+    capture = AsyncMock()
+    with (
+        patch(
+            "app.hsreplay_bg_screenshots.latest_compositions_screenshot",
+            return_value=cached,
+        ),
+        patch(
+            "app.hsreplay_bg_screenshots._capture_compositions_screenshot_unlocked",
+            new=capture,
+        ),
+        patch(
+            "app.hsreplay_bg_screenshots._now",
+            return_value="2026-08-13T10:00:00+00:00",
+        ),
+    ):
+        result = asyncio.run(
+            capture_compositions_screenshot(
+                allow_cached_on_failure=True,
+                stale_only=True,
+            )
+        )
+
+    assert result == {
+        "ok": True,
+        "published": False,
+        "skipped": True,
+        "reason": "fresh_screenshot",
+        "source_id": SCREENSHOT_SOURCE_ID,
+        "state": "ok",
+        "captured_at": "2026-08-12T12:19:00+00:00",
+    }
+    capture.assert_not_awaited()
+
+
+def test_stale_only_capture_retries_when_latest_is_old() -> None:
+    cached = {
+        "ok": True,
+        "source_id": SCREENSHOT_SOURCE_ID,
+        "captured_at": "2026-08-12T12:19:00+00:00",
+    }
+    fresh = {
+        "ok": True,
+        "source_id": SCREENSHOT_SOURCE_ID,
+        "captured_at": "2026-08-13T12:19:00+00:00",
+    }
+    capture = AsyncMock(return_value=fresh)
+    with (
+        patch(
+            "app.hsreplay_bg_screenshots.latest_compositions_screenshot",
+            return_value=cached,
+        ),
+        patch(
+            "app.hsreplay_bg_screenshots._capture_compositions_screenshot_unlocked",
+            new=capture,
+        ),
+        patch(
+            "app.hsreplay_bg_screenshots._now",
+            return_value="2026-08-13T12:00:00+00:00",
+        ),
+        patch("app.hsreplay_bg_screenshots.save_status"),
+    ):
+        result = asyncio.run(
+            capture_compositions_screenshot(
+                allow_cached_on_failure=True,
+                stale_only=True,
+            )
+        )
+
+    assert result == fresh
+    capture.assert_awaited_once_with()
 
 
 def test_capture_returns_honest_skip_when_source_is_locked() -> None:
@@ -362,8 +537,65 @@ def test_scheduled_capture_cli_enables_last_known_good_fallback(
         exit_code = cli.main(["capture-bg-compositions-screenshot", "--scheduled"])
 
     assert exit_code == 0
-    capture.assert_awaited_once_with(allow_cached_on_failure=True)
+    capture.assert_awaited_once_with(
+        allow_cached_on_failure=True,
+        stale_only=False,
+    )
     assert json.loads(capsys.readouterr().out) == result
+
+
+def test_scheduled_stale_only_capture_cli_forwards_retry_policy(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    result = {
+        "ok": True,
+        "published": False,
+        "source_id": SCREENSHOT_SOURCE_ID,
+        "state": "ok",
+        "skipped": True,
+        "reason": "fresh_screenshot",
+    }
+    capture = AsyncMock(return_value=result)
+    with (
+        patch(
+            "app.parser_control.is_source_scheduled_enabled",
+            return_value=True,
+        ),
+        patch(
+            "app.hsreplay_bg_screenshots.capture_compositions_screenshot",
+            new=capture,
+        ),
+        patch("app.reliability_telemetry.record_terminal_results"),
+    ):
+        exit_code = cli.main(
+            [
+                "capture-bg-compositions-screenshot",
+                "--scheduled",
+                "--stale-only",
+            ]
+        )
+
+    assert exit_code == 0
+    capture.assert_awaited_once_with(
+        allow_cached_on_failure=True,
+        stale_only=True,
+    )
+    assert json.loads(capsys.readouterr().out) == result
+
+
+def test_screenshot_timer_retries_without_recapturing_fresh_asset() -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    timer = (
+        project_root / "systemd/hs-data-api-docker-bg-compositions-screenshot.timer"
+    ).read_text(encoding="utf-8")
+    service = (
+        project_root / "systemd/hs-data-api-docker-bg-compositions-screenshot.service"
+    ).read_text(encoding="utf-8")
+
+    assert timer.count("OnCalendar=") == 4
+    for hour in ("04", "10", "16", "22"):
+        assert f"OnCalendar=*-*-* {hour}:10:00 Europe/Warsaw" in timer
+    assert "--scheduled --stale-only" in service
 
 
 def test_latest_rejects_a_text_artifact_marked_as_success(tmp_path: Path) -> None:

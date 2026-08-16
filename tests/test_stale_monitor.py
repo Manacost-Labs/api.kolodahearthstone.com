@@ -104,6 +104,27 @@ class StaleMonitorTest(unittest.TestCase):
             found = find_stale_sources(include_ok=True)
         self.assertEqual(found, [])
 
+    def test_skips_operationally_disabled_source(self) -> None:
+        source = SOURCE_BY_ID["firestone_standard"]
+        old = (datetime.now(UTC) - timedelta(hours=100)).isoformat()
+
+        with TemporaryDirectory() as directory, patch.dict(
+            os.environ,
+            {
+                "HS_API_DATA_DIR": directory,
+                "HS_FIRESTONE_STANDARD_AUTHORIZED": "false",
+            },
+            clear=False,
+        ), patch("app.stale_monitor.SOURCES", [source]), patch(
+            "app.stale_monitor.stale_dataset_hours", return_value=12.0
+        ):
+            write_json(dataset_path(source.id), {"fetched_at": old})
+            save_status(source.id, {"state": "ok", "fetched_at": old})
+
+            found = find_stale_sources(include_ok=True)
+
+        self.assertEqual(found, [])
+
     def test_stale_alert_state_escalates_by_age(self) -> None:
         self.assertEqual(
             _stale_alert_state({"state": "ok", "dataset_age_hours": 20}),

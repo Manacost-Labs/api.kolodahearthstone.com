@@ -508,6 +508,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Capture a Firecrawl screenshot of HSReplay Battlegrounds compositions.",
     )
     bg_compositions_screenshot.add_argument("--scheduled", action="store_true")
+    bg_compositions_screenshot.add_argument(
+        "--stale-only",
+        action="store_true",
+        help="Skip provider requests while the current screenshot is less than 23 hours old.",
+    )
     sub.add_parser("hsreplay-login", help="Log into HSReplay Premium and save browser session.")
     imp = sub.add_parser(
         "hsreplay-import-storage",
@@ -777,6 +782,7 @@ def main(argv: list[str] | None = None) -> int:
             compositions_screenshot_asset_quality_report,
         )
         from .parser_control import load_resolved_public_dataset
+        from .publish_gate import is_usable_vicious_temporal_lkg
         from .scrapers.quality import quality_metrics, validate_parsed_data
         from .source_contracts import contract_quality_report, get_contract
         from .storage import load_status
@@ -808,6 +814,7 @@ def main(argv: list[str] | None = None) -> int:
             structured = data.get("structured") or data.get("hsreplay_extracted") or {}
             error_type = None
             asset_report = None
+            verified_upstream_pending_lkg = False
             try:
                 if is_screenshot_asset:
                     asset_report = compositions_screenshot_asset_quality_report()
@@ -829,7 +836,24 @@ def main(argv: list[str] | None = None) -> int:
                         if contract is not None and structured
                         else None
                     )
-                    if source.kind == "pipeline":
+                    upstream_state = str(
+                        status.get("last_refresh_upstream_state")
+                        or status.get("upstream_state")
+                        or ""
+                    )
+                    verified_upstream_pending_lkg = bool(
+                        status.get("serving_cached_dataset")
+                        and status.get("cached_content_temporally_grandfathered")
+                        and upstream_state == "upstream_publication_pending"
+                        and data
+                        and is_usable_vicious_temporal_lkg(source, data)
+                    )
+                    if verified_upstream_pending_lkg:
+                        validate_ok = True
+                        reason = (
+                            "valid temporal LKG while upstream publication is pending"
+                        )
+                    elif source.kind == "pipeline":
                         state = status.get("state", SourceState.NEVER_FETCHED)
                         validate_ok = state == SourceState.OK and bool(structured)
                         reason = (
@@ -863,6 +887,11 @@ def main(argv: list[str] | None = None) -> int:
                         and asset_report.get("serving_cached_asset") is True
                     )
                 ),
+                "classification": (
+                    "upstream_publication_pending"
+                    if verified_upstream_pending_lkg
+                    else None
+                ),
                 "structured_type": structured.get("type"),
                 "rows_total": metrics.get("rows_total"),
                 "quality_score": quality_score,
@@ -887,10 +916,14 @@ def main(argv: list[str] | None = None) -> int:
             if (
                 not validate_ok
                 or row["contract_ok"] is False
-                or row["serving_cached_dataset"]
                 or low_score
             ):
                 bad.append(row)
+            elif row["serving_cached_dataset"]:
+                if verified_upstream_pending_lkg:
+                    warn.append(row)
+                else:
+                    bad.append(row)
             elif warn_score:
                 warn.append(row)
         payload = {
@@ -1211,7 +1244,8 @@ def main(argv: list[str] | None = None) -> int:
             "hsreplay_battlegrounds_compositions_screenshot",
             lambda: asyncio.run(
                 capture_compositions_screenshot(
-                    allow_cached_on_failure=bool(args.scheduled)
+                    allow_cached_on_failure=bool(args.scheduled),
+                    stale_only=bool(args.stale_only),
                 )
             ),
         )

@@ -45,6 +45,98 @@ POWER_BRACKETS = [
     ("Gold Silver Bronze", 16, 19),
 ]
 
+LIVE_TIME_RANGES = ("lastDay", "last3Days", "lastWeek", "last2Weeks")
+
+
+class ViciousLiveWindowUnavailable(RuntimeError):
+    """Firebase has no aligned ladder and matchup window with live samples."""
+
+    failure_reason_code = "unavailable"
+    upstream_state = "upstream_temporarily_empty"
+    skip_browser_fallback = True
+
+    def __init__(self, diagnostics: dict[str, Any]) -> None:
+        self.upstream_readiness = diagnostics
+        super().__init__("Vicious Firebase has no non-empty aligned data window")
+
+
+def _numeric_total(value: Any) -> float:
+    if isinstance(value, bool):
+        return 0.0
+    if isinstance(value, (int, float)):
+        return max(float(value), 0.0)
+    if isinstance(value, (list, tuple)):
+        return sum(_numeric_total(item) for item in value)
+    return 0.0
+
+
+def _archetype_identities(rows: Any) -> set[tuple[str, str]]:
+    if not isinstance(rows, list):
+        return set()
+    return {
+        (str(item[0]), str(item[1]))
+        for item in rows
+        if isinstance(item, list) and len(item) >= 2
+    }
+
+
+def _select_live_window(
+    ladder_payload: dict[str, Any],
+    table_payload: dict[str, Any],
+) -> tuple[str, dict[str, Any], dict[str, Any], dict[str, Any]]:
+    diagnostics: list[dict[str, Any]] = []
+    for time_range in LIVE_TIME_RANGES:
+        ladder_interval = ladder_payload.get(time_range)
+        table_interval = table_payload.get(time_range)
+        ladder = ladder_interval if isinstance(ladder_interval, dict) else {}
+        table_group = table_interval if isinstance(table_interval, dict) else {}
+        ranks_all = table_group.get("ranks_all")
+        table = ranks_all if isinstance(ranks_all, dict) else {}
+
+        ladder_archetypes = _archetype_identities(ladder.get("archetypes"))
+        table_archetypes = _archetype_identities(table.get("archetypes"))
+        ladder_games = _numeric_total(ladder.get("gamesPerRank"))
+        matchup_games = _numeric_total(table.get("table"))
+        shared_archetypes = len(ladder_archetypes & table_archetypes)
+        usable = (
+            ladder_games > 0
+            and matchup_games > 0
+            and shared_archetypes > 0
+        )
+        diagnostics.append(
+            {
+                "time_range": time_range,
+                "ladder_games": int(ladder_games),
+                "ladder_archetypes": len(ladder_archetypes),
+                "table_archetypes": len(table_archetypes),
+                "shared_archetypes": shared_archetypes,
+                "matchup_games": int(matchup_games),
+                "usable": usable,
+            }
+        )
+        if usable:
+            selection = {
+                "preferred_time_range": LIVE_TIME_RANGES[0],
+                "selected_time_range": time_range,
+                "fallback_used": time_range != LIVE_TIME_RANGES[0],
+                "window_state": (
+                    "preferred_ready"
+                    if time_range == LIVE_TIME_RANGES[0]
+                    else "fallback_ready"
+                ),
+                "window_diagnostics": diagnostics,
+            }
+            return time_range, ladder, table, selection
+
+    selection = {
+        "preferred_time_range": LIVE_TIME_RANGES[0],
+        "selected_time_range": None,
+        "fallback_used": False,
+        "window_state": "upstream_temporarily_empty",
+        "window_diagnostics": diagnostics,
+    }
+    raise ViciousLiveWindowUnavailable(selection)
+
 
 def _pct(value: float | int | None) -> str | None:
     if value is None:
@@ -371,13 +463,17 @@ async def fetch_vicious_live(source: Source) -> dict[str, Any]:
         ladder_payload = await _firebase_json(client, "premiumData/ladderData/Standard", token)
         table_payload = await _firebase_json(client, "premiumData/tableData/Standard", token)
 
-    ladder_view = build_ladder_view(ladder_payload["lastDay"])
-    table_view = build_table_view(table_payload["last2Weeks"]["ranks_all"])
+    time_range, ladder_interval, table_interval, window_selection = (
+        _select_live_window(ladder_payload, table_payload)
+    )
+    ladder_view = build_ladder_view(ladder_interval)
+    table_view = build_table_view(table_interval)
     tier_list = build_power_tier_list(ladder_view, table_view)
     availability = live_upstream_availability(
-        ladder_payload["lastDay"].get("archetypes") or [],
-        table_payload["last2Weeks"]["ranks_all"].get("archetypes") or [],
+        ladder_interval.get("archetypes") or [],
+        table_interval.get("archetypes") or [],
     )
+    availability.update(window_selection)
     deck_distribution = ladder_view["deck_distribution"]
     if not availability["ready"]:
         deck_distribution, tier_list = _without_placeholder_decks(
@@ -387,9 +483,9 @@ async def fetch_vicious_live(source: Source) -> dict[str, Any]:
     return {
         "type": "vicious_live",
         "format": "Standard",
-        "pie_time_range": "lastDay",
-        "tier_ladder_time_range": "lastDay",
-        "tier_matchup_time_range": "last2Weeks",
+        "pie_time_range": time_range,
+        "tier_ladder_time_range": time_range,
+        "tier_matchup_time_range": time_range,
         "games": ladder_view["games"],
         "class_distribution": ladder_view["class_distribution"],
         "deck_distribution": deck_distribution,

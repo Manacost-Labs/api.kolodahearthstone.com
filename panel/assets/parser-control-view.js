@@ -13,6 +13,7 @@
         succeeded: { label: 'Успешно', tone: 'good' },
         partial: { label: 'Частично', tone: 'warning' },
         warning: { label: 'Требует внимания', tone: 'warning' },
+        upstream_pending: { label: 'Ожидает публикации', tone: 'info' },
         missing: { label: 'Нет данных', tone: 'muted' },
         failed: { label: 'Ошибка', tone: 'bad' },
         error: { label: 'Ошибка', tone: 'bad' },
@@ -42,7 +43,7 @@
         const activeRun = snapshot?.activeRun || null;
         const issueStates = new Set(['warning', 'partial', 'missing', 'error', 'failed']);
         const issues = sources.filter((source) => issueStates.has(String(source.health || source.state || '').toLowerCase())).length;
-        const healthy = sources.filter((source) => ['ok', 'ready'].includes(String(source.health || source.state || '').toLowerCase())).length;
+        const healthy = sources.filter((source) => ['ok', 'ready', 'upstream_pending'].includes(String(source.health || source.state || '').toLowerCase())).length;
         const nextRunAt = sources
             .map((source) => source.nextRunAt)
             .filter(Boolean)
