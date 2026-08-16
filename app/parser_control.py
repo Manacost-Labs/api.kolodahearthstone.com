@@ -693,6 +693,7 @@ class ParserControlStore:
             sources: list[dict[str, Any]] = []
             for source_id in section.source_ids:
                 source = SOURCE_BY_ID[source_id]
+                operationally_enabled = source_operationally_enabled(source_id)
                 source_schedule = schedule_inventory["sources"][source_id]
                 status = self._read_source_json("statuses", source_id) or {}
                 dataset = self._read_source_json("datasets", source_id) or {}
@@ -777,7 +778,9 @@ class ParserControlStore:
                     and status.get("cached_content_temporally_grandfathered") is True
                     and upstream_state == "upstream_publication_pending"
                 )
-                if upstream_publication_pending:
+                if not operationally_enabled:
+                    health = "disabled"
+                elif upstream_publication_pending:
                     health = "upstream_pending"
                 elif serving_cached or source_state == "partial":
                     health = "warning"
@@ -818,12 +821,15 @@ class ParserControlStore:
                         "rowsTotal": published_rows_total,
                         "candidateRowsTotal": candidate_rows_total,
                         "supportsEarly": source_id in EARLY_SOURCE_IDS,
-                        "canRunManually": True,
-                        "enabled": section_enabled,
+                        "canRunManually": operationally_enabled,
+                        "operationallyEnabled": operationally_enabled,
+                        "enabled": section_enabled and operationally_enabled,
                         "scheduleIds": source_schedule["scheduleIds"],
                         "schedule": source_schedule["schedule"],
                         "nextRunAt": (
-                            source_schedule["nextRunAt"] if section_enabled else None
+                            source_schedule["nextRunAt"]
+                            if section_enabled and operationally_enabled
+                            else None
                         ),
                     }
                 )

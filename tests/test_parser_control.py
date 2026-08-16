@@ -708,6 +708,27 @@ class ParserControlStoreTest(unittest.TestCase):
 
         self.assertEqual(row["health"], "warning")
 
+    def test_snapshot_marks_operationally_disabled_source_as_disabled(self) -> None:
+        source_id = "firestone_standard"
+        with TemporaryDirectory() as directory, patch.dict(
+            os.environ,
+            {"HS_FIRESTONE_STANDARD_AUTHORIZED": "false"},
+            clear=False,
+        ):
+            snapshot = ParserControlStore(Path(directory)).snapshot()
+            row = next(
+                source
+                for section in snapshot["sections"]
+                for source in section["sources"]
+                if source["id"] == source_id
+            )
+
+        self.assertEqual(row["health"], "disabled")
+        self.assertFalse(row["operationallyEnabled"])
+        self.assertFalse(row["canRunManually"])
+        self.assertFalse(row["enabled"])
+        self.assertIsNone(row["nextRunAt"])
+
 
 class ParserPipelineStateTest(unittest.IsolatedAsyncioTestCase):
     async def test_bg_minion_aggregate_preserves_database_diagnostics(self) -> None:
