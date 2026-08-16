@@ -1042,21 +1042,44 @@ function analytics_normalize(string $module, array $definition, array $fetch): a
         $staleCount = 0;
         foreach ($sources as $source) {
             $status = is_array($source['status'] ?? null) ? $source['status'] : [];
-            $cached = !empty($status['serving_cached_dataset']);
+            $cached = !empty($source['serving_cached_dataset'])
+                || !empty($status['serving_cached_dataset']);
+            $operationallyEnabled = !array_key_exists('operationally_enabled', $source)
+                || !empty($source['operationally_enabled']);
             $fetchedAt = isset($source['fetched_at']) ? (string)$source['fetched_at'] : null;
             $age = analytics_source_age_label($fetchedAt);
-            $staleCount += ($age['seconds'] === null || $age['seconds'] >= 259200) ? 1 : 0;
+            $hasCanonicalStale = array_key_exists('stale', $source);
+            $isStale = $operationallyEnabled && (
+                $hasCanonicalStale
+                    ? !empty($source['stale'])
+                    : ($age['seconds'] === null || $age['seconds'] >= 259200)
+            );
+            $staleCount += $isStale ? 1 : 0;
+            $state = $operationallyEnabled
+                ? ($status['effective_state'] ?? $source['state'] ?? 'unknown')
+                : 'disabled';
+            if (!$operationallyEnabled) {
+                $ageLabel = 'Отключён политикой';
+                $ageTone = 'neutral';
+            } elseif ($isStale) {
+                $ageLabel = 'Устарело · ' . $age['label'];
+                $ageTone = 'warning';
+            } elseif ($age['seconds'] === null) {
+                $ageLabel = 'Актуальность подтверждена';
+                $ageTone = 'neutral';
+            } else {
+                $ageLabel = 'Актуально · ' . $age['label'];
+                $ageTone = $age['tone'] === 'good' ? 'good' : 'neutral';
+            }
             $rows[] = [
                 'source' => $source['source_id'] ?? '',
                 'site' => $source['site'] ?? '',
                 'category' => $source['category'] ?? '',
                 'description' => $source['description'] ?? '',
-                'state' => $status['effective_state'] ?? $source['state'] ?? 'unknown',
+                'state' => $state,
                 'fetched_at' => $fetchedAt,
-                'age' => in_array($age['tone'], ['warning', 'bad'], true)
-                    ? 'Устарело · ' . $age['label']
-                    : 'Актуально · ' . $age['label'],
-                'age_tone' => $age['tone'],
+                'age' => $ageLabel,
+                'age_tone' => $ageTone,
                 'dataset' => !empty($source['has_dataset']) ? 'Опубликован' : 'Нет набора',
                 'cache' => $cached ? 'Последний успешный набор' : 'Актуальный набор',
             ];
@@ -1072,12 +1095,14 @@ function analytics_normalize(string $module, array $definition, array $fetch): a
             return $leftTime <=> $rightTime;
         });
         $total = (int)($payload['total'] ?? count($sources));
+        $operationalTotal = (int)($payload['operational_total'] ?? $total);
         $ok = (int)($payload['ok_count'] ?? 0);
+        $problemCount = max(0, $operationalTotal - $ok);
         return analytics_result_shell($module, $definition, $fetch, [
             ['label' => 'Источников', 'value' => $total],
-            ['label' => 'Работают', 'value' => $ok, 'tone' => $ok === $total ? 'good' : 'warning'],
-            ['label' => 'Проблемных', 'value' => max(0, $total - $ok), 'tone' => $ok === $total ? 'good' : 'bad'],
-            ['label' => 'Устарели 3+ дня', 'value' => $staleCount, 'tone' => $staleCount > 0 ? 'warning' : 'good'],
+            ['label' => 'Работают', 'value' => $ok, 'tone' => $ok === $operationalTotal ? 'good' : 'warning'],
+            ['label' => 'Проблемных', 'value' => $problemCount, 'tone' => $problemCount === 0 ? 'good' : 'bad'],
+            ['label' => 'Устарели', 'value' => $staleCount, 'tone' => $staleCount > 0 ? 'warning' : 'good'],
         ], [
             analytics_column('source', 'Источник', 'code'),
             analytics_column('site', 'Сайт'),

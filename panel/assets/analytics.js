@@ -965,7 +965,8 @@
             const tableRow = document.createElement('tr');
             if (activeModule === 'overview') {
                 const effectiveState = String(row.state || '').toLocaleLowerCase('ru-RU');
-                if (effectiveState !== 'ok') tableRow.classList.add('is-problem');
+                const expectedStates = ['ok', 'disabled', 'upstream_pending', 'upstream_publication_pending'];
+                if (!expectedStates.includes(effectiveState)) tableRow.classList.add('is-problem');
                 else if (['warning', 'bad'].includes(row.age_tone)) tableRow.classList.add('is-stale');
             }
             columns.forEach((column) => {

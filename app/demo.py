@@ -169,22 +169,49 @@ def build_demo_view(source_id: str) -> dict[str, Any]:
 
 
 def build_overview() -> dict[str, Any]:
+    from .config import source_operationally_enabled, stale_dataset_hours
     from .parser_control import load_resolved_public_dataset
+    from .stale_monitor import find_stale_sources
 
+    stale_by_source = {
+        str(item.get("source_id")): item
+        for item in find_stale_sources(include_ok=True)
+        if item.get("source_id")
+    }
+    default_stale_hours = stale_dataset_hours()
     items: list[dict[str, Any]] = []
     for source in SOURCES:
         status = load_status(source.id) or {}
         dataset = load_resolved_public_dataset(source.id)
+        operationally_enabled = source_operationally_enabled(source.id)
+        stale = stale_by_source.get(source.id)
+        state = status.get("state", SourceState.NEVER_FETCHED)
+        if not operationally_enabled:
+            state = "disabled"
         items.append(
             {
                 "source_id": source.id,
                 "site": source.site,
                 "category": source.category,
                 "description": source.description,
-                "state": status.get("state", SourceState.NEVER_FETCHED),
-                "fetched_at": dataset.get("fetched_at") if dataset else None,
+                "state": state,
+                "fetched_at": (
+                    dataset.get("fetched_at") if dataset else status.get("fetched_at")
+                ),
                 "has_dataset": dataset is not None,
+                "operationally_enabled": operationally_enabled,
+                "stale": operationally_enabled and stale is not None,
+                "stale_reason": stale.get("reason") if stale else None,
+                "stale_hours_threshold": (source.stale_hours or default_stale_hours),
+                "serving_cached_dataset": bool(status.get("serving_cached_dataset")),
             }
         )
-    ok = sum(1 for i in items if i["state"] == SourceState.OK)
-    return {"sources": items, "ok_count": ok, "total": len(items)}
+    operational = [item for item in items if item["operationally_enabled"]]
+    ok = sum(1 for item in operational if item["state"] == SourceState.OK)
+    return {
+        "sources": items,
+        "ok_count": ok,
+        "operational_total": len(operational),
+        "disabled_count": len(items) - len(operational),
+        "total": len(items),
+    }
