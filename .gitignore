@@ -27,3 +27,7 @@ hs-data-api.credentials
 /panel/var/
 /panel/.playwright-cli/
 /panel/output/
+
+# Отметка о развёрнутом коммите, пишется deploy-server.sh на боевом сервере.
+# Без игнорирования она делает дерево грязным и блокирует следующий деплой.
+/.deployed-commit
