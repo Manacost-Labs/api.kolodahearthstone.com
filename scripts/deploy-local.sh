@@ -11,6 +11,15 @@ if [[ "$(id -u)" -ne 0 ]]; then
   exit 1
 fi
 
+# Копирование исключает .git, поэтому целевой каталог перестаёт помнить свою
+# версию: git показывает давний коммит, а на диске лежит другой код. Для
+# боевой установки есть deploy-server.sh, который обновляется через git pull.
+if [[ "$(readlink -f "$INSTALL_DIR")" == "/srv/hs-data-api" ]]; then
+  echo "Отказ: /srv/hs-data-api обновляется через scripts/deploy-server.sh." >&2
+  echo "Этот скрипт копирует файлы мимо git и оставляет версию неизвестной." >&2
+  exit 1
+fi
+
 echo "=== Sync $ROOT -> $INSTALL_DIR ==="
 rsync -av --delete \
   --exclude data \

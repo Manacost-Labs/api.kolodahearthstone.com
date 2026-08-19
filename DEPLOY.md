@@ -104,30 +104,44 @@ PostgreSQL credentials, connection metadata и backups остаются на м�
 
 ## Обновление кода без потери кэша
 
-**С этого workspace (rsync):**
+Боевая установка обновляется только через git:
 
 ```bash
-sudo ./scripts/deploy-local.sh
+sudo /srv/hs-data-api/scripts/deploy-server.sh
 ```
 
-**Или через git:**
+Скрипт делает `git pull --ff-only`, собирает образ, перезапускает контейнер и
+ждёт `200` на `/v1/health`. Если сервис не поднялся, прежний образ
+возвращается автоматически. Развёрнутый коммит остаётся в
+`/srv/hs-data-api/.deployed-commit` и в теге `hs-data-api:rollback-<коммит>`.
+
+Посмотреть, что приедет, ничего не меняя:
+
+```bash
+sudo /srv/hs-data-api/scripts/deploy-server.sh --dry-run
+```
+
+Деплой останавливается, если в рабочем каталоге есть незакоммиченные правки.
+Это намеренно: править код прямо на сервере нельзя, изменения нужно провести
+через репозиторий. Обойти можно флагом `--allow-dirty`, но тогда версия в
+проде перестаёт совпадать с коммитом.
+
+`scripts/deploy-local.sh` (rsync) предназначен для отдельных тестовых
+установок и отказывается работать с `/srv/hs-data-api`: копирование исключает
+`.git`, из-за чего каталог перестаёт помнить свою версию — git показывает один
+коммит, а на диске лежит другой код.
+
+Перед деплоем merge PR и выбор release commit выполняются отдельно. Не
+деплойте непроверенную feature-ветку.
+
+Если после обновления кода нужно переустановить зависимости хоста или юниты:
 
 ```bash
 cd /srv/hs-data-api
-test -z "$(git status --porcelain)"  # не затирать локальные изменения
-git fetch --prune origin
-git checkout main
-git pull --ff-only origin main
-./venv/bin/pip install -r requirements.txt
 sudo ./scripts/merge-env-example.sh /etc/hs-data-api.env
 sudo ./scripts/install-docker-systemd.sh
-sudo systemctl enable --now hs-flaresolverr.service hs-data-api-refresh.timer hs-data-api-refresh-api.timer hs-data-api-freshness-check.timer
-sudo systemctl disable --now hs-data-api-refresh-protected.timer 2>/dev/null || true
-sudo systemctl restart hs-data-api hs-flaresolverr
 ./scripts/audit.sh
 ```
-
-Перед этим merge PR и выбор release commit выполняются отдельно. Не деплойте непроверенную feature-ветку и не используйте `git reset --hard` для обновления production checkout.
 
 Production refresh schedule:
 
