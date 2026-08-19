@@ -89,6 +89,10 @@ case "$JOB" in
     THIRD_AFTER_CMD=("$PYTHON" "$APP_ROOT/scripts/sync_constructed_related_wiki_art.py" "--format" "all")
     SMOKE_URLS=("$API_BASE/meta")
     ;;
+  constructed-mirror)
+    CMD=("$PYTHON" "$APP_ROOT/scripts/mirror_constructed_images.py")
+    SMOKE_URLS=("$API_BASE/constructed-cards?per_page=1")
+    ;;
   constructed-images)
     CMD=("$PYTHON" "$APP_ROOT/scripts/backfill_constructed_images.py")
     SMOKE_URLS=("$API_BASE/constructed-cards?per_page=1")
