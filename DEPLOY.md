@@ -14,24 +14,41 @@
 
 ## Быстрая установка с нуля
 
+На чистом сервере (Debian/Ubuntu, нужен root):
+
 ```bash
-sudo git clone https://github.com/Manacost-Labs/api.kolodahearthstone.com.git /srv/hs-data-api
-cd /srv/hs-data-api
-sudo ./scripts/install.sh --dir /srv/hs-data-api
-sudo nano /etc/hs-data-api.env   # прокси, HS_API_KEY, опционально HSReplay/Telegram
-sudo systemctl restart hs-data-api hs-flaresolverr
-sudo systemctl start hs-data-api-refresh.timer hs-data-api-refresh-api.timer hs-data-api-freshness-check.timer
+curl -fsSL https://raw.githubusercontent.com/Manacost-Labs/api.kolodahearthstone.com/main/scripts/bootstrap-server.sh | sudo bash
+```
+
+Скрипт доставит недостающие зависимости, склонирует репозиторий в
+`/srv/hs-data-api`, соберёт образ, поставит systemd-таймеры и дождётся `200`
+на `/v1/health`. Повторный запуск безопасен и работает как обновление.
+
+Секретов в репозитории нет, поэтому на первом запуске создаётся
+`/srv/hs-data-api/.env.docker` из `.env.example`, и установка останавливается.
+Заполните ключи и поднимите сервис:
+
+```bash
+sudo nano /srv/hs-data-api/.env.docker
+sudo /srv/hs-data-api/scripts/deploy-server.sh
+```
+
+Проверить готовность окружения, ничего не устанавливая:
+
+```bash
+sudo ./scripts/bootstrap-server.sh --check
+```
+
+После установки:
+
+```bash
 sudo /srv/hs-data-api/scripts/server-readiness.sh --strict
 sudo /srv/hs-data-api/scripts/server-readiness.sh --strict --refresh-all
 ```
 
-Legacy one-line installer по умолчанию использует `/opt/hs-data-api`; для canonical Docker layout используйте явную установку выше:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Manacost-Labs/api.kolodahearthstone.com/main/scripts/install.sh | sudo bash
-```
-
-> Для `curl | bash` сначала убедитесь, что в `main` на GitHub актуальная версия скриптов.
+> `scripts/install.sh` — установка прежнего образца, без Docker: venv и юнит
+> `hs-data-api.service`, которого на боевом сервере нет. Оставлен для старых
+> установок в `/opt/hs-data-api`, для новых не используется.
 
 ## Перенос с текущего сервера (с сохранением кэша)
 

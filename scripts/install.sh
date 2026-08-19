@@ -1,4 +1,12 @@
 #!/usr/bin/env bash
+# LEGACY. Ставит сборку без Docker: venv, hs-data-api.service и таймеры
+# hs-data-api-refresh.*. Боевая установка работает иначе — контейнер через
+# docker compose и юниты hs-data-api-docker-*, поэтому здешний сервис на ней
+# просто отсутствует.
+#
+# Для нового сервера используйте scripts/bootstrap-server.sh, для обновления
+# существующего — scripts/deploy-server.sh. Этот скрипт оставлен для старых
+# установок в /opt/hs-data-api.
 # Install Hearthstone Data API on a fresh Ubuntu/Debian server.
 # Usage: sudo ./scripts/install.sh [--dir /opt/hs-data-api] [--no-systemd]
 set -euo pipefail
