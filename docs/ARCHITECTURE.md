@@ -181,9 +181,11 @@ scan_cards.php                    sync_*.py по областям
 - **`/srv/hs-data-api` разъехался с origin.** Production working copy отстаёт
   от `origin/main` и содержит незакоммиченные правки. Правило «runtime не
   является исходником» соблюдается не полностью.
-- **Два зеркала на GitHub.** `Manacost-Labs/api.kolodahearthstone.com` и
-  `Zulut30/hearthstone-parses` имеют одинаковую историю. Канонический —
-  первый.
+- **Старое имя репозитория вводит в заблуждение.** `Zulut30/hearthstone-parses`
+  это не второй репозиторий, а прежний адрес этого же: GitHub держит редирект
+  после переименования и переноса. Одинаковая история объясняется именно этим.
+  Ссылаться везде на `Manacost-Labs/api.kolodahearthstone.com`, иначе легко
+  принять редирект за отдельное зеркало.
 
 ## Проверка и deployment
 
