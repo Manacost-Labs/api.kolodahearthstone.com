@@ -1,0 +1,15 @@
+# Скан карт Hearthstone + докачка рендеров Полей сражений. Каждые 5 часов.
+#
+# ВНИМАНИЕ. Задача всё ещё делает cd в старую установку панели
+# (/var/www/koloda/data/www/db.kolodahs.ru). Рабочим корнем при этом служит
+# KOLODAHS_APP_ROOT из /etc/db-kolodahs-card-scan.env, иначе скрипты кладут
+# картинки в каталог, который nginx не отдаёт. Правильное решение — перевести
+# cd на /srv/api-kolodahearthstone/panel/current и снести старую установку;
+# до тех пор переменную из env убирать нельзя.
+#
+# Секреты (BLIZZARD_CLIENT_ID/SECRET) лежат в /etc/db-kolodahs-card-scan.env
+# и в репозиторий не попадают, шаблон см. в .env.example.
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+17 */5 * * * koloda cd /var/www/koloda/data/www/db.kolodahs.ru && set -a && . /etc/db-kolodahs-card-scan.env && set +a && /usr/bin/flock -n /tmp/db-kolodahs-card-scan.lock nice -n 10 ionice -c2 -n7 timeout 900 /bin/bash -c '/opt/php74/bin/php scripts/scan_cards.php --source=all && /opt/wiki-hs-parser/.venv/bin/python scripts/sync_battlegrounds_images.py' >> /var/log/db-kolodahs-card-scan.log 2>&1
