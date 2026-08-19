@@ -34,6 +34,9 @@ STATE_FILE = APP_ROOT / "var" / "sync" / "constructed-mirror-state.json"
 NORMAL_DIRNAME = "constructed-related"
 GOLDEN_DIRNAME = "constructed-golden"
 USER_AGENT = "kolodahearthstone.com-image-mirror/1.0 (+https://kolodahearthstone.ru)"
+# Blizzard иногда отдаёт в API адрес рендера, которого на CDN уже нет.
+# HearthstoneJSON держит те же карты и выручает в таких случаях.
+HSJ_RENDER = "https://art.hearthstonejson.com/v1/render/latest/ruRU/512x/{card_id}.png"
 
 # wiki.gg — небольшой community-хост, его грузим бережно; CloudFront выдержит
 # и больше потоков.
@@ -168,8 +171,20 @@ def candidates(conn, kind: str, force: bool) -> list[dict[str, Any]]:
         return list(cur.fetchall())
 
 
-def download(url: str, target: Path) -> int:
-    """Качает во временный файл рядом с целью и подменяет одним движением."""
+def download(urls: list[str], target: Path) -> tuple[int, str]:
+    """Качает первый доступный адрес во временный файл и подменяет им цель."""
+    errors = []
+    for index, url in enumerate(urls):
+        try:
+            return fetch_one(url, target), url
+        except Exception as exc:
+            errors.append(f"{host_of(url)}: {exc}")
+            if index + 1 == len(urls):
+                raise RuntimeError("; ".join(errors)) from exc
+    raise RuntimeError("no source urls")
+
+
+def fetch_one(url: str, target: Path) -> int:
     throttle(host_of(url))
     req = urllib.request.Request(
         url,
@@ -244,6 +259,7 @@ def mirror(conn, config: dict[str, Any], kind: str, limit: int | None,
         "candidates": len(rows),
         "up_to_date": fresh,
         "downloaded": 0,
+        "fallback": 0,
         "already_on_disk": 0,
         "errors": 0,
         "bytes": 0,
@@ -266,8 +282,13 @@ def mirror(conn, config: dict[str, Any], kind: str, limit: int | None,
         card_id = str(row["card_id"])
         if on_disk:
             return ("linked", card_id, rel_url, 0, None)
+        urls = [str(row["source_url"])]
+        if kind == "normal":
+            urls.append(HSJ_RENDER.format(card_id=card_id))
         try:
-            return ("downloaded", card_id, rel_url, download(str(row["source_url"]), target), None)
+            size, used = download(urls, target)
+            return ("downloaded" if used == urls[0] else "downloaded_fallback",
+                    card_id, rel_url, size, None)
         except Exception as exc:
             return ("error", card_id, rel_url, 0, str(exc))
 
@@ -280,6 +301,8 @@ def mirror(conn, config: dict[str, Any], kind: str, limit: int | None,
             if outcome == "linked":
                 stats["already_on_disk"] += 1
             else:
+                if outcome == "downloaded_fallback":
+                    stats["fallback"] += 1
                 stats["downloaded"] += 1
                 stats["bytes"] += size
             state["assets"][f"{kind}:{card_id}"] = {
