@@ -226,7 +226,33 @@ async def _fetch_cloud_html(
 
 def _metastats_class_html_is_usable(html_content: str, class_name: str) -> bool:
     try:
-        return bool(parse_metastats_class_page(html_content, class_name))
+        if parse_metastats_class_page(html_content, class_name):
+            return True
+        soup = BeautifulSoup(html_content, "lxml")
+        title = soup.title.get_text(" ", strip=True) if soup.title else ""
+        heading = next(
+            (
+                tag
+                for tag in soup.find_all("h1", class_="page-header")
+                if tag.get_text(" ", strip=True) == f"{class_name} Decks"
+            ),
+            None,
+        )
+        page_text = re.sub(r"[^a-z]", "", soup.get_text(" ").casefold())
+        expected_classes = {
+            re.sub(r"[^a-z]", "", candidate.casefold()) for candidate in CLASSES
+        }
+        blocked = any(
+            marker in html_content.casefold()
+            for marker in ("cf-chl-", "just a moment", "access denied")
+        )
+        return bool(
+            title.startswith(f"{class_name} Decks (")
+            and heading is not None
+            and heading.find_parent(id="page-wrapper") is not None
+            and all(candidate in page_text for candidate in expected_classes)
+            and not blocked
+        )
     except Exception:  # noqa: BLE001 - provider candidate validation fails closed
         return False
 
@@ -290,8 +316,8 @@ async def _fetch_metastats_class(
                 )
 
         decks = parse_metastats_class_page(html_content, class_name)
-        if not decks:
-            raise RuntimeError(f"MetaStats class {class_name} returned no decks")
+        if not _metastats_class_html_is_usable(html_content, class_name):
+            raise RuntimeError(f"MetaStats class {class_name} returned invalid content")
         return class_name, decks, backend
 
 
@@ -344,6 +370,9 @@ async def fetch_metastats_decks(source: Source) -> dict[str, Any]:
         "type": "metastats_decks",
         "decks": all_decks,
         "classes_parsed": list(CLASSES),
+        "empty_classes": [
+            class_name for class_name in CLASSES if not by_class[class_name]
+        ],
         "total_decks": len(all_decks),
         "_fetch_backend": fetch_backend,
     }

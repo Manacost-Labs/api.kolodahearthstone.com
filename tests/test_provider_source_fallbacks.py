@@ -89,6 +89,18 @@ def _metastats_class_html(class_name: str, *, decks: int = 4) -> str:
     return f'<html><div class="tab-pane" id="{class_name}">{rows}</div></html>'
 
 
+def _metastats_empty_class_html(class_name: str) -> str:
+    navigation = " ".join(CLASSES)
+    return (
+        "<html><head>"
+        f"<title>{class_name} Decks (August 2026) - Hearthstone Meta Stats</title>"
+        "</head><body>"
+        f'<nav>{navigation}</nav><div id="page-wrapper">'
+        f'<h1 class="page-header">{class_name} Decks</h1>'
+        "</div></body></html>"
+    )
+
+
 def _metastats_matchups_html() -> str:
     headers = "".join(f"<th>Opponent {index}</th>" for index in range(6))
     rows: list[str] = []
@@ -548,6 +560,35 @@ class ProviderSourceFallbackTest(unittest.TestCase):
         self.assertEqual(structured["total_decks"], len(CLASSES) * 4)
         self.assertEqual(structured["_fetch_backend"], "scrape_do")
         self.assertEqual(cloud_fetch.await_count, len(CLASSES))
+        residential.assert_not_awaited()
+
+    def test_metastats_accepts_a_structurally_valid_empty_post_patch_class(self) -> None:
+        async def cloud(
+            source: Source,
+            *,
+            accept_html,
+        ) -> tuple[str, str]:
+            class_name = source.url.rstrip("/").rsplit("/", 1)[-1]
+            candidate = (
+                _metastats_empty_class_html(class_name)
+                if class_name == "Paladin"
+                else _metastats_class_html(class_name)
+            )
+            self.assertTrue(accept_html(candidate))
+            return candidate, "scrape_do"
+
+        with (
+            patch("app.metastats._fetch_cloud_html", side_effect=cloud),
+            patch(
+                "app.metastats._fetch_residential_html",
+                new=AsyncMock(side_effect=AssertionError("must remain fallback")),
+            ) as residential,
+        ):
+            structured = asyncio.run(fetch_metastats_decks(METASTATS_SOURCE))
+
+        self.assertEqual(structured["classes_parsed"], CLASSES)
+        self.assertEqual(structured["empty_classes"], ["Paladin"])
+        self.assertEqual(structured["total_decks"], (len(CLASSES) - 1) * 4)
         residential.assert_not_awaited()
 
     def test_metastats_matchups_prefers_validated_cloud_candidate(self) -> None:
