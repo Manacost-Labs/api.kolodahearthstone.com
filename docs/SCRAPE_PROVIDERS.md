@@ -159,7 +159,7 @@ docker exec hs-data-api python -m app.cli brightdata-init-usage --billed-request
 
 ### Безопасное включение ParsesUnix
 
-Интеграция закреплена на неизменяемом релизе `ParsesUnix v0.9.0` с проверкой
+Интеграция закреплена на неизменяемом релизе `ParsesUnix v0.9.1` с проверкой
 SHA-256. По умолчанию она полностью выключена. Режим выбирается отдельно для
 каждого source ID:
 
@@ -171,9 +171,16 @@ SHA-256. По умолчанию она полностью выключена. �
   publish gate и regression gate. Обрезанный ответ, challenge или сетевой сбой
   отклоняются до разбора данных.
 
-Текущий адаптер использует только бесплатный direct transport. Настройка
-`HS_PARSESUNIX_ALLOWED_PROVIDERS` зарезервирована для следующего слоя с бюджетным
-ledger; наличие токена само по себе не запускает Scrape.do или Bright Data.
+Адаптер всегда начинает с бесплатного direct transport. Только verdict
+`BLOCKED` или `SOFT_BLOCK` может передать URL в платный слой. Scrape.do вызывается
+не более одного раза на URL и только когда одновременно заданы явный provider
+allowlist, ненулевой дневной credit limit, ненулевой request limit текущего
+refresh и токен. Решение, резерв и фактическая стоимость записываются в
+долговечные budget/stats/breaker ledger ядра. Наличие токена само по себе ничего
+не включает; неизвестная стоимость останавливает дальнейшие платные вызовы.
+После этой попытки URL не возвращается в старый provider cascade, поэтому один
+block не может дважды списать Scrape.do credits. Bright Data этим слоем не
+поддерживается.
 API-first и Firecrawl-primary маршруты сохраняют свой приоритет, а ParsesUnix
 участвует только в общей HTML-ветке или её fallback.
 
@@ -188,6 +195,9 @@ API-first и Firecrawl-primary маршруты сохраняют свой пр
 | `HS_PARSESUNIX_MAX_CONCURRENCY` | Отдельный предел параллельных sync-вызовов нового ядра, `1..8`, default `2`. |
 | `HS_PARSESUNIX_TIMEOUT_SECONDS` | Общий deadline одного transport-вызова, `5..300`, default `150`. |
 | `HS_PARSESUNIX_MAX_BODY_BYTES` | Максимальный размер одного ответа, `1..32 MiB`, default `8 MiB`; превышение считается неполным ответом, а не успехом. |
+| `HS_PARSESUNIX_SCRAPE_DO_DAILY_CREDIT_LIMIT` | Долговечный UTC-day лимит Scrape.do credits нового ядра; default `0`, то есть платные вызовы запрещены. |
+| `HS_PARSESUNIX_SCRAPE_DO_MAX_REQUESTS_PER_REFRESH` | Атомарный лимит реальных Scrape.do-вызовов одного refresh; default `0`. Вне контекста refresh вызов запрещён. |
+| `HS_PARSESUNIX_SCRAPE_DO_STRATEGIES` | Разрешённые стратегии Scrape.do; default `normal` (1 credit). `render`, `super`, `super_render` требуют явного добавления. |
 | `HS_HSREPLAY_JSON_CHANNELS` | Каскад HSReplay JSON; default `flaresolverr,scrape_do,curl_cffi`: бесплатный локальный solver, затем оплаченная подписка Scrape.do, затем residential `curl_cffi`. Предпочтения контракта идут первыми, затем добавляются настроенные каналы без дублей. |
 | `HS_HSREPLAY_SCRAPE_DO_MAX_REQUESTS` | Атомарный лимит зарезервированных HSReplay JSON-вызовов Scrape.do на refresh, default `120`. Этого достаточно для текущего полного набора архетипов с запасом. |
 | `HS_HSREPLAY_SCRAPE_DO_MAX_CREDITS` | Атомарный stop threshold HSReplay JSON на refresh, default `160`. Ошибочные и отклонённые вызовы не возвращают резерв. Фактическая цена известна только из ответа, поэтому один уже выполненный вызов может превысить threshold; следующий вызов будет заблокирован. |

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from .trinket_slices import TRINKET_SLICE_SOURCE_IDS
@@ -141,6 +142,49 @@ def parsesunix_max_body_bytes() -> int:
             "HS_PARSESUNIX_MAX_BODY_BYTES must be between 1048576 and 33554432"
         )
     return value
+
+
+def parsesunix_scrape_do_daily_credit_limit() -> Decimal:
+    raw = os.environ.get("HS_PARSESUNIX_SCRAPE_DO_DAILY_CREDIT_LIMIT", "0")
+    try:
+        value = Decimal(raw)
+    except InvalidOperation as exc:
+        raise ValueError(
+            "HS_PARSESUNIX_SCRAPE_DO_DAILY_CREDIT_LIMIT must be a decimal"
+        ) from exc
+    if not value.is_finite() or not Decimal(0) <= value <= Decimal(10_000_000):
+        raise ValueError(
+            "HS_PARSESUNIX_SCRAPE_DO_DAILY_CREDIT_LIMIT must be between 0 and 10000000"
+        )
+    return value
+
+
+def parsesunix_scrape_do_max_requests_per_refresh() -> int:
+    value = int(os.environ.get("HS_PARSESUNIX_SCRAPE_DO_MAX_REQUESTS_PER_REFRESH", "0"))
+    if not 0 <= value <= 1000:
+        raise ValueError(
+            "HS_PARSESUNIX_SCRAPE_DO_MAX_REQUESTS_PER_REFRESH must be between 0 and 1000"
+        )
+    return value
+
+
+def parsesunix_scrape_do_strategies() -> tuple[str, ...]:
+    allowed = frozenset({"normal", "render", "super", "super_render"})
+    raw = os.environ.get("HS_PARSESUNIX_SCRAPE_DO_STRATEGIES", "normal")
+    strategies = tuple(part.strip().lower() for part in raw.split(",") if part.strip())
+    if not strategies:
+        raise ValueError("HS_PARSESUNIX_SCRAPE_DO_STRATEGIES must not be empty")
+    if len(strategies) != len(set(strategies)):
+        raise ValueError(
+            "HS_PARSESUNIX_SCRAPE_DO_STRATEGIES must not contain duplicates"
+        )
+    unknown = sorted(set(strategies) - allowed)
+    if unknown:
+        raise ValueError(
+            "HS_PARSESUNIX_SCRAPE_DO_STRATEGIES contains unsupported strategies: "
+            + ", ".join(unknown)
+        )
+    return strategies
 
 
 def bind_host() -> str:

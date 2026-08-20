@@ -7,6 +7,9 @@ from app.config import (
     parsesunix_max_body_bytes,
     parsesunix_max_concurrency,
     parsesunix_mode_for_source,
+    parsesunix_scrape_do_daily_credit_limit,
+    parsesunix_scrape_do_max_requests_per_refresh,
+    parsesunix_scrape_do_strategies,
     parsesunix_state_dir,
     parsesunix_timeout_seconds,
 )
@@ -76,6 +79,42 @@ def test_resource_limits_are_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("HS_PARSESUNIX_MAX_BODY_BYTES", "1048575")
     with pytest.raises(ValueError, match="between 1048576 and 33554432"):
         parsesunix_max_body_bytes()
+
+    monkeypatch.setenv("HS_PARSESUNIX_SCRAPE_DO_DAILY_CREDIT_LIMIT", "-1")
+    with pytest.raises(ValueError, match="between 0 and 10000000"):
+        parsesunix_scrape_do_daily_credit_limit()
+
+    monkeypatch.setenv("HS_PARSESUNIX_SCRAPE_DO_MAX_REQUESTS_PER_REFRESH", "1001")
+    with pytest.raises(ValueError, match="between 0 and 1000"):
+        parsesunix_scrape_do_max_requests_per_refresh()
+
+
+def test_scrape_do_paid_layer_is_fail_closed_and_strategy_limited(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for name in (
+        "HS_PARSESUNIX_SCRAPE_DO_DAILY_CREDIT_LIMIT",
+        "HS_PARSESUNIX_SCRAPE_DO_MAX_REQUESTS_PER_REFRESH",
+        "HS_PARSESUNIX_SCRAPE_DO_STRATEGIES",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    assert parsesunix_scrape_do_daily_credit_limit() == 0
+    assert parsesunix_scrape_do_max_requests_per_refresh() == 0
+    assert parsesunix_scrape_do_strategies() == ("normal",)
+
+    monkeypatch.setenv(
+        "HS_PARSESUNIX_SCRAPE_DO_STRATEGIES",
+        "normal,render",
+    )
+    assert parsesunix_scrape_do_strategies() == ("normal", "render")
+
+    monkeypatch.setenv(
+        "HS_PARSESUNIX_SCRAPE_DO_STRATEGIES",
+        "normal,brightdata",
+    )
+    with pytest.raises(ValueError, match="brightdata"):
+        parsesunix_scrape_do_strategies()
 
 
 def test_state_is_isolated_below_the_api_data_directory(

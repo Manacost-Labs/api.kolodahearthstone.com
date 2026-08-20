@@ -151,14 +151,14 @@ def test_invalid_rollout_configuration_fails_before_any_transport(
     parsesunix.assert_not_awaited()
 
 
-def test_paid_fallback_requires_a_blocking_verdict() -> None:
+def test_parsesunix_never_reenters_the_legacy_paid_chain() -> None:
     blocked = ParsesUnixTransportRejected(_evidence("challenge", verdict="BLOCKED"))
     origin_down = ParsesUnixTransportRejected(
         _evidence("upstream unavailable", verdict="ORIGIN_DOWN")
     )
     integration_failure = ParsesUnixExecutionError("local configuration failed")
 
-    assert fetcher._parsesunix_allows_paid_fallback(blocked) is True
+    assert fetcher._parsesunix_allows_paid_fallback(blocked) is False
     assert fetcher._parsesunix_allows_paid_fallback(origin_down) is False
     assert fetcher._parsesunix_allows_paid_fallback(integration_failure) is False
     assert (

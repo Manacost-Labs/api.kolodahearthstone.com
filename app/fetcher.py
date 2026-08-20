@@ -62,7 +62,7 @@ from .parsesunix_transport import (
     TransportEvidence,
 )
 from .parsesunix_transport import (
-    fetch_direct as fetch_with_parsesunix,
+    fetch as fetch_with_parsesunix,
 )
 from .post_patch_policy import (
     EARLY_SOURCE_IDS,
@@ -1540,7 +1540,10 @@ async def _fetch_generic_html(
 
 def _parsesunix_allows_paid_fallback(error: Exception) -> bool:
     if isinstance(error, ParsesUnixTransportRejected):
-        return error.evidence.paid_escalation_allowed
+        # The ParsesUnix bridge has already evaluated the explicit provider
+        # allowlist and budget. Re-entering the legacy provider chain here could
+        # bill the same URL a second time or bypass a zero budget.
+        return False
     return not isinstance(error, ParsesUnixIntegrationError)
 
 
