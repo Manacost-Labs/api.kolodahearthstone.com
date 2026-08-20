@@ -24,6 +24,7 @@
   "overrides": {
     "@opentelemetry/core": "2.8.0",
     "cookie": "0.7.2",
+    "deepmerge-ts": "8.0.0",
     "engine.io": "6.6.9",
     "engine.io-client": "6.6.6",
     "esbuild": "0.25.0",
