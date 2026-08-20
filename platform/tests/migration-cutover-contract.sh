@@ -66,6 +66,15 @@ if [[ "$(grep -c '= ANY(append_only_tables)' "${project_root}/scripts/sync-shado
   echo 'FAIL: append-only history must never run destructive cleanup joins' >&2
   exit 1
 fi
+assert_contains scripts/sync-shadow.php \
+  "authoritative_replace_tables text\[\] := ARRAY" \
+  'tables with unstable surrogate ids need an explicit atomic replacement policy'
+assert_contains scripts/sync-shadow.php \
+  "'catalog\.battlegrounds_card_wiki_related'" \
+  'wiki relationship rows must not conflict when MariaDB recreates their ids'
+assert_contains scripts/sync-shadow.php \
+  '= ANY\(authoritative_replace_tables\)' \
+  'authoritative replacement must run before generic primary-key upsert'
 assert_contains scripts/verify-platform.sh \
   "test .*public_status.* = '302'" \
   'the protected panel root must be monitored as a GitHub OAuth redirect'

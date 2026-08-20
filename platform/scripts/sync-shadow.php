@@ -125,6 +125,9 @@ DECLARE
         'analytics.card_popularity_history',
         'analytics.hsguru_archetype_history'
     ];
+    authoritative_replace_tables text[] := ARRAY[
+        'catalog.battlegrounds_card_wiki_related'
+    ];
 BEGIN
     FOREACH source_schema IN ARRAY ARRAY['catalog_stage', 'analytics_stage'] LOOP
         target_schema := replace(source_schema, '_stage', '');
@@ -195,6 +198,20 @@ BEGIN
 
             IF primary_keys IS NULL OR cardinality(primary_keys) = 0 THEN
                 EXECUTE format('TRUNCATE TABLE %I.%I', target_schema, table_record.table_name);
+                EXECUTE format(
+                    'INSERT INTO %I.%I (%s) SELECT %s FROM %I.%I',
+                    target_schema, table_record.table_name, column_list, column_list,
+                    source_schema, table_record.table_name
+                );
+                CONTINUE;
+            END IF;
+
+            -- MariaDB periodically deletes and recreates these rows, so the
+            -- same natural relationship can legitimately receive a new id.
+            -- A primary-key upsert would then collide with the natural unique
+            -- index. Replace the small authoritative snapshot atomically.
+            IF format('%s.%s', target_schema, table_record.table_name) = ANY(authoritative_replace_tables) THEN
+                EXECUTE format('DELETE FROM %I.%I', target_schema, table_record.table_name);
                 EXECUTE format(
                     'INSERT INTO %I.%I (%s) SELECT %s FROM %I.%I',
                     target_schema, table_record.table_name, column_list, column_list,
