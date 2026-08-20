@@ -60,6 +60,7 @@ def test_direct_transport_does_not_accept_soft_block(monkeypatch) -> None:
 
     assert evidence.transport_validated is False
     assert evidence.verdict == "SOFT_BLOCK"
+    assert evidence.paid_escalation_allowed is True
 
 
 def test_truncated_response_is_never_transport_validated(monkeypatch) -> None:
@@ -77,6 +78,7 @@ def test_truncated_response_is_never_transport_validated(monkeypatch) -> None:
 
     assert evidence.transport_validated is False
     assert evidence.verdict == "PARSE_FAIL"
+    assert evidence.paid_escalation_allowed is False
     assert "configured" in evidence.reason
 
 
@@ -97,5 +99,6 @@ def test_transport_error_is_sanitized(monkeypatch) -> None:
 
     assert evidence.transport_validated is False
     assert evidence.verdict == "ORIGIN_DOWN"
+    assert evidence.paid_escalation_allowed is False
     assert "secret" not in evidence.reason
     assert "secret" not in repr(evidence.telemetry())

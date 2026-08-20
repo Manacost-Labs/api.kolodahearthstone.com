@@ -13,7 +13,7 @@ import threading
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
-from web_scraper import ContentRules, Verdict
+from web_scraper import PAID_ESCALATION_VERDICTS, ContentRules, Verdict
 from web_scraper.fetchers import RawResponse, UrllibTransport
 from web_scraper.triage import classify_response
 
@@ -53,6 +53,10 @@ class TransportEvidence:
     def transport_validated(self) -> bool:
         return self.verdict == Verdict.OK.value and not self.truncated
 
+    @property
+    def paid_escalation_allowed(self) -> bool:
+        return self.verdict in {verdict.value for verdict in PAID_ESCALATION_VERDICTS}
+
     def telemetry(self) -> dict[str, object]:
         """Return bounded, secret-free evidence without response bodies or URL queries."""
 
@@ -73,8 +77,27 @@ class TransportEvidence:
             "paid_cost_usd": self.paid_cost_usd,
             "cost_certainty": self.cost_certainty,
             "transport_validated": self.transport_validated,
+            "paid_escalation_allowed": self.paid_escalation_allowed,
             "publication_validated": None,
         }
+
+
+class ParsesUnixIntegrationError(RuntimeError):
+    """The integration could not safely produce transport evidence."""
+
+
+class ParsesUnixExecutionError(ParsesUnixIntegrationError):
+    """Configuration, safety validation, or adapter execution failed."""
+
+
+class ParsesUnixTransportRejected(ParsesUnixIntegrationError):
+    """A response arrived, but deterministic triage rejected it."""
+
+    def __init__(self, evidence: TransportEvidence) -> None:
+        self.evidence = evidence
+        super().__init__(
+            f"ParsesUnix rejected the response: {evidence.verdict}: {evidence.reason}"
+        )
 
 
 def _limiter(limit: int) -> threading.BoundedSemaphore:

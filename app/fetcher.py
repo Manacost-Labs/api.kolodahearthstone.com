@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import html
 import logging
 import random
@@ -39,6 +40,7 @@ from .config import (
     firecrawl_primary_source_ids,
     flaresolverr_session_per_source,
     http_retry_attempts,
+    parsesunix_mode_for_source,
     proxy_check_url,
     refresh_delay_browser_only,
     refresh_parallel_light,
@@ -53,6 +55,15 @@ from .config import (
 from .dataset_regression import check_dataset_regression, estimate_metric_count
 from .fetch_routes import source_can_run_without_residential_proxy
 from .parser import parse_html
+from .parsesunix_transport import (
+    ParsesUnixExecutionError,
+    ParsesUnixIntegrationError,
+    ParsesUnixTransportRejected,
+    TransportEvidence,
+)
+from .parsesunix_transport import (
+    fetch_direct as fetch_with_parsesunix,
+)
 from .post_patch_policy import (
     EARLY_SOURCE_IDS,
     POST_PATCH_BASELINE_LABEL,
@@ -122,6 +133,17 @@ class _DeferredAIJob:
     review_kind: str
     execute: Callable[[], Awaitable[Any]]
     affected_source_ids: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class _GenericHtmlFetch:
+    body: str
+    http_status: int
+    final_url: str
+    backend: str
+    page_snapshot: Any | None
+    parsesunix_mode: str
+    parsesunix_observation: dict[str, object] | None = None
 
 
 _deferred_ai_jobs: ContextVar[list[_DeferredAIJob] | None] = ContextVar(
@@ -1096,6 +1118,10 @@ def _preserve_cached_ok_status(source: Source, failed_status: dict[str, Any]) ->
             status["last_refresh_upstream_readiness"] = readiness
     if failed_status.get("proxy_status") in {402, 407}:
         status["last_refresh_proxy_status"] = failed_status["proxy_status"]
+    for evidence_key in ("parsesunix_transport", "parsesunix_shadow"):
+        evidence = failed_status.get(evidence_key)
+        if isinstance(evidence, dict):
+            status[f"last_refresh_{evidence_key}"] = dict(evidence)
     try:
         cached_dt = datetime.fromisoformat(cached_at.replace("Z", "+00:00"))
         if cached_dt.tzinfo is None:
@@ -1296,6 +1322,223 @@ async def _fetch_direct(_client: httpx.AsyncClient, source: Source) -> tuple[str
         on_session_burn=_burn,
         validate_body=lambda code, body: not is_session_blocked(code, body),
     )
+
+
+def _attach_parsesunix_observation(
+    payload: dict[str, Any],
+    *,
+    mode: str,
+    observation: dict[str, object] | None,
+    publication_validated: bool | None = None,
+) -> None:
+    if observation is None or mode not in {"parsesunix", "shadow"}:
+        return
+    evidence = dict(observation)
+    if mode == "parsesunix" and publication_validated is not None:
+        evidence["publication_validated"] = publication_validated
+    key = "parsesunix_transport" if mode == "parsesunix" else "parsesunix_shadow"
+    payload[key] = evidence
+
+
+async def _complete_parsesunix_shadow(
+    task: asyncio.Task[TransportEvidence],
+    source: Source,
+    *,
+    legacy_body: str | None,
+    legacy_http_status: int | None,
+    legacy_backend: str | None,
+) -> dict[str, object]:
+    """Compare a shadow response without publishing or mutating source state."""
+
+    try:
+        evidence = await task
+    except Exception as exc:  # noqa: BLE001 - shadow failures must not affect legacy
+        return {
+            "mode": "shadow",
+            "error_type": type(exc).__name__,
+            "transport_validated": False,
+            "publication_validated": None,
+            "paid_requests": 0,
+            "paid_cost_usd": "0",
+            "cost_certainty": "exact",
+        }
+
+    observation = evidence.telemetry()
+    observation.update(
+        {
+            "mode": "shadow",
+            "legacy_backend": legacy_backend,
+            "legacy_http_status": legacy_http_status,
+            "legacy_body_bytes": (
+                len(legacy_body.encode("utf-8", errors="replace"))
+                if legacy_body is not None
+                else None
+            ),
+            "http_status_match": (
+                evidence.http_status == legacy_http_status
+                if legacy_http_status is not None
+                else None
+            ),
+            "content_hash_match": (
+                evidence.content_sha256
+                == hashlib.sha256(
+                    legacy_body.encode("utf-8", errors="replace")
+                ).hexdigest()
+                if legacy_body is not None
+                else None
+            ),
+            "candidate_validated": None,
+        }
+    )
+    if not evidence.transport_validated:
+        return observation
+
+    try:
+        parsed = parse_html(source, evidence.body)
+        gate = validate_candidate_for_publish(
+            source,
+            parsed,
+            backend=evidence.backend,
+        )
+        observation["candidate_validated"] = gate.ok
+        observation["candidate_reason"] = str(gate.reason)[:500]
+        observation["candidate_metric_count"] = estimate_metric_count(parsed)
+    except Exception as exc:  # noqa: BLE001 - parsers and gates are plugin boundaries
+        observation["candidate_validated"] = False
+        observation["candidate_error_type"] = type(exc).__name__
+    return observation
+
+
+async def _fetch_generic_html(
+    client: httpx.AsyncClient | None,
+    source: Source,
+    *,
+    preferred_backend: str,
+) -> _GenericHtmlFetch:
+    try:
+        mode = parsesunix_mode_for_source(source.id)
+    except ValueError as exc:
+        raise ParsesUnixExecutionError(
+            f"Invalid ParsesUnix rollout configuration: {exc}"
+        ) from exc
+    shadow_task: asyncio.Task[TransportEvidence] | None = None
+    if mode == "shadow":
+        shadow_task = asyncio.create_task(
+            fetch_with_parsesunix(source.fetch_url),
+            name=f"parsesunix-shadow:{source.id}",
+        )
+
+    try:
+        if mode == "parsesunix":
+            try:
+                evidence = await fetch_with_parsesunix(source.fetch_url)
+            except Exception as exc:
+                raise ParsesUnixExecutionError(
+                    f"ParsesUnix direct transport failed: {type(exc).__name__}"
+                ) from exc
+            observation = evidence.telemetry()
+            log_action(
+                "parsesunix.transport.observe",
+                source_id=source.id,
+                backend=evidence.backend,
+                http_status=evidence.http_status,
+                level="info" if evidence.transport_validated else "warn",
+                extra=observation,
+            )
+            if not evidence.transport_validated:
+                raise ParsesUnixTransportRejected(evidence)
+            return _GenericHtmlFetch(
+                body=evidence.body,
+                http_status=evidence.http_status or 0,
+                final_url=evidence.final_url,
+                backend=evidence.backend,
+                page_snapshot=None,
+                parsesunix_mode=mode,
+                parsesunix_observation=observation,
+            )
+
+        if fetch_direct_enabled() and client is not None:
+            log_action(
+                "http.request.begin",
+                source_id=source.id,
+                backend="direct",
+                url=source.fetch_url,
+            )
+            body, http_status, final_url = await _fetch_direct(client, source)
+            backend = "direct"
+            page_snapshot = None
+            log_action(
+                "http.request.ok",
+                source_id=source.id,
+                backend=backend,
+                http_status=http_status,
+                url=str(final_url),
+                bytes_out=len(body.encode("utf-8", errors="replace")),
+            )
+        else:
+            result = await fetch_html(
+                source,
+                preferred_backend=preferred_backend,
+                parse_preview=lambda html: parse_html(source, html),
+            )
+            body = result.html
+            http_status = result.http_status
+            final_url = result.final_url
+            backend = result.backend
+            page_snapshot = result.snapshot
+    except asyncio.CancelledError:
+        if shadow_task is not None:
+            shadow_task.cancel()
+            await asyncio.gather(shadow_task, return_exceptions=True)
+        raise
+    except Exception:
+        if shadow_task is not None:
+            observation = await _complete_parsesunix_shadow(
+                shadow_task,
+                source,
+                legacy_body=None,
+                legacy_http_status=None,
+                legacy_backend=None,
+            )
+            log_action(
+                "parsesunix.shadow.observe",
+                source_id=source.id,
+                level="info",
+                extra=observation,
+            )
+        raise
+
+    observation = None
+    if shadow_task is not None:
+        observation = await _complete_parsesunix_shadow(
+            shadow_task,
+            source,
+            legacy_body=body,
+            legacy_http_status=http_status,
+            legacy_backend=backend,
+        )
+        log_action(
+            "parsesunix.shadow.observe",
+            source_id=source.id,
+            level="info",
+            extra=observation,
+        )
+
+    return _GenericHtmlFetch(
+        body=body,
+        http_status=http_status,
+        final_url=final_url,
+        backend=backend,
+        page_snapshot=page_snapshot,
+        parsesunix_mode=mode,
+        parsesunix_observation=observation,
+    )
+
+
+def _parsesunix_allows_paid_fallback(error: Exception) -> bool:
+    if isinstance(error, ParsesUnixTransportRejected):
+        return error.evidence.paid_escalation_allowed
+    return not isinstance(error, ParsesUnixIntegrationError)
 
 
 def _save_dataset_with_checks(
@@ -2698,7 +2941,8 @@ async def _fetch_source_with_active_lifecycle(
             )
 
     set_flaresolverr_source(source.id)
-    page_snapshot = None
+    parsesunix_mode = "legacy"
+    parsesunix_observation: dict[str, object] | None = None
     log_action(
         "browser.fetch.begin",
         source_id=source.id,
@@ -2706,30 +2950,22 @@ async def _fetch_source_with_active_lifecycle(
         extra={"preferred_backend": preferred_backend, "direct": fetch_direct_enabled()},
     )
     try:
-        if fetch_direct_enabled() and client is not None:
-            log_action("http.request.begin", source_id=source.id, backend="direct", url=source.fetch_url)
-            body, http_status, final_url = await _fetch_direct(client, source)
-            backend = "direct"
-            log_action(
-                "http.request.ok",
-                source_id=source.id,
-                backend="direct",
-                http_status=http_status,
-                url=str(final_url),
-                bytes_out=len(body.encode("utf-8", errors="replace")),
-            )
-        else:
-            result = await fetch_html(
-                source,
-                preferred_backend=preferred_backend,
-                parse_preview=lambda html: parse_html(source, html),
-            )
-            body = result.html
-            http_status = result.http_status
-            final_url = result.final_url
-            backend = result.backend
-            page_snapshot = result.snapshot
+        fetched = await _fetch_generic_html(
+            client,
+            source,
+            preferred_backend=preferred_backend,
+        )
+        body = fetched.body
+        http_status = fetched.http_status
+        final_url = fetched.final_url
+        backend = fetched.backend
+        page_snapshot = fetched.page_snapshot
+        parsesunix_mode = fetched.parsesunix_mode
+        parsesunix_observation = fetched.parsesunix_observation
     except Exception as exc:
+        if isinstance(exc, ParsesUnixTransportRejected):
+            parsesunix_mode = "parsesunix"
+            parsesunix_observation = exc.evidence.telemetry()
         log_action(
             "browser.fetch.end",
             source_id=source.id,
@@ -2738,12 +2974,28 @@ async def _fetch_source_with_active_lifecycle(
             detail=str(exc)[:2000],
             level="error",
         )
-        firecrawl_status = await _try_firecrawl_html(
-            source,
-            fetched_at=fetched_at,
-            reason=f"browser_exception:{type(exc).__name__}",
-        )
+        firecrawl_status = None
+        if _parsesunix_allows_paid_fallback(exc):
+            firecrawl_status = await _try_firecrawl_html(
+                source,
+                fetched_at=fetched_at,
+                reason=f"browser_exception:{type(exc).__name__}",
+            )
+        else:
+            log_action(
+                "parsesunix.paid_fallback.skipped",
+                source_id=source.id,
+                level="warn",
+                detail="ParsesUnix verdict or integration failure does not authorize paid escalation",
+                extra=parsesunix_observation,
+            )
         if firecrawl_status is not None:
+            _attach_parsesunix_observation(
+                firecrawl_status,
+                mode=parsesunix_mode,
+                observation=parsesunix_observation,
+                publication_validated=False,
+            )
             return _finish(firecrawl_status)
         status = _status_payload(
             source,
@@ -2753,6 +3005,12 @@ async def _fetch_source_with_active_lifecycle(
             detail=str(exc)[:2000],
         )
         _attach_failure_class(status, exc)
+        _attach_parsesunix_observation(
+            status,
+            mode=parsesunix_mode,
+            observation=parsesunix_observation,
+            publication_validated=False,
+        )
         status = _save_failure_status(source, status)
         if status.get("state") != SourceState.OK:
             await send_telegram_alert(source.id, SourceState.FETCH_ERROR, status["detail"], source.url)
@@ -2785,6 +3043,12 @@ async def _fetch_source_with_active_lifecycle(
             reason="cloudflare_challenge",
         )
         if firecrawl_status is not None:
+            _attach_parsesunix_observation(
+                firecrawl_status,
+                mode=parsesunix_mode,
+                observation=parsesunix_observation,
+                publication_validated=False,
+            )
             return _finish(firecrawl_status)
         status = _status_payload(
             source,
@@ -2796,6 +3060,12 @@ async def _fetch_source_with_active_lifecycle(
             content_length=content_length,
             backend=backend,
             used_residential_proxy=_source_uses_residential_proxy(source, backend),
+        )
+        _attach_parsesunix_observation(
+            status,
+            mode=parsesunix_mode,
+            observation=parsesunix_observation,
+            publication_validated=False,
         )
         status = _save_failure_status(source, status)
         if status.get("state") != SourceState.OK:
@@ -2816,6 +3086,12 @@ async def _fetch_source_with_active_lifecycle(
             reason=f"http_status:{http_status}",
         )
         if firecrawl_status is not None:
+            _attach_parsesunix_observation(
+                firecrawl_status,
+                mode=parsesunix_mode,
+                observation=parsesunix_observation,
+                publication_validated=False,
+            )
             return _finish(firecrawl_status)
         status = _status_payload(
             source,
@@ -2827,6 +3103,12 @@ async def _fetch_source_with_active_lifecycle(
             content_length=content_length,
             backend=backend,
             used_residential_proxy=_source_uses_residential_proxy(source, backend),
+        )
+        _attach_parsesunix_observation(
+            status,
+            mode=parsesunix_mode,
+            observation=parsesunix_observation,
+            publication_validated=False,
         )
         status = _save_failure_status(source, status)
         if status.get("state") != SourceState.OK:
@@ -2899,6 +3181,12 @@ async def _fetch_source_with_active_lifecycle(
             reason=f"quality_error:{reason[:120]}",
         )
         if firecrawl_status is not None:
+            _attach_parsesunix_observation(
+                firecrawl_status,
+                mode=parsesunix_mode,
+                observation=parsesunix_observation,
+                publication_validated=False,
+            )
             return _finish(firecrawl_status)
 
         ai_diagnosis = None
@@ -2927,6 +3215,12 @@ async def _fetch_source_with_active_lifecycle(
         )
         _attach_ai_review_status(status, ai_telemetry)
         _attach_ai_diagnosis_status(status, ai_diagnosis)
+        _attach_parsesunix_observation(
+            status,
+            mode=parsesunix_mode,
+            observation=parsesunix_observation,
+            publication_validated=False,
+        )
         status = _save_failure_status(source, status)
         if status.get("state") != SourceState.OK:
             await send_telegram_alert(source.id, SourceState.QUALITY_ERROR, reason, source.url)
@@ -2942,6 +3236,11 @@ async def _fetch_source_with_active_lifecycle(
         "used_residential_proxy": _source_uses_residential_proxy(source, backend),
         "data": parsed,
     }
+    _attach_parsesunix_observation(
+        dataset,
+        mode=parsesunix_mode,
+        observation=parsesunix_observation,
+    )
     reg, reg_msg, provisional_metadata = _save_dataset_with_checks(
         source, dataset, fetched_at=fetched_at
     )
@@ -2999,6 +3298,12 @@ async def _fetch_source_with_active_lifecycle(
     _attach_ai_review_status(status, ai_telemetry)
     _attach_ai_diagnosis_status(status, ai_diagnosis)
     _attach_provisional_status(status, provisional_metadata)
+    _attach_parsesunix_observation(
+        status,
+        mode=parsesunix_mode,
+        observation=parsesunix_observation,
+        publication_validated=not reg,
+    )
     if reg:
         status = _save_failure_status(source, status)
     else:
