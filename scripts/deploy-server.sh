@@ -16,6 +16,8 @@ HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:18081/v1/health}"
 HEALTH_RETRIES="${HEALTH_RETRIES:-30}"
 HEALTH_DELAY="${HEALTH_DELAY:-5}"
 HOST_SERVICE_USER="${HOST_SERVICE_USER:-debian}"
+HOST_TIMER_EXPORT_UNIT="${HOST_TIMER_EXPORT_UNIT:-hs-data-api-docker-export-timer-state.service}"
+HOST_TIMER_SNAPSHOT="$INSTALL_DIR/data/parser-control-systemd.json"
 STAMP_FILE="$INSTALL_DIR/.deployed-commit"
 
 ALLOW_DIRTY=0
@@ -48,6 +50,23 @@ ensure_host_services_can_read_source() {
     || die "пользователь host-служб $HOST_SERVICE_USER не существует"
   runuser -u "$HOST_SERVICE_USER" -- test -r "$INSTALL_DIR/app/systemd_timer_export.py" \
     || die "$HOST_SERVICE_USER не может читать код host-side exporter"
+}
+
+rollback_api() {
+  if docker image inspect "hs-data-api:rollback-$OLD_COMMIT" >/dev/null 2>&1; then
+    docker image tag "hs-data-api:rollback-$OLD_COMMIT" hs-data-api:local
+    docker compose -f "$COMPOSE_FILE" up -d api
+    echo "Откат на $OLD_COMMIT выполнен. Код в рабочем каталоге остался новым: $COMMIT" >&2
+  fi
+}
+
+verify_host_timer_export() {
+  systemctl cat "$HOST_TIMER_EXPORT_UNIT" >/dev/null 2>&1 \
+    || { echo "Не установлен $HOST_TIMER_EXPORT_UNIT" >&2; return 1; }
+  systemctl start "$HOST_TIMER_EXPORT_UNIT" \
+    || { systemctl --no-pager --full status "$HOST_TIMER_EXPORT_UNIT" >&2 || true; return 1; }
+  runuser -u "$HOST_SERVICE_USER" -- test -s "$HOST_TIMER_SNAPSHOT" \
+    || { echo "Exporter не создал $HOST_TIMER_SNAPSHOT" >&2; return 1; }
 }
 
 [[ "$(id -u)" -eq 0 ]] || die "запускать через sudo"
@@ -102,23 +121,29 @@ say "перезапускаю"
 docker compose -f "$COMPOSE_FILE" up -d api
 
 say "проверяю здоровье: $HEALTH_URL"
+API_HEALTHY=0
 for attempt in $(seq 1 "$HEALTH_RETRIES"); do
   code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$HEALTH_URL" || true)"
   if [[ "$code" == "200" ]]; then
     say "здоров с попытки $attempt"
-    printf '%s\n' "$COMMIT" > "$STAMP_FILE"
-    say "готово: в проде $COMMIT"
-    exit 0
+    API_HEALTHY=1
+    break
   fi
   sleep "$HEALTH_DELAY"
 done
 
-# Сюда попадаем, только если новая сборка не поднялась. Возвращаем прежний
-# образ, иначе сервис останется лежать до ручного вмешательства.
-echo "ОШИБКА: сервис не ответил за $((HEALTH_RETRIES * HEALTH_DELAY)) с, откатываюсь" >&2
-if docker image inspect "hs-data-api:rollback-$OLD_COMMIT" >/dev/null 2>&1; then
-  docker image tag "hs-data-api:rollback-$OLD_COMMIT" hs-data-api:local
-  docker compose -f "$COMPOSE_FILE" up -d api
-  echo "Откат на $OLD_COMMIT выполнен. Код в рабочем каталоге остался новым: $COMMIT" >&2
+if [[ "$API_HEALTHY" -ne 1 ]]; then
+  echo "ОШИБКА: сервис не ответил за $((HEALTH_RETRIES * HEALTH_DELAY)) с, откатываюсь" >&2
+  rollback_api
+  exit 1
 fi
-exit 1
+
+say "проверяю host-side exporter расписаний"
+if ! verify_host_timer_export; then
+  echo "ОШИБКА: exporter расписаний не прошёл post-deploy проверку, откатываюсь" >&2
+  rollback_api
+  exit 1
+fi
+
+printf '%s\n' "$COMMIT" > "$STAMP_FILE"
+say "готово: в проде $COMMIT"

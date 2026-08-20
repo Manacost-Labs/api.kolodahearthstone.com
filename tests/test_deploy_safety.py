@@ -28,6 +28,18 @@ def test_server_deploy_keeps_tracked_app_code_readable_by_host_services() -> Non
     assert "chmod -R" not in script
 
 
+def test_server_deploy_checks_host_timer_export_before_marking_success() -> None:
+    script = (ROOT / "scripts" / "deploy-server.sh").read_text(encoding="utf-8")
+
+    assert 'systemctl start "$HOST_TIMER_EXPORT_UNIT"' in script
+    assert 'runuser -u "$HOST_SERVICE_USER" -- test -s "$HOST_TIMER_SNAPSHOT"' in script
+    assert "exporter расписаний не прошёл post-deploy проверку" in script
+    post_deploy = script[script.index('say "проверяю host-side exporter расписаний"') :]
+    assert post_deploy.index("verify_host_timer_export") < post_deploy.index(
+        'printf \'%s\\n\' "$COMMIT" > "$STAMP_FILE"'
+    )
+
+
 def test_token_administration_has_a_dedicated_rate_limit() -> None:
     vhost = (ROOT / "deploy" / "nginx" / "api.kolodahearthstone.com.conf").read_text(
         encoding="utf-8"
