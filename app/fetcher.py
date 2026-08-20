@@ -1515,10 +1515,15 @@ async def _fetch_generic_html(
                 bytes_out=len(body.encode("utf-8", errors="replace")),
             )
         else:
+            parse_preview = (
+                None
+                if source.id == "hsguru_streamer_decks_legend_1000"
+                else lambda html: parse_html(source, html)
+            )
             result = await fetch_html(
                 source,
                 preferred_backend=preferred_backend,
-                parse_preview=lambda html: parse_html(source, html),
+                parse_preview=parse_preview,
             )
             body = result.html
             http_status = result.http_status

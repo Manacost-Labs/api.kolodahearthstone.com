@@ -13,7 +13,7 @@ from app.parsesunix_transport import (
     ParsesUnixTransportRejected,
     TransportEvidence,
 )
-from app.sources import Source
+from app.sources import SOURCE_BY_ID, Source
 
 SOURCE = Source(
     id="parsesunix_test_source",
@@ -68,6 +68,28 @@ def test_legacy_mode_never_calls_parsesunix(monkeypatch: pytest.MonkeyPatch) -> 
     assert result.parsesunix_mode == "legacy"
     assert result.parsesunix_observation is None
     parsesunix.assert_not_awaited()
+
+
+def test_streamer_defers_quality_gate_until_after_deck_code_enrichment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    streamer = SOURCE_BY_ID["hsguru_streamer_decks_legend_1000"]
+    fetch_html = AsyncMock(return_value=_legacy_result("<html>streamer table</html>"))
+    monkeypatch.setattr(
+        fetcher, "parsesunix_mode_for_source", lambda _source_id: "legacy"
+    )
+    monkeypatch.setattr(fetcher, "fetch_direct_enabled", lambda: False)
+    monkeypatch.setattr(fetcher, "fetch_html", fetch_html)
+
+    asyncio.run(
+        fetcher._fetch_generic_html(
+            None,
+            streamer,
+            preferred_backend="legacy_browser",
+        )
+    )
+
+    assert fetch_html.await_args.kwargs["parse_preview"] is None
 
 
 def test_active_mode_uses_only_validated_parsesunix_body(
