@@ -57,6 +57,15 @@ class ConvergenceChain:
     updated_at: datetime
 
 
+@dataclass(frozen=True)
+class ConvergenceClaim:
+    chain: ConvergenceChain
+    attempt_id: str
+    attempt_number: int
+    lease_owner: str
+    lease_until: datetime
+
+
 def _as_utc(value: datetime, *, field: str) -> datetime:
     if not isinstance(value, datetime) or value.tzinfo is None:
         raise ValueError(f"{field} must be a timezone-aware datetime")
@@ -215,6 +224,147 @@ class ConvergenceStore:
             return self._get_chain(connection, normalized_chain_id)
         finally:
             connection.close()
+
+    def claim_due(
+        self,
+        *,
+        owner: str,
+        now: datetime,
+        lease_seconds: int = 5 * 60,
+    ) -> ConvergenceClaim | None:
+        lease_owner = _identifier(owner, field="owner")
+        moment = _as_utc(now, field="now")
+        if not 30 <= lease_seconds <= 60 * 60:
+            raise ValueError("lease_seconds must be between 30 and 3600")
+        now_epoch = moment.timestamp()
+        lease_until_epoch = now_epoch + lease_seconds
+
+        connection = self._connect()
+        connection.row_factory = sqlite3.Row
+        try:
+            _ensure_schema(connection)
+            connection.execute("BEGIN IMMEDIATE")
+            expired_running = [
+                str(row[0])
+                for row in connection.execute(
+                    """
+                    SELECT chain_id
+                    FROM convergence_chains
+                    WHERE state = 'running'
+                      AND lease_until IS NOT NULL
+                      AND lease_until <= ?
+                    """,
+                    (now_epoch,),
+                )
+            ]
+            for chain_id in expired_running:
+                connection.execute(
+                    """
+                    UPDATE convergence_attempts
+                    SET state = 'failed', reason_code = 'lease_expired',
+                        finished_at = ?, updated_at = ?
+                    WHERE chain_id = ? AND state = 'running'
+                    """,
+                    (now_epoch, now_epoch, chain_id),
+                )
+                connection.execute(
+                    """
+                    UPDATE convergence_chains
+                    SET state = 'waiting', next_attempt_at = ?,
+                        lease_owner = NULL, lease_until = NULL, updated_at = ?
+                    WHERE chain_id = ? AND state = 'running'
+                    """,
+                    (now_epoch, now_epoch, chain_id),
+                )
+
+            connection.execute(
+                """
+                UPDATE convergence_chains
+                SET state = 'exhausted', next_attempt_at = NULL,
+                    lease_owner = NULL, lease_until = NULL, updated_at = ?
+                WHERE state IN ('waiting', 'upstream_pending', 'running')
+                  AND deadline_at <= ?
+                """,
+                (now_epoch, now_epoch),
+            )
+            row = connection.execute(
+                """
+                SELECT chain_id, attempt_index, action
+                FROM convergence_chains
+                WHERE state IN ('waiting', 'upstream_pending')
+                  AND next_attempt_at IS NOT NULL
+                  AND next_attempt_at <= ?
+                  AND deadline_at > ?
+                  AND (lease_until IS NULL OR lease_until <= ?)
+                ORDER BY next_attempt_at, created_at, chain_id
+                LIMIT 1
+                """,
+                (now_epoch, now_epoch, now_epoch),
+            ).fetchone()
+            if row is None:
+                connection.commit()
+                return None
+
+            chain_id = str(row["chain_id"])
+            attempt_number = int(row["attempt_index"]) + 1
+            attempt_id = hashlib.sha256(
+                f"{chain_id}\0{attempt_number}".encode("utf-8")
+            ).hexdigest()[:32]
+            updated = connection.execute(
+                """
+                UPDATE convergence_chains
+                SET state = 'running', attempt_index = ?,
+                    next_attempt_at = NULL, lease_owner = ?, lease_until = ?,
+                    updated_at = ?
+                WHERE chain_id = ?
+                  AND state IN ('waiting', 'upstream_pending')
+                  AND (lease_until IS NULL OR lease_until <= ?)
+                """,
+                (
+                    attempt_number,
+                    lease_owner,
+                    lease_until_epoch,
+                    now_epoch,
+                    chain_id,
+                    now_epoch,
+                ),
+            )
+            if updated.rowcount != 1:
+                connection.rollback()
+                return None
+            connection.execute(
+                """
+                INSERT INTO convergence_attempts (
+                    attempt_id, chain_id, attempt_number, action, state,
+                    started_at, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, 'running', ?, ?, ?)
+                """,
+                (
+                    attempt_id,
+                    chain_id,
+                    attempt_number,
+                    str(row["action"]),
+                    now_epoch,
+                    now_epoch,
+                    now_epoch,
+                ),
+            )
+            connection.commit()
+            chain = self._get_chain(connection, chain_id)
+        except BaseException:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+        if chain is None:
+            raise RuntimeError("Claimed convergence chain disappeared")
+        return ConvergenceClaim(
+            chain=chain,
+            attempt_id=attempt_id,
+            attempt_number=attempt_number,
+            lease_owner=lease_owner,
+            lease_until=_from_epoch(lease_until_epoch),
+        )
 
     @staticmethod
     def _get_chain(

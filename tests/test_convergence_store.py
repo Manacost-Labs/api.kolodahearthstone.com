@@ -150,3 +150,76 @@ def test_fresh_outcome_never_creates_a_chain(tmp_path: Path) -> None:
             observed_at=observed,
             deadline_at=observed + timedelta(hours=12),
         )
+
+
+def test_only_one_worker_can_claim_a_due_chain(tmp_path: Path) -> None:
+    path = tmp_path / "parser-telemetry.sqlite3"
+    _create_transport_chain(path)
+    due_at = datetime(2026, 8, 20, 12, 5, tzinfo=UTC)
+
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        claims = list(
+            pool.map(
+                lambda index: ConvergenceStore(path).claim_due(
+                    owner=f"worker-{index}",
+                    now=due_at,
+                ),
+                range(12),
+            )
+        )
+
+    claimed = [claim for claim in claims if claim is not None]
+    assert len(claimed) == 1
+    assert claimed[0].attempt_number == 1
+    assert claimed[0].chain.state == "running"
+    with sqlite3.connect(path) as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM convergence_attempts"
+        ).fetchone() == (1,)
+
+
+def test_expired_lease_is_recovered_as_the_next_attempt(tmp_path: Path) -> None:
+    path = tmp_path / "parser-telemetry.sqlite3"
+    chain = _create_transport_chain(path)
+    first_due = datetime(2026, 8, 20, 12, 5, tzinfo=UTC)
+    first = ConvergenceStore(path).claim_due(
+        owner="worker-first",
+        now=first_due,
+        lease_seconds=60,
+    )
+
+    recovered = ConvergenceStore(path).claim_due(
+        owner="worker-second",
+        now=first_due + timedelta(minutes=2),
+        lease_seconds=60,
+    )
+
+    assert first is not None
+    assert recovered is not None
+    assert recovered.chain.chain_id == chain.chain_id
+    assert recovered.attempt_number == 2
+    with sqlite3.connect(path) as connection:
+        attempts = connection.execute(
+            """
+            SELECT attempt_number, state, reason_code
+            FROM convergence_attempts
+            ORDER BY attempt_number
+            """
+        ).fetchall()
+    assert attempts == [(1, "failed", "lease_expired"), (2, "running", None)]
+
+
+def test_chain_past_deadline_is_exhausted_without_a_claim(tmp_path: Path) -> None:
+    path = tmp_path / "parser-telemetry.sqlite3"
+    chain = _create_transport_chain(path)
+
+    claim = ConvergenceStore(path).claim_due(
+        owner="worker",
+        now=datetime(2026, 8, 21, 1, 0, tzinfo=UTC),
+    )
+    exhausted = ConvergenceStore(path).get_chain(chain.chain_id)
+
+    assert claim is None
+    assert exhausted is not None
+    assert exhausted.state == "exhausted"
+    assert exhausted.next_attempt_at is None
