@@ -5,6 +5,9 @@ export type ParserRunStatus = "queued" | "running" | "succeeded" | "partial" | "
 export interface ParserRun {
   id: string;
   status: ParserRunStatus;
+  attemptPurpose: "manual" | "recovery";
+  originOccurrenceId: string | null;
+  recoveryChainId: string | null;
   sourceIds: string[];
   completedSources: number;
   failedSources: number;
@@ -19,6 +22,9 @@ export interface ParserRun {
 export interface ParserSelection {
   sourceIds?: string[];
   sectionIds?: string[];
+  attemptPurpose?: "manual" | "recovery";
+  originOccurrenceId?: string;
+  recoveryChainId?: string;
 }
 
 function endpoint(path: string): URL {
@@ -112,6 +118,13 @@ function isParserRun(value: unknown): value is ParserRun {
     typeof run.id !== "string" ||
     !/^[a-f0-9]{32}$/.test(run.id) ||
     !statuses.includes(run.status as ParserRunStatus) ||
+    (run.attemptPurpose !== "manual" && run.attemptPurpose !== "recovery") ||
+    (run.originOccurrenceId !== null &&
+      (typeof run.originOccurrenceId !== "string" ||
+        !/^[A-Za-z0-9_.:-]{1,160}$/.test(run.originOccurrenceId))) ||
+    (run.recoveryChainId !== null &&
+      (typeof run.recoveryChainId !== "string" ||
+        !/^[A-Za-z0-9_.:-]{1,160}$/.test(run.recoveryChainId))) ||
     !Array.isArray(run.sourceIds) ||
     !run.sourceIds.every(
       (sourceId) =>
@@ -126,6 +139,14 @@ function isParserRun(value: unknown): value is ParserRun {
     !Array.isArray(run.results) ||
     run.results.length > run.completedSources ||
     !run.results.every(isParserResult)
+  ) {
+    return false;
+  }
+
+  if (
+    (run.attemptPurpose === "recovery" && run.recoveryChainId === null) ||
+    (run.attemptPurpose !== "recovery" &&
+      (run.recoveryChainId !== null || run.originOccurrenceId !== null))
   ) {
     return false;
   }
@@ -196,7 +217,10 @@ export async function enqueueParserRun(
       requestId,
       sourceIds: selection.sourceIds ?? [],
       sectionIds: selection.sectionIds ?? [],
-      reason
+      reason,
+      attemptPurpose: selection.attemptPurpose ?? "manual",
+      originOccurrenceId: selection.originOccurrenceId ?? null,
+      recoveryChainId: selection.recoveryChainId ?? null
     })
   });
   const envelope = payload as { run?: unknown; deduplicated?: unknown };

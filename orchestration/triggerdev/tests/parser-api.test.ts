@@ -9,6 +9,9 @@ function runEnvelope(status = "queued"): Record<string, unknown> {
   return {
     id: "0123456789abcdef0123456789abcdef",
     status,
+    attemptPurpose: "manual",
+    originOccurrenceId: null,
+    recoveryChainId: null,
     sourceIds: ["vicious_syndicate_live_beta"],
     totalSources: 1,
     completedSources: status === "queued" ? 0 : 1,
@@ -64,6 +67,41 @@ test("enqueue retries transient failures with the same idempotency body", async 
   assert.equal(result.run.status, "queued");
   assert.equal(calls, 3);
   assert.equal(new Set(bodies).size, 1);
+});
+
+test("enqueue forwards recovery correlation without changing it", async () => {
+  let body: Record<string, unknown> = {};
+  globalThis.fetch = (async (_input, init) => {
+    body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return Response.json(
+      {
+        run: {
+          ...runEnvelope(),
+          attemptPurpose: "recovery",
+          originOccurrenceId: "schedule:20260820T100000Z",
+          recoveryChainId: "chain-1"
+        },
+        deduplicated: false
+      },
+      { status: 202 }
+    );
+  }) as typeof fetch;
+
+  const response = await enqueueParserRun(
+    "convergence:chain-1:attempt:2",
+    {
+      sourceIds: ["vicious_syndicate_live_beta"],
+      attemptPurpose: "recovery",
+      originOccurrenceId: "schedule:20260820T100000Z",
+      recoveryChainId: "chain-1"
+    },
+    "automatic recovery"
+  );
+
+  assert.equal(body.attemptPurpose, "recovery");
+  assert.equal(body.originOccurrenceId, "schedule:20260820T100000Z");
+  assert.equal(body.recoveryChainId, "chain-1");
+  assert.equal(response.run.recoveryChainId, "chain-1");
 });
 
 test("endpoint joins root and base-path URLs with exactly one slash", async () => {

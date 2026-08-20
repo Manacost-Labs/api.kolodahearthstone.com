@@ -56,7 +56,8 @@ PARSER_RUN_TIMEOUT_SECONDS=4500
   `vicious_syndicate_live_beta` и `vicious_syndicate_radars`; cron отсутствует.
 
 Обе task используют очередь с `concurrencyLimit: 1`, ставят локальную job и
-проверяют её статус каждые 30 секунд через Trigger wait. Терминальные исходы:
+проверяют её статус каждые 75 секунд через Trigger wait. Ожидание дольше минуты
+не удерживает concurrency slot Trigger.dev. Терминальные исходы:
 
 | Trigger result | Локальный status | Смысл |
 | --- | --- | --- |
@@ -66,10 +67,13 @@ PARSER_RUN_TIMEOUT_SECONDS=4500
 
 ## Idempotency и transient retry
 
-Для каждого Trigger run формируется стабильный
-`requestId=trigger:<run-id>:<task-id>`. Локальный server ledger связывает его с
-одним parser run: повтор с той же selection возвращает уже созданную job даже
-после её завершения, а повтор с другой selection отклоняется.
+Для ручного Trigger run формируется стабильный
+`requestId=trigger:<run-id>:<task-id>`. Recovery-run использует ключ
+`requestId=convergence:<chain-id>:attempt:<number>`, поэтому повтор одного шага
+сходимости не превращается в новую локальную job даже при новом Trigger run ID.
+Локальный server ledger связывает ключ с одним parser run: повтор с той же
+selection и correlation context возвращает уже созданную job даже после её
+завершения, а повтор с другими параметрами отклоняется.
 
 HTTP-клиент повторяет до трёх раз только network errors, invalid/truncated JSON
 успешного ответа и статусы `408`, `425`, `429`, `5xx`; validation/auth responses

@@ -9,6 +9,7 @@ import {
 
 export interface ParserJobPayload extends ParserSelection {
   reason?: string;
+  attemptNumber?: number;
 }
 
 export interface ParserJobResult {
@@ -34,6 +35,37 @@ function validateSelection(payload: ParserJobPayload): void {
       throw new Error("Parser selection contains an invalid identifier");
     }
   }
+  const purpose = payload.attemptPurpose ?? "manual";
+  if (purpose === "recovery") {
+    if (!payload.recoveryChainId) {
+      throw new Error("Recovery jobs require recoveryChainId");
+    }
+    if (!Number.isSafeInteger(payload.attemptNumber) || Number(payload.attemptNumber) < 1) {
+      throw new Error("Recovery jobs require a positive attemptNumber");
+    }
+  } else if (
+    payload.recoveryChainId !== undefined ||
+    payload.originOccurrenceId !== undefined ||
+    payload.attemptNumber !== undefined
+  ) {
+    throw new Error("Recovery correlation fields require attemptPurpose=recovery");
+  }
+  for (const value of [payload.recoveryChainId, payload.originOccurrenceId]) {
+    if (value !== undefined && !/^[A-Za-z0-9_.:-]{1,120}$/.test(value)) {
+      throw new Error("Recovery correlation contains an invalid identifier");
+    }
+  }
+}
+
+export function parserRequestId(
+  payload: ParserJobPayload,
+  triggerRunId: string,
+  taskId: string
+): string {
+  if (payload.attemptPurpose === "recovery") {
+    return `convergence:${payload.recoveryChainId}:attempt:${payload.attemptNumber}`;
+  }
+  return `trigger:${triggerRunId}:${taskId}`;
 }
 
 export async function runLocalParserJob(
@@ -44,7 +76,7 @@ export async function runLocalParserJob(
   validateSelection(payload);
   const { runTimeoutMs } = parserControlConfig();
   const deadline = Date.now() + runTimeoutMs;
-  const requestId = `trigger:${triggerRunId}:${taskId}`;
+  const requestId = parserRequestId(payload, triggerRunId, taskId);
   const created = await enqueueParserRun(
     requestId,
     payload,
@@ -64,7 +96,7 @@ export async function runLocalParserJob(
     if (Date.now() >= deadline) {
       throw new Error(`Local parser run ${run.id} exceeded its wall-clock deadline`);
     }
-    await wait.for({ seconds: 30 });
+    await wait.for({ seconds: 75 });
     run = await getParserRun(run.id);
     metadata.set("completedSources", run.completedSources);
     metadata.set("failedSources", run.failedSources);
