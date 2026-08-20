@@ -1958,7 +1958,9 @@ def _dedupe_streamer_decks_parsed(parsed: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(row, dict):
             continue
         deck_text = str(row.get("Deck") or "")
-        deck_code = str(row.get("deck_code") or "").strip() or (first_deck_code_from_text(deck_text) or "")
+        deck_code = first_deck_code_from_text(
+            str(row.get("deck_code") or "")
+        ) or (first_deck_code_from_text(deck_text) or "")
         if deck_code:
             row["deck_code"] = deck_code
             key = f"code:{deck_code}"

@@ -8,6 +8,7 @@ from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 
 from .cards_index import resolve_card_name
+from .deck_decode import first_deck_code_from_text
 from .hsreplay_extract import extract_for_source, parse_bg_trinkets_api_payload
 from .sources import Source
 from .structured import build_structured
@@ -27,9 +28,9 @@ def _deck_code_from_cell(cell: Any) -> str | None:
             value = node.get(attribute)
             if not isinstance(value, str):
                 continue
-            match = DECK_CODE_RE.search(value)
-            if match:
-                return match.group(0)
+            deck_code = first_deck_code_from_text(value)
+            if deck_code:
+                return deck_code
     return None
 
 

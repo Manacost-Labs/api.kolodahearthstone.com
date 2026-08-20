@@ -180,8 +180,8 @@ def test_hsguru_streamer_preserves_detail_url_and_hydrates_missing_code() -> Non
 
 def test_hsguru_streamer_reads_deck_code_from_copy_attribute_without_hydration() -> None:
     deck_code = (
-        "AAEBAf0GBs30Av76A4f7A564BtvXB63ZBwycENfOA4j0A8b5A8f5A63p"
-        "BdCeBu6hBom1BoSZB+C+B43cBwAA"
+        "AAEBAf0GDsnCAtfOA/LtA/GRBOWwBI21BJfvBMCSBcKSBZWzBvWYB+ybB9edB8ey"
+        "Bw3nywL40ALamwPX7QO07QS4uAXu/QWEngbQngaUygapiAeEmQfgnQcAAA=="
     )
     source = SOURCE_BY_ID["hsguru_streamer_decks_legend_1000"]
     html = f"""
