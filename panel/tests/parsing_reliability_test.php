@@ -55,6 +55,16 @@ $envelope = [
                 'full_fresh_rate_pct' => 77.78,
                 'accepted_fresh_rate_pct' => 77.78,
                 'data_available_rate_pct' => 77.78,
+                'freshness_slo' => [
+                    'target_rate_pct' => 99.0,
+                    'objective_status' => 'collecting',
+                    'good_attempts' => 7,
+                    'bad_attempts' => 2,
+                    'allowed_bad_attempts' => 0.09,
+                    'bad_attempts_over_budget' => 2,
+                    'error_budget_remaining_attempts' => -1.91,
+                    'error_budget_consumed_pct' => 2222.22,
+                ],
                 'verified_completeness' => [
                     'instrumented_sources' => 4,
                     'catalog_sources' => 99,
@@ -124,6 +134,16 @@ $envelope = [
                 'full_fresh_rate_pct' => 88.0,
                 'accepted_fresh_rate_pct' => 92.0,
                 'data_available_rate_pct' => 97.0,
+                'freshness_slo' => [
+                    'target_rate_pct' => 99.0,
+                    'objective_status' => 'breached',
+                    'good_attempts' => 88,
+                    'bad_attempts' => 12,
+                    'allowed_bad_attempts' => 1.0,
+                    'bad_attempts_over_budget' => 11,
+                    'error_budget_remaining_attempts' => -11.0,
+                    'error_budget_consumed_pct' => 1200.0,
+                ],
                 'verified_completeness' => [
                     'instrumented_sources' => 100,
                     'catalog_sources' => 100,
@@ -188,9 +208,43 @@ assert_same(77.78, $normalized['windows'][0]['full_fresh_rate_pct'], 'Missing te
 assert_same(7, $normalized['windows'][0]['observed_eligible_attempts'], 'Observed eligible outcomes must remain explicit.');
 assert_same(2, $normalized['windows'][0]['missing_terminal_windows'], 'Missing terminal outcomes must reach the UI.');
 assert_same(9, $normalized['windows'][0]['eligible_attempts'], 'Missing terminals must be included in the denominator.');
+assert_same(
+    true,
+    $normalized['windows'][0]['freshness_slo']['reported'],
+    'A reconciled preliminary fresh-only budget must reach the panel.'
+);
+assert_same(
+    'collecting',
+    $normalized['windows'][0]['freshness_slo']['objective_status'],
+    'A partial measurement must keep the budget explicitly preliminary.'
+);
+assert_same(
+    2,
+    $normalized['windows'][0]['freshness_slo']['bad_attempts_over_budget'],
+    'The panel must expose the exact number of attempts over budget.'
+);
 assert_same(true, $normalized['windows'][1]['rates_observed'], 'An observed window with consistent attempts may show rates.');
 assert_same(true, $normalized['windows'][1]['rates_available'], 'Observed rates must also be available.');
 assert_same(5, $normalized['windows'][1]['counts']['lkg_served'], 'LKG must remain a separate count.');
+assert_same(
+    'breached',
+    $normalized['windows'][1]['freshness_slo']['objective_status'],
+    'An observed 88% window must show a breached 99% budget.'
+);
+assert_same(
+    -11.0,
+    $normalized['windows'][1]['freshness_slo']['error_budget_remaining_attempts'],
+    'A negative remaining budget must not be hidden.'
+);
+
+$invalidFreshnessBudget = $envelope;
+$invalidFreshnessBudget['data']['windows'][1]['freshness_slo']['allowed_bad_attempts'] = 12.0;
+$invalidFreshnessBudget = analytics_normalize_parsing_reliability($invalidFreshnessBudget);
+assert_same(
+    false,
+    $invalidFreshnessBudget['windows'][1]['freshness_slo']['reported'],
+    'Contradictory budget arithmetic must fail closed.'
+);
 assert_same(
     true,
     $normalized['windows'][0]['scheduled_reliability']['reported'],

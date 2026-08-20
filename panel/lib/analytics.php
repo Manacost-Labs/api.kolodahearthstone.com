@@ -343,6 +343,107 @@ function analytics_reliability_exact_count($value): ?int
     return (int)$number;
 }
 
+function analytics_empty_reliability_slo(): array
+{
+    return [
+        'reported' => false,
+        'target_rate_pct' => 99.0,
+        'objective_status' => 'collecting',
+        'good_attempts' => null,
+        'bad_attempts' => null,
+        'allowed_bad_attempts' => null,
+        'bad_attempts_over_budget' => null,
+        'error_budget_remaining_attempts' => null,
+        'error_budget_consumed_pct' => null,
+    ];
+}
+
+function analytics_normalize_reliability_slo(
+    $value,
+    int $eligibleAttempts,
+    string $measurementStatus,
+    bool $staleCache = false
+): array {
+    $empty = analytics_empty_reliability_slo();
+    if (!is_array($value)) {
+        return $empty;
+    }
+
+    $target = analytics_reliability_percentage($value['target_rate_pct'] ?? null);
+    $good = analytics_reliability_exact_count($value['good_attempts'] ?? null);
+    $bad = analytics_reliability_exact_count($value['bad_attempts'] ?? null);
+    $overBudget = analytics_reliability_exact_count(
+        $value['bad_attempts_over_budget'] ?? null
+    );
+    $allowedBad = is_numeric($value['allowed_bad_attempts'] ?? null)
+        ? (float)$value['allowed_bad_attempts']
+        : null;
+    $remaining = is_numeric($value['error_budget_remaining_attempts'] ?? null)
+        ? (float)$value['error_budget_remaining_attempts']
+        : null;
+    $consumed = is_numeric($value['error_budget_consumed_pct'] ?? null)
+        ? (float)$value['error_budget_consumed_pct']
+        : null;
+    $objective = (string)($value['objective_status'] ?? '');
+    if (
+        $target === null
+        || $good === null
+        || $bad === null
+        || $overBudget === null
+        || $allowedBad === null
+        || $remaining === null
+        || !is_finite($allowedBad)
+        || !is_finite($remaining)
+        || $allowedBad < 0.0
+        || ($consumed !== null && (!is_finite($consumed) || $consumed < 0.0))
+        || !in_array($objective, ['collecting', 'meeting', 'breached'], true)
+        || $good + $bad !== $eligibleAttempts
+    ) {
+        return $empty;
+    }
+
+    $expectedAllowed = round($eligibleAttempts * ((100.0 - $target) / 100.0), 2);
+    $expectedRemaining = round($expectedAllowed - $bad, 2);
+    $expectedOverBudget = max(0, (int)ceil($bad - $expectedAllowed));
+    $expectedConsumed = $expectedAllowed > 0.0
+        ? round(($bad / $expectedAllowed) * 100.0, 2)
+        : null;
+    if (
+        abs($allowedBad - $expectedAllowed) > 0.011
+        || abs($remaining - $expectedRemaining) > 0.011
+        || $overBudget !== $expectedOverBudget
+        || (($consumed === null) !== ($expectedConsumed === null))
+        || (
+            $consumed !== null
+            && $expectedConsumed !== null
+            && abs($consumed - $expectedConsumed) > 0.011
+        )
+    ) {
+        return $empty;
+    }
+
+    $presentedObjective = $staleCache || $measurementStatus !== 'observed'
+        ? 'collecting'
+        : (($eligibleAttempts > 0 && $good / $eligibleAttempts >= $target / 100.0)
+            ? 'meeting'
+            : 'breached');
+    if ($measurementStatus === 'observed' && !$staleCache && $objective !== $presentedObjective) {
+        return $empty;
+    }
+
+    return [
+        'reported' => true,
+        'target_rate_pct' => $target,
+        'objective_status' => $presentedObjective,
+        'good_attempts' => $good,
+        'bad_attempts' => $bad,
+        'allowed_bad_attempts' => round($allowedBad, 2),
+        'bad_attempts_over_budget' => $overBudget,
+        'error_budget_remaining_attempts' => round($remaining, 2),
+        'error_budget_consumed_pct' => $consumed === null ? null : round($consumed, 2),
+    ];
+}
+
 function analytics_empty_scheduled_reliability(): array
 {
     return [
@@ -1037,6 +1138,13 @@ function analytics_normalize_parsing_reliability(
             && $dataAvailable !== null;
         $ratesObserved = $measurementStatus === 'observed' && $ratesAvailable;
 
+        $freshnessSlo = analytics_normalize_reliability_slo(
+            $rawWindow['freshness_slo'] ?? null,
+            $eligibleAttempts,
+            $measurementStatus,
+            $staleCache
+        );
+
         $verifiedCompleteness = analytics_normalize_verified_completeness(
             $rawWindow['verified_completeness'] ?? null,
             $eligibleAttempts,
@@ -1060,6 +1168,7 @@ function analytics_normalize_parsing_reliability(
             'data_available_rate_pct' => $dataAvailable,
             'rates_available' => $ratesAvailable,
             'rates_observed' => $ratesObserved,
+            'freshness_slo' => $freshnessSlo,
             'parsesunix_rollout' => analytics_normalize_parsesunix_rollout(
                 $rawWindow['parsesunix_rollout'] ?? null
             ),

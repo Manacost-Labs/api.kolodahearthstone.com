@@ -390,6 +390,56 @@
             countCard('Ошибки', model.counts.failed, 'без результата'),
             countCard('Таймауты', model.counts.timedOut, 'завершены по лимиту времени')
         );
+        const freshnessSlo = model.freshnessSlo || {
+            reported: false,
+            targetRate: '99%',
+            objectiveLabel: 'Накапливаем статистику',
+            objectiveClass: 'is-collecting',
+            goodAttempts: null,
+            badAttempts: null,
+            allowedBadAttempts: null,
+            badAttemptsOverBudget: null,
+            remainingAttempts: null,
+            consumedRate: '—',
+        };
+        const budgetSection = document.createElement('section');
+        budgetSection.className = 'parsing-completeness parsing-error-budget';
+        budgetSection.setAttribute('aria-labelledby', 'parsing-error-budget-title');
+        const budgetHead = document.createElement('header');
+        budgetHead.className = 'parsing-completeness-head';
+        const budgetHeadingGroup = document.createElement('div');
+        const budgetHeading = document.createElement('h4');
+        budgetHeading.id = 'parsing-error-budget-title';
+        budgetHeading.textContent = 'Бюджет ошибок fresh-only';
+        const budgetCopy = document.createElement('p');
+        budgetCopy.textContent = 'Provisional, LKG, ошибки, таймауты и пропущенные terminal-события уменьшают честный бюджет. Skipped исключается только при доказанной неприменимости запуска.';
+        budgetHeadingGroup.append(budgetHeading, budgetCopy);
+        const budgetBadge = document.createElement('span');
+        budgetBadge.className = `parsing-reliability-badge ${freshnessSlo.objectiveClass}`;
+        budgetBadge.textContent = `Цель ${freshnessSlo.targetRate} · ${freshnessSlo.objectiveLabel}`;
+        budgetHead.append(budgetHeadingGroup, budgetBadge);
+        const budgetRates = document.createElement('div');
+        budgetRates.className = 'parsing-completeness-rates';
+        budgetRates.append(
+            rateCard(
+                'Использовано бюджета',
+                freshnessSlo.reported ? freshnessSlo.consumedRate : '—',
+                freshnessSlo.reported
+                    ? '100% означает, что допустимый месячный или выбранный оконный бюджет исчерпан.'
+                    : 'API ещё не вернул согласованный расчёт бюджета.',
+                'is-primary'
+            )
+        );
+        const budgetCounts = document.createElement('div');
+        budgetCounts.className = 'parsing-completeness-counts';
+        budgetCounts.append(
+            countCard('Fresh', freshnessSlo.goodAttempts, 'только новые полные публикации'),
+            countCard('Не fresh', freshnessSlo.badAttempts, 'все eligible-исходы вне fresh_published'),
+            countCard('Допустимо', freshnessSlo.allowedBadAttempts, '1% от eligible-попыток'),
+            countCard('Сверх бюджета', freshnessSlo.badAttemptsOverBudget, 'минимум запусков, которые нужно исправить'),
+            countCard('Остаток', freshnessSlo.remainingAttempts, 'отрицательное значение означает превышение')
+        );
+        budgetSection.append(budgetHead, budgetRates, budgetCounts);
         const ratioDetail = (numerator, denominator, noun) => (
             numerator === null || numerator === undefined
             || denominator === null || denominator === undefined
@@ -805,6 +855,7 @@
             windowNav,
             rates,
             counts,
+            budgetSection,
             parsesUnixSection,
             scheduleSection,
             completeness,

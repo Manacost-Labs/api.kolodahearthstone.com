@@ -29,6 +29,17 @@ const observedWindow = {
     full_fresh_rate_pct: 88,
     accepted_fresh_rate_pct: 92,
     data_available_rate_pct: 97,
+    freshness_slo: {
+        reported: true,
+        target_rate_pct: 99,
+        objective_status: 'breached',
+        good_attempts: 88,
+        bad_attempts: 12,
+        allowed_bad_attempts: 1,
+        bad_attempts_over_budget: 11,
+        error_budget_remaining_attempts: -11,
+        error_budget_consumed_pct: 1200,
+    },
     verified_completeness: {
         instrumented_sources: 4,
         catalog_sources: 4,
@@ -123,6 +134,9 @@ test('describes extraction evidence without claiming full upstream pages', () =>
     assert.match(renderer, /Macro rate по источникам/);
     assert.match(renderer, /Худший наблюдавшийся источник/);
     assert.match(renderer, /Выполнение расписания/);
+    assert.match(renderer, /Бюджет ошибок fresh-only/);
+    assert.match(renderer, /Использовано бюджета/);
+    assert.match(renderer, /Сверх бюджета/);
     assert.match(renderer, /On-time fresh/);
     assert.match(renderer, /Покрытие расписаний/);
     assert.match(renderer, /Внедрение ParsesUnix/);
@@ -133,6 +147,42 @@ test('describes extraction evidence without claiming full upstream pages', () =>
     assert.match(renderer, /без нулевой оценки неизвестной стоимости/);
     assert.match(renderer, /предварительно/i);
     assert.doesNotMatch(renderer, /Полное получение данных|страница получена целиком/);
+});
+
+test('shows the exact honest fresh-only error budget', () => {
+    const model = buildReliabilityViewModel({
+        state: 'available',
+        default_window: '7d',
+        windows: [observedWindow],
+    });
+
+    assert.equal(model.freshnessSlo.reported, true);
+    assert.equal(model.freshnessSlo.objectiveStatus, 'breached');
+    assert.equal(model.freshnessSlo.objectiveLabel, 'Бюджет превышен');
+    assert.equal(model.freshnessSlo.goodAttempts, 88);
+    assert.equal(model.freshnessSlo.badAttempts, 12);
+    assert.equal(model.freshnessSlo.allowedBadAttempts, 1);
+    assert.equal(model.freshnessSlo.badAttemptsOverBudget, 11);
+    assert.equal(model.freshnessSlo.remainingAttempts, -11);
+    assert.equal(model.freshnessSlo.consumedRate, '1 200%');
+});
+
+test('fails the fresh-only budget closed on contradictory arithmetic', () => {
+    const model = buildReliabilityViewModel({
+        state: 'available',
+        default_window: '7d',
+        windows: [{
+            ...observedWindow,
+            freshness_slo: {
+                ...observedWindow.freshness_slo,
+                bad_attempts_over_budget: 1,
+            },
+        }],
+    });
+
+    assert.equal(model.freshnessSlo.reported, false);
+    assert.equal(model.freshnessSlo.objectiveStatus, 'collecting');
+    assert.equal(model.freshnessSlo.consumedRate, '—');
 });
 
 test('shows the ParsesUnix rollout as a separate validated funnel', () => {

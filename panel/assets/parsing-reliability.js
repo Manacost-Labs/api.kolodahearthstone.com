@@ -34,6 +34,86 @@
         return Number.isInteger(number) && number >= 0 ? number : null;
     };
 
+    const finiteNumber = (value) => {
+        if (value === null || value === '' || typeof value === 'boolean') return null;
+        const number = Number(value);
+        return Number.isFinite(number) ? number : null;
+    };
+
+    const buildFreshnessSlo = (slo, measurementStatus, eligibleAttempts) => {
+        const fallback = {
+            reported: false,
+            targetRate: '99%',
+            objectiveStatus: 'collecting',
+            objectiveLabel: 'Накапливаем статистику',
+            objectiveClass: 'is-collecting',
+            goodAttempts: null,
+            badAttempts: null,
+            allowedBadAttempts: null,
+            badAttemptsOverBudget: null,
+            remainingAttempts: null,
+            consumedRate: '—',
+        };
+        if (!slo || slo.reported !== true) return fallback;
+
+        const target = boundedPercentage(slo.target_rate_pct);
+        const good = exactNonNegativeCount(slo.good_attempts);
+        const bad = exactNonNegativeCount(slo.bad_attempts);
+        const overBudget = exactNonNegativeCount(slo.bad_attempts_over_budget);
+        const allowedBad = finiteNumber(slo.allowed_bad_attempts);
+        const remaining = finiteNumber(slo.error_budget_remaining_attempts);
+        const consumed = finiteNumber(slo.error_budget_consumed_pct);
+        const eligible = exactNonNegativeCount(eligibleAttempts);
+        const objective = ['collecting', 'meeting', 'breached'].includes(slo.objective_status)
+            ? slo.objective_status
+            : null;
+        if (
+            target === null || good === null || bad === null || overBudget === null
+            || allowedBad === null || allowedBad < 0 || remaining === null
+            || consumed === null || consumed < 0 || eligible === null
+            || good + bad !== eligible || objective === null
+        ) return fallback;
+
+        const expectedAllowed = Math.round(eligible * ((100 - target) / 100) * 100) / 100;
+        const expectedRemaining = Math.round((expectedAllowed - bad) * 100) / 100;
+        const expectedOverBudget = Math.max(0, Math.ceil(bad - expectedAllowed));
+        const expectedConsumed = expectedAllowed > 0
+            ? Math.round((bad / expectedAllowed) * 10000) / 100
+            : null;
+        if (
+            Math.abs(allowedBad - expectedAllowed) > 0.011
+            || Math.abs(remaining - expectedRemaining) > 0.011
+            || overBudget !== expectedOverBudget
+            || expectedConsumed === null
+            || Math.abs(consumed - expectedConsumed) > 0.011
+        ) return fallback;
+
+        const presentedObjective = measurementStatus === 'observed' ? objective : 'collecting';
+        const labels = {
+            collecting: 'Предварительный бюджет',
+            meeting: 'Бюджет соблюдается',
+            breached: 'Бюджет превышен',
+        };
+        const classes = {
+            collecting: 'is-collecting',
+            meeting: 'is-met',
+            breached: 'is-miss',
+        };
+        return {
+            reported: true,
+            targetRate: percentage(target),
+            objectiveStatus: presentedObjective,
+            objectiveLabel: labels[presentedObjective],
+            objectiveClass: classes[presentedObjective],
+            goodAttempts: good,
+            badAttempts: bad,
+            allowedBadAttempts: allowedBad,
+            badAttemptsOverBudget: overBudget,
+            remainingAttempts: remaining,
+            consumedRate: percentage(consumed),
+        };
+    };
+
     const buildParsesUnixRollout = (rollout) => {
         const fallback = {
             reported: false,
@@ -590,6 +670,11 @@
         const parsesUnixRollout = buildParsesUnixRollout(
             window?.parsesunix_rollout
         );
+        const freshnessSlo = buildFreshnessSlo(
+            window?.freshness_slo,
+            measurementStatus,
+            window?.eligible_attempts
+        );
         const badge = observed
             ? 'Наблюдаемый срез'
             : (preliminary ? 'Предварительный срез' : 'Накапливаем статистику');
@@ -618,6 +703,7 @@
                 timedOut: window ? nonNegativeCount(counts.timed_out) : null,
                 skipped: window ? nonNegativeCount(counts.skipped) : null,
             },
+            freshnessSlo,
             verifiedCompleteness,
             scheduledReliability,
             parsesUnixRollout,
