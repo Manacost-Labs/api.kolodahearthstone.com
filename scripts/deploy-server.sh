@@ -7,6 +7,7 @@
 # в проде — это то, что показывает git, и то же значение попадает в тег образа
 # и в файл-отметку.
 set -euo pipefail
+umask 0022
 
 INSTALL_DIR="${INSTALL_DIR:-/srv/hs-data-api}"
 BRANCH="${BRANCH:-main}"
@@ -14,6 +15,7 @@ COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:18081/v1/health}"
 HEALTH_RETRIES="${HEALTH_RETRIES:-30}"
 HEALTH_DELAY="${HEALTH_DELAY:-5}"
+HOST_SERVICE_USER="${HOST_SERVICE_USER:-debian}"
 STAMP_FILE="$INSTALL_DIR/.deployed-commit"
 
 ALLOW_DIRTY=0
@@ -30,6 +32,23 @@ done
 
 die() { echo "ОШИБКА: $*" >&2; exit 1; }
 say() { echo "==> $*"; }
+
+ensure_host_services_can_read_source() {
+  local path
+
+  # Deployment запускается от root, а host-side exporter — от непривилегированного
+  # пользователя. Исправляем права только у публичного tracked-кода app, не
+  # затрагивая .env, credentials, data и другие runtime-файлы.
+  find app -type d -exec chmod a+rx {} +
+  while IFS= read -r -d '' path; do
+    [[ -f "$path" ]] && chmod a+r -- "$path"
+  done < <(git ls-files -z -- app)
+
+  id "$HOST_SERVICE_USER" >/dev/null 2>&1 \
+    || die "пользователь host-служб $HOST_SERVICE_USER не существует"
+  runuser -u "$HOST_SERVICE_USER" -- test -r "$INSTALL_DIR/app/systemd_timer_export.py" \
+    || die "$HOST_SERVICE_USER не может читать код host-side exporter"
+}
 
 [[ "$(id -u)" -eq 0 ]] || die "запускать через sudo"
 [[ -d "$INSTALL_DIR/.git" ]] || die "$INSTALL_DIR не git-репозиторий"
@@ -68,6 +87,7 @@ fi
 
 git pull --ff-only --quiet origin "$BRANCH"
 COMMIT="$(git rev-parse --short HEAD)"
+ensure_host_services_can_read_source
 
 # Тег на прежний образ, чтобы откат не зависел от повторной сборки.
 if docker image inspect hs-data-api:local >/dev/null 2>&1; then
