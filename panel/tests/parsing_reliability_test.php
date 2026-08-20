@@ -15,7 +15,7 @@ function assert_same($expected, $actual, string $message): void
 $envelope = [
     'data' => [
         'methodology' => [
-            'version' => 'logical-source-observed-v9',
+            'version' => 'logical-source-observed-v15',
             'unit' => 'one terminal outcome per source in a refresh run',
             'scope' => 'observed_scrape_and_pipeline_sources',
             'completeness' => 'observed_attempts_plus_recorded_run_deficits',
@@ -53,6 +53,20 @@ $envelope = [
                     'failed' => 0,
                     'timed_out' => 0,
                     'skipped' => 1,
+                ],
+                'outcome_recovery' => [
+                    'provisional' => [
+                        'events' => 0,
+                        'recovered_to_fresh' => 0,
+                        'reclassified_upstream_pending' => 0,
+                        'unresolved' => 0,
+                    ],
+                    'lkg_served' => [
+                        'events' => 0,
+                        'recovered_to_fresh' => 0,
+                        'reclassified_upstream_pending' => 0,
+                        'unresolved' => 0,
+                    ],
                 ],
                 'full_fresh_rate_pct' => 77.78,
                 'end_to_end_fresh_rate_pct' => 70.0,
@@ -147,6 +161,20 @@ $envelope = [
                     'failed' => 2,
                     'timed_out' => 1,
                     'skipped' => 5,
+                ],
+                'outcome_recovery' => [
+                    'provisional' => [
+                        'events' => 4,
+                        'recovered_to_fresh' => 3,
+                        'reclassified_upstream_pending' => 0,
+                        'unresolved' => 1,
+                    ],
+                    'lkg_served' => [
+                        'events' => 5,
+                        'recovered_to_fresh' => 2,
+                        'reclassified_upstream_pending' => 2,
+                        'unresolved' => 1,
+                    ],
                 ],
                 'full_fresh_rate_pct' => 88.0,
                 'accepted_fresh_rate_pct' => 92.0,
@@ -247,6 +275,21 @@ assert_same(true, $normalized['windows'][1]['rates_observed'], 'An observed wind
 assert_same(true, $normalized['windows'][1]['rates_available'], 'Observed rates must also be available.');
 assert_same(5, $normalized['windows'][1]['counts']['lkg_served'], 'LKG must remain a separate count.');
 assert_same(
+    3,
+    $normalized['windows'][1]['outcome_recovery']['provisional']['recovered_to_fresh'],
+    'Recovered provisional events must remain distinct from unresolved events.'
+);
+assert_same(
+    2,
+    $normalized['windows'][1]['outcome_recovery']['lkg_served']['reclassified_upstream_pending'],
+    'Verified upstream publication delays must explain historical LKG events.'
+);
+assert_same(
+    1,
+    $normalized['windows'][1]['outcome_recovery']['lkg_served']['unresolved'],
+    'The panel must expose the LKG events that still have no resolution.'
+);
+assert_same(
     'breached',
     $normalized['windows'][1]['freshness_slo']['objective_status'],
     'An observed 88% window must show a breached 99% budget.'
@@ -264,6 +307,15 @@ assert_same(
     false,
     $invalidFreshnessBudget['windows'][1]['freshness_slo']['reported'],
     'Contradictory budget arithmetic must fail closed.'
+);
+
+$invalidOutcomeRecovery = $envelope;
+$invalidOutcomeRecovery['data']['windows'][1]['outcome_recovery']['lkg_served']['unresolved'] = 2;
+$invalidOutcomeRecovery = analytics_normalize_parsing_reliability($invalidOutcomeRecovery);
+assert_same(
+    false,
+    $invalidOutcomeRecovery['windows'][1]['outcome_recovery']['reported'],
+    'Contradictory recovery arithmetic must fail closed without hiding the whole window.'
 );
 assert_same(
     true,

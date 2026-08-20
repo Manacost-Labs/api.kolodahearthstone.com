@@ -343,6 +343,62 @@ function analytics_reliability_exact_count($value): ?int
     return (int)$number;
 }
 
+function analytics_empty_outcome_recovery(): array
+{
+    $emptyCounts = [
+        'events' => null,
+        'recovered_to_fresh' => null,
+        'reclassified_upstream_pending' => null,
+        'unresolved' => null,
+    ];
+    return [
+        'reported' => false,
+        'provisional' => $emptyCounts,
+        'lkg_served' => $emptyCounts,
+    ];
+}
+
+function analytics_normalize_outcome_recovery($value, array $counts): array
+{
+    $empty = analytics_empty_outcome_recovery();
+    if (!is_array($value)) {
+        return $empty;
+    }
+
+    $normalized = ['reported' => true];
+    foreach (['provisional', 'lkg_served'] as $outcome) {
+        $raw = is_array($value[$outcome] ?? null) ? $value[$outcome] : null;
+        if ($raw === null) {
+            return $empty;
+        }
+        $events = analytics_reliability_exact_count($raw['events'] ?? null);
+        $recovered = analytics_reliability_exact_count(
+            $raw['recovered_to_fresh'] ?? null
+        );
+        $upstreamPending = analytics_reliability_exact_count(
+            $raw['reclassified_upstream_pending'] ?? null
+        );
+        $unresolved = analytics_reliability_exact_count($raw['unresolved'] ?? null);
+        if (
+            $events === null
+            || $recovered === null
+            || $upstreamPending === null
+            || $unresolved === null
+            || $events !== ($counts[$outcome] ?? null)
+            || $events !== $recovered + $upstreamPending + $unresolved
+        ) {
+            return $empty;
+        }
+        $normalized[$outcome] = [
+            'events' => $events,
+            'recovered_to_fresh' => $recovered,
+            'reclassified_upstream_pending' => $upstreamPending,
+            'unresolved' => $unresolved,
+        ];
+    }
+    return $normalized;
+}
+
 function analytics_empty_reliability_slo(): array
 {
     return [
@@ -1178,6 +1234,10 @@ function analytics_normalize_parsing_reliability(
             && $eligibleAttempts === $observedEligibleAttempts + $missingTerminalWindows
             && $upstreamPendingAttempts <= $counts['skipped']
             && $endToEndAttempts === $eligibleAttempts + $upstreamPendingAttempts;
+        $outcomeRecovery = analytics_normalize_outcome_recovery(
+            $rawWindow['outcome_recovery'] ?? null,
+            $counts
+        );
 
         $coverageRatio = is_numeric($rawWindow['coverage_ratio'] ?? null)
             ? (float)$rawWindow['coverage_ratio']
@@ -1246,6 +1306,7 @@ function analytics_normalize_parsing_reliability(
             'upstream_pending_attempts' => $upstreamPendingAttempts,
             'end_to_end_attempts' => $endToEndAttempts,
             'counts' => $counts,
+            'outcome_recovery' => $outcomeRecovery,
             'full_fresh_rate_pct' => $fullFresh,
             'end_to_end_fresh_rate_pct' => $endToEndFresh,
             'accepted_fresh_rate_pct' => $acceptedFresh,

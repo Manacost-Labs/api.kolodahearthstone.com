@@ -40,6 +40,54 @@
         return Number.isFinite(number) ? number : null;
     };
 
+    const emptyOutcomeRecovery = () => ({
+        reported: false,
+        provisional: {
+            events: null,
+            recoveredToFresh: null,
+            reclassifiedUpstreamPending: null,
+            unresolved: null,
+        },
+        lkg: {
+            events: null,
+            recoveredToFresh: null,
+            reclassifiedUpstreamPending: null,
+            unresolved: null,
+        },
+    });
+
+    const buildOutcomeRecovery = (raw, counts) => {
+        const fallback = emptyOutcomeRecovery();
+        if (!raw || raw.reported !== true) return fallback;
+        const normalize = (value, expectedEvents) => {
+            if (!value) return null;
+            const events = exactNonNegativeCount(value.events);
+            const recoveredToFresh = exactNonNegativeCount(value.recovered_to_fresh);
+            const reclassifiedUpstreamPending = exactNonNegativeCount(
+                value.reclassified_upstream_pending
+            );
+            const unresolved = exactNonNegativeCount(value.unresolved);
+            if (
+                events === null
+                || recoveredToFresh === null
+                || reclassifiedUpstreamPending === null
+                || unresolved === null
+                || events !== exactNonNegativeCount(expectedEvents)
+                || events !== recoveredToFresh + reclassifiedUpstreamPending + unresolved
+            ) return null;
+            return {
+                events,
+                recoveredToFresh,
+                reclassifiedUpstreamPending,
+                unresolved,
+            };
+        };
+        const provisional = normalize(raw.provisional, counts.provisional);
+        const lkg = normalize(raw.lkg_served, counts.lkg_served);
+        if (!provisional || !lkg) return fallback;
+        return {reported: true, provisional, lkg};
+    };
+
     const buildFreshnessSlo = (slo, measurementStatus, eligibleAttempts) => {
         const fallback = {
             reported: false,
@@ -701,6 +749,10 @@
         );
         const preliminary = ratesAvailable && !observed;
         const counts = window?.counts || {};
+        const outcomeRecovery = buildOutcomeRecovery(
+            window?.outcome_recovery,
+            counts
+        );
         const verifiedCompleteness = buildVerifiedCompleteness(
             window?.verified_completeness,
             measurementStatus,
@@ -755,6 +807,7 @@
                 timedOut: window ? nonNegativeCount(counts.timed_out) : null,
                 skipped: window ? nonNegativeCount(counts.skipped) : null,
             },
+            outcomeRecovery,
             freshnessSlo,
             verifiedCompleteness,
             scheduledReliability,

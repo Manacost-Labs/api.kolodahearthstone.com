@@ -387,10 +387,17 @@
         };
         const counts = document.createElement('div');
         counts.className = 'parsing-reliability-counts';
+        const recovery = model.outcomeRecovery;
+        const provisionalDetail = recovery?.reported
+            ? `Fresh после повтора: ${integerFormatter.format(recovery.provisional.recoveredToFresh)} · не закрыто: ${integerFormatter.format(recovery.provisional.unresolved)}`
+            : 'приняты условно';
+        const lkgDetail = recovery?.reported
+            ? `Fresh после повтора: ${integerFormatter.format(recovery.lkg.recoveredToFresh)} · переклассифицированы upstream: ${integerFormatter.format(recovery.lkg.reclassifiedUpstreamPending)} · не закрыто: ${integerFormatter.format(recovery.lkg.unresolved)}`
+            : 'отдан последний успешный набор';
         counts.append(
-            countCard('Provisional', model.counts.provisional, 'приняты условно'),
+            countCard('Provisional · событий', model.counts.provisional, provisionalDetail),
             countCard('Ждём upstream', model.upstreamPendingAttempts, 'новый файл ещё не опубликован'),
-            countCard('LKG', model.counts.lkg, 'отдан последний успешный набор'),
+            countCard('LKG · событий', model.counts.lkg, lkgDetail),
             countCard('Ошибки', model.counts.failed, 'без результата'),
             countCard('Таймауты', model.counts.timedOut, 'завершены по лимиту времени')
         );

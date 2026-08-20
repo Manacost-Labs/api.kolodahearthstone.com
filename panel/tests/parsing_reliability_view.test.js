@@ -28,6 +28,21 @@ const observedWindow = {
         timed_out: 1,
         skipped: 5,
     },
+    outcome_recovery: {
+        reported: true,
+        provisional: {
+            events: 4,
+            recovered_to_fresh: 3,
+            reclassified_upstream_pending: 0,
+            unresolved: 1,
+        },
+        lkg_served: {
+            events: 5,
+            recovered_to_fresh: 2,
+            reclassified_upstream_pending: 2,
+            unresolved: 1,
+        },
+    },
     full_fresh_rate_pct: 88,
     end_to_end_fresh_rate_pct: 86.27,
     accepted_fresh_rate_pct: 92,
@@ -138,6 +153,9 @@ test('describes extraction evidence without claiming full upstream pages', () =>
     assert.match(renderer, /Свежесть для пользователя/);
     assert.match(renderer, /Надёжность парсера/);
     assert.match(renderer, /Ждём upstream/);
+    assert.match(renderer, /Fresh после повтора/);
+    assert.match(renderer, /переклассифицированы upstream/);
+    assert.match(renderer, /не закрыто/);
     assert.match(renderer, /On-time parser/);
     assert.match(renderer, /Rollout источников/);
     assert.match(renderer, /weighted по попыткам/);
@@ -459,6 +477,19 @@ test('uses the observed weekly window for honest headline rates', () => {
     assert.equal(model.counts.lkg, 5);
     assert.equal(model.counts.failed, 2);
     assert.equal(model.counts.timedOut, 1);
+    assert.equal(model.outcomeRecovery.reported, true);
+    assert.deepEqual(model.outcomeRecovery.provisional, {
+        events: 4,
+        recoveredToFresh: 3,
+        reclassifiedUpstreamPending: 0,
+        unresolved: 1,
+    });
+    assert.deepEqual(model.outcomeRecovery.lkg, {
+        events: 5,
+        recoveredToFresh: 2,
+        reclassifiedUpstreamPending: 2,
+        unresolved: 1,
+    });
     assert.equal(model.observedEligibleAttempts, 98);
     assert.equal(model.missingTerminalWindows, 2);
     assert.equal(model.verifiedCompleteness.completeFreshRate, '98%');
@@ -483,6 +514,26 @@ test('uses the observed weekly window for honest headline rates', () => {
     );
     assert.equal(model.verifiedCompleteness.objectiveStatus, 'miss');
     assert.match(model.verifiedCompleteness.objectiveLabel, /miss/);
+});
+
+test('fails contradictory recovery arithmetic closed', () => {
+    const model = buildReliabilityViewModel({
+        state: 'available',
+        default_window: '7d',
+        windows: [{
+            ...observedWindow,
+            outcome_recovery: {
+                ...observedWindow.outcome_recovery,
+                lkg_served: {
+                    ...observedWindow.outcome_recovery.lkg_served,
+                    unresolved: 2,
+                },
+            },
+        }],
+    });
+
+    assert.equal(model.outcomeRecovery.reported, false);
+    assert.equal(model.outcomeRecovery.lkg.unresolved, null);
 });
 
 test('keeps 100% attempt coverage collecting while only 4 of 99 sources are instrumented', () => {
