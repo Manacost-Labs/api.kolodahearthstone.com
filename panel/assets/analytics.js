@@ -343,28 +343,31 @@
             return card;
         };
         const pendingCopy = 'Появится после первой согласованной выборки.';
-        const freshCopy = model.preliminary
-            ? 'Предварительно по зафиксированным попыткам; provisional и LKG не входят.'
-            : 'Новая полная публикация без provisional и LKG.';
+        const endToEndCopy = model.preliminary
+            ? 'Предварительно: учитывает также подтверждённые задержки публикации upstream.'
+            : 'Новые полные данные доступны пользователю; задержки upstream тоже снижают процент.';
+        const parserCopy = model.preliminary
+            ? 'Предварительно по eligible-попыткам; доказанное отсутствие upstream исключено.'
+            : 'Успех парсера после появления данных у источника, без provisional и LKG.';
         const rates = document.createElement('div');
         rates.className = 'parsing-reliability-rates';
         rates.append(
             rateCard(
-                'Новые данные · fresh-only',
-                model.fullFresh,
-                model.ratesAvailable ? freshCopy : pendingCopy,
+                'Свежесть для пользователя',
+                model.endToEndFresh,
+                model.ratesAvailable ? endToEndCopy : pendingCopy,
                 'is-primary'
+            ),
+            rateCard(
+                'Надёжность парсера',
+                model.fullFresh,
+                model.ratesAvailable ? parserCopy : pendingCopy
             ),
             rateCard(
                 'Доступность данных · с LKG',
                 model.availability,
                 model.ratesAvailable ? 'Fresh + provisional + последний успешный набор LKG.' : pendingCopy,
                 'is-availability'
-            ),
-            rateCard(
-                'Принятая свежесть',
-                model.acceptedFresh,
-                model.ratesAvailable ? 'Fresh + provisional, без резервного LKG.' : pendingCopy
             )
         );
 
@@ -386,6 +389,7 @@
         counts.className = 'parsing-reliability-counts';
         counts.append(
             countCard('Provisional', model.counts.provisional, 'приняты условно'),
+            countCard('Ждём upstream', model.upstreamPendingAttempts, 'новый файл ещё не опубликован'),
             countCard('LKG', model.counts.lkg, 'отдан последний успешный набор'),
             countCard('Ошибки', model.counts.failed, 'без результата'),
             countCard('Таймауты', model.counts.timedOut, 'завершены по лимиту времени')
@@ -410,9 +414,9 @@
         const budgetHeadingGroup = document.createElement('div');
         const budgetHeading = document.createElement('h4');
         budgetHeading.id = 'parsing-error-budget-title';
-        budgetHeading.textContent = 'Бюджет ошибок fresh-only';
+        budgetHeading.textContent = 'Бюджет ошибок парсера fresh-only';
         const budgetCopy = document.createElement('p');
-        budgetCopy.textContent = 'Provisional, LKG, ошибки, таймауты и пропущенные terminal-события уменьшают честный бюджет. Skipped исключается только при доказанной неприменимости запуска.';
+        budgetCopy.textContent = 'Provisional, LKG, ошибки, таймауты и пропущенные terminal-события уменьшают бюджет парсера. Доказанное ожидание upstream исключается только здесь, но остаётся плохим исходом для пользовательской свежести.';
         budgetHeadingGroup.append(budgetHeading, budgetCopy);
         const budgetBadge = document.createElement('span');
         budgetBadge.className = `parsing-reliability-badge ${freshnessSlo.objectiveClass}`;
@@ -601,18 +605,22 @@
             reported: false,
             preliminary: false,
             onTimeFreshRate: '—',
+            parserOnTimeFreshRate: '—',
             targetRate: '99%',
             scheduleCoverage: '—',
             temporalCoverage: '—',
             trackedSchedules: null,
             catalogSchedules: null,
             dueSlots: null,
+            onTimeUpstreamPending: null,
             missing: null,
             late: null,
             excludedSlots: null,
             pendingSlots: null,
             objectiveLabel: 'Недостаточно данных расписания · collecting',
             objectiveClass: 'is-collecting',
+            parserObjectiveLabel: 'Недостаточно данных расписания · collecting',
+            parserObjectiveClass: 'is-collecting',
         };
         const scheduleSection = document.createElement('section');
         scheduleSection.className = 'parsing-completeness parsing-schedule-reliability';
@@ -639,12 +647,19 @@
         scheduleRates.className = 'parsing-completeness-gates';
         scheduleRates.append(
             rateCard(
-                'On-time fresh',
+                'On-time end-to-end',
                 scheduled.onTimeFreshRate,
                 scheduled.reported
-                    ? 'Новая валидная публикация завершена до дедлайна обязательного запуска.'
+                    ? 'Новые данные доступны к дедлайну; ожидание upstream снижает этот процент.'
                     : 'Недостаточно данных журнала: процент пока не считается.',
                 'is-primary'
+            ),
+            rateCard(
+                'On-time parser',
+                scheduled.parserOnTimeFreshRate,
+                scheduled.reported
+                    ? `После исключения доказанного отсутствия upstream · ${scheduled.parserObjectiveLabel}.`
+                    : 'Недостаточно данных журнала: процент пока не считается.'
             ),
             rateCard(
                 'Покрытие расписаний',
@@ -665,6 +680,7 @@
         scheduleCounts.className = 'parsing-completeness-counts';
         scheduleCounts.append(
             countCard('Due', scheduled.dueSlots, 'слоты с наступившим дедлайном'),
+            countCard('Ждём upstream', scheduled.onTimeUpstreamPending, 'нет нового файла к дедлайну'),
             countCard('Missing', scheduled.missing, 'обязательные запуски без результата'),
             countCard('Late', scheduled.late, 'результат получен после дедлайна'),
             countCard('Excluded', scheduled.excludedSlots, 'явно исключённые слоты'),

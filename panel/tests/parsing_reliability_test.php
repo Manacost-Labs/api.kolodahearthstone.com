@@ -44,6 +44,8 @@ $envelope = [
                 'observed_eligible_attempts' => 7,
                 'missing_terminal_windows' => 2,
                 'eligible_attempts' => 9,
+                'upstream_pending_attempts' => 1,
+                'end_to_end_attempts' => 10,
                 'counts' => [
                     'fresh_published' => 7,
                     'provisional' => 0,
@@ -53,6 +55,7 @@ $envelope = [
                     'skipped' => 1,
                 ],
                 'full_fresh_rate_pct' => 77.78,
+                'end_to_end_fresh_rate_pct' => 70.0,
                 'accepted_fresh_rate_pct' => 77.78,
                 'data_available_rate_pct' => 77.78,
                 'freshness_slo' => [
@@ -64,6 +67,16 @@ $envelope = [
                     'bad_attempts_over_budget' => 2,
                     'error_budget_remaining_attempts' => -1.91,
                     'error_budget_consumed_pct' => 2222.22,
+                ],
+                'end_to_end_freshness_slo' => [
+                    'target_rate_pct' => 99.0,
+                    'objective_status' => 'collecting',
+                    'good_attempts' => 7,
+                    'bad_attempts' => 3,
+                    'allowed_bad_attempts' => 0.1,
+                    'bad_attempts_over_budget' => 3,
+                    'error_budget_remaining_attempts' => -2.9,
+                    'error_budget_consumed_pct' => 3000.0,
                 ],
                 'verified_completeness' => [
                     'instrumented_sources' => 4,
@@ -105,12 +118,16 @@ $envelope = [
                     'pending_slots' => 2,
                     'due_slots' => 8,
                     'on_time_fresh' => 7,
+                    'on_time_upstream_pending' => 1,
                     'on_time_nonfresh' => 0,
                     'late' => 0,
-                    'missing' => 1,
+                    'missing' => 0,
                     'on_time_fresh_rate_pct' => 87.5,
+                    'parser_eligible_due_slots' => 7,
+                    'parser_on_time_fresh_rate_pct' => 100.0,
                     'target_rate_pct' => 99.0,
                     'objective_status' => 'collecting',
+                    'parser_objective_status' => 'collecting',
                 ],
             ],
             [
@@ -205,6 +222,9 @@ assert_same(2, count($normalized['windows']), 'Known windows must be retained.')
 assert_same(false, $normalized['windows'][0]['rates_observed'], 'Collecting rates must never be presented as observed.');
 assert_same(true, $normalized['windows'][0]['rates_available'], 'Consistent collecting rates may be presented as preliminary.');
 assert_same(77.78, $normalized['windows'][0]['full_fresh_rate_pct'], 'Missing terminals must reduce the honest fresh rate.');
+assert_same(70.0, $normalized['windows'][0]['end_to_end_fresh_rate_pct'], 'Upstream publication gaps must reduce end-to-end freshness.');
+assert_same(1, $normalized['windows'][0]['upstream_pending_attempts'], 'Verified upstream gaps must remain explicit.');
+assert_same(10, $normalized['windows'][0]['end_to_end_attempts'], 'End-to-end denominator must include verified upstream gaps.');
 assert_same(7, $normalized['windows'][0]['observed_eligible_attempts'], 'Observed eligible outcomes must remain explicit.');
 assert_same(2, $normalized['windows'][0]['missing_terminal_windows'], 'Missing terminal outcomes must reach the UI.');
 assert_same(9, $normalized['windows'][0]['eligible_attempts'], 'Missing terminals must be included in the denominator.');
@@ -259,6 +279,16 @@ assert_same(
     87.5,
     $normalized['windows'][0]['scheduled_reliability']['on_time_fresh_rate_pct'],
     'A coherent partial ledger may expose its explicitly preliminary on-time rate.'
+);
+assert_same(
+    1,
+    $normalized['windows'][0]['scheduled_reliability']['on_time_upstream_pending'],
+    'A verified upstream gap must be a terminal schedule state instead of missing.'
+);
+assert_same(
+    100.0,
+    $normalized['windows'][0]['scheduled_reliability']['parser_on_time_fresh_rate_pct'],
+    'Parser schedule reliability must exclude only verified upstream gaps.'
 );
 assert_same(
     true,

@@ -268,18 +268,27 @@
             pendingSlots: null,
             dueSlots: null,
             onTimeFresh: null,
+            onTimeUpstreamPending: null,
             onTimeNonfresh: null,
             late: null,
             missing: null,
+            parserEligibleDueSlots: null,
+            parserOnTimeFreshRate: '—',
             objectiveStatus: 'collecting',
             objectiveLabel: 'Недостаточно данных расписания · collecting',
             objectiveClass: 'is-collecting',
+            parserObjectiveStatus: 'collecting',
+            parserObjectiveLabel: 'Недостаточно данных расписания · collecting',
+            parserObjectiveClass: 'is-collecting',
         };
         if (!scheduled || scheduled.reported === false) return fallback;
 
         const ledgerStatus = String(scheduled.ledger_status || '');
         const measurementStatus = String(scheduled.measurement_status || '');
         const objectiveStatus = String(scheduled.objective_status || '');
+        const parserObjectiveStatus = String(
+            scheduled.parser_objective_status || objectiveStatus
+        );
         const boundedRatio = (value) => {
             if (value === null || value === '' || typeof value === 'boolean') return null;
             const number = Number(value);
@@ -293,7 +302,8 @@
         const countKeys = [
             'tracked_schedules', 'catalog_schedules', 'expected_slots',
             'eligible_slots', 'excluded_slots', 'pending_slots', 'due_slots',
-            'on_time_fresh', 'on_time_nonfresh', 'late', 'missing',
+            'on_time_fresh', 'on_time_upstream_pending', 'on_time_nonfresh',
+            'late', 'missing', 'parser_eligible_due_slots',
         ];
         const counts = Object.fromEntries(countKeys.map((key) => [
             key,
@@ -327,6 +337,7 @@
             !['partial', 'covered'].includes(ledgerStatus)
             || !['collecting', 'observed'].includes(measurementStatus)
             || !['collecting', 'meeting', 'breached'].includes(objectiveStatus)
+            || !['collecting', 'meeting', 'breached'].includes(parserObjectiveStatus)
             || target === null
             || !countsPresent
             || !timestampsValid
@@ -340,11 +351,24 @@
         const expectedRate = counts.due_slots === 0
             ? null
             : Math.round((counts.on_time_fresh / counts.due_slots) * 10000) / 100;
+        const reportedParserRate = boundedPercentage(
+            scheduled.parser_on_time_fresh_rate_pct
+        );
+        const expectedParserRate = counts.parser_eligible_due_slots === 0
+            ? null
+            : Math.round(
+                (counts.on_time_fresh / counts.parser_eligible_due_slots) * 10000
+            ) / 100;
         const covered = scheduleCoverage === 1 && temporalCoverage === 1;
         let expectedObjective = 'collecting';
         if (measurementStatus === 'observed' && counts.due_slots > 0) {
             expectedObjective = counts.on_time_fresh * 100
                 >= target * counts.due_slots ? 'meeting' : 'breached';
+        }
+        let expectedParserObjective = 'collecting';
+        if (measurementStatus === 'observed' && counts.parser_eligible_due_slots > 0) {
+            expectedParserObjective = counts.on_time_fresh * 100
+                >= target * counts.parser_eligible_due_slots ? 'meeting' : 'breached';
         }
         const valid = counts.tracked_schedules > 0
             && counts.catalog_schedules > 0
@@ -353,20 +377,31 @@
             && counts.expected_slots === counts.eligible_slots + counts.excluded_slots
             && counts.eligible_slots === counts.due_slots + counts.pending_slots
             && counts.due_slots === counts.on_time_fresh + counts.on_time_nonfresh
-                + counts.late + counts.missing
+                + counts.on_time_upstream_pending + counts.late + counts.missing
+            && counts.parser_eligible_due_slots
+                === counts.due_slots - counts.on_time_upstream_pending
             && (
                 (expectedRate === null && reportedRate === null)
                 || (expectedRate !== null && reportedRate !== null
                     && Math.abs(reportedRate - expectedRate) <= 0.011)
             )
+            && (
+                (expectedParserRate === null && reportedParserRate === null)
+                || (expectedParserRate !== null && reportedParserRate !== null
+                    && Math.abs(reportedParserRate - expectedParserRate) <= 0.011)
+            )
             && (ledgerStatus === 'covered') === covered
             && !(measurementStatus === 'observed' && !covered)
             && !(measurementStatus === 'collecting' && objectiveStatus !== 'collecting')
-            && objectiveStatus === expectedObjective;
+            && !(measurementStatus === 'collecting'
+                && parserObjectiveStatus !== 'collecting')
+            && objectiveStatus === expectedObjective
+            && parserObjectiveStatus === expectedParserObjective;
         if (!valid) return fallback;
 
         const presentedStatus = stale ? 'collecting' : measurementStatus;
         const presentedObjective = stale ? 'collecting' : objectiveStatus;
+        const presentedParserObjective = stale ? 'collecting' : parserObjectiveStatus;
         const objectiveLabels = {
             collecting: 'Собираем наблюдения · collecting',
             meeting: 'Цель выполняется · meeting',
@@ -384,6 +419,9 @@
             observed: presentedStatus === 'observed',
             preliminary: ledgerStatus === 'partial' || presentedStatus !== 'observed',
             onTimeFreshRate: expectedRate === null ? '—' : percentage(reportedRate),
+            parserOnTimeFreshRate: expectedParserRate === null
+                ? '—'
+                : percentage(reportedParserRate),
             rateAvailable: expectedRate !== null,
             targetRate: percentage(target),
             scheduleCoverage: percentage(scheduleCoverage * 100),
@@ -398,12 +436,17 @@
             pendingSlots: counts.pending_slots,
             dueSlots: counts.due_slots,
             onTimeFresh: counts.on_time_fresh,
+            onTimeUpstreamPending: counts.on_time_upstream_pending,
             onTimeNonfresh: counts.on_time_nonfresh,
             late: counts.late,
             missing: counts.missing,
+            parserEligibleDueSlots: counts.parser_eligible_due_slots,
             objectiveStatus: presentedObjective,
             objectiveLabel: objectiveLabels[presentedObjective],
             objectiveClass: objectiveClasses[presentedObjective],
+            parserObjectiveStatus: presentedParserObjective,
+            parserObjectiveLabel: objectiveLabels[presentedParserObjective],
+            parserObjectiveClass: objectiveClasses[presentedParserObjective],
         };
     };
 
@@ -689,12 +732,21 @@
             ratesAvailable,
             stale,
             fullFresh: ratesAvailable ? percentage(window.full_fresh_rate_pct) : '—',
+            endToEndFresh: ratesAvailable
+                ? percentage(window.end_to_end_fresh_rate_pct)
+                : '—',
             availability: ratesAvailable ? percentage(window.data_available_rate_pct) : '—',
             acceptedFresh: ratesAvailable ? percentage(window.accepted_fresh_rate_pct) : '—',
             coverage: window ? percentage(Number(window.coverage_ratio) * 100) : '—',
             observedEligibleAttempts: window ? nonNegativeCount(window.observed_eligible_attempts) : null,
             missingTerminalWindows: window ? nonNegativeCount(window.missing_terminal_windows) : null,
             eligibleAttempts: window ? nonNegativeCount(window.eligible_attempts) : null,
+            upstreamPendingAttempts: window
+                ? nonNegativeCount(window.upstream_pending_attempts)
+                : null,
+            endToEndAttempts: window
+                ? nonNegativeCount(window.end_to_end_attempts)
+                : null,
             totalAttempts: window ? nonNegativeCount(window.total_attempts) : null,
             counts: {
                 provisional: window ? nonNegativeCount(counts.provisional) : null,

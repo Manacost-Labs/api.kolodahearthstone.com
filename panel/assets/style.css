@@ -3575,6 +3575,14 @@ thead th:last-child {
     margin-top: 8px;
 }
 
+.parsing-schedule-reliability .parsing-completeness-gates {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.parsing-schedule-reliability .parsing-completeness-counts {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .parsing-completeness-source-rates {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -4338,6 +4346,11 @@ body.analytics-detail-open {
     .parsing-completeness-source-rates,
     .parsing-completeness-source-counts,
     .parsing-completeness-counts {
+        grid-template-columns: 1fr;
+    }
+
+    .parsing-schedule-reliability .parsing-completeness-gates,
+    .parsing-schedule-reliability .parsing-completeness-counts {
         grid-template-columns: 1fr;
     }
 

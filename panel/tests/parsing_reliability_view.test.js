@@ -17,6 +17,8 @@ const observedWindow = {
     observed_eligible_attempts: 98,
     missing_terminal_windows: 2,
     eligible_attempts: 100,
+    upstream_pending_attempts: 2,
+    end_to_end_attempts: 102,
     total_attempts: 105,
     counts: {
         fresh_published: 88,
@@ -27,6 +29,7 @@ const observedWindow = {
         skipped: 5,
     },
     full_fresh_rate_pct: 88,
+    end_to_end_fresh_rate_pct: 86.27,
     accepted_fresh_rate_pct: 92,
     data_available_rate_pct: 97,
     freshness_slo: {
@@ -84,12 +87,16 @@ const coveredSchedule = {
     pending_slots: 0,
     due_slots: 100,
     on_time_fresh: 98,
+    on_time_upstream_pending: 0,
     on_time_nonfresh: 1,
     late: 1,
     missing: 0,
     on_time_fresh_rate_pct: 98,
+    parser_eligible_due_slots: 100,
+    parser_on_time_fresh_rate_pct: 98,
     target_rate_pct: 99,
     objective_status: 'breached',
+    parser_objective_status: 'breached',
 };
 
 const parsesUnixRollout = {
@@ -128,16 +135,20 @@ test('describes extraction evidence without claiming full upstream pages', () =>
     assert.match(renderer, /Проверенная полнота извлечения/);
     assert.match(renderer, /Свежие ответы без потерь извлечения/);
     assert.match(renderer, /Полнота каталога upstream/);
+    assert.match(renderer, /Свежесть для пользователя/);
+    assert.match(renderer, /Надёжность парсера/);
+    assert.match(renderer, /Ждём upstream/);
+    assert.match(renderer, /On-time parser/);
     assert.match(renderer, /Rollout источников/);
     assert.match(renderer, /weighted по попыткам/);
     assert.match(renderer, /Источники, выполняющие 99%/);
     assert.match(renderer, /Macro rate по источникам/);
     assert.match(renderer, /Худший наблюдавшийся источник/);
     assert.match(renderer, /Выполнение расписания/);
-    assert.match(renderer, /Бюджет ошибок fresh-only/);
+    assert.match(renderer, /Бюджет ошибок парсера fresh-only/);
     assert.match(renderer, /Использовано бюджета/);
     assert.match(renderer, /Сверх бюджета/);
-    assert.match(renderer, /On-time fresh/);
+    assert.match(renderer, /On-time end-to-end/);
     assert.match(renderer, /Покрытие расписаний/);
     assert.match(renderer, /Внедрение ParsesUnix/);
     assert.match(renderer, /Транспорт подтверждён/);
@@ -309,6 +320,34 @@ test('shows an observed schedule objective only for a fully covered ledger', () 
     assert.equal(model.scheduledReliability.objectiveClass, 'is-miss');
 });
 
+test('separates end-to-end schedule delay from parser reliability', () => {
+    const model = buildReliabilityViewModel({
+        state: 'available',
+        default_window: '7d',
+        windows: [{
+            ...observedWindow,
+            scheduled_reliability: {
+                ...coveredSchedule,
+                on_time_upstream_pending: 2,
+                on_time_nonfresh: 0,
+                late: 0,
+                parser_eligible_due_slots: 98,
+                parser_on_time_fresh_rate_pct: 100,
+                parser_objective_status: 'meeting',
+            },
+        }],
+    });
+
+    assert.equal(model.endToEndFresh, '86,27%');
+    assert.equal(model.upstreamPendingAttempts, 2);
+    assert.equal(model.endToEndAttempts, 102);
+    assert.equal(model.scheduledReliability.onTimeFreshRate, '98%');
+    assert.equal(model.scheduledReliability.parserOnTimeFreshRate, '100%');
+    assert.equal(model.scheduledReliability.onTimeUpstreamPending, 2);
+    assert.equal(model.scheduledReliability.objectiveStatus, 'breached');
+    assert.equal(model.scheduledReliability.parserObjectiveStatus, 'meeting');
+});
+
 test('labels a coherent partial schedule slice as explicitly preliminary', () => {
     const model = buildReliabilityViewModel({
         state: 'available',
@@ -322,6 +361,7 @@ test('labels a coherent partial schedule slice as explicitly preliminary', () =>
                 schedule_coverage_ratio: 0.5,
                 tracked_schedules: 1,
                 objective_status: 'collecting',
+                parser_objective_status: 'collecting',
             },
         }],
     });
@@ -391,6 +431,8 @@ test('downgrades a cached schedule objective to preliminary collecting', () => {
                 on_time_nonfresh: 0,
                 on_time_fresh_rate_pct: 99,
                 objective_status: 'meeting',
+                parser_on_time_fresh_rate_pct: 99,
+                parser_objective_status: 'meeting',
             },
         }],
     });

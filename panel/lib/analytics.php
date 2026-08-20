@@ -462,12 +462,16 @@ function analytics_empty_scheduled_reliability(): array
         'pending_slots' => null,
         'due_slots' => null,
         'on_time_fresh' => null,
+        'on_time_upstream_pending' => null,
         'on_time_nonfresh' => null,
         'late' => null,
         'missing' => null,
         'on_time_fresh_rate_pct' => null,
+        'parser_eligible_due_slots' => null,
+        'parser_on_time_fresh_rate_pct' => null,
         'target_rate_pct' => 99.0,
         'objective_status' => 'collecting',
+        'parser_objective_status' => 'collecting',
     ];
 }
 
@@ -511,6 +515,7 @@ function analytics_normalize_scheduled_reliability(
     $ledgerStatus = (string)($raw['ledger_status'] ?? '');
     $measurementStatus = (string)($raw['measurement_status'] ?? '');
     $objectiveStatus = (string)($raw['objective_status'] ?? '');
+    $parserObjectiveStatus = (string)($raw['parser_objective_status'] ?? $objectiveStatus);
     $scheduleCoverage = analytics_reliability_ratio($raw['schedule_coverage_ratio'] ?? null);
     $temporalCoverage = analytics_reliability_ratio($raw['temporal_coverage_ratio'] ?? null);
     $target = analytics_reliability_percentage($raw['target_rate_pct'] ?? null);
@@ -518,6 +523,7 @@ function analytics_normalize_scheduled_reliability(
         !in_array($ledgerStatus, ['absent', 'partial', 'covered'], true)
         || !in_array($measurementStatus, ['collecting', 'observed'], true)
         || !in_array($objectiveStatus, ['collecting', 'meeting', 'breached'], true)
+        || !in_array($parserObjectiveStatus, ['collecting', 'meeting', 'breached'], true)
         || $scheduleCoverage === null
         || $temporalCoverage === null
         || $target === null
@@ -539,6 +545,19 @@ function analytics_normalize_scheduled_reliability(
         if ($counts[$key] === null) {
             return $empty;
         }
+    }
+    $counts['on_time_upstream_pending'] = analytics_reliability_exact_count(
+        $raw['on_time_upstream_pending'] ?? 0
+    );
+    $defaultParserEligible = $counts['due_slots'] - $counts['on_time_upstream_pending'];
+    $counts['parser_eligible_due_slots'] = analytics_reliability_exact_count(
+        $raw['parser_eligible_due_slots'] ?? $defaultParserEligible
+    );
+    if (
+        $counts['on_time_upstream_pending'] === null
+        || $counts['parser_eligible_due_slots'] === null
+    ) {
+        return $empty;
     }
 
     $coverageStartedAt = analytics_reliability_iso_datetime(
@@ -564,11 +583,35 @@ function analytics_normalize_scheduled_reliability(
     $expectedOnTimeRate = $counts['due_slots'] === 0
         ? null
         : round($counts['on_time_fresh'] / $counts['due_slots'] * 100, 2);
+    $parserOnTimeRate = analytics_reliability_percentage(
+        $raw['parser_on_time_fresh_rate_pct'] ?? (
+            $counts['parser_eligible_due_slots'] === 0
+                ? null
+                : round(
+                    $counts['on_time_fresh']
+                    / $counts['parser_eligible_due_slots'] * 100,
+                    2
+                )
+        )
+    );
+    $expectedParserOnTimeRate = $counts['parser_eligible_due_slots'] === 0
+        ? null
+        : round(
+            $counts['on_time_fresh'] / $counts['parser_eligible_due_slots'] * 100,
+            2
+        );
     $covered = $scheduleCoverage === 1.0 && $temporalCoverage === 1.0;
     $expectedObjective = 'collecting';
     if ($measurementStatus === 'observed' && $counts['due_slots'] > 0) {
         $expectedObjective = $counts['on_time_fresh'] * 100
             >= $target * $counts['due_slots']
+            ? 'meeting'
+            : 'breached';
+    }
+    $expectedParserObjective = 'collecting';
+    if ($measurementStatus === 'observed' && $counts['parser_eligible_due_slots'] > 0) {
+        $expectedParserObjective = $counts['on_time_fresh'] * 100
+            >= $target * $counts['parser_eligible_due_slots']
             ? 'meeting'
             : 'breached';
     }
@@ -581,16 +624,26 @@ function analytics_normalize_scheduled_reliability(
         || $counts['expected_slots'] !== $counts['eligible_slots'] + $counts['excluded_slots']
         || $counts['eligible_slots'] !== $counts['due_slots'] + $counts['pending_slots']
         || $counts['due_slots'] !== $counts['on_time_fresh']
-            + $counts['on_time_nonfresh'] + $counts['late'] + $counts['missing']
+            + $counts['on_time_upstream_pending'] + $counts['on_time_nonfresh']
+            + $counts['late'] + $counts['missing']
+        || $counts['parser_eligible_due_slots'] !== $counts['due_slots']
+            - $counts['on_time_upstream_pending']
         || ($expectedOnTimeRate === null && $onTimeRate !== null)
         || ($expectedOnTimeRate !== null && (
             $onTimeRate === null || abs($onTimeRate - $expectedOnTimeRate) > 0.011
+        ))
+        || ($expectedParserOnTimeRate === null && $parserOnTimeRate !== null)
+        || ($expectedParserOnTimeRate !== null && (
+            $parserOnTimeRate === null
+            || abs($parserOnTimeRate - $expectedParserOnTimeRate) > 0.011
         ))
         || ($ledgerStatus === 'covered' && !$covered)
         || ($ledgerStatus === 'partial' && $covered)
         || ($measurementStatus === 'observed' && ($ledgerStatus !== 'covered' || !$covered))
         || ($measurementStatus === 'collecting' && $objectiveStatus !== 'collecting')
+        || ($measurementStatus === 'collecting' && $parserObjectiveStatus !== 'collecting')
         || $objectiveStatus !== $expectedObjective
+        || $parserObjectiveStatus !== $expectedParserObjective
     ) {
         return $empty;
     }
@@ -608,8 +661,12 @@ function analytics_normalize_scheduled_reliability(
         $counts,
         [
             'on_time_fresh_rate_pct' => $onTimeRate,
+            'parser_on_time_fresh_rate_pct' => $parserOnTimeRate,
             'target_rate_pct' => $target,
             'objective_status' => $forceCollecting ? 'collecting' : $objectiveStatus,
+            'parser_objective_status' => $forceCollecting
+                ? 'collecting'
+                : $parserObjectiveStatus,
         ]
     );
 }
@@ -1107,11 +1164,20 @@ function analytics_normalize_parsing_reliability(
             $rawWindow['missing_terminal_windows'] ?? 0
         );
         $eligibleAttempts = analytics_reliability_count($rawWindow['eligible_attempts'] ?? 0);
+        $upstreamPendingAttempts = analytics_reliability_count(
+            $rawWindow['upstream_pending_attempts'] ?? 0
+        );
+        $endToEndAttempts = analytics_reliability_count(
+            $rawWindow['end_to_end_attempts']
+                ?? ($eligibleAttempts + $upstreamPendingAttempts)
+        );
         $countedTotal = array_sum($counts);
         $countedEligible = $countedTotal - $counts['skipped'];
         $countsConsistent = $totalAttempts === $countedTotal
             && $observedEligibleAttempts === $countedEligible
-            && $eligibleAttempts === $observedEligibleAttempts + $missingTerminalWindows;
+            && $eligibleAttempts === $observedEligibleAttempts + $missingTerminalWindows
+            && $upstreamPendingAttempts <= $counts['skipped']
+            && $endToEndAttempts === $eligibleAttempts + $upstreamPendingAttempts;
 
         $coverageRatio = is_numeric($rawWindow['coverage_ratio'] ?? null)
             ? (float)$rawWindow['coverage_ratio']
@@ -1128,12 +1194,21 @@ function analytics_normalize_parsing_reliability(
             ? 'observed'
             : 'collecting';
         $fullFresh = analytics_reliability_percentage($rawWindow['full_fresh_rate_pct'] ?? null);
+        $endToEndFresh = analytics_reliability_percentage(
+            $rawWindow['end_to_end_fresh_rate_pct'] ?? $fullFresh
+        );
+        $expectedEndToEndFresh = $endToEndAttempts === 0
+            ? null
+            : round($counts['fresh_published'] / $endToEndAttempts * 100, 2);
         $acceptedFresh = analytics_reliability_percentage($rawWindow['accepted_fresh_rate_pct'] ?? null);
         $dataAvailable = analytics_reliability_percentage($rawWindow['data_available_rate_pct'] ?? null);
         $ratesAvailable = $measurementStatusValid
             && $eligibleAttempts > 0
             && $countsConsistent
             && $fullFresh !== null
+            && $endToEndFresh !== null
+            && $expectedEndToEndFresh !== null
+            && abs($endToEndFresh - $expectedEndToEndFresh) <= 0.011
             && $acceptedFresh !== null
             && $dataAvailable !== null;
         $ratesObserved = $measurementStatus === 'observed' && $ratesAvailable;
@@ -1141,6 +1216,12 @@ function analytics_normalize_parsing_reliability(
         $freshnessSlo = analytics_normalize_reliability_slo(
             $rawWindow['freshness_slo'] ?? null,
             $eligibleAttempts,
+            $measurementStatus,
+            $staleCache
+        );
+        $endToEndFreshnessSlo = analytics_normalize_reliability_slo(
+            $rawWindow['end_to_end_freshness_slo'] ?? null,
+            $endToEndAttempts,
             $measurementStatus,
             $staleCache
         );
@@ -1162,13 +1243,17 @@ function analytics_normalize_parsing_reliability(
             'observed_eligible_attempts' => $observedEligibleAttempts,
             'missing_terminal_windows' => $missingTerminalWindows,
             'eligible_attempts' => $eligibleAttempts,
+            'upstream_pending_attempts' => $upstreamPendingAttempts,
+            'end_to_end_attempts' => $endToEndAttempts,
             'counts' => $counts,
             'full_fresh_rate_pct' => $fullFresh,
+            'end_to_end_fresh_rate_pct' => $endToEndFresh,
             'accepted_fresh_rate_pct' => $acceptedFresh,
             'data_available_rate_pct' => $dataAvailable,
             'rates_available' => $ratesAvailable,
             'rates_observed' => $ratesObserved,
             'freshness_slo' => $freshnessSlo,
+            'end_to_end_freshness_slo' => $endToEndFreshnessSlo,
             'parsesunix_rollout' => analytics_normalize_parsesunix_rollout(
                 $rawWindow['parsesunix_rollout'] ?? null
             ),
