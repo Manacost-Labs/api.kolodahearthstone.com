@@ -797,12 +797,13 @@ def resolve_current_patch_period(cached_dataset: dict[str, Any] | None = None) -
     configured = hsguru_current_patch_period()
     if configured:
         return configured
+    discovered_period: str | None = None
     try:
         from scripts.seed_hs_manacost_patches import current_patch_version
 
         version = current_patch_version()
         if re.fullmatch(r"\d+(?:\.\d+){1,3}", version):
-            return f"patch_{version}"
+            discovered_period = f"patch_{version}"
     except Exception:
         pass
     previous = (
@@ -811,8 +812,22 @@ def resolve_current_patch_period(cached_dataset: dict[str, Any] | None = None) -
         .get("criteria", {})
         .get("period")
     )
-    if isinstance(previous, str) and re.fullmatch(r"patch_\d+(?:\.\d+){1,3}", previous):
-        return previous
+    cached_period = (
+        previous
+        if isinstance(previous, str)
+        and re.fullmatch(r"patch_\d+(?:\.\d+){1,3}", previous)
+        else None
+    )
+    candidates = [
+        period for period in (discovered_period, cached_period) if period is not None
+    ]
+    if candidates:
+        return max(
+            candidates,
+            key=lambda period: tuple(
+                int(part) for part in period.removeprefix("patch_").split(".")
+            ),
+        )
     raise RuntimeError(
         "Cannot discover the current Hearthstone patch; set HS_HSGURU_PATCH_PERIOD"
     )

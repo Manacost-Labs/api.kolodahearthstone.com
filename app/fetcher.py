@@ -3094,6 +3094,9 @@ async def fetch_source(
     # context. If an admin switches Early -> Stable before the write, the save
     # gate detects the token change and leaves the stable channel untouched.
     with capture_publication_policy(source.id):
+        from .hsguru_post_patch import source_for_active_post_patch
+
+        source = source_for_active_post_patch(source)
         return await _fetch_source_with_captured_policy(
             client,
             source,
