@@ -69,6 +69,7 @@ from .post_patch_policy import (
     POST_PATCH_BASELINE_LABEL,
     STABLE_PUBLICATION_BASELINE_LABEL,
     build_provisional_metadata,
+    can_confirm_post_patch_baseline,
     capture_publication_policy,
     early_policy_changed_since_capture,
     policy_for,
@@ -1593,6 +1594,20 @@ def _save_dataset_with_checks(
     except ValueError:
         metadata_time = None
 
+    previous_structured = (prev_data or {}).get("structured") or {}
+    previous_baseline = previous_structured.get("baseline_rows")
+    if previous_structured.get("provisional") and isinstance(previous_baseline, int):
+        baseline_rows = previous_baseline
+    else:
+        baseline_rows = estimate_metric_count(source, prev_data or {})
+    accepted_rows = estimate_metric_count(source, new_data)
+    candidate_provisional_metadata = build_provisional_metadata(
+        source.id,
+        accepted_rows=accepted_rows,
+        baseline_rows=baseline_rows or accepted_rows,
+        at=metadata_time,
+    )
+
     early_policy_active = policy_for(source.id, at=metadata_time) is not None
     strict_validation_ok = False
     strict_validation_reason: str | None = None
@@ -1600,7 +1615,6 @@ def _save_dataset_with_checks(
     strict_regression_message: str | None = None
     strict_extra: dict[str, Any] = {}
     if early_policy_active:
-        previous_structured = (prev_data or {}).get("structured") or {}
         strict_previous_data = prev_data
         if previous_structured.get("provisional") is True:
             stable_baseline = load_baseline(
@@ -1626,6 +1640,54 @@ def _save_dataset_with_checks(
                     previous_data=strict_previous_data,
                     new_data=new_data,
                 )
+                if strict_regression and candidate_provisional_metadata:
+                    clean_previous_data = dict(prev_data or {})
+                    for key in ("structured", "hsreplay_extracted"):
+                        structured = clean_previous_data.get(key)
+                        if not isinstance(structured, dict):
+                            continue
+                        clean_previous_data[key] = {
+                            field: value
+                            for field, value in structured.items()
+                            if field
+                            not in {
+                                "accepted_rows",
+                                "baseline_rows",
+                                "coverage_ratio",
+                                "data_phase",
+                                "minimum_sample",
+                                "patch_window",
+                                "provisional",
+                            }
+                        }
+                    previous_validation_ok, _ = validate_parsed_data(
+                        source,
+                        clean_previous_data,
+                        emit_telemetry=False,
+                    )
+                    baseline_confirmed, confirmation_reason = (
+                        can_confirm_post_patch_baseline(
+                            previous_structured=previous_structured,
+                            candidate_structured=(
+                                new_data.get("structured")
+                                or new_data.get("hsreplay_extracted")
+                                or {}
+                            ),
+                            candidate_metadata=candidate_provisional_metadata,
+                            previous_fetched_at=(previous or {}).get("fetched_at"),
+                            candidate_fetched_at=fetched_at,
+                        )
+                    )
+                    if previous_validation_ok and baseline_confirmed:
+                        strict_regression = False
+                        strict_regression_message = None
+                        strict_extra.update(
+                            {
+                                "post_patch_baseline_reset_confirmed": True,
+                                "post_patch_baseline_observations": 2,
+                                "post_patch_baseline_confirmation": confirmation_reason,
+                            }
+                        )
 
     if early_policy_active and strict_validation_ok and not strict_regression:
         reg, msg = False, None
@@ -1687,20 +1749,8 @@ def _save_dataset_with_checks(
             extra=extra,
         )
         return reg, msg, {}
-    previous_structured = (prev_data or {}).get("structured") or {}
-    previous_baseline = previous_structured.get("baseline_rows")
-    if previous_structured.get("provisional") and isinstance(previous_baseline, int):
-        baseline_rows = previous_baseline
-    else:
-        baseline_rows = estimate_metric_count(source, prev_data or {})
-    accepted_rows = estimate_metric_count(source, new_data)
     provisional_metadata = (
-        build_provisional_metadata(
-            source.id,
-            accepted_rows=accepted_rows,
-            baseline_rows=baseline_rows or accepted_rows,
-            at=metadata_time,
-        )
+        candidate_provisional_metadata
         if not strict_validation_ok or strict_regression
         else {}
     )

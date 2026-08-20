@@ -11,6 +11,7 @@ from app.post_patch_policy import (
     EARLY_SOURCE_IDS,
     active_post_patch_refresh_source_ids,
     build_provisional_metadata,
+    can_confirm_post_patch_baseline,
     effective_contract_min_rows,
     effective_firestone_minimum_sample,
     policy_for,
@@ -62,6 +63,17 @@ def _patch_cards(count: int) -> list[dict]:
             "dbfId": index + 1,
             "deck_winrate": "52.1%",
             "deck_popularity": "1.2%",
+        }
+        for index in range(count)
+    ]
+
+
+def _metastats_rows(count: int) -> list[dict]:
+    return [
+        {
+            "archetype_name": f"Archetype {index}",
+            "win_rate": 52.1,
+            "games": 100 + index,
         }
         for index in range(count)
     ]
@@ -744,6 +756,100 @@ class PostPatchPolicyTest(unittest.TestCase):
             "stable-publication",
             candidate,
         )
+
+    def test_two_consistent_observations_confirm_new_patch_baseline(self) -> None:
+        source = SOURCE_BY_ID["metastats_decks"]
+        patch_window = {
+            "from": "2026-07-21",
+            "until": "2026-07-28",
+            "timezone": "Europe/Warsaw",
+        }
+        previous = {
+            "fetched_at": "2026-07-23T10:00:00+00:00",
+            "data": {
+                "structured": {
+                    "type": "metastats_decks",
+                    "decks": _metastats_rows(45),
+                    "data_phase": "post_patch_early",
+                    "provisional": True,
+                    "accepted_rows": 45,
+                    "baseline_rows": 182,
+                    "coverage_ratio": 0.2473,
+                    "minimum_sample": 10,
+                    "patch_window": patch_window,
+                }
+            },
+        }
+        stable = {
+            "data": {
+                "structured": {
+                    "type": "metastats_decks",
+                    "decks": _metastats_rows(182),
+                }
+            }
+        }
+        candidate = {
+            "data": {
+                "structured": {
+                    "type": "metastats_decks",
+                    "decks": _metastats_rows(45),
+                }
+            }
+        }
+
+        with (
+            patch("app.post_patch_policy.current_time", return_value=WINDOW_TIME),
+            patch("app.fetcher.load_dataset", return_value=previous),
+            patch("app.fetcher.load_baseline", return_value=stable),
+            patch("app.fetcher.save_dataset") as save_dataset,
+            patch("app.fetcher.save_baseline") as save_stable,
+            patch("app.fetcher.save_baseline_once"),
+            patch("app.fetcher.log_action"),
+        ):
+            regression, message, provisional_metadata = _save_dataset_with_checks(
+                source,
+                candidate,
+                fetched_at=WINDOW_TIME.isoformat(),
+            )
+
+        self.assertFalse(regression)
+        self.assertIsNone(message)
+        self.assertEqual(provisional_metadata, {})
+        self.assertNotIn(
+            "provisional",
+            save_dataset.call_args.args[1]["data"]["structured"],
+        )
+        save_stable.assert_called_once_with(
+            source.id,
+            "stable-publication",
+            candidate,
+        )
+
+    def test_patch_baseline_confirmation_rejects_retry_burst(self) -> None:
+        patch_window = {
+            "from": "2026-07-21",
+            "until": "2026-07-28",
+            "timezone": "Europe/Warsaw",
+        }
+        confirmed, reason = can_confirm_post_patch_baseline(
+            previous_structured={
+                "type": "metastats_decks",
+                "data_phase": "post_patch_early",
+                "provisional": True,
+                "accepted_rows": 45,
+                "patch_window": patch_window,
+            },
+            candidate_structured={"type": "metastats_decks"},
+            candidate_metadata={
+                "accepted_rows": 45,
+                "patch_window": patch_window,
+            },
+            previous_fetched_at="2026-07-23T11:55:00+00:00",
+            candidate_fetched_at="2026-07-23T12:00:00+00:00",
+        )
+
+        self.assertFalse(confirmed)
+        self.assertIn("too close", reason)
 
     def test_first_provisional_publish_preserves_previous_stable_dataset(self) -> None:
         source = SOURCE_BY_ID["hsreplay_arena_cards_advanced"]

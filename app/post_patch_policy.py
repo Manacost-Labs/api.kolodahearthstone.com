@@ -6,7 +6,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from .hsreplay_card_periods import HSREPLAY_CARD_PERIOD_SOURCE_IDS
@@ -20,6 +20,8 @@ DEFAULT_WINDOW_START = date(2026, 7, 21)
 DEFAULT_WINDOW_UNTIL = date(2026, 7, 28)
 POST_PATCH_BASELINE_LABEL = f"arena-post-patch-{DEFAULT_WINDOW_START.isoformat()}"
 STABLE_PUBLICATION_BASELINE_LABEL = "stable-publication"
+BASELINE_CONFIRMATION_MIN_AGE = timedelta(minutes=30)
+BASELINE_CONFIRMATION_MIN_ROW_RATIO = 0.90
 
 
 @dataclass(frozen=True)
@@ -334,3 +336,52 @@ def build_provisional_metadata(
             "timezone": (central_window or {}).get("timezone") or WINDOW_TIMEZONE,
         },
     }
+
+
+def can_confirm_post_patch_baseline(
+    *,
+    previous_structured: dict[str, Any],
+    candidate_structured: dict[str, Any],
+    candidate_metadata: dict[str, object],
+    previous_fetched_at: str | None,
+    candidate_fetched_at: str,
+) -> tuple[bool, str]:
+    """Prove that two observations can replace a pre-patch row baseline."""
+
+    if previous_structured.get("provisional") is not True:
+        return False, "previous observation is not provisional"
+    if previous_structured.get("data_phase") != "post_patch_early":
+        return False, "previous observation is outside the post-patch phase"
+    if previous_structured.get("type") != candidate_structured.get("type"):
+        return False, "structured type changed between observations"
+    previous_window = previous_structured.get("patch_window")
+    candidate_window = candidate_metadata.get("patch_window")
+    if not isinstance(previous_window, dict) or previous_window != candidate_window:
+        return False, "observations do not share the same patch window"
+
+    previous_rows = previous_structured.get("accepted_rows")
+    candidate_rows = candidate_metadata.get("accepted_rows")
+    if (
+        not isinstance(previous_rows, int)
+        or isinstance(previous_rows, bool)
+        or previous_rows <= 0
+        or not isinstance(candidate_rows, int)
+        or isinstance(candidate_rows, bool)
+        or candidate_rows <= 0
+    ):
+        return False, "observation row counts are missing"
+    if candidate_rows < previous_rows * BASELINE_CONFIRMATION_MIN_ROW_RATIO:
+        return False, "candidate row count is not consistent with the prior observation"
+
+    try:
+        previous_time = datetime.fromisoformat(
+            str(previous_fetched_at or "").replace("Z", "+00:00")
+        )
+        candidate_time = datetime.fromisoformat(candidate_fetched_at.replace("Z", "+00:00"))
+    except ValueError:
+        return False, "observation timestamps are invalid"
+    if previous_time.tzinfo is None or candidate_time.tzinfo is None:
+        return False, "observation timestamps must include a timezone"
+    if candidate_time - previous_time < BASELINE_CONFIRMATION_MIN_AGE:
+        return False, "observations are too close to confirm a new baseline"
+    return True, "two stable-valid post-patch observations confirm the new baseline"
