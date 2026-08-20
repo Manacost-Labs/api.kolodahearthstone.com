@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -97,6 +98,55 @@ class ParserControlStoreTest(unittest.TestCase):
                     reason="recover provisional",
                     attempt_purpose="recovery",
                 )
+
+    def test_worker_records_recovery_without_rewriting_origin_window(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = ParserControlStore(root)
+            run, _ = store.enqueue_run(
+                source_ids=["hsguru_meta_standard_legend"],
+                requested_by="convergence-controller",
+                reason="recover provisional",
+                request_id="convergence:chain-1:attempt-1",
+                attempt_purpose="recovery",
+                origin_occurrence_id="schedule:20260820T100000Z",
+                recovery_chain_id="chain-1",
+            )
+
+            async def executor(_source_ids: list[str]) -> list[dict[str, object]]:
+                return [
+                    {
+                        "source_id": "hsguru_meta_standard_legend",
+                        "state": "ok",
+                    }
+                ]
+
+            worker = ParserRunWorker(store, executor=executor)
+            self.assertTrue(worker.process_next())
+
+            with sqlite3.connect(root / "parser-telemetry.sqlite3") as connection:
+                stored = connection.execute(
+                    """
+                    SELECT
+                        refresh_window_id,
+                        attempt_purpose,
+                        origin_occurrence_id,
+                        recovery_chain_id,
+                        outcome
+                    FROM source_attempts
+                    """
+                ).fetchone()
+
+            self.assertEqual(
+                stored,
+                (
+                    f"recovery:chain-1:{run['id']}",
+                    "recovery",
+                    "schedule:20260820T100000Z",
+                    "chain-1",
+                    "fresh_published",
+                ),
+            )
 
     def test_policy_update_is_persisted_and_uses_optimistic_revision(self) -> None:
         with TemporaryDirectory() as directory:
@@ -803,11 +853,16 @@ class ParserPipelineStateTest(unittest.IsolatedAsyncioTestCase):
         with patch(
             "app.fetcher.refresh_sources",
             new=AsyncMock(return_value=[base_result]),
-        ), patch(
+        ) as refresh_sources, patch(
             "app.parser_control._run_pipeline_source",
             new=AsyncMock(return_value=database_result),
         ):
             results = await execute_parser_run([source_id])
+
+        refresh_sources.assert_awaited_once_with(
+            [source_id],
+            persist_reliability=False,
+        )
 
         self.assertEqual(len(results), 1)
         result = results[0]

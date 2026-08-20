@@ -1775,14 +1775,68 @@ async def _run_pipeline_source(source_id: str) -> dict[str, Any]:
     return pipeline_result
 
 
-async def execute_parser_run(source_ids: list[str]) -> list[dict[str, Any]]:
+def _record_parser_run_reliability(
+    telemetry_run_id: str,
+    results: list[dict[str, Any]],
+    *,
+    path: Path,
+    attempt_purpose: str,
+    origin_occurrence_id: str | None,
+    recovery_chain_id: str | None,
+    refresh_window_id: str | None,
+) -> None:
+    if not results:
+        return
+    terminal_results = [
+        {
+            **result,
+            "source_id": str(result.get("source_id") or result.get("sourceId") or ""),
+        }
+        for result in results
+    ]
+    try:
+        from .reliability_telemetry import record_terminal_results
+
+        record_terminal_results(
+            telemetry_run_id,
+            terminal_results,
+            path=path,
+            expected_source_count=len(terminal_results),
+            refresh_window_id=refresh_window_id,
+            attempt_purpose=attempt_purpose,
+            origin_occurrence_id=origin_occurrence_id,
+            recovery_chain_id=recovery_chain_id,
+        )
+    except Exception as exc:  # noqa: BLE001 - telemetry cannot invert parser outcomes
+        _logger.warning(
+            "Parser-control reliability write failed for run %s: %s",
+            telemetry_run_id,
+            type(exc).__name__,
+        )
+
+
+async def execute_parser_run(
+    source_ids: list[str],
+    *,
+    telemetry_run_id: str | None = None,
+    telemetry_path: Path | None = None,
+    attempt_purpose: str = "manual",
+    origin_occurrence_id: str | None = None,
+    recovery_chain_id: str | None = None,
+    refresh_window_id: str | None = None,
+) -> list[dict[str, Any]]:
     from .fetcher import refresh_sources
 
     scrape_ids = [source_id for source_id in source_ids if SOURCE_BY_ID[source_id].kind == "scrape"]
     pipeline_ids = [source_id for source_id in source_ids if SOURCE_BY_ID[source_id].kind == "pipeline"]
     results: list[dict[str, Any]] = []
     if scrape_ids:
-        results.extend(await refresh_sources(scrape_ids))
+        results.extend(
+            await refresh_sources(
+                scrape_ids,
+                persist_reliability=False,
+            )
+        )
     for source_id in pipeline_ids:
         results.append(await _run_pipeline_source(source_id))
     # This source has two public products: the cached source dataset and the
@@ -1830,6 +1884,16 @@ async def execute_parser_run(source_ids: list[str]) -> list[dict[str, Any]]:
                 database_rows_total = _result_rows_total(database_result)
                 if database_rows_total is not None:
                     base["rows_total"] = database_rows_total
+    if telemetry_run_id is not None and telemetry_path is not None:
+        _record_parser_run_reliability(
+            telemetry_run_id,
+            results,
+            path=telemetry_path,
+            attempt_purpose=attempt_purpose,
+            origin_occurrence_id=origin_occurrence_id,
+            recovery_chain_id=recovery_chain_id,
+            refresh_window_id=refresh_window_id,
+        )
     return results
 
 
@@ -1838,7 +1902,7 @@ class ParserRunWorker:
         self,
         store: ParserControlStore,
         *,
-        executor: Callable[[list[str]], Any] = execute_parser_run,
+        executor: Callable[[list[str]], Any] | None = None,
     ) -> None:
         self.store = store
         self.executor = executor
@@ -1911,8 +1975,30 @@ class ParserRunWorker:
             if source_id in completed:
                 continue
             source_started_ms = _monotonic_ms()
+            attempt_purpose = str(run.get("attemptPurpose") or "manual")
+            origin_occurrence_id = run.get("originOccurrenceId")
+            recovery_chain_id = run.get("recoveryChainId")
+            telemetry_run_id = f"parser-control:{run_id}:{source_id}"
+            refresh_window_id = (
+                f"recovery:{recovery_chain_id}:{run_id}"
+                if attempt_purpose == "recovery" and recovery_chain_id
+                else None
+            )
             try:
-                raw_results = asyncio.run(self.executor([source_id]))
+                if self.executor is None:
+                    raw_results = asyncio.run(
+                        execute_parser_run(
+                            [source_id],
+                            telemetry_run_id=telemetry_run_id,
+                            telemetry_path=self.store.root / "parser-telemetry.sqlite3",
+                            attempt_purpose=attempt_purpose,
+                            origin_occurrence_id=origin_occurrence_id,
+                            recovery_chain_id=recovery_chain_id,
+                            refresh_window_id=refresh_window_id,
+                        )
+                    )
+                else:
+                    raw_results = asyncio.run(self.executor([source_id]))
                 raw_result = next(
                     (
                         row
@@ -1939,6 +2025,15 @@ class ParserRunWorker:
                 }
             summary["durationMs"] = max(
                 0, round(_monotonic_ms() - source_started_ms)
+            )
+            _record_parser_run_reliability(
+                telemetry_run_id,
+                [summary],
+                path=self.store.root / "parser-telemetry.sqlite3",
+                attempt_purpose=attempt_purpose,
+                origin_occurrence_id=origin_occurrence_id,
+                recovery_chain_id=recovery_chain_id,
+                refresh_window_id=refresh_window_id,
             )
             self.store.record_run_result(run_id, summary)
 

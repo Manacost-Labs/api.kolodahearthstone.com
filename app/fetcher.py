@@ -4216,6 +4216,7 @@ async def _refresh_sources_unlocked(
     tier_filter: str | None = None,
     respect_section_controls: bool = False,
     refresh_window_id: str | None = None,
+    persist_reliability: bool = True,
 ) -> list[dict[str, Any]]:
     global _firecrawl_fallback_attempts
     _firecrawl_fallback_attempts = 0
@@ -4301,6 +4302,8 @@ async def _refresh_sources_unlocked(
     )
 
     def record_reliability(terminal_results: list[dict[str, Any]]) -> None:
+        if not persist_reliability:
+            return
         if refresh_window_id is None:
             _record_reliability_results_best_effort(
                 run_id,
@@ -4629,6 +4632,7 @@ async def refresh_sources(
     tier: str | None = None,
     respect_section_controls: bool = False,
     refresh_window_id: str | None = None,
+    persist_reliability: bool = True,
 ) -> list[dict[str, Any]]:
     lock_source_ids = _refresh_lock_source_ids(source_ids, tier=tier)
     available_source_ids: list[str] = []
@@ -4644,7 +4648,7 @@ async def refresh_sources(
             else:
                 available_source_ids.append(source_id)
 
-        if locked_outcomes:
+        if locked_outcomes and persist_reliability:
             if refresh_window_id is None:
                 _record_reliability_results_best_effort(
                     f"locked-{uuid.uuid4().hex}",
@@ -4663,19 +4667,18 @@ async def refresh_sources(
         refresh_source_ids = source_ids
         if locked_outcomes:
             refresh_source_ids = available_source_ids
-        if refresh_window_id is None:
-            refreshed = await _refresh_sources_unlocked(
-                refresh_source_ids,
-                tier_filter=tier,
-                respect_section_controls=respect_section_controls,
-            )
-        else:
-            refreshed = await _refresh_sources_unlocked(
-                refresh_source_ids,
-                tier_filter=tier,
-                respect_section_controls=respect_section_controls,
-                refresh_window_id=refresh_window_id,
-            )
+        unlocked_options: dict[str, Any] = {
+            "tier_filter": tier,
+            "respect_section_controls": respect_section_controls,
+        }
+        if refresh_window_id is not None:
+            unlocked_options["refresh_window_id"] = refresh_window_id
+        if not persist_reliability:
+            unlocked_options["persist_reliability"] = False
+        refreshed = await _refresh_sources_unlocked(
+            refresh_source_ids,
+            **unlocked_options,
+        )
         return [*refreshed, *locked_outcomes]
 
 
