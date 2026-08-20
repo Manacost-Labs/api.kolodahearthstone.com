@@ -48,6 +48,8 @@ class ConvergenceChain:
     state: str
     delays_seconds: tuple[int, ...]
     paid_fetch_allowed: bool
+    paid_requests_total: int
+    paid_cost_microusd_total: int
     attempt_index: int
     next_attempt_at: datetime | None
     deadline_at: datetime
@@ -335,15 +337,16 @@ class ConvergenceStore:
             connection.execute(
                 """
                 INSERT INTO convergence_attempts (
-                    attempt_id, chain_id, attempt_number, action, state,
+                    attempt_id, chain_id, attempt_number, action, state, worker_id,
                     started_at, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, 'running', ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, 'running', ?, ?, ?, ?)
                 """,
                 (
                     attempt_id,
                     chain_id,
                     attempt_number,
                     str(row["action"]),
+                    lease_owner,
                     now_epoch,
                     now_epoch,
                     now_epoch,
@@ -365,6 +368,158 @@ class ConvergenceStore:
             lease_owner=lease_owner,
             lease_until=_from_epoch(lease_until_epoch),
         )
+
+    def finish_attempt(
+        self,
+        *,
+        attempt_id: str,
+        owner: str,
+        outcome: str,
+        reason_code: str,
+        decision: RecoveryDecision,
+        finished_at: datetime,
+        execution_succeeded: bool,
+        parser_run_id: str | None = None,
+        paid_requests: int = 0,
+        paid_cost_microusd: int = 0,
+    ) -> ConvergenceChain:
+        normalized_attempt_id = _identifier(attempt_id, field="attempt_id")
+        lease_owner = _identifier(owner, field="owner")
+        moment = _as_utc(finished_at, field="finished_at")
+        normalized_outcome = _bounded_label(outcome, field="outcome")
+        normalized_reason = _bounded_label(reason_code, field="reason_code")
+        normalized_parser_run_id = (
+            _identifier(parser_run_id, field="parser_run_id")
+            if parser_run_id is not None
+            else None
+        )
+        if paid_requests < 0 or paid_cost_microusd < 0:
+            raise ValueError("Paid usage must be non-negative")
+        now_epoch = moment.timestamp()
+
+        connection = self._connect()
+        connection.row_factory = sqlite3.Row
+        try:
+            _ensure_schema(connection)
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """
+                SELECT
+                    attempts.chain_id,
+                    attempts.attempt_number,
+                    attempts.state AS attempt_state,
+                    attempts.worker_id,
+                    chains.deadline_at,
+                    chains.paid_fetch_allowed,
+                    chains.lease_owner,
+                    chains.lease_until
+                FROM convergence_attempts AS attempts
+                JOIN convergence_chains AS chains USING (chain_id)
+                WHERE attempts.attempt_id = ?
+                """,
+                (normalized_attempt_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError("Convergence attempt was not found")
+            chain_id = str(row["chain_id"])
+            if str(row["worker_id"] or "") != lease_owner:
+                raise PermissionError("Convergence attempt is owned by another worker")
+            if str(row["attempt_state"]) != "running":
+                connection.commit()
+                chain = self._get_chain(connection, chain_id)
+                if chain is None:
+                    raise RuntimeError("Completed convergence chain disappeared")
+                return chain
+            if str(row["lease_owner"] or "") != lease_owner:
+                raise PermissionError("Convergence lease is owned by another worker")
+            if row["lease_until"] is None or float(row["lease_until"]) <= now_epoch:
+                raise PermissionError("Convergence lease has expired")
+            if paid_requests and not bool(row["paid_fetch_allowed"]):
+                raise ValueError("This convergence attempt cannot spend provider credits")
+            if decision.action == "complete" and not execution_succeeded:
+                raise ValueError("A failed execution cannot complete a convergence chain")
+
+            attempt_number = int(row["attempt_number"])
+            delays = tuple(int(delay) for delay in decision.delays_seconds)
+            if decision.action == "complete":
+                state = "fresh"
+                next_attempt_at = None
+            elif decision.action in {
+                "pause_provider",
+                "quarantine",
+                "diagnose",
+            }:
+                state = _initial_state(decision.action)
+                next_attempt_at = None
+            elif attempt_number >= len(delays):
+                state = "exhausted"
+                next_attempt_at = None
+            else:
+                candidate_next = now_epoch + delays[attempt_number]
+                if candidate_next >= float(row["deadline_at"]):
+                    state = "exhausted"
+                    next_attempt_at = None
+                else:
+                    state = _initial_state(decision.action)
+                    next_attempt_at = candidate_next
+
+            connection.execute(
+                """
+                UPDATE convergence_attempts
+                SET state = ?, parser_run_id = ?, outcome = ?, reason_code = ?,
+                    paid_requests = ?, paid_cost_microusd = ?,
+                    finished_at = ?, updated_at = ?
+                WHERE attempt_id = ? AND state = 'running'
+                """,
+                (
+                    "succeeded" if execution_succeeded else "failed",
+                    normalized_parser_run_id,
+                    normalized_outcome,
+                    normalized_reason,
+                    paid_requests,
+                    paid_cost_microusd,
+                    now_epoch,
+                    now_epoch,
+                    normalized_attempt_id,
+                ),
+            )
+            connection.execute(
+                """
+                UPDATE convergence_chains
+                SET action = ?, reason_class = ?, state = ?,
+                    delays_seconds_json = ?, paid_fetch_allowed = ?,
+                    paid_requests_total = paid_requests_total + ?,
+                    paid_cost_microusd_total = paid_cost_microusd_total + ?,
+                    next_attempt_at = ?, last_outcome = ?, last_reason_code = ?,
+                    lease_owner = NULL, lease_until = NULL, updated_at = ?
+                WHERE chain_id = ? AND state = 'running' AND lease_owner = ?
+                """,
+                (
+                    decision.action,
+                    decision.reason_class,
+                    state,
+                    json.dumps(delays, separators=(",", ":")),
+                    int(decision.paid_fetch_allowed),
+                    paid_requests,
+                    paid_cost_microusd,
+                    next_attempt_at,
+                    normalized_outcome,
+                    normalized_reason,
+                    now_epoch,
+                    chain_id,
+                    lease_owner,
+                ),
+            )
+            connection.commit()
+            chain = self._get_chain(connection, chain_id)
+        except BaseException:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+        if chain is None:
+            raise RuntimeError("Completed convergence chain disappeared")
+        return chain
 
     @staticmethod
     def _get_chain(
@@ -407,6 +562,8 @@ class ConvergenceStore:
             state=str(row["state"]),
             delays_seconds=delays,
             paid_fetch_allowed=bool(row["paid_fetch_allowed"]),
+            paid_requests_total=int(row["paid_requests_total"]),
+            paid_cost_microusd_total=int(row["paid_cost_microusd_total"]),
             attempt_index=int(row["attempt_index"]),
             next_attempt_at=next_attempt_at,
             deadline_at=_from_epoch(row["deadline_at"]),
@@ -447,6 +604,12 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
                     paid_fetch_allowed INTEGER NOT NULL CHECK (
                         paid_fetch_allowed IN (0, 1)
                     ),
+                    paid_requests_total INTEGER NOT NULL DEFAULT 0 CHECK (
+                        paid_requests_total >= 0
+                    ),
+                    paid_cost_microusd_total INTEGER NOT NULL DEFAULT 0 CHECK (
+                        paid_cost_microusd_total >= 0
+                    ),
                     attempt_index INTEGER NOT NULL DEFAULT 0 CHECK (
                         attempt_index >= 0
                     ),
@@ -462,6 +625,24 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
                 )
                 """
             )
+            chain_columns = {
+                str(row[1])
+                for row in connection.execute(
+                    "PRAGMA table_info(convergence_chains)"
+                )
+            }
+            if "paid_requests_total" not in chain_columns:
+                connection.execute(
+                    "ALTER TABLE convergence_chains "
+                    "ADD COLUMN paid_requests_total INTEGER NOT NULL DEFAULT 0 "
+                    "CHECK (paid_requests_total >= 0)"
+                )
+            if "paid_cost_microusd_total" not in chain_columns:
+                connection.execute(
+                    "ALTER TABLE convergence_chains "
+                    "ADD COLUMN paid_cost_microusd_total INTEGER NOT NULL DEFAULT 0 "
+                    "CHECK (paid_cost_microusd_total >= 0)"
+                )
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS convergence_chain_sources (
@@ -483,6 +664,7 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
                     state TEXT NOT NULL CHECK (
                         state IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')
                     ),
+                    worker_id TEXT NOT NULL DEFAULT '',
                     parser_run_id TEXT,
                     outcome TEXT,
                     reason_code TEXT,
@@ -498,6 +680,17 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
                 )
                 """
             )
+            attempt_columns = {
+                str(row[1])
+                for row in connection.execute(
+                    "PRAGMA table_info(convergence_attempts)"
+                )
+            }
+            if "worker_id" not in attempt_columns:
+                connection.execute(
+                    "ALTER TABLE convergence_attempts "
+                    "ADD COLUMN worker_id TEXT NOT NULL DEFAULT ''"
+                )
             connection.execute(
                 """
                 CREATE INDEX IF NOT EXISTS convergence_chains_due_idx

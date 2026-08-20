@@ -223,3 +223,159 @@ def test_chain_past_deadline_is_exhausted_without_a_claim(tmp_path: Path) -> Non
     assert exhausted is not None
     assert exhausted.state == "exhausted"
     assert exhausted.next_attempt_at is None
+
+
+def test_fresh_attempt_completes_chain_and_is_idempotent(tmp_path: Path) -> None:
+    path = tmp_path / "parser-telemetry.sqlite3"
+    chain = _create_transport_chain(path)
+    due_at = datetime(2026, 8, 20, 12, 5, tzinfo=UTC)
+    claim = ConvergenceStore(path).claim_due(owner="worker", now=due_at)
+    assert claim is not None
+
+    finished = ConvergenceStore(path).finish_attempt(
+        attempt_id=claim.attempt_id,
+        owner="worker",
+        outcome="fresh_published",
+        reason_code="none",
+        decision=decide_recovery(outcome="fresh_published"),
+        finished_at=due_at + timedelta(minutes=1),
+        execution_succeeded=True,
+        parser_run_id="parser-control:run-1",
+        paid_requests=1,
+        paid_cost_microusd=1500,
+    )
+    repeated = ConvergenceStore(path).finish_attempt(
+        attempt_id=claim.attempt_id,
+        owner="worker",
+        outcome="fresh_published",
+        reason_code="none",
+        decision=decide_recovery(outcome="fresh_published"),
+        finished_at=due_at + timedelta(minutes=1),
+        execution_succeeded=True,
+        parser_run_id="parser-control:run-1",
+    )
+
+    assert finished.chain_id == chain.chain_id
+    assert finished.state == "fresh"
+    assert finished.next_attempt_at is None
+    assert finished.paid_requests_total == 1
+    assert finished.paid_cost_microusd_total == 1500
+    assert repeated == finished
+    with sqlite3.connect(path) as connection:
+        stored = connection.execute(
+            """
+            SELECT state, parser_run_id, outcome
+            FROM convergence_attempts
+            """
+        ).fetchone()
+    assert stored == ("succeeded", "parser-control:run-1", "fresh_published")
+
+
+def test_transport_failure_reschedules_then_exhausts_bounded_attempts(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "parser-telemetry.sqlite3"
+    chain = _create_transport_chain(path)
+    store = ConvergenceStore(path)
+    due_at = datetime(2026, 8, 20, 12, 5, tzinfo=UTC)
+    decision = decide_recovery(outcome="failed", reason_code="transport")
+
+    first = store.claim_due(owner="worker", now=due_at)
+    assert first is not None
+    after_first = store.finish_attempt(
+        attempt_id=first.attempt_id,
+        owner="worker",
+        outcome="failed",
+        reason_code="transport",
+        decision=decision,
+        finished_at=due_at + timedelta(minutes=1),
+        execution_succeeded=False,
+    )
+    assert after_first.next_attempt_at == datetime(
+        2026, 8, 20, 12, 26, tzinfo=UTC
+    )
+
+    second = store.claim_due(owner="worker", now=after_first.next_attempt_at)
+    assert second is not None
+    after_second = store.finish_attempt(
+        attempt_id=second.attempt_id,
+        owner="worker",
+        outcome="failed",
+        reason_code="transport",
+        decision=decision,
+        finished_at=after_first.next_attempt_at + timedelta(minutes=1),
+        execution_succeeded=False,
+    )
+    assert after_second.next_attempt_at == datetime(
+        2026, 8, 20, 13, 27, tzinfo=UTC
+    )
+
+    third = store.claim_due(owner="worker", now=after_second.next_attempt_at)
+    assert third is not None
+    exhausted = store.finish_attempt(
+        attempt_id=third.attempt_id,
+        owner="worker",
+        outcome="failed",
+        reason_code="transport",
+        decision=decision,
+        finished_at=after_second.next_attempt_at + timedelta(minutes=1),
+        execution_succeeded=False,
+    )
+
+    assert exhausted.chain_id == chain.chain_id
+    assert exhausted.state == "exhausted"
+    assert exhausted.next_attempt_at is None
+
+
+def test_unpaid_probe_rejects_provider_usage_and_wrong_owner(tmp_path: Path) -> None:
+    path = tmp_path / "parser-telemetry.sqlite3"
+    observed = datetime(2026, 8, 20, 12, 0, tzinfo=UTC)
+    store = ConvergenceStore(path)
+    store.create_or_get_chain(
+        cohort_id="vicious-reports",
+        source_ids=["vicious_syndicate_radars"],
+        origin_occurrence_id="schedule:20260820T100000Z",
+        decision=decide_recovery(
+            outcome="lkg_served",
+            reason_code="unavailable",
+            upstream_pending=True,
+        ),
+        outcome="lkg_served",
+        reason_code="unavailable",
+        observed_at=observed,
+        deadline_at=observed + timedelta(hours=12),
+    )
+    claim = store.claim_due(
+        owner="probe-worker",
+        now=observed + timedelta(minutes=30),
+    )
+    assert claim is not None
+    with pytest.raises(PermissionError, match="another worker"):
+        store.finish_attempt(
+            attempt_id=claim.attempt_id,
+            owner="wrong-worker",
+            outcome="lkg_served",
+            reason_code="unavailable",
+            decision=decide_recovery(
+                outcome="lkg_served",
+                reason_code="unavailable",
+                upstream_pending=True,
+            ),
+            finished_at=observed + timedelta(minutes=31),
+            execution_succeeded=True,
+        )
+    with pytest.raises(ValueError, match="cannot spend provider credits"):
+        store.finish_attempt(
+            attempt_id=claim.attempt_id,
+            owner="probe-worker",
+            outcome="lkg_served",
+            reason_code="unavailable",
+            decision=decide_recovery(
+                outcome="lkg_served",
+                reason_code="unavailable",
+                upstream_pending=True,
+            ),
+            finished_at=observed + timedelta(minutes=31),
+            execution_succeeded=True,
+            paid_requests=1,
+        )
