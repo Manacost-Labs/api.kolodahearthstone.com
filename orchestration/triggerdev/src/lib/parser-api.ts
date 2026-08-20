@@ -16,6 +16,15 @@ export interface ParserRun {
     sourceId: string;
     state: string;
     servingCachedDataset: boolean;
+    outcome:
+      | "fresh_published"
+      | "provisional"
+      | "lkg_served"
+      | "failed"
+      | "timed_out"
+      | "skipped";
+    reasonCode: string;
+    upstreamPending: boolean;
   }>;
 }
 
@@ -170,7 +179,10 @@ function isParserRun(value: unknown): value is ParserRun {
     run.status === "succeeded" &&
     (run.results.length !== run.totalSources ||
       run.results.some(
-        (result) => result.state !== "ok" || result.servingCachedDataset
+        (result) =>
+          result.state !== "ok" ||
+          result.servingCachedDataset ||
+          result.outcome !== "fresh_published"
       ))
   ) {
     return false;
@@ -197,12 +209,49 @@ function isParserResult(value: unknown): value is ParserRun["results"][number] {
     "never_fetched",
     "error"
   ]);
+  const outcomes = new Set([
+    "fresh_published",
+    "provisional",
+    "lkg_served",
+    "failed",
+    "timed_out",
+    "skipped"
+  ]);
+  const reasons = new Set([
+    "none",
+    "proxy_payment",
+    "authentication",
+    "rate_limited",
+    "access_blocked",
+    "upstream_4xx",
+    "upstream_5xx",
+    "timeout",
+    "transport",
+    "unavailable",
+    "contract",
+    "parse_error",
+    "regression",
+    "backend_policy",
+    "ai_quarantine",
+    "publication_sync",
+    "preflight",
+    "dependency",
+    "unknown"
+  ]);
   return (
     typeof result.sourceId === "string" &&
     /^[A-Za-z0-9_.:-]{1,120}$/.test(result.sourceId) &&
     typeof result.state === "string" &&
     states.has(result.state) &&
-    typeof result.servingCachedDataset === "boolean"
+    typeof result.servingCachedDataset === "boolean" &&
+    typeof result.outcome === "string" &&
+    outcomes.has(result.outcome) &&
+    typeof result.reasonCode === "string" &&
+    reasons.has(result.reasonCode) &&
+    typeof result.upstreamPending === "boolean" &&
+    (!result.upstreamPending || result.outcome === "skipped") &&
+    (!(["fresh_published", "provisional"] as string[]).includes(result.outcome) ||
+      result.reasonCode === "none")
   );
 }
 

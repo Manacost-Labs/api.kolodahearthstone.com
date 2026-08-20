@@ -8,7 +8,7 @@ import logging
 import os
 import threading
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from datetime import UTC, date, datetime
 from datetime import time as datetime_time
@@ -26,6 +26,7 @@ from .parser_control_registry import (
     source_label,
 )
 from .sources import SOURCE_BY_ID
+from .source_state import SourceState
 
 CONTROL_FILENAME = "parser-control.json"
 CONTROL_LOCK_FILENAME = "parser-control.lock"
@@ -1673,7 +1674,23 @@ def expand_run_selection(
 
 
 def _run_result_summary(result: dict[str, Any]) -> dict[str, Any]:
+    from .reliability_telemetry import (
+        classify_failure_reason,
+        classify_independently_ineligible_reason,
+        classify_terminal_status,
+    )
+
     source_id = str(result.get("source_id") or result.get("sourceId") or "")
+    classification_result = {
+        **result,
+        "source_id": source_id,
+        "serving_cached_dataset": bool(
+            result.get("serving_cached_dataset") or result.get("servingCachedDataset")
+        ),
+        "failure_reason_code": (
+            result.get("failure_reason_code") or result.get("failureReasonCode")
+        ),
+    }
     errors, errors_total, errors_truncated = _result_errors(result)
     summary = {
         "sourceId": source_id,
@@ -1687,11 +1704,34 @@ def _run_result_summary(result: dict[str, Any]) -> dict[str, Any]:
         "servingCachedDataset": bool(
             result.get("serving_cached_dataset") or result.get("servingCachedDataset")
         ),
+        "terminalOutcome": classify_terminal_status(classification_result),
+        "reasonCode": classify_failure_reason(classification_result),
+        "independentlyIneligibleReason": (
+            classify_independently_ineligible_reason(classification_result)
+        ),
     }
     rows_total = _result_rows_total(result)
     if rows_total is not None:
         summary["rowsTotal"] = rows_total
     return summary
+
+
+def _run_summary_outcome(result: Mapping[str, object]) -> str:
+    explicit = str(result.get("terminalOutcome") or "")
+    if explicit in {
+        "fresh_published",
+        "provisional",
+        "lkg_served",
+        "failed",
+        str(SourceState.TIMED_OUT),
+        "skipped",
+    }:
+        return explicit
+    if bool(result.get("servingCachedDataset")):
+        return "lkg_served"
+    if result.get("state") == "ok":
+        return "fresh_published"
+    return "failed"
 
 
 async def _run_pipeline_source(source_id: str) -> dict[str, Any]:
@@ -1794,6 +1834,17 @@ def _record_parser_run_reliability(
         }
         for result in results
     ]
+    trusted_classification = all(
+        all(
+            field in result
+            for field in (
+                "terminalOutcome",
+                "reasonCode",
+                "independentlyIneligibleReason",
+            )
+        )
+        for result in terminal_results
+    )
     try:
         from .reliability_telemetry import record_terminal_results
 
@@ -1806,6 +1857,7 @@ def _record_parser_run_reliability(
             attempt_purpose=attempt_purpose,
             origin_occurrence_id=origin_occurrence_id,
             recovery_chain_id=recovery_chain_id,
+            trusted_terminal_classification=trusted_classification,
         )
     except Exception as exc:  # noqa: BLE001 - telemetry cannot invert parser outcomes
         _logger.warning(
@@ -2022,6 +2074,9 @@ class ParserRunWorker:
                     "detail": detail,
                     "errors": [detail],
                     "servingCachedDataset": False,
+                    "terminalOutcome": "failed",
+                    "reasonCode": "unknown",
+                    "independentlyIneligibleReason": "",
                 }
             summary["durationMs"] = max(
                 0, round(_monotonic_ms() - source_started_ms)
@@ -2040,12 +2095,14 @@ class ParserRunWorker:
         persisted = self.store.get_run(run_id) or _run_public_view(run)
         summaries = list(persisted.get("results") or [])
         fresh_count = sum(
-            result.get("state") == "ok" and not result.get("servingCachedDataset")
+            _run_summary_outcome(result) == "fresh_published"
             for result in summaries
         )
         usable_count = sum(
-            result.get("state") in {"ok", "partial"}
+            _run_summary_outcome(result)
+            in {"fresh_published", "provisional", "lkg_served"}
             or bool(result.get("servingCachedDataset"))
+            or result.get("state") == "partial"
             for result in summaries
         )
         expected_count = len(run.get("sourceIds") or [])

@@ -221,6 +221,9 @@ class ParserControlApiTest(unittest.TestCase):
                     "sourceId": "heartharena_tierlist",
                     "state": "fetch_error",
                     "servingCachedDataset": True,
+                    "outcome": "lkg_served",
+                    "reasonCode": "unknown",
+                    "upstreamPending": False,
                 }
             ],
         )
@@ -349,6 +352,9 @@ class ParserControlApiTest(unittest.TestCase):
                     "errorsTotal": 4,
                     "errorsTruncated": False,
                     "servingCachedDataset": True,
+                    "terminalOutcome": "lkg_served",
+                    "reasonCode": "unknown",
+                    "independentlyIneligibleReason": "",
                     "rowsTotal": 137,
                     "durationMs": 250,
                 },

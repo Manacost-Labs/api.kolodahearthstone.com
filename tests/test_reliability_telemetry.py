@@ -1222,6 +1222,49 @@ def test_attempt_correlation_fails_closed(
         )
 
 
+@pytest.mark.parametrize(
+    ("terminal_fields", "message"),
+    [
+        (
+            {
+                "terminalOutcome": "invented",
+                "reasonCode": "unknown",
+                "independentlyIneligibleReason": "",
+            },
+            "outcome",
+        ),
+        (
+            {
+                "terminalOutcome": "fresh_published",
+                "reasonCode": "transport",
+                "independentlyIneligibleReason": "",
+            },
+            "reason none",
+        ),
+        (
+            {
+                "terminalOutcome": "failed",
+                "reasonCode": "transport",
+                "independentlyIneligibleReason": "upstream_not_published",
+            },
+            "skipped outcome",
+        ),
+    ],
+)
+def test_trusted_terminal_classification_fails_closed(
+    tmp_path: Path,
+    terminal_fields: dict[str, object],
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        record_terminal_results(
+            "run",
+            [{"source_id": "source", "state": "error", **terminal_fields}],
+            path=tmp_path / "reliability.sqlite3",
+            trusted_terminal_classification=True,
+        )
+
+
 @pytest.mark.parametrize("source_id", tuple(FIELD_UNAVAILABLE_REASONS))
 def test_new_attempts_track_every_instrumented_completeness_source(
     tmp_path: Path,

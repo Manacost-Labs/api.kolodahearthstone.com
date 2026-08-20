@@ -148,6 +148,78 @@ class ParserControlStoreTest(unittest.TestCase):
                 ),
             )
 
+    def test_worker_does_not_count_provisional_as_fresh(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = ParserControlStore(root)
+            run, _ = store.enqueue_run(
+                source_ids=["hsguru_meta_standard_legend"],
+                requested_by="convergence-controller",
+                reason="recover candidate",
+                attempt_purpose="recovery",
+                origin_occurrence_id="schedule:20260820T100000Z",
+                recovery_chain_id="chain-provisional",
+            )
+
+            async def executor(_source_ids: list[str]) -> list[dict[str, object]]:
+                return [
+                    {
+                        "source_id": "hsguru_meta_standard_legend",
+                        "state": "ok",
+                        "provisional": True,
+                    }
+                ]
+
+            self.assertTrue(ParserRunWorker(store, executor=executor).process_next())
+            persisted = store.get_run(run["id"])
+            self.assertIsNotNone(persisted)
+            assert persisted is not None
+            self.assertEqual(persisted["status"], "partial")
+            self.assertEqual(
+                persisted["results"][0]["terminalOutcome"],
+                "provisional",
+            )
+            with sqlite3.connect(root / "parser-telemetry.sqlite3") as connection:
+                outcome = connection.execute(
+                    "SELECT outcome FROM source_attempts"
+                ).fetchone()
+            self.assertEqual(outcome, ("provisional",))
+
+    def test_worker_does_not_count_lkg_as_fresh(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = ParserControlStore(root)
+            run, _ = store.enqueue_run(
+                source_ids=["hsguru_meta_standard_legend"],
+                requested_by="convergence-controller",
+                reason="recover transport",
+                attempt_purpose="recovery",
+                origin_occurrence_id="schedule:20260820T100000Z",
+                recovery_chain_id="chain-lkg",
+            )
+
+            async def executor(_source_ids: list[str]) -> list[dict[str, object]]:
+                return [
+                    {
+                        "source_id": "hsguru_meta_standard_legend",
+                        "state": "fetch_error",
+                        "serving_cached_dataset": True,
+                        "failure_reason_code": "transport",
+                    }
+                ]
+
+            self.assertTrue(ParserRunWorker(store, executor=executor).process_next())
+            persisted = store.get_run(run["id"])
+            self.assertIsNotNone(persisted)
+            assert persisted is not None
+            self.assertEqual(persisted["status"], "partial")
+            self.assertEqual(persisted["results"][0]["terminalOutcome"], "lkg_served")
+            with sqlite3.connect(root / "parser-telemetry.sqlite3") as connection:
+                stored = connection.execute(
+                    "SELECT outcome, reason_code FROM source_attempts"
+                ).fetchone()
+            self.assertEqual(stored, ("lkg_served", "transport"))
+
     def test_policy_update_is_persisted_and_uses_optimistic_revision(self) -> None:
         with TemporaryDirectory() as directory:
             store = ParserControlStore(Path(directory))

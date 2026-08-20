@@ -23,7 +23,15 @@ function runEnvelope(status = "queued"): Record<string, unknown> {
             {
               sourceId: "vicious_syndicate_live_beta",
               state: status === "succeeded" ? "ok" : "fetch_error",
-              servingCachedDataset: status === "partial"
+              servingCachedDataset: status === "partial",
+              outcome:
+                status === "succeeded"
+                  ? "fresh_published"
+                  : status === "partial"
+                    ? "lkg_served"
+                    : "failed",
+              reasonCode: status === "succeeded" ? "none" : "transport",
+              upstreamPending: false
             }
           ]
   };

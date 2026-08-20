@@ -13,6 +13,7 @@ from typing import Literal
 from .hsreplay_card_periods import HSREPLAY_CARD_PERIOD_SOURCE_IDS
 from .parsesunix_contracts import SPECIALIZED_API_SOURCE_IDS
 from .post_patch_policy import EARLY_SOURCE_IDS
+from .source_state import SourceState
 from .sources import SOURCE_BY_ID
 from .trinket_slices import TRINKET_SLICE_SOURCE_IDS
 
@@ -144,7 +145,10 @@ def decide_recovery(
             _LOCAL_DELAYS,
             False,
         )
-    if normalized_outcome == "timed_out" or normalized_reason in _TRANSPORT_REASONS:
+    if (
+        normalized_outcome == SourceState.TIMED_OUT
+        or normalized_reason in _TRANSPORT_REASONS
+    ):
         return RecoveryDecision(
             "retry_transport",
             "transport_retryable",

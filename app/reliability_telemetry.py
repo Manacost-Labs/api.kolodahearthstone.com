@@ -338,6 +338,35 @@ def _independently_ineligible_reason(status: Mapping[str, object]) -> str:
     return ""
 
 
+def classify_independently_ineligible_reason(
+    status: Mapping[str, object],
+) -> str:
+    """Return the bounded exclusion reason used by terminal telemetry."""
+
+    return _independently_ineligible_reason(status)
+
+
+def _trusted_terminal_classification(
+    result: Mapping[str, object],
+) -> tuple[str, str, str]:
+    outcome = str(result.get("terminalOutcome") or "").strip()
+    reason_code = str(result.get("reasonCode") or "").strip()
+    ineligible_reason = str(
+        result.get("independentlyIneligibleReason") or ""
+    ).strip()
+    if outcome not in OUTCOMES:
+        raise ValueError("Preclassified terminal outcome is invalid")
+    if reason_code not in {*FAILURE_REASONS, "none"}:
+        raise ValueError("Preclassified terminal reason is invalid")
+    if ineligible_reason not in {"", "upstream_not_published"}:
+        raise ValueError("Preclassified ineligible reason is invalid")
+    if outcome in {"fresh_published", "provisional"} and reason_code != "none":
+        raise ValueError("Successful preclassified outcomes require reason none")
+    if ineligible_reason and outcome != "skipped":
+        raise ValueError("An ineligible reason requires a skipped outcome")
+    return outcome, reason_code, ineligible_reason
+
+
 def _ai_terminal_fields(
     status: Mapping[str, object],
 ) -> tuple[str, str, str, str, str, int]:
@@ -573,6 +602,7 @@ def record_terminal_results(
     attempt_purpose: str = "primary",
     origin_occurrence_id: str | None = None,
     recovery_chain_id: str | None = None,
+    trusted_terminal_classification: bool = False,
 ) -> int:
     """Persist terminal source results atomically and idempotently.
 
@@ -613,9 +643,16 @@ def record_terminal_results(
         if not source_id or source_id in seen_sources:
             continue
         seen_sources.add(source_id)
-        outcome = classify_terminal_status(result)
-        reason_code = classify_failure_reason(result)
-        independently_ineligible_reason = _independently_ineligible_reason(result)
+        if trusted_terminal_classification:
+            (
+                outcome,
+                reason_code,
+                independently_ineligible_reason,
+            ) = _trusted_terminal_classification(result)
+        else:
+            outcome = classify_terminal_status(result)
+            reason_code = classify_failure_reason(result)
+            independently_ineligible_reason = _independently_ineligible_reason(result)
         ai_fields = _ai_terminal_fields(result)
         completeness_fields = _completeness_terminal_fields(source_id, result)
         parsesunix_fields = _parsesunix_terminal_fields(result)

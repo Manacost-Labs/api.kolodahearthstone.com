@@ -1145,16 +1145,68 @@ def _orchestrator_run_view(run: dict[str, Any]) -> dict[str, Any]:
         return min(value, total)
 
     allowed_states = {str(state) for state in SourceState} | {"error"}
+    allowed_outcomes = {
+        "fresh_published",
+        "provisional",
+        "lkg_served",
+        "failed",
+        str(SourceState.TIMED_OUT),
+        "skipped",
+    }
+    allowed_reasons = {
+        "none",
+        "proxy_payment",
+        "authentication",
+        "rate_limited",
+        "access_blocked",
+        "upstream_4xx",
+        "upstream_5xx",
+        "timeout",
+        "transport",
+        "unavailable",
+        "contract",
+        "parse_error",
+        "regression",
+        "backend_policy",
+        "ai_quarantine",
+        "publication_sync",
+        "preflight",
+        "dependency",
+        "unknown",
+    }
     results: list[dict[str, Any]] = []
     for raw in run.get("results") or []:
         if not isinstance(raw, dict) or not isinstance(raw.get("sourceId"), str):
             continue
         state = raw.get("state")
+        serving_cached = bool(raw.get("servingCachedDataset"))
+        outcome = raw.get("terminalOutcome")
+        if outcome not in allowed_outcomes:
+            outcome = (
+                "lkg_served"
+                if serving_cached
+                else "fresh_published"
+                if state == "ok"
+                else "failed"
+            )
+        reason_code = raw.get("reasonCode")
+        if reason_code not in allowed_reasons:
+            reason_code = (
+                "none"
+                if outcome in {"fresh_published", "provisional"}
+                else "unknown"
+            )
         results.append(
             {
                 "sourceId": raw["sourceId"],
                 "state": state if state in allowed_states else "error",
-                "servingCachedDataset": bool(raw.get("servingCachedDataset")),
+                "servingCachedDataset": serving_cached,
+                "outcome": outcome,
+                "reasonCode": reason_code,
+                "upstreamPending": (
+                    raw.get("independentlyIneligibleReason")
+                    == "upstream_not_published"
+                ),
             }
         )
 
