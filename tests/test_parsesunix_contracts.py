@@ -100,7 +100,6 @@ def test_specialized_api_contract_registry_covers_all_eighty_one_sources() -> No
     assert len(SPECIALIZED_API_SOURCE_IDS) == 81
     assert all(
         specialized_api_response_contract(SOURCE_BY_ID[source_id]).required_json_paths
-        == ("type",)
         for source_id in SPECIALIZED_API_SOURCE_IDS
     )
 
@@ -124,6 +123,35 @@ def test_specialized_adapter_output_is_fail_closed_and_emits_evidence() -> None:
             {"trinkets": [{"name": "plausible but untyped"}]},
             backend="hsreplay_trinkets_api",
         )
+
+
+def test_vicious_contract_requires_independent_freshness_evidence() -> None:
+    source = SOURCE_BY_ID["vicious_syndicate_radars"]
+    contract = specialized_api_response_contract(source)
+
+    assert contract.required_json_paths == (
+        "type",
+        "issue",
+        "latest_report_issue",
+        "upstream_state",
+        "diagnostics.radar_urls",
+    )
+    rejected = validate_response(
+        _response(
+            json.dumps(
+                {
+                    "type": "vicious_syndicate_radars",
+                    "issue": "354",
+                    "latest_report_issue": "355",
+                    "upstream_state": "upstream_publication_pending",
+                }
+            ),
+            content_type="application/json",
+        ),
+        contract,
+    )
+
+    assert rejected.transport_validated is False
 
 
 def test_hsreplay_analytics_contract_requires_series_data() -> None:

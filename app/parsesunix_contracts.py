@@ -114,8 +114,17 @@ def specialized_api_response_contract(source: Source) -> ResponseContract:
     source_contract = get_contract(source.id)
     if source_contract is None or not source_contract.structured_type:
         raise ValueError(f"Source {source.id} has no structured response contract")
+    required_paths = ("type",)
+    if source.id == "vicious_syndicate_radars":
+        required_paths = (
+            "type",
+            "issue",
+            "latest_report_issue",
+            "upstream_state",
+            "diagnostics.radar_urls",
+        )
     return ResponseContract.json(
-        required_json_paths=("type",),
+        required_json_paths=required_paths,
         min_body_bytes=20,
     )
 
