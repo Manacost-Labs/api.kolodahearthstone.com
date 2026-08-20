@@ -197,7 +197,7 @@ def test_firecrawl_primary_records_parsesunix_shadow_without_changing_publicatio
         "validate_candidate_for_publish",
         lambda *_args, **_kwargs: SimpleNamespace(ok=True, reason="accepted"),
     )
-    monkeypatch.setattr(fetcher, "estimate_metric_count", lambda _parsed: 2)
+    monkeypatch.setattr(fetcher, "estimate_metric_count", lambda _source, _parsed: 2)
     monkeypatch.setattr(fetcher, "complete_source_trace", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(fetcher, "log_action", lambda *_args, **_kwargs: None)
 
@@ -219,6 +219,8 @@ def test_firecrawl_primary_records_parsesunix_shadow_without_changing_publicatio
     assert {key: result[key] for key in published} == published
     assert result["parsesunix_shadow"]["transport_validated"] is True
     assert result["parsesunix_shadow"]["candidate_validated"] is True
+    assert result["parsesunix_shadow"]["candidate_metric_count"] == 2
+    assert "candidate_error_type" not in result["parsesunix_shadow"]
     assert result["parsesunix_shadow"]["publication_validated"] is None
 
 
@@ -259,7 +261,7 @@ def test_shadow_mode_compares_candidate_but_returns_legacy_body(
         "validate_candidate_for_publish",
         lambda *_args, **_kwargs: SimpleNamespace(ok=True, reason="candidate accepted"),
     )
-    monkeypatch.setattr(fetcher, "estimate_metric_count", lambda _parsed: 2)
+    monkeypatch.setattr(fetcher, "estimate_metric_count", lambda _source, _parsed: 2)
     monkeypatch.setattr(fetcher, "log_action", lambda *_args, **_kwargs: None)
 
     result = asyncio.run(

@@ -1409,7 +1409,7 @@ async def _complete_parsesunix_shadow(
         )
         observation["candidate_validated"] = gate.ok
         observation["candidate_reason"] = str(gate.reason)[:500]
-        observation["candidate_metric_count"] = estimate_metric_count(parsed)
+        observation["candidate_metric_count"] = estimate_metric_count(source, parsed)
     except Exception as exc:  # noqa: BLE001 - parsers and gates are plugin boundaries
         observation["candidate_validated"] = False
         observation["candidate_error_type"] = type(exc).__name__
