@@ -184,7 +184,7 @@ def _confirmed_upstream_publication_pending(status: Mapping[str, object]) -> boo
     if discovered_at.tzinfo is None or refreshed_at.tzinfo is None:
         return False
     discovery_age = refreshed_at - discovered_at
-    return timedelta(0) <= discovery_age <= timedelta(hours=12)
+    return timedelta(minutes=-5) <= discovery_age <= timedelta(hours=12)
 
 
 def classify_terminal_status(status: Mapping[str, object]) -> str:
