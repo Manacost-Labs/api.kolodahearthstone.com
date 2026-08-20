@@ -55,7 +55,11 @@ from .config import (
 from .dataset_regression import check_dataset_regression, estimate_metric_count
 from .fetch_routes import source_can_run_without_residential_proxy
 from .parser import parse_html
-from .parsesunix_contracts import page_response_contract
+from .parsesunix_contracts import (
+    SPECIALIZED_API_SOURCE_IDS,
+    page_response_contract,
+    specialized_api_response_contract,
+)
 from .parsesunix_transport import (
     ParsesUnixExecutionError,
     ParsesUnixIntegrationError,
@@ -65,6 +69,7 @@ from .parsesunix_transport import (
 from .parsesunix_transport import (
     fetch as fetch_with_parsesunix,
 )
+from .parsesunix_transport import validate_acquired_response
 from .post_patch_policy import (
     EARLY_SOURCE_IDS,
     POST_PATCH_BASELINE_LABEL,
@@ -1872,8 +1877,22 @@ def _dataset_from_structured(
 
         candidate_transport = consume_hsreplay_json_transport_backend(source.id)
     transport_backend = _sanitize_transport_backend(candidate_transport)
-    schema_validation = validate_structured_schema(public_structured)
     body = json_mod.dumps(public_structured, ensure_ascii=False)
+    parsesunix_observation: dict[str, object] | None = None
+    if source.id in SPECIALIZED_API_SOURCE_IDS:
+        evidence = validate_acquired_response(
+            source.fetch_url,
+            body,
+            specialized_api_response_contract(source),
+            headers={"content-type": "application/json"},
+            final_url=source.fetch_url,
+            backend=backend,
+        )
+        parsesunix_observation = evidence.telemetry()
+        parsesunix_observation["mode"] = "api_contract"
+        if not evidence.transport_validated:
+            raise ParsesUnixTransportRejected(evidence)
+    schema_validation = validate_structured_schema(public_structured)
     parsed = {
         "source_id": source.id,
         "site": source.site,
@@ -1903,6 +1922,8 @@ def _dataset_from_structured(
     }
     if transport_backend is not None:
         parsed["_transport_backend"] = transport_backend
+    if parsesunix_observation is not None:
+        parsed["_parsesunix_transport"] = parsesunix_observation
     return parsed
 
 
@@ -2654,10 +2675,14 @@ async def _fetch_source_with_active_lifecycle(
         or source.id in API_FIRST_SOURCE_IDS
     ):
         log_action("api.route.begin", source_id=source.id, tier=source_tier)
+        api_parsesunix_observation: dict[str, object] | None = None
         try:
             parsed = await _fetch_hsreplay_api_source(source)
             if parsed is not None:
                 backend = str(parsed.pop("_backend", "hsreplay_api") or "hsreplay_api")
+                candidate_observation = parsed.pop("_parsesunix_transport", None)
+                if isinstance(candidate_observation, dict):
+                    api_parsesunix_observation = candidate_observation
                 transport_backend = (
                     _sanitize_transport_backend(parsed.pop("_transport_backend", None))
                     or backend
@@ -2786,6 +2811,13 @@ async def _fetch_source_with_active_lifecycle(
                     _attach_ai_review_status(status, ai_telemetry)
                     _attach_ai_diagnosis_status(status, ai_diagnosis)
                     _attach_provisional_status(status, provisional_metadata)
+                    _attach_parsesunix_observation(
+                        status,
+                        mode="parsesunix",
+                        observation=api_parsesunix_observation,
+                        candidate_validated=True,
+                        publication_validated=not reg,
+                    )
                     if reg:
                         status = _save_failure_status(source, status)
                     elif publication_decision is not None:
@@ -2958,6 +2990,13 @@ async def _fetch_source_with_active_lifecycle(
                 )
                 _attach_ai_review_status(status, ai_telemetry)
                 _attach_ai_diagnosis_status(status, ai_diagnosis)
+                _attach_parsesunix_observation(
+                    status,
+                    mode="parsesunix",
+                    observation=api_parsesunix_observation,
+                    candidate_validated=False,
+                    publication_validated=False,
+                )
                 if upstream_metadata is not None:
                     status.update(upstream_metadata)
                 if publication_decision is not None:
@@ -3041,6 +3080,9 @@ async def _fetch_source_with_active_lifecycle(
             import logging
 
             api_detail = str(exc)[:2000]
+            if isinstance(exc, ParsesUnixTransportRejected):
+                api_parsesunix_observation = exc.evidence.telemetry()
+                api_parsesunix_observation["mode"] = "api_contract"
             skip_browser_fallback = getattr(exc, "skip_browser_fallback", False) is True
             if isinstance(exc, ProxyPaymentRequiredError):
                 # API collectors and browser fallbacks share one paid proxy.
@@ -3099,6 +3141,13 @@ async def _fetch_source_with_active_lifecycle(
                 upstream_readiness = getattr(exc, "upstream_readiness", None)
                 if isinstance(upstream_readiness, dict):
                     status["upstream_readiness"] = upstream_readiness
+                _attach_parsesunix_observation(
+                    status,
+                    mode="parsesunix",
+                    observation=api_parsesunix_observation,
+                    candidate_validated=False,
+                    publication_validated=False,
+                )
                 status = _save_failure_status(source, status)
                 log_action(
                     "api.fallback.skipped",
@@ -3124,6 +3173,13 @@ async def _fetch_source_with_active_lifecycle(
                     detail=f"API fetch failed (browser fallback disabled): {api_detail}",
                 )
                 _attach_failure_class(status, exc)
+                _attach_parsesunix_observation(
+                    status,
+                    mode="parsesunix",
+                    observation=api_parsesunix_observation,
+                    candidate_validated=False,
+                    publication_validated=False,
+                )
                 status = _save_failure_status(source, status)
                 log_action(
                     "api.fallback.blocked",

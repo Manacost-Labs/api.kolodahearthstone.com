@@ -12,6 +12,12 @@ from urllib.parse import urlsplit
 from web_scraper import ResponseContract
 
 from .source_contracts import get_contract
+from .source_tiers import (
+    API_FIRST_SOURCE_IDS,
+    BROWSER_PATCHRIGHT_IDS,
+    LIGHT_API_IDS,
+    MEDIUM_API_IDS,
+)
 from .sources import Source
 from .trinket_slices import (
     LEGACY_DEFAULT_TRINKET_SOURCE_IDS,
@@ -20,6 +26,12 @@ from .trinket_slices import (
 
 STRICT_HSREPLAY_TRINKET_SOURCE_IDS = frozenset(
     (*LEGACY_DEFAULT_TRINKET_SOURCE_IDS, *TRINKET_SLICE_SOURCE_IDS)
+)
+SPECIALIZED_API_SOURCE_IDS = frozenset(
+    LIGHT_API_IDS
+    | MEDIUM_API_IDS
+    | BROWSER_PATCHRIGHT_IDS
+    | API_FIRST_SOURCE_IDS
 )
 
 
@@ -92,3 +104,17 @@ def hsreplay_json_contract_for_source(
     if source_id not in STRICT_HSREPLAY_TRINKET_SOURCE_IDS:
         return None
     return hsreplay_json_response_contract(url)
+
+
+def specialized_api_response_contract(source: Source) -> ResponseContract:
+    """Prove a dedicated adapter returned a typed JSON document before publish."""
+
+    if source.id not in SPECIALIZED_API_SOURCE_IDS:
+        raise ValueError(f"Source {source.id} is not a specialized API source")
+    source_contract = get_contract(source.id)
+    if source_contract is None or not source_contract.structured_type:
+        raise ValueError(f"Source {source.id} has no structured response contract")
+    return ResponseContract.json(
+        required_json_paths=("type",),
+        min_body_bytes=20,
+    )
