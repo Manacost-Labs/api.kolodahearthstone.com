@@ -205,6 +205,7 @@ def _parse_hsguru_matchups_with_evidence(
     pairs: list[dict[str, Any]] = []
     raw_cells = 0
     explained_self_matchups = 0
+    explained_upstream_empty_cells = 0
     unexplained_missing_cells = 0
     for row in rows:
         if len(row) < 2:
@@ -217,12 +218,15 @@ def _parse_hsguru_matchups_with_evidence(
         for ci, col in enumerate(columns):
             idx = ci + 2
             raw_cells += 1
-            val = row[idx] if idx < len(row) else None
+            if idx >= len(row):
+                unexplained_missing_cells += 1
+                continue
+            val = row[idx]
             if val is None or val == "":
                 if str(row_arch).strip().casefold() == str(col).strip().casefold():
                     explained_self_matchups += 1
                 else:
-                    unexplained_missing_cells += 1
+                    explained_upstream_empty_cells += 1
                 continue
             pairs.append(
                 {
@@ -235,11 +239,17 @@ def _parse_hsguru_matchups_with_evidence(
         raw_rows=raw_cells,
         eligible_rows=raw_cells,
         normalized_rows=len(pairs),
-        explained_reasons=(
-            {"self_matchup_not_applicable": explained_self_matchups}
-            if explained_self_matchups
-            else None
-        ),
+        explained_reasons={
+            reason: count
+            for reason, count in (
+                ("self_matchup_not_applicable", explained_self_matchups),
+                (
+                    "upstream_insufficient_matchup_sample",
+                    explained_upstream_empty_cells,
+                ),
+            )
+            if count
+        },
         unexplained_reasons=(
             {"missing_matchup_cell": unexplained_missing_cells}
             if unexplained_missing_cells

@@ -98,8 +98,14 @@ for _hsguru_matchups_source_id in (
     "hsguru_matchups_diamond_4to1",
 ):
     EXPLAINED_ROW_DROP_REASONS[_hsguru_matchups_source_id] = frozenset(
-        {"self_matchup_not_applicable"}
+        {
+            "self_matchup_not_applicable",
+            "upstream_insufficient_matchup_sample",
+        }
     )
+EXPLAINED_ROW_DROP_REASONS[HSGURU_STREAMER_ROLLING_SOURCE_ID] = frozenset(
+    {"duplicate_streamer_deck"}
+)
 for _legacy_trinket_source_id in (
     "hsreplay_battlegrounds_trinkets_lesser",
     "hsreplay_battlegrounds_trinkets_greater",

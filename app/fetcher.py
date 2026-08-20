@@ -1887,6 +1887,7 @@ def _dataset_from_structured(
 
 
 def _dedupe_streamer_decks_parsed(parsed: dict[str, Any]) -> dict[str, Any]:
+    from .completeness import row_retrieval_evidence
     from .deck_decode import first_deck_code_from_text
 
     tables = parsed.get("tables") or []
@@ -1927,6 +1928,38 @@ def _dedupe_streamer_decks_parsed(parsed: dict[str, Any]) -> dict[str, Any]:
     structured = parsed.get("structured")
     if isinstance(structured, dict) and structured.get("type") == "streamer_decks":
         structured["rows"] = deduped
+        evidence = structured.get("row_retrieval")
+        if isinstance(evidence, dict):
+            drop_reasons = evidence.get("drop_reasons")
+            explained = (
+                dict(drop_reasons.get("explained") or {})
+                if isinstance(drop_reasons, dict)
+                else {}
+            )
+            unexplained = (
+                dict(drop_reasons.get("unexplained") or {})
+                if isinstance(drop_reasons, dict)
+                else {}
+            )
+            original_normalized = evidence.get("normalized_rows")
+            duplicate_rows = (
+                max(original_normalized - len(deduped), 0)
+                if isinstance(original_normalized, int)
+                and not isinstance(original_normalized, bool)
+                else 0
+            )
+            if duplicate_rows:
+                explained["duplicate_streamer_deck"] = (
+                    explained.get("duplicate_streamer_deck", 0) + duplicate_rows
+                )
+            structured["row_retrieval"] = row_retrieval_evidence(
+                raw_rows=int(evidence.get("raw_rows", 0)),
+                eligible_rows=int(evidence.get("eligible_rows", 0)),
+                normalized_rows=len(deduped),
+                explained_reasons=explained,
+                unexplained_reasons=unexplained,
+                scope=str(evidence.get("scope") or "hsguru_streamer_first_table"),
+            )
     return parsed
 
 
