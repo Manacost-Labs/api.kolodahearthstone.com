@@ -52,7 +52,7 @@ def test_v1_system_paths_do_not_replace_legacy_paths() -> None:
 def test_v1_parsing_reliability_returns_sanitized_public_contract() -> None:
     report = {
         "methodology": {
-            "version": "logical-source-observed-v13",
+            "version": "logical-source-observed-v14",
             "unit": "one terminal outcome per source in a refresh run",
             "scope": "observed_scrape_and_pipeline_sources",
             "completeness": "observed_attempts_plus_recorded_run_deficits",
@@ -74,6 +74,10 @@ def test_v1_parsing_reliability_returns_sanitized_public_contract() -> None:
                 "timed_out",
             ],
             "excluded_outcomes": ["skipped"],
+            "independently_ineligible_method": (
+                "verified_upstream_absence_is_excluded_from_parser_slo_but_"
+                "included_in_end_to_end_freshness"
+            ),
             "slo_target_rate_pct": 99.0,
             "failure_reason_values": [
                 "proxy_payment",
@@ -115,6 +119,8 @@ def test_v1_parsing_reliability_returns_sanitized_public_contract() -> None:
                 "observed_eligible_attempts": 10,
                 "missing_terminal_windows": 2,
                 "eligible_attempts": 12,
+                "upstream_pending_attempts": 0,
+                "end_to_end_attempts": 12,
                 "counts": {
                     "fresh_published": 8,
                     "provisional": 1,
@@ -144,9 +150,20 @@ def test_v1_parsing_reliability_returns_sanitized_public_contract() -> None:
                     "unknown": 1,
                 },
                 "full_fresh_rate_pct": 66.67,
+                "end_to_end_fresh_rate_pct": 66.67,
                 "accepted_fresh_rate_pct": 75.0,
                 "data_available_rate_pct": 75.0,
                 "freshness_slo": {
+                    "target_rate_pct": 99.0,
+                    "objective_status": "collecting",
+                    "good_attempts": 8,
+                    "bad_attempts": 4,
+                    "allowed_bad_attempts": 0.12,
+                    "bad_attempts_over_budget": 4,
+                    "error_budget_remaining_attempts": -3.88,
+                    "error_budget_consumed_pct": 3333.33,
+                },
+                "end_to_end_freshness_slo": {
                     "target_rate_pct": 99.0,
                     "objective_status": "collecting",
                     "good_attempts": 8,
@@ -231,12 +248,16 @@ def test_v1_parsing_reliability_returns_sanitized_public_contract() -> None:
                     "pending_slots": 1,
                     "due_slots": 10,
                     "on_time_fresh": 8,
+                    "on_time_upstream_pending": 0,
                     "on_time_nonfresh": 1,
                     "late": 0,
                     "missing": 1,
                     "on_time_fresh_rate_pct": 80.0,
+                    "parser_eligible_due_slots": 10,
+                    "parser_on_time_fresh_rate_pct": 80.0,
                     "target_rate_pct": 99.0,
                     "objective_status": "collecting",
+                    "parser_objective_status": "collecting",
                 },
                 "ai_quality": {
                     "candidate_review": {

@@ -120,6 +120,11 @@ Endpoint возвращает независимые окна `24h`, `7d` и `30
 `verified_completeness.complete_fresh`. Ответ всегда имеет
 `Cache-Control: no-store`.
 
+`full_fresh_rate_pct` измеряет надёжность парсера только для eligible-попыток.
+`end_to_end_fresh_rate_pct` дополнительно включает в знаменатель доказанные
+`upstream_pending_attempts`: источник ещё не выпустил артефакт, поэтому это не
+ошибка парсера, но свежих данных у пользователя всё равно нет.
+
 Поля `verified_completeness`:
 
 | Поле | Знаменатель и смысл |
@@ -143,10 +148,13 @@ Endpoint возвращает независимые окна `24h`, `7d` и `30
 | `temporal_coverage_ratio` | Доля выбранного окна между `coverage_started_at` и непрерывным `materialized_through`. |
 | `due_slots` | Eligible-слоты, дедлайн которых уже наступил. |
 | `on_time_fresh` | Новая публикация завершена не позже дедлайна. |
+| `on_time_upstream_pending` | До дедлайна независимо подтверждено, что upstream ещё не опубликовал нужный артефакт. Не считается `missing` или parser failure. |
 | `on_time_nonfresh` | До дедлайна был terminal, но не fresh publication. |
 | `late` | Первый пригодный terminal появился только после дедлайна. |
 | `missing` | После дедлайна нет ни одного non-skipped terminal. |
 | `excluded_slots` | Сохранённые, но не включённые в знаменатель решения (`section-disabled` или `operationally-disabled`). |
+| `parser_eligible_due_slots` | `due_slots` без `on_time_upstream_pending`; знаменатель условной надёжности парсера. |
+| `parser_on_time_fresh_rate_pct` | Доля своевременных fresh-публикаций после исключения только независимо доказанного отсутствия upstream. |
 
 Граница 99% проверяется по целым счётчикам до округления. Ledger охватывает все
 15 primary-расписаний и обнаруживает полностью не стартовавшие запуски;

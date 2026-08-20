@@ -39,7 +39,7 @@ WINDOWS = (
     ("7d", timedelta(days=7)),
     ("30d", timedelta(days=30)),
 )
-METHODOLOGY_VERSION = "logical-source-observed-v13"
+METHODOLOGY_VERSION = "logical-source-observed-v14"
 SLO_TARGET_RATE_PCT = 99.0
 PIPELINE_SCHEDULE_LEDGER_READY = False
 COVERAGE_BUCKET_SECONDS = 24 * 60 * 60
@@ -310,6 +310,12 @@ def classify_failure_reason(status: Mapping[str, object]) -> str:
     return "unknown"
 
 
+def _independently_ineligible_reason(status: Mapping[str, object]) -> str:
+    if _confirmed_upstream_publication_pending(status):
+        return "upstream_not_published"
+    return ""
+
+
 def _ai_terminal_fields(
     status: Mapping[str, object],
 ) -> tuple[str, str, str, str, str, int]:
@@ -568,6 +574,7 @@ def record_terminal_results(
         seen_sources.add(source_id)
         outcome = classify_terminal_status(result)
         reason_code = classify_failure_reason(result)
+        independently_ineligible_reason = _independently_ineligible_reason(result)
         ai_fields = _ai_terminal_fields(result)
         completeness_fields = _completeness_terminal_fields(source_id, result)
         parsesunix_fields = _parsesunix_terminal_fields(result)
@@ -590,6 +597,7 @@ def record_terminal_results(
                 outcome,
                 terminal_state,
                 reason_code,
+                independently_ineligible_reason,
                 *ai_fields,
                 *completeness_fields,
                 *parsesunix_fields,
@@ -636,6 +644,7 @@ def record_terminal_results(
                     outcome,
                     terminal_state,
                     reason_code,
+                    independently_ineligible_reason,
                     ai_review_state,
                     ai_review_verdict,
                     ai_diagnosis_state,
@@ -658,7 +667,7 @@ def record_terminal_results(
                 ) VALUES (
                     ?, ?, ?, ?, ?, ?, ?, ?, ?,
                     ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                 )
                 """,
                 row,
@@ -857,6 +866,7 @@ def _schema_is_current(connection: sqlite3.Connection) -> bool:
         "outcome",
         "terminal_state",
         "reason_code",
+        "independently_ineligible_reason",
         "ai_review_state",
         "ai_review_verdict",
         "ai_diagnosis_state",
@@ -925,6 +935,7 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
                     ),
                     terminal_state TEXT NOT NULL,
                     reason_code TEXT NOT NULL DEFAULT 'unknown',
+                    independently_ineligible_reason TEXT NOT NULL DEFAULT '',
                     ai_review_state TEXT NOT NULL DEFAULT 'not_run',
                     ai_review_verdict TEXT NOT NULL DEFAULT 'not_run',
                     ai_diagnosis_state TEXT NOT NULL DEFAULT 'not_run',
@@ -986,6 +997,7 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
             migrations = {
                 "refresh_window_id": "TEXT NOT NULL DEFAULT ''",
                 "reason_code": "TEXT NOT NULL DEFAULT 'unknown'",
+                "independently_ineligible_reason": "TEXT NOT NULL DEFAULT ''",
                 "ai_review_state": "TEXT NOT NULL DEFAULT 'not_run'",
                 "ai_review_verdict": "TEXT NOT NULL DEFAULT 'not_run'",
                 "ai_diagnosis_state": "TEXT NOT NULL DEFAULT 'not_run'",
@@ -1542,6 +1554,7 @@ def _query_window(
             SELECT
                 attempt_id,
                 outcome,
+                independently_ineligible_reason,
                 ROW_NUMBER() OVER (
                     PARTITION BY
                         source_id,
@@ -1559,17 +1572,20 @@ def _query_window(
             FROM source_attempts
             WHERE finished_at >= ? AND finished_at <= ?
         )
-        SELECT outcome, COUNT(*)
+        SELECT outcome, independently_ineligible_reason, COUNT(*)
         FROM ranked_attempts
         WHERE logical_rank = 1
-        GROUP BY outcome
+        GROUP BY outcome, independently_ineligible_reason
         """,
         (from_at.timestamp(), report_at.timestamp()),
     ).fetchall()
     counts = {outcome: 0 for outcome in OUTCOMES}
-    for outcome, count in rows:
+    upstream_pending_attempts = 0
+    for outcome, ineligible_reason, count in rows:
         if outcome in counts:
-            counts[str(outcome)] = int(count)
+            counts[str(outcome)] += int(count)
+        if ineligible_reason == "upstream_not_published":
+            upstream_pending_attempts += int(count)
 
     reason_rows = connection.execute(
         """
@@ -1626,6 +1642,7 @@ def _query_window(
         to_epoch=report_at.timestamp(),
     )
     eligible_attempts = observed_eligible_attempts + missing_terminal_windows
+    end_to_end_attempts = eligible_attempts + upstream_pending_attempts
     full_fresh = counts["fresh_published"]
     accepted_fresh = full_fresh + counts["provisional"]
     data_available = accepted_fresh + counts["lkg_served"]
@@ -1670,14 +1687,22 @@ def _query_window(
         "observed_eligible_attempts": observed_eligible_attempts,
         "missing_terminal_windows": missing_terminal_windows,
         "eligible_attempts": eligible_attempts,
+        "upstream_pending_attempts": upstream_pending_attempts,
+        "end_to_end_attempts": end_to_end_attempts,
         "counts": counts,
         "failure_reasons": failure_reasons,
         "full_fresh_rate_pct": _percentage(full_fresh, eligible_attempts),
+        "end_to_end_fresh_rate_pct": _percentage(full_fresh, end_to_end_attempts),
         "accepted_fresh_rate_pct": _percentage(accepted_fresh, eligible_attempts),
         "data_available_rate_pct": _percentage(data_available, eligible_attempts),
         "freshness_slo": _slo_budget(
             good_attempts=full_fresh,
             eligible_attempts=eligible_attempts,
+            measurement_complete=measurement_complete,
+        ),
+        "end_to_end_freshness_slo": _slo_budget(
+            good_attempts=full_fresh,
+            eligible_attempts=end_to_end_attempts,
             measurement_complete=measurement_complete,
         ),
         "availability_slo": _slo_budget(
@@ -1710,12 +1735,20 @@ def _empty_report(report_at: datetime) -> dict[str, Any]:
                 "observed_eligible_attempts": 0,
                 "missing_terminal_windows": 0,
                 "eligible_attempts": 0,
+                "upstream_pending_attempts": 0,
+                "end_to_end_attempts": 0,
                 "counts": {outcome: 0 for outcome in OUTCOMES},
                 "failure_reasons": {reason: 0 for reason in FAILURE_REASONS},
                 "full_fresh_rate_pct": None,
+                "end_to_end_fresh_rate_pct": None,
                 "accepted_fresh_rate_pct": None,
                 "data_available_rate_pct": None,
                 "freshness_slo": _slo_budget(
+                    good_attempts=0,
+                    eligible_attempts=0,
+                    measurement_complete=False,
+                ),
+                "end_to_end_freshness_slo": _slo_budget(
                     good_attempts=0,
                     eligible_attempts=0,
                     measurement_complete=False,
@@ -1751,12 +1784,16 @@ def _empty_scheduled_reliability() -> dict[str, Any]:
         "pending_slots": 0,
         "due_slots": 0,
         "on_time_fresh": 0,
+        "on_time_upstream_pending": 0,
         "on_time_nonfresh": 0,
         "late": 0,
         "missing": 0,
         "on_time_fresh_rate_pct": None,
+        "parser_eligible_due_slots": 0,
+        "parser_on_time_fresh_rate_pct": None,
         "target_rate_pct": SLO_TARGET_RATE_PCT,
         "objective_status": "collecting",
+        "parser_objective_status": "collecting",
     }
 
 
@@ -1871,12 +1908,22 @@ def _query_scheduled_reliability(
                     THEN 1 ELSE 0
                 END) AS on_time_fresh,
                 MAX(CASE
+                    WHEN attempts.independently_ineligible_reason =
+                         'upstream_not_published'
+                     AND attempts.finished_at <= slots.deadline_at
+                    THEN 1 ELSE 0
+                END) AS on_time_upstream_pending,
+                MAX(CASE
                     WHEN attempts.outcome != 'skipped'
                      AND attempts.finished_at <= slots.deadline_at
                     THEN 1 ELSE 0
                 END) AS on_time_terminal,
                 MAX(CASE
-                    WHEN attempts.outcome != 'skipped'
+                    WHEN (
+                        attempts.outcome != 'skipped'
+                        OR attempts.independently_ineligible_reason =
+                           'upstream_not_published'
+                    )
                      AND attempts.finished_at > slots.deadline_at
                     THEN 1 ELSE 0
                 END) AS late_terminal
@@ -1903,17 +1950,26 @@ def _query_scheduled_reliability(
             END), 0),
             COALESCE(SUM(CASE
                 WHEN slots.eligible = 1 AND slots.deadline_at <= ?
-                 AND flags.on_time_fresh = 0 AND flags.on_time_terminal = 1
+                 AND flags.on_time_fresh = 0
+                 AND flags.on_time_upstream_pending = 1 THEN 1 ELSE 0
+            END), 0),
+            COALESCE(SUM(CASE
+                WHEN slots.eligible = 1 AND slots.deadline_at <= ?
+                 AND flags.on_time_fresh = 0
+                 AND flags.on_time_upstream_pending = 0
+                 AND flags.on_time_terminal = 1
                 THEN 1 ELSE 0
             END), 0),
             COALESCE(SUM(CASE
                 WHEN slots.eligible = 1 AND slots.deadline_at <= ?
                  AND flags.on_time_fresh = 0 AND flags.on_time_terminal = 0
+                 AND flags.on_time_upstream_pending = 0
                  AND flags.late_terminal = 1 THEN 1 ELSE 0
             END), 0),
             COALESCE(SUM(CASE
                 WHEN slots.eligible = 1 AND slots.deadline_at <= ?
                  AND flags.on_time_fresh = 0 AND flags.on_time_terminal = 0
+                 AND flags.on_time_upstream_pending = 0
                  AND flags.late_terminal = 0 THEN 1 ELSE 0
             END), 0)
         FROM relevant_slots AS slots
@@ -1930,9 +1986,10 @@ def _query_scheduled_reliability(
             report_epoch,
             report_epoch,
             report_epoch,
+            report_epoch,
         ),
     ).fetchone()
-    values = [int(value or 0) for value in (counts_row or (0,) * 9)]
+    values = [int(value or 0) for value in (counts_row or (0,) * 10)]
     (
         expected_slots,
         eligible_slots,
@@ -1940,16 +1997,25 @@ def _query_scheduled_reliability(
         pending_slots,
         due_slots,
         on_time_fresh,
+        on_time_upstream_pending,
         on_time_nonfresh,
         late,
         missing,
     ) = values
+    parser_eligible_due_slots = max(0, due_slots - on_time_upstream_pending)
     covered = schedule_coverage_ratio >= 1.0 and temporal_coverage_ratio >= 1.0
     measurement_status = "observed" if covered else "collecting"
     objective_status = "collecting"
     if measurement_status == "observed" and due_slots > 0:
         objective_status = (
             "meeting" if _ratio_meets_target(on_time_fresh, due_slots) else "breached"
+        )
+    parser_objective_status = "collecting"
+    if measurement_status == "observed" and parser_eligible_due_slots > 0:
+        parser_objective_status = (
+            "meeting"
+            if _ratio_meets_target(on_time_fresh, parser_eligible_due_slots)
+            else "breached"
         )
     return {
         "ledger_status": "covered" if covered else "partial",
@@ -1966,12 +2032,19 @@ def _query_scheduled_reliability(
         "pending_slots": pending_slots,
         "due_slots": due_slots,
         "on_time_fresh": on_time_fresh,
+        "on_time_upstream_pending": on_time_upstream_pending,
         "on_time_nonfresh": on_time_nonfresh,
         "late": late,
         "missing": missing,
         "on_time_fresh_rate_pct": _percentage(on_time_fresh, due_slots),
+        "parser_eligible_due_slots": parser_eligible_due_slots,
+        "parser_on_time_fresh_rate_pct": _percentage(
+            on_time_fresh,
+            parser_eligible_due_slots,
+        ),
         "target_rate_pct": SLO_TARGET_RATE_PCT,
         "objective_status": objective_status,
+        "parser_objective_status": parser_objective_status,
     }
 
 
@@ -2001,6 +2074,10 @@ def _methodology() -> dict[str, Any]:
         ),
         "eligible_outcomes": list(ELIGIBLE_OUTCOMES),
         "excluded_outcomes": ["skipped"],
+        "independently_ineligible_method": (
+            "verified_upstream_absence_is_excluded_from_parser_slo_but_included_"
+            "in_end_to_end_freshness"
+        ),
         "slo_target_rate_pct": SLO_TARGET_RATE_PCT,
         "failure_reason_values": list(FAILURE_REASONS),
         "physical_attempts_method": "all persisted source attempts before window folding",

@@ -14,7 +14,7 @@ Audit the parser as a data pipeline, not merely as an HTTP service. A successful
 - Do not print or copy cookies, tokens, proxy credentials, `.env` values, response bodies, or production database rows containing sensitive data.
 - Keep production probes read-only. Do not call paid providers or force all-source refreshes unless the user explicitly requests them.
 - Do not count cached/LKG data, provisional data, an HTTP 200, or a non-empty body as full-fresh success.
-- Never improve a percentage by excluding failures unless the occurrence is independently proven ineligible, such as an upstream artifact that has not yet been published.
+- Never improve a percentage by excluding failures unless the occurrence is independently proven ineligible, such as an upstream artifact that has not yet been published. Keep that occurrence excluded from the parser SLO but included as bad in end-to-end freshness.
 
 ## Audit workflow
 
@@ -36,6 +36,7 @@ For a saved response, use `--input report.json`. The script is read-only and ret
 Always report these separately for 24h, 7d, and 30d:
 
 - full-fresh rate;
+- end-to-end fresh rate, including independently verified upstream publication gaps;
 - accepted-fresh rate, including provisional;
 - data-available rate, including LKG;
 - exact good, bad, and allowed-bad counts;

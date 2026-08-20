@@ -203,6 +203,68 @@ def test_schedule_slot_states_are_exclusive_and_exclusions_are_auditable(
     assert scheduled["objective_status"] == "breached"
 
 
+def test_confirmed_upstream_absence_is_terminal_but_not_parser_eligible(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "reliability.sqlite3"
+    record_terminal_results(
+        "run-fresh",
+        [{"source_id": "fresh-source", "state": "ok"}],
+        finished_at=datetime(2026, 8, 14, 10, 30, tzinfo=UTC),
+        refresh_window_id="slot-fresh",
+        path=path,
+    )
+    record_terminal_results(
+        "run-upstream-pending",
+        [
+            {
+                "source_id": "vicious_syndicate_radars",
+                "state": "ok",
+                "serving_cached_dataset": True,
+                "failure_reason_code": "unavailable",
+                "upstream_state": "upstream_publication_pending",
+                "last_refresh_upstream_state": "upstream_publication_pending",
+                "last_refresh_at": "2026-08-14T10:30:00+00:00",
+                "last_refresh_upstream_readiness": {
+                    "latest_report_issue": "355",
+                    "candidate_issue": "354",
+                    "full_discovery_at": "2026-08-14T10:25:00+00:00",
+                },
+            }
+        ],
+        finished_at=datetime(2026, 8, 14, 10, 30, tzinfo=UTC),
+        refresh_window_id="slot-upstream-pending",
+        path=path,
+    )
+    _create_ledger_tables(path)
+    _insert_state(path, tracked=14, catalog=14)
+    for occurrence_id, source_id in (
+        ("slot-fresh", "fresh-source"),
+        ("slot-upstream-pending", "vicious_syndicate_radars"),
+    ):
+        _insert_slot(
+            path,
+            occurrence_id=occurrence_id,
+            source_id=source_id,
+            scheduled_for=datetime(2026, 8, 14, 9, 0, tzinfo=UTC),
+            deadline_at=datetime(2026, 8, 14, 11, 0, tzinfo=UTC),
+        )
+
+    scheduled = build_reliability_report(now=NOW, path=path)["windows"][0][
+        "scheduled_reliability"
+    ]
+
+    assert scheduled["due_slots"] == 2
+    assert scheduled["on_time_fresh"] == 1
+    assert scheduled["on_time_upstream_pending"] == 1
+    assert scheduled["on_time_nonfresh"] == 0
+    assert scheduled["missing"] == 0
+    assert scheduled["on_time_fresh_rate_pct"] == 50.0
+    assert scheduled["parser_eligible_due_slots"] == 1
+    assert scheduled["parser_on_time_fresh_rate_pct"] == 100.0
+    assert scheduled["parser_objective_status"] == "meeting"
+
+
 def test_empty_report_marks_schedule_ledger_as_absent(tmp_path: Path) -> None:
     scheduled = build_reliability_report(
         now=NOW,

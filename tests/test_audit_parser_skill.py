@@ -29,6 +29,8 @@ def test_audit_distinguishes_full_fresh_from_availability() -> None:
                         "measurement_status": "collecting",
                         "coverage_ratio": 0.5,
                         "eligible_attempts": 100,
+                        "upstream_pending_attempts": 2,
+                        "end_to_end_attempts": 102,
                         "counts": {
                             "fresh_published": 80,
                             "provisional": 10,
@@ -38,6 +40,7 @@ def test_audit_distinguishes_full_fresh_from_availability() -> None:
                             "skipped": 2,
                         },
                         "full_fresh_rate_pct": 80.0,
+                        "end_to_end_fresh_rate_pct": 78.43,
                         "accepted_fresh_rate_pct": 90.0,
                         "data_available_rate_pct": 99.0,
                         "failure_reasons": {"unknown": 1},
@@ -52,6 +55,9 @@ def test_audit_distinguishes_full_fresh_from_availability() -> None:
                         },
                         "scheduled_reliability": {
                             "schedule_coverage_ratio": 0.2,
+                            "on_time_upstream_pending": 2,
+                            "parser_eligible_due_slots": 8,
+                            "parser_on_time_fresh_rate_pct": 100.0,
                         },
                         "parsesunix_rollout": {"observed_attempts": 0},
                     }
@@ -63,9 +69,19 @@ def test_audit_distinguishes_full_fresh_from_availability() -> None:
     window = audit["windows"][0]
     assert window["fresh_published"] == 80
     assert window["bad_attempts"] == 20
+    assert window["upstream_pending_attempts"] == 2
+    assert window["end_to_end_attempts"] == 102
+    assert window["end_to_end_bad_attempts"] == 22
+    assert window["end_to_end_fresh_rate_pct"] == 78.43
+    assert window["scheduled_reliability"]["on_time_upstream_pending"] == 2
+    assert (
+        window["scheduled_reliability"]["parser_on_time_fresh_rate_pct"]
+        == 100.0
+    )
     assert window["allowed_bad_attempts"] == 1.0
     assert {finding["code"] for finding in audit["findings"]} >= {
         "freshness_below_target",
+        "upstream_publication_pending",
         "measurement_incomplete",
         "provisional_candidates",
         "lkg_dependency",

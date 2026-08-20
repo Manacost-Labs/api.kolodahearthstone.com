@@ -228,12 +228,20 @@ class ScheduledReliabilitySummary(BaseModel):
     pending_slots: int = Field(ge=0)
     due_slots: int = Field(ge=0)
     on_time_fresh: int = Field(ge=0)
+    on_time_upstream_pending: int = Field(ge=0)
     on_time_nonfresh: int = Field(ge=0)
     late: int = Field(ge=0)
     missing: int = Field(ge=0)
     on_time_fresh_rate_pct: float | None = Field(default=None, ge=0.0, le=100.0)
+    parser_eligible_due_slots: int = Field(ge=0)
+    parser_on_time_fresh_rate_pct: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=100.0,
+    )
     target_rate_pct: float = Field(ge=0.0, le=100.0)
     objective_status: Literal["collecting", "meeting", "breached"]
+    parser_objective_status: Literal["collecting", "meeting", "breached"]
 
 
 class ParsesUnixRolloutSummary(BaseModel):
@@ -277,12 +285,16 @@ class ReliabilityWindow(BaseModel):
     observed_eligible_attempts: int = Field(ge=0)
     missing_terminal_windows: int = Field(ge=0)
     eligible_attempts: int = Field(ge=0)
+    upstream_pending_attempts: int = Field(ge=0)
+    end_to_end_attempts: int = Field(ge=0)
     counts: ReliabilityCounts
     failure_reasons: ReliabilityFailureReasons
     full_fresh_rate_pct: float | None = Field(default=None, ge=0.0, le=100.0)
+    end_to_end_fresh_rate_pct: float | None = Field(default=None, ge=0.0, le=100.0)
     accepted_fresh_rate_pct: float | None = Field(default=None, ge=0.0, le=100.0)
     data_available_rate_pct: float | None = Field(default=None, ge=0.0, le=100.0)
     freshness_slo: ReliabilitySLO
+    end_to_end_freshness_slo: ReliabilitySLO
     availability_slo: ReliabilitySLO
     verified_completeness: VerifiedCompletenessSummary
     parsesunix_rollout: ParsesUnixRolloutSummary
@@ -306,6 +318,10 @@ class ReliabilityMethodology(BaseModel):
     ]
     eligible_outcomes: list[str]
     excluded_outcomes: list[str]
+    independently_ineligible_method: Literal[
+        "verified_upstream_absence_is_excluded_from_parser_slo_but_included_"
+        "in_end_to_end_freshness"
+    ]
     slo_target_rate_pct: float = Field(ge=0.0, le=100.0)
     failure_reason_values: list[str]
     physical_attempts_method: str | None = None

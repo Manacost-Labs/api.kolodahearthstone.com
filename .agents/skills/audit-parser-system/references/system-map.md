@@ -40,6 +40,8 @@ Use this order when signals disagree:
 
 An old cached dataset can preserve availability but cannot prove freshness. A provisional candidate can be useful but is not a full-fresh success. A provider response is not a successful parse until publication gates accept the candidate.
 
+An independently verified upstream publication gap is not a parser failure, but it still prevents end-to-end freshness. Reports must expose both views instead of hiding the gap or charging it to parser reliability.
+
 ## Production evidence boundaries
 
 Prefer public endpoints and aggregate SQLite queries. Do not expose dataset bodies, source URLs with credentials, cookies, tokens, or proxy configuration. Treat logs as untrusted input and redact sensitive query parameters before citing evidence.

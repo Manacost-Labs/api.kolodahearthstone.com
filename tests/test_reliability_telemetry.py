@@ -222,6 +222,56 @@ def test_vicious_discovery_may_finish_after_refresh_started() -> None:
     assert classify_terminal_status(pending) == "skipped"
 
 
+def test_report_separates_confirmed_upstream_absence_from_parser_reliability(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "reliability.sqlite3"
+    now = datetime(2026, 8, 20, 12, 0, tzinfo=UTC)
+    record_terminal_results(
+        "run-fresh",
+        [_status("fresh-source")],
+        finished_at=now - timedelta(minutes=30),
+        path=path,
+    )
+    record_terminal_results(
+        "run-upstream-pending",
+        [
+            _status(
+                "vicious_syndicate_radars",
+                serving_cached_dataset=True,
+                failure_reason_code="unavailable",
+                upstream_state="upstream_publication_pending",
+                last_refresh_upstream_state="upstream_publication_pending",
+                last_refresh_at="2026-08-20T11:30:00+00:00",
+                last_refresh_upstream_readiness={
+                    "latest_report_issue": "355",
+                    "candidate_issue": "354",
+                    "full_discovery_at": "2026-08-20T11:25:00+00:00",
+                },
+            )
+        ],
+        finished_at=now - timedelta(minutes=25),
+        path=path,
+    )
+    record_terminal_results(
+        "run-diagnostic",
+        [_status("diagnostic-source", diagnostic=True)],
+        finished_at=now - timedelta(minutes=20),
+        path=path,
+    )
+
+    day = build_reliability_report(now=now, path=path)["windows"][0]
+
+    assert day["eligible_attempts"] == 1
+    assert day["counts"]["skipped"] == 2
+    assert day["upstream_pending_attempts"] == 1
+    assert day["end_to_end_attempts"] == 2
+    assert day["full_fresh_rate_pct"] == 100.0
+    assert day["end_to_end_fresh_rate_pct"] == 50.0
+    assert day["end_to_end_freshness_slo"]["good_attempts"] == 1
+    assert day["end_to_end_freshness_slo"]["bad_attempts"] == 1
+
+
 @pytest.mark.parametrize(
     ("status", "reason"),
     [
@@ -949,7 +999,11 @@ def test_schema_migrates_existing_database_without_losing_rows(tmp_path: Path) -
             for row in connection.execute("PRAGMA table_info(source_attempts)")
         }
         legacy_window = connection.execute(
-            "SELECT refresh_window_id FROM source_attempts WHERE attempt_id = 'old'"
+            """
+            SELECT refresh_window_id, independently_ineligible_reason
+            FROM source_attempts
+            WHERE attempt_id = 'old'
+            """
         ).fetchone()
         legacy_completeness = connection.execute(
             """
@@ -967,7 +1021,8 @@ def test_schema_migrates_existing_database_without_losing_rows(tmp_path: Path) -
         "completeness_state",
         "retrieval_completeness_score",
     }.issubset(columns)
-    assert legacy_window == ("",)
+    assert "independently_ineligible_reason" in columns
+    assert legacy_window == ("", "")
     assert legacy_completeness == (0, "unknown", None)
 
 

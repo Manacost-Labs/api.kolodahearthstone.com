@@ -65,7 +65,12 @@ def build_audit(payload: Any, *, target_pct: float = 99.0) -> dict[str, Any]:
         failed = _integer(counts.get("failed"))
         timed_out = _integer(counts.get("timed_out"))
         skipped = _integer(counts.get("skipped"))
+        upstream_pending = _integer(raw_window.get("upstream_pending_attempts"))
+        end_to_end_attempts = _integer(raw_window.get("end_to_end_attempts"))
+        if end_to_end_attempts <= 0:
+            end_to_end_attempts = eligible + upstream_pending
         bad = max(eligible - fresh, 0)
+        end_to_end_bad = max(end_to_end_attempts - fresh, 0)
         allowed_bad = eligible * max(100.0 - target_pct, 0.0) / 100.0
         measurement = str(raw_window.get("measurement_status", "unknown"))
 
@@ -80,10 +85,17 @@ def build_audit(payload: Any, *, target_pct: float = 99.0) -> dict[str, Any]:
             "failed": failed,
             "timed_out": timed_out,
             "skipped": skipped,
+            "upstream_pending_attempts": upstream_pending,
+            "end_to_end_attempts": end_to_end_attempts,
             "full_fresh_rate_pct": raw_window.get("full_fresh_rate_pct"),
+            "end_to_end_fresh_rate_pct": raw_window.get(
+                "end_to_end_fresh_rate_pct",
+                raw_window.get("full_fresh_rate_pct"),
+            ),
             "accepted_fresh_rate_pct": raw_window.get("accepted_fresh_rate_pct"),
             "data_available_rate_pct": raw_window.get("data_available_rate_pct"),
             "bad_attempts": bad,
+            "end_to_end_bad_attempts": end_to_end_bad,
             "allowed_bad_attempts": round(allowed_bad, 4),
         }
         windows.append(summary)
@@ -105,6 +117,17 @@ def build_audit(payload: Any, *, target_pct: float = 99.0) -> dict[str, Any]:
                     "high",
                     "measurement_incomplete",
                     "The window is still collecting; it cannot prove the SLO.",
+                    window=label,
+                )
+            )
+        if upstream_pending:
+            findings.append(
+                _finding(
+                    "medium",
+                    "upstream_publication_pending",
+                    f"{upstream_pending} attempts independently confirmed that "
+                    "the upstream artifact was not yet published; they remain "
+                    "bad for end-to-end freshness but are excluded from parser SLO.",
                     window=label,
                 )
             )
@@ -201,6 +224,18 @@ def build_audit(payload: Any, *, target_pct: float = 99.0) -> dict[str, Any]:
         schedules = raw_window.get("scheduled_reliability")
         if isinstance(schedules, dict):
             schedule_coverage = _number(schedules.get("schedule_coverage_ratio"))
+            summary["scheduled_reliability"] = {
+                "schedule_coverage_ratio": schedule_coverage,
+                "on_time_upstream_pending": _integer(
+                    schedules.get("on_time_upstream_pending")
+                ),
+                "parser_eligible_due_slots": _integer(
+                    schedules.get("parser_eligible_due_slots")
+                ),
+                "parser_on_time_fresh_rate_pct": schedules.get(
+                    "parser_on_time_fresh_rate_pct"
+                ),
+            }
             if schedule_coverage < 1.0:
                 findings.append(
                     _finding(
