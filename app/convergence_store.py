@@ -227,6 +227,69 @@ class ConvergenceStore:
         finally:
             connection.close()
 
+    def planner_cursor(self) -> tuple[float, str] | None:
+        connection = self._connect()
+        try:
+            _ensure_schema(connection)
+            row = connection.execute(
+                """
+                SELECT last_finished_at, last_attempt_id
+                FROM convergence_planner_state
+                WHERE singleton = 1
+                """
+            ).fetchone()
+            if row is None:
+                return None
+            return float(row[0]), str(row[1])
+        finally:
+            connection.close()
+
+    def advance_planner_cursor(
+        self,
+        *,
+        finished_at: float,
+        attempt_id: str,
+        updated_at: datetime,
+    ) -> None:
+        normalized_attempt_id = _identifier(attempt_id, field="attempt_id")
+        moment = _as_utc(updated_at, field="updated_at")
+        connection = self._connect()
+        try:
+            _ensure_schema(connection)
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute(
+                """
+                SELECT last_finished_at, last_attempt_id
+                FROM convergence_planner_state
+                WHERE singleton = 1
+                """
+            ).fetchone()
+            candidate = (float(finished_at), normalized_attempt_id)
+            current = (
+                (float(existing[0]), str(existing[1]))
+                if existing is not None
+                else None
+            )
+            if current is None or candidate > current:
+                connection.execute(
+                    """
+                    INSERT INTO convergence_planner_state (
+                        singleton, last_finished_at, last_attempt_id, updated_at
+                    ) VALUES (1, ?, ?, ?)
+                    ON CONFLICT(singleton) DO UPDATE SET
+                        last_finished_at = excluded.last_finished_at,
+                        last_attempt_id = excluded.last_attempt_id,
+                        updated_at = excluded.updated_at
+                    """,
+                    (candidate[0], candidate[1], moment.timestamp()),
+                )
+            connection.commit()
+        except BaseException:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
     def claim_due(
         self,
         *,
@@ -677,6 +740,16 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
                     created_at REAL NOT NULL,
                     updated_at REAL NOT NULL,
                     UNIQUE (chain_id, attempt_number)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS convergence_planner_state (
+                    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+                    last_finished_at REAL NOT NULL,
+                    last_attempt_id TEXT NOT NULL,
+                    updated_at REAL NOT NULL
                 )
                 """
             )
