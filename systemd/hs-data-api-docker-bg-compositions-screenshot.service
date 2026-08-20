@@ -6,4 +6,4 @@ After=hs-data-api-docker.service network-online.target
 [Service]
 Type=oneshot
 WorkingDirectory=/srv/hs-data-api
-ExecStart=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm api python -m app.cli capture-bg-compositions-screenshot --scheduled --stale-only
+ExecStart=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm api python -m app.cli capture-bg-compositions-screenshot --scheduled --stale-only --schedule-id capture-bg-compositions-screenshot

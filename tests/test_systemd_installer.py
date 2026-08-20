@@ -155,15 +155,12 @@ def test_api_refresh_units_use_one_aggregating_command() -> None:
 
 
 def test_primary_docker_refreshes_use_durable_schedule_occurrences() -> None:
-    full_refresh = (
-        ROOT / "systemd" / "hs-data-api-docker-refresh.service"
-    ).read_text(encoding="utf-8")
-    api_refresh = (
-        ROOT / "systemd" / "hs-data-api-docker-refresh-api.service"
-    ).read_text(encoding="utf-8")
+    from app.schedule_ledger import tracked_schedule_specs
 
-    assert "--schedule-id refresh-all-daily" in full_refresh
-    assert "--schedule-id refresh-api-daily" in api_refresh
+    for spec in tracked_schedule_specs():
+        service_name = spec.systemd_unit.removesuffix(".timer") + ".service"
+        service = (ROOT / "systemd" / service_name).read_text(encoding="utf-8")
+        assert f"--schedule-id {spec.id}" in service
 
 
 def test_schedule_ledger_reconciler_materializes_48_hours_every_five_minutes() -> None:

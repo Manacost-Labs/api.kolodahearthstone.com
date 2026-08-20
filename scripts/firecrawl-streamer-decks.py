@@ -8,6 +8,7 @@ the shared application refresh path and must not be duplicated here.
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import sys
@@ -39,16 +40,20 @@ def _refresh_derived_fun_decks() -> dict[str, Any]:
         }
 
 
-def main() -> int:
-    exit_code = cli_main(
-        [
-            "refresh",
-            "--source",
-            SOURCE_ID,
-            "--scheduled",
-            "--require-all-ok",
-        ]
-    )
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--schedule-id")
+    args = parser.parse_args(argv)
+    refresh_args = [
+        "refresh",
+        "--source",
+        SOURCE_ID,
+        "--scheduled",
+        "--require-all-ok",
+    ]
+    if args.schedule_id:
+        refresh_args.extend(("--schedule-id", args.schedule_id))
+    exit_code = cli_main(refresh_args)
     if exit_code != 0:
         return exit_code
 

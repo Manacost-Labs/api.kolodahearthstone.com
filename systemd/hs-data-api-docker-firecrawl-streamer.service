@@ -8,4 +8,4 @@ Type=oneshot
 SuccessExitStatus=10
 WorkingDirectory=/srv/hs-data-api
 ExecCondition=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm api python -m app.cli scheduled-check --source hsguru_streamer_decks_legend_1000
-ExecStart=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm api python /app/scripts/firecrawl-streamer-decks.py
+ExecStart=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm api python /app/scripts/firecrawl-streamer-decks.py --schedule-id refresh-streamer-decks

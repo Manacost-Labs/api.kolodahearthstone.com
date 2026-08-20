@@ -10,6 +10,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import AsyncMock, patch
 
 from app import cli
+from app.post_patch_policy import EARLY_SOURCE_IDS
 from app.resource_locks import ResourceLocked
 from app.source_tiers import LIGHT_API_IDS, MEDIUM_API_IDS
 from app.sources import SOURCES, Source
@@ -482,6 +483,51 @@ class CliTest(unittest.TestCase):
             respect_section_controls=True,
         )
         self.assertEqual(json.loads(output.getvalue())["source_ids"], list(selected))
+
+    def test_post_patch_schedule_claim_uses_static_scope_and_shared_window(self) -> None:
+        selected = ("heartharena_tierlist", "hsreplay_arena_cards_advanced")
+        refresh = AsyncMock(
+            return_value=[
+                {"source_id": source_id, "state": "ok"}
+                for source_id in selected
+            ]
+        )
+        occurrence = "refresh-post-patch-tierlists:20260820T082000Z"
+        with (
+            patch("app.cli.load_env_file"),
+            patch(
+                "app.post_patch_policy.active_post_patch_refresh_source_ids",
+                return_value=selected,
+            ),
+            patch(
+                "app.parser_control.filter_scheduled_source_ids",
+                return_value=list(selected),
+            ),
+            patch("app.cli.refresh_sources", new=refresh),
+            patch(
+                "app.schedule_ledger.claim_occurrence",
+                return_value=occurrence,
+            ) as claim,
+            redirect_stdout(io.StringIO()),
+        ):
+            exit_code = cli.main(
+                [
+                    "refresh-post-patch",
+                    "--schedule-id",
+                    "refresh-post-patch-tierlists",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        claim.assert_called_once_with(
+            "refresh-post-patch-tierlists",
+            sorted(EARLY_SOURCE_IDS),
+        )
+        refresh.assert_awaited_once_with(
+            list(selected),
+            respect_section_controls=True,
+            refresh_window_id=occurrence,
+        )
 
     def test_freshness_execution_mode_reports_degradation_not_crash(self) -> None:
         summary = {

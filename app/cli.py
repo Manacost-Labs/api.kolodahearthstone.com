@@ -322,12 +322,16 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--schedule-id",
         help="Bind a scheduled run to an existing durable ledger occurrence.",
     )
-    sub.add_parser(
+    refresh_post_patch = sub.add_parser(
         "refresh-post-patch",
         help=(
             "Refresh every operational early-policy scrape source while the "
             "bounded post-patch window is active."
         ),
+    )
+    refresh_post_patch.add_argument(
+        "--schedule-id",
+        help="Bind the post-patch run to a durable ledger occurrence.",
     )
     refresh_api_tiers = sub.add_parser(
         "refresh-api-tiers",
@@ -441,6 +445,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="Skip this scheduled pipeline when its admin section is disabled.",
     )
+    archetypes.add_argument("--schedule-id")
     bg_minions = sub.add_parser(
         "refresh-bg-minions-db",
         help="Refresh the local SQLite database with HSReplay Battlegrounds minion snapshots.",
@@ -450,6 +455,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="Skip this scheduled pipeline when its admin section is disabled.",
     )
+    bg_minions.add_argument("--schedule-id")
     bg_hero_details = sub.add_parser(
         "refresh-bg-hero-details",
         help="Refresh HSReplay Battlegrounds hero detail statistics and duos hero tier list.",
@@ -463,6 +469,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="Skip this scheduled pipeline when its admin section is disabled.",
     )
+    bg_hero_details.add_argument("--schedule-id")
     hsguru_matrix = sub.add_parser(
         "refresh-hsguru-meta-matrix",
         help="Refresh the unified HSGuru Standard/Wild meta matrix through Firecrawl.",
@@ -473,6 +480,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="Skip this scheduled pipeline when its admin section is disabled.",
     )
+    hsguru_matrix.add_argument("--schedule-id")
     fun_decks = sub.add_parser(
         "refresh-fun-decks",
         help="Rebuild the derived fun/off-meta decks dataset from streamer candidates.",
@@ -482,6 +490,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="Skip this scheduled pipeline when its admin section is disabled.",
     )
+    fun_decks.add_argument("--schedule-id")
     fun_decks.add_argument(
         "--format",
         choices=("standard", "wild", "all"),
@@ -498,6 +507,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="Report a usable partial refresh as handled degradation.",
     )
+    hsguru_analysis.add_argument("--schedule-id")
     hsguru_scope = hsguru_analysis.add_mutually_exclusive_group()
     hsguru_scope.add_argument(
         "--limit",
@@ -515,6 +525,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Capture a Firecrawl screenshot of HSReplay Battlegrounds compositions.",
     )
     bg_compositions_screenshot.add_argument("--scheduled", action="store_true")
+    bg_compositions_screenshot.add_argument("--schedule-id")
     bg_compositions_screenshot.add_argument(
         "--stale-only",
         action="store_true",
@@ -564,6 +575,46 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     load_env_file()
     args = parse_args(argv or sys.argv[1:])
+    dedicated_refresh_window_id: str | None = None
+    dedicated_schedule_sources: dict[str, frozenset[str]] = {
+        "refresh-hsreplay-archetypes": frozenset({"hsreplay_archetypes"}),
+        "refresh-bg-minions-db": frozenset({"hsreplay_battlegrounds_minions"}),
+        "refresh-bg-hero-details": frozenset(
+            {"hsreplay_battlegrounds_hero_details"}
+        ),
+        "refresh-hsguru-meta-matrix": frozenset({"hsguru_meta_matrix"}),
+        "refresh-fun-decks": frozenset({"hsguru_fun_decks"}),
+        "refresh-hsguru-archetype-analysis": frozenset(
+            {"hsguru_archetype_analysis"}
+        ),
+        "capture-bg-compositions-screenshot": frozenset(
+            {"hsreplay_battlegrounds_compositions_screenshot"}
+        ),
+    }
+    if args.command == "refresh-post-patch":
+        from .post_patch_policy import EARLY_SOURCE_IDS
+
+        dedicated_schedule_sources[args.command] = EARLY_SOURCE_IDS
+    schedule_id = getattr(args, "schedule_id", None)
+    if args.command in dedicated_schedule_sources and schedule_id:
+        if args.command != "refresh-post-patch" and not getattr(
+            args, "scheduled", False
+        ):
+            print("--schedule-id requires --scheduled", file=sys.stderr)
+            return 2
+        try:
+            from .schedule_ledger import claim_occurrence
+
+            dedicated_refresh_window_id = claim_occurrence(
+                schedule_id,
+                sorted(dedicated_schedule_sources[args.command]),
+            )
+        except Exception as exc:  # noqa: BLE001 - bounded scheduler failure
+            print(
+                f"Schedule ledger claim failed: {type(exc).__name__}",
+                file=sys.stderr,
+            )
+            return int(ExitCode.ERROR)
     if args.command == "api-token":
         from .api_tokens import ApiTokenError, get_api_token_store
 
@@ -1009,6 +1060,7 @@ def main(argv: list[str] | None = None) -> int:
                         "reason": "section_disabled",
                         "source_id": "hsreplay_archetypes",
                     },
+                    refresh_window_id=dedicated_refresh_window_id,
                 )
                 print(json.dumps(result, ensure_ascii=False, indent=2))
                 return 0
@@ -1028,6 +1080,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
             ),
             diagnostic=args.limit is not None,
+            refresh_window_id=dedicated_refresh_window_id,
         )
         print(json.dumps(result, ensure_ascii=False, indent=2))
         if args.scheduled and result.get("state") == "locked":
@@ -1050,6 +1103,7 @@ def main(argv: list[str] | None = None) -> int:
                         "source_id": source_id,
                     },
                     allow_scrape_source=True,
+                    refresh_window_id=dedicated_refresh_window_id,
                 )
                 print(json.dumps(result, ensure_ascii=False, indent=2))
                 return 0
@@ -1060,6 +1114,7 @@ def main(argv: list[str] | None = None) -> int:
                 source_id,
                 refresh_bg_minion_database_sync,
                 allow_scrape_source=True,
+                refresh_window_id=dedicated_refresh_window_id,
             )
         else:
             result = refresh_bg_minion_database_sync()
@@ -1078,6 +1133,7 @@ def main(argv: list[str] | None = None) -> int:
                         "reason": "section_disabled",
                         "source_id": "hsreplay_battlegrounds_hero_details",
                     },
+                    refresh_window_id=dedicated_refresh_window_id,
                 )
                 print(json.dumps(result, ensure_ascii=False, indent=2))
                 return 0
@@ -1094,6 +1150,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
             ),
             diagnostic=args.limit is not None,
+            refresh_window_id=dedicated_refresh_window_id,
         )
         print(json.dumps(result, ensure_ascii=False, indent=2))
         if args.scheduled and result.get("state") == "locked":
@@ -1116,6 +1173,7 @@ def main(argv: list[str] | None = None) -> int:
                         "reason": "section_disabled",
                         "source_id": "hsguru_meta_matrix",
                     },
+                    refresh_window_id=dedicated_refresh_window_id,
                 )
                 print(json.dumps(result, ensure_ascii=False, indent=2))
                 return 0
@@ -1126,6 +1184,7 @@ def main(argv: list[str] | None = None) -> int:
             lambda: asyncio.run(
                 refresh_hsguru_meta_matrix(concurrency=max(1, min(args.concurrency, 5)))
             ),
+            refresh_window_id=dedicated_refresh_window_id,
         )
         print(json.dumps(result, ensure_ascii=False, indent=2))
         if args.scheduled:
@@ -1154,6 +1213,7 @@ def main(argv: list[str] | None = None) -> int:
                         "reason": "section_disabled",
                         "source_id": "hsguru_fun_decks",
                     },
+                    refresh_window_id=dedicated_refresh_window_id,
                 )
                 print(json.dumps(result, ensure_ascii=False, indent=2))
                 return 0
@@ -1170,6 +1230,7 @@ def main(argv: list[str] | None = None) -> int:
                 scheduled=bool(args.scheduled),
                 format_focus=focus,
             ),
+            refresh_window_id=dedicated_refresh_window_id,
         )
         print(json.dumps(result, ensure_ascii=False, indent=2))
         if args.scheduled and result.get("state") == "locked":
@@ -1188,6 +1249,7 @@ def main(argv: list[str] | None = None) -> int:
                         "reason": "section_disabled",
                         "source_id": "hsguru_archetype_analysis",
                     },
+                    refresh_window_id=dedicated_refresh_window_id,
                 )
                 print(json.dumps(result, ensure_ascii=False, indent=2))
                 return 0
@@ -1203,6 +1265,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
             ),
             diagnostic=args.limit is not None,
+            refresh_window_id=dedicated_refresh_window_id,
         )
         print(json.dumps(result, ensure_ascii=False, indent=2))
         if args.scheduled and result.get("state") == "locked":
@@ -1242,6 +1305,7 @@ def main(argv: list[str] | None = None) -> int:
                             "hsreplay_battlegrounds_compositions_screenshot"
                         ),
                     },
+                    refresh_window_id=dedicated_refresh_window_id,
                 )
                 print(json.dumps(result, ensure_ascii=False, indent=2))
                 return 0
@@ -1255,6 +1319,7 @@ def main(argv: list[str] | None = None) -> int:
                     stale_only=bool(args.stale_only),
                 )
             ),
+            refresh_window_id=dedicated_refresh_window_id,
         )
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0 if result.get("ok") else 1
@@ -1475,12 +1540,21 @@ def main(argv: list[str] | None = None) -> int:
             )
             return int(ExitCode.OK)
         expected_ids = set(filter_scheduled_source_ids(selected))
-        results = asyncio.run(
-            refresh_sources(
-                selected,
-                respect_section_controls=True,
+        if dedicated_refresh_window_id is None:
+            results = asyncio.run(
+                refresh_sources(
+                    selected,
+                    respect_section_controls=True,
+                )
             )
-        )
+        else:
+            results = asyncio.run(
+                refresh_sources(
+                    selected,
+                    respect_section_controls=True,
+                    refresh_window_id=dedicated_refresh_window_id,
+                )
+            )
         exit_code = _scheduled_refresh_exit_code(
             results,
             expected_ids=expected_ids,

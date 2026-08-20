@@ -125,8 +125,8 @@ def test_first_materialization_starts_now_and_reaches_48_hours() -> None:
     assert datetime.fromtimestamp(state["materialized_through"], tz=UTC) == (
         now + FUTURE_HORIZON
     )
-    assert state["tracked_schedule_count"] == 2
-    assert state["catalog_schedule_count"] > state["tracked_schedule_count"]
+    assert state["tracked_schedule_count"] == len(tracked_schedule_specs())
+    assert state["catalog_schedule_count"] == state["tracked_schedule_count"]
     assert state["catalog_source_count"] == len(SOURCE_BY_ID)
 
 
@@ -174,6 +174,30 @@ def test_disabled_source_decision_is_bounded_and_materialization_is_idempotent()
         connection.execute("SELECT COUNT(*) FROM schedule_source_windows").fetchone()[0]
         == before_count
     )
+
+
+def test_inactive_post_patch_occurrences_are_explicitly_excluded() -> None:
+    connection = _connection()
+    now = datetime(2026, 8, 14, 7, 0, tzinfo=UTC)
+
+    with patch(
+        "app.parser_control.effective_publication_mode",
+        return_value="stable",
+    ):
+        materialize_schedule_windows(connection, now=now)
+
+    rows = connection.execute(
+        """
+        SELECT eligible, exclusion_reason
+        FROM schedule_source_windows
+        WHERE schedule_id = 'refresh-post-patch-tierlists'
+        """
+    ).fetchall()
+    assert rows
+    assert {row["eligible"] for row in rows} == {0}
+    reasons = {row["exclusion_reason"] for row in rows}
+    assert "publication-mode-not-early" in reasons
+    assert reasons <= {"publication-mode-not-early", "operationally-disabled"}
 
 
 def test_materialization_gap_starts_a_new_coverage_cohort_without_backfill() -> None:
@@ -334,8 +358,8 @@ def test_reconcile_returns_bounded_aggregate_and_persists_state(tmp_path: Path) 
     eligible = cast(int, aggregate["eligible_source_windows"])
     excluded = cast(int, aggregate["excluded_source_windows"])
 
-    assert aggregate["tracked_schedule_count"] == 2
-    assert catalog_schedule_count > 2
+    assert aggregate["tracked_schedule_count"] == len(tracked_schedule_specs())
+    assert catalog_schedule_count == len(tracked_schedule_specs())
     assert aggregate["catalog_source_count"] == len(SOURCE_BY_ID)
     assert aggregate["materialized_through"] == (now + timedelta(hours=48)).isoformat()
     assert expected > 0

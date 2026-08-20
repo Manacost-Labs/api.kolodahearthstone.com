@@ -8,4 +8,4 @@ Type=oneshot
 SuccessExitStatus=10
 WorkingDirectory=/srv/hs-data-api
 ExecCondition=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm api python -m app.cli scheduled-check --source hsguru_fun_decks
-ExecStart=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm api python -m app.cli refresh-fun-decks --scheduled --format standard
+ExecStart=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm api python -m app.cli refresh-fun-decks --scheduled --format standard --schedule-id refresh-fun-decks-standard

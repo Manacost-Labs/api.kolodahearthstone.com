@@ -9,7 +9,7 @@ StartLimitBurst=3
 Type=oneshot
 SuccessExitStatus=10
 WorkingDirectory=/srv/hs-data-api
-ExecStart=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm api python -m app.cli refresh-post-patch
+ExecStart=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm api python -m app.cli refresh-post-patch --schedule-id refresh-post-patch-tierlists
 ExecStopPost=-/usr/bin/curl --fail --silent --show-error --max-time 20 --request POST http://127.0.0.1:3101/_internal/tierlist/cache-bust?source=hsreplay
 ExecStopPost=-/usr/bin/curl --fail --silent --show-error --max-time 20 --request POST http://127.0.0.1:3101/_internal/tierlist/cache-bust?source=heartharena
 ExecStopPost=-/usr/bin/curl --fail --silent --show-error --max-time 20 --request POST http://127.0.0.1:3101/_internal/tierlist/cache-bust?source=firestone

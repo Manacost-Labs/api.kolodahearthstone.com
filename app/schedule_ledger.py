@@ -19,7 +19,9 @@ from .parser_control_schedule import (
 from .sources import SOURCE_BY_ID
 from .storage import root_dir
 
-TRACKED_SCHEDULE_IDS = frozenset({"refresh-all-daily", "refresh-api-daily"})
+TRACKED_SCHEDULE_IDS = frozenset(
+    spec.id for spec in _SCHEDULES if spec.purpose == "primary"
+)
 FUTURE_HORIZON = timedelta(hours=48)
 OCCURRENCE_DEADLINE = timedelta(hours=2)
 MAX_EXCLUSION_REASON_LENGTH = 96
@@ -65,6 +67,28 @@ def tracked_schedule_specs() -> tuple[_ScheduleSpec, ...]:
     if any(spec.purpose != "primary" for spec in specs):
         raise RuntimeError("recovery schedules cannot create ledger obligations")
     return specs
+
+
+def _occurrence_eligibility(
+    spec: _ScheduleSpec,
+    source_id: str,
+    decision: SourceEligibility,
+    *,
+    scheduled_for: datetime,
+) -> SourceEligibility:
+    if not decision.eligible or spec.required_publication_mode is None:
+        return decision
+    from .parser_control import effective_publication_mode
+
+    if (
+        effective_publication_mode(source_id, at=scheduled_for)
+        == spec.required_publication_mode
+    ):
+        return decision
+    return SourceEligibility(
+        eligible=False,
+        exclusion_reason=f"publication-mode-not-{spec.required_publication_mode}",
+    )
 
 
 def _valid_local_candidate(
@@ -329,7 +353,12 @@ def materialize_schedule_windows(
             for scheduled_for in occurrences:
                 occurrence_id = deterministic_occurrence_id(spec.id, scheduled_for)
                 for source_id in sorted(spec.source_ids):
-                    decision = decisions[source_id]
+                    decision = _occurrence_eligibility(
+                        spec,
+                        source_id,
+                        decisions[source_id],
+                        scheduled_for=scheduled_for,
+                    )
                     cursor = connection.execute(
                         """
                         INSERT INTO schedule_source_windows (

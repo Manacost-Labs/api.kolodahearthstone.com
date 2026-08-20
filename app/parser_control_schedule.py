@@ -20,7 +20,7 @@ from .source_tiers import LIGHT_API_IDS, MEDIUM_API_IDS
 from .sources import SOURCE_BY_ID
 
 SCHEDULE_INVENTORY_SCHEMA_VERSION = 2
-SCHEDULE_INVENTORY_VERSION = "2026-08-20.1"
+SCHEDULE_INVENTORY_VERSION = "2026-08-20.2"
 SCHEDULE_TIMEZONE = "Europe/Warsaw"
 
 _SYSTEMCTL_SEARCH_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
@@ -104,7 +104,7 @@ _SCHEDULES: tuple[_ScheduleSpec, ...] = (
         label="Каждый час в :15",
         systemd_unit="hs-data-api-docker-firecrawl-streamer.timer",
         on_calendar=("*-*-* *:15:00 Europe/Warsaw",),
-        source_ids=frozenset({"hsguru_streamer_decks_legend_1000", "hsguru_fun_decks"}),
+        source_ids=frozenset({"hsguru_streamer_decks_legend_1000"}),
         recurrence="daily",
         local_times=_times(*((hour, 15) for hour in range(24))),
     ),
