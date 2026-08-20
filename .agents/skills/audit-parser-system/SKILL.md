@@ -43,6 +43,11 @@ Always report these separately for 24h, 7d, and 30d:
 - verified completeness coverage;
 - provider and bounded failure-reason counts.
 
+Treat completeness as three independent gates: catalog instrumentation,
+instrumented-source observation coverage, and completeness evidence coverage for
+all eligible parser attempts. A full catalog alone is not evidence that retrieval
+was observed or verified.
+
 If coverage is incomplete, label the result as observed evidence rather than a proven monthly SLO.
 
 ### 3. Trace every bad terminal outcome

@@ -143,13 +143,57 @@ def build_audit(payload: Any, *, target_pct: float = 99.0) -> dict[str, Any]:
         completeness = raw_window.get("verified_completeness")
         if isinstance(completeness, dict):
             catalog_coverage = _number(completeness.get("source_catalog_coverage_pct"))
-            if catalog_coverage < 95.0:
+            observation_coverage = _number(
+                completeness.get("instrumented_source_observation_coverage_pct")
+            )
+            attempt_coverage = _number(
+                completeness.get("coverage_of_all_parser_attempts_pct")
+            )
+            instrumented_sources = _integer(completeness.get("instrumented_sources"))
+            observed_sources = _integer(
+                completeness.get("observed_instrumented_sources")
+            )
+            sources_without_observations = _integer(
+                completeness.get("sources_without_observations")
+            )
+            tracked_attempts = _integer(completeness.get("tracked_attempts"))
+            summary["verified_completeness"] = {
+                "source_catalog_coverage_pct": catalog_coverage,
+                "instrumented_source_observation_coverage_pct": observation_coverage,
+                "coverage_of_all_parser_attempts_pct": attempt_coverage,
+                "instrumented_sources": instrumented_sources,
+                "observed_instrumented_sources": observed_sources,
+                "sources_without_observations": sources_without_observations,
+                "tracked_attempts": tracked_attempts,
+            }
+            if catalog_coverage < target_pct:
                 findings.append(
                     _finding(
                         "high",
                         "completeness_catalog_gap",
                         f"Verified-completeness instrumentation covers only "
                         f"{catalog_coverage}% of catalog sources.",
+                        window=label,
+                    )
+                )
+            if observation_coverage < target_pct:
+                findings.append(
+                    _finding(
+                        "high",
+                        "completeness_observation_gap",
+                        f"Only {observed_sources}/{instrumented_sources} instrumented "
+                        f"sources were observed ({observation_coverage}%); "
+                        f"without observations={sources_without_observations}.",
+                        window=label,
+                    )
+                )
+            if attempt_coverage < target_pct:
+                findings.append(
+                    _finding(
+                        "high",
+                        "completeness_attempt_coverage_gap",
+                        f"Only {tracked_attempts}/{eligible} eligible parser attempts "
+                        f"have completeness evidence ({attempt_coverage}%).",
                         window=label,
                     )
                 )
