@@ -141,6 +141,40 @@ const parsesUnixRollout = {
     paid_cost_usd: '0.000000',
 };
 
+const convergence = {
+    reported: true,
+    ledger_status: 'observed',
+    policy_version: 1,
+    total_chains: 5,
+    affected_sources: 4,
+    chain_states: {
+        waiting: 1,
+        running: 0,
+        fresh: 2,
+        upstream_pending: 1,
+        paused: 0,
+        quarantined: 0,
+        diagnosis_required: 0,
+        exhausted: 1,
+        cancelled: 0,
+    },
+    total_attempts: 3,
+    attempt_states: {
+        queued: 0,
+        running: 0,
+        succeeded: 2,
+        failed: 1,
+        cancelled: 0,
+    },
+    paid_requests: 1,
+    paid_cost_usd: '0.001500',
+    last_updated_at: '2026-08-11T03:29:00+00:00',
+    planner: {
+        mode: 'shadow',
+        last_run_at: '2026-08-11T03:29:00+00:00',
+    },
+};
+
 test('describes extraction evidence without claiming full upstream pages', () => {
     const renderer = fs.readFileSync(
         path.join(__dirname, '../assets/analytics.js'),
@@ -166,6 +200,10 @@ test('describes extraction evidence without claiming full upstream pages', () =>
     assert.match(renderer, /Бюджет ошибок парсера fresh-only/);
     assert.match(renderer, /Использовано бюджета/);
     assert.match(renderer, /Сверх бюджета/);
+    assert.match(renderer, /Сходимость к свежим данным/);
+    assert.match(renderer, /Fresh после recovery/);
+    assert.match(renderer, /Shadow · без автозапросов/);
+    assert.match(renderer, /LKG успехом не считается/);
     assert.match(renderer, /On-time end-to-end/);
     assert.match(renderer, /Покрытие расписаний/);
     assert.match(renderer, /Внедрение ParsesUnix/);
@@ -176,6 +214,40 @@ test('describes extraction evidence without claiming full upstream pages', () =>
     assert.match(renderer, /без нулевой оценки неизвестной стоимости/);
     assert.match(renderer, /предварительно/i);
     assert.doesNotMatch(renderer, /Полное получение данных|страница получена целиком/);
+});
+
+test('shows convergence separately without inflating the primary SLO', () => {
+    const model = buildReliabilityViewModel({
+        state: 'available',
+        default_window: '7d',
+        convergence,
+        windows: [observedWindow],
+    });
+
+    assert.equal(model.fullFresh, '88%');
+    assert.equal(model.convergence.reported, true);
+    assert.equal(model.convergence.totalChains, 5);
+    assert.equal(model.convergence.chainStates.fresh, 2);
+    assert.equal(model.convergence.chainStates.exhausted, 1);
+    assert.equal(model.convergence.paidRequests, 1);
+    assert.equal(model.convergence.paidCostUsd, '0.001500');
+    assert.equal(model.convergence.planner.mode, 'shadow');
+});
+
+test('fails contradictory convergence arithmetic closed', () => {
+    const model = buildReliabilityViewModel({
+        state: 'available',
+        default_window: '7d',
+        convergence: {
+            ...convergence,
+            chain_states: {...convergence.chain_states, fresh: 3},
+        },
+        windows: [observedWindow],
+    });
+
+    assert.equal(model.convergence.reported, false);
+    assert.equal(model.convergence.totalChains, null);
+    assert.equal(model.fullFresh, '88%');
 });
 
 test('shows the exact honest fresh-only error budget', () => {

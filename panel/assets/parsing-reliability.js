@@ -162,6 +162,82 @@
         };
     };
 
+    const buildConvergence = (raw) => {
+        const fallback = {
+            reported: false,
+            ledgerStatus: 'not_initialized',
+            policyVersion: null,
+            totalChains: null,
+            affectedSources: null,
+            chainStates: {},
+            totalAttempts: null,
+            attemptStates: {},
+            paidRequests: null,
+            paidCostUsd: null,
+            lastUpdatedAt: null,
+            planner: {mode: 'off', lastRunAt: null},
+        };
+        if (!raw || raw.reported !== true) return fallback;
+        const ledgerStatus = String(raw.ledger_status || '');
+        const policyVersion = exactNonNegativeCount(raw.policy_version);
+        const totalChains = exactNonNegativeCount(raw.total_chains);
+        const affectedSources = exactNonNegativeCount(raw.affected_sources);
+        const totalAttempts = exactNonNegativeCount(raw.total_attempts);
+        const paidRequests = exactNonNegativeCount(raw.paid_requests);
+        const paidCostUsd = typeof raw.paid_cost_usd === 'string'
+            && /^\d+\.\d{6}$/.test(raw.paid_cost_usd)
+            ? raw.paid_cost_usd
+            : null;
+        const chainKeys = [
+            'waiting', 'running', 'fresh', 'upstream_pending', 'paused',
+            'quarantined', 'diagnosis_required', 'exhausted', 'cancelled',
+        ];
+        const attemptKeys = ['queued', 'running', 'succeeded', 'failed', 'cancelled'];
+        const chainStates = Object.fromEntries(chainKeys.map((key) => [
+            key,
+            exactNonNegativeCount(raw.chain_states?.[key]),
+        ]));
+        const attemptStates = Object.fromEntries(attemptKeys.map((key) => [
+            key,
+            exactNonNegativeCount(raw.attempt_states?.[key]),
+        ]));
+        const planner = raw.planner || {};
+        const plannerMode = String(planner.mode || '');
+        if (
+            !['not_initialized', 'empty', 'observed'].includes(ledgerStatus)
+            || policyVersion === null
+            || policyVersion < 1
+            || totalChains === null
+            || affectedSources === null
+            || totalAttempts === null
+            || paidRequests === null
+            || paidCostUsd === null
+            || Object.values(chainStates).some((value) => value === null)
+            || Object.values(chainStates).reduce((sum, value) => sum + value, 0) !== totalChains
+            || Object.values(attemptStates).some((value) => value === null)
+            || Object.values(attemptStates).reduce((sum, value) => sum + value, 0) !== totalAttempts
+            || !['off', 'shadow'].includes(plannerMode)
+            || (ledgerStatus !== 'observed' && totalChains !== 0)
+        ) return fallback;
+        return {
+            reported: true,
+            ledgerStatus,
+            policyVersion,
+            totalChains,
+            affectedSources,
+            chainStates,
+            totalAttempts,
+            attemptStates,
+            paidRequests,
+            paidCostUsd,
+            lastUpdatedAt: raw.last_updated_at || null,
+            planner: {
+                mode: plannerMode,
+                lastRunAt: planner.last_run_at || null,
+            },
+        };
+    };
+
     const buildParsesUnixRollout = (rollout) => {
         const fallback = {
             reported: false,
@@ -770,6 +846,7 @@
             measurementStatus,
             window?.eligible_attempts
         );
+        const convergence = buildConvergence(reliability?.convergence);
         const badge = observed
             ? 'Наблюдаемый срез'
             : (preliminary ? 'Предварительный срез' : 'Накапливаем статистику');
@@ -812,6 +889,7 @@
             verifiedCompleteness,
             scheduledReliability,
             parsesUnixRollout,
+            convergence,
             generatedAt: reliability?.generated_at || null,
             message: reliability?.message || 'Накапливаем статистику',
         };

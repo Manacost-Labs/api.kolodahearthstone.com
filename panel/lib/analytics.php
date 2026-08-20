@@ -399,6 +399,130 @@ function analytics_normalize_outcome_recovery($value, array $counts): array
     return $normalized;
 }
 
+function analytics_empty_convergence(): array
+{
+    return [
+        'reported' => false,
+        'ledger_status' => 'not_initialized',
+        'policy_version' => null,
+        'total_chains' => null,
+        'affected_sources' => null,
+        'chain_states' => [],
+        'total_attempts' => null,
+        'attempt_states' => [],
+        'paid_requests' => null,
+        'paid_cost_usd' => null,
+        'last_updated_at' => null,
+        'planner' => [
+            'mode' => 'off',
+            'last_run_at' => null,
+            'scanned_terminal_events' => null,
+            'scanned_missing_slots' => null,
+            'planned_chains' => null,
+            'planned_sources' => null,
+            'skipped_events' => null,
+        ],
+    ];
+}
+
+function analytics_normalize_convergence($value): array
+{
+    $empty = analytics_empty_convergence();
+    if (!is_array($value)) {
+        return $empty;
+    }
+    $ledgerStatus = (string)($value['ledger_status'] ?? '');
+    $policyVersion = analytics_reliability_exact_count(
+        $value['policy_version'] ?? null
+    );
+    $totalChains = analytics_reliability_exact_count($value['total_chains'] ?? null);
+    $affectedSources = analytics_reliability_exact_count(
+        $value['affected_sources'] ?? null
+    );
+    $totalAttempts = analytics_reliability_exact_count(
+        $value['total_attempts'] ?? null
+    );
+    $paidRequests = analytics_reliability_exact_count($value['paid_requests'] ?? null);
+    $paidCost = (string)($value['paid_cost_usd'] ?? '');
+    $rawChainStates = is_array($value['chain_states'] ?? null)
+        ? $value['chain_states']
+        : [];
+    $rawAttemptStates = is_array($value['attempt_states'] ?? null)
+        ? $value['attempt_states']
+        : [];
+    $chainStates = [];
+    foreach (
+        [
+            'waiting', 'running', 'fresh', 'upstream_pending', 'paused',
+            'quarantined', 'diagnosis_required', 'exhausted', 'cancelled',
+        ] as $state
+    ) {
+        $chainStates[$state] = analytics_reliability_exact_count(
+            $rawChainStates[$state] ?? null
+        );
+    }
+    $attemptStates = [];
+    foreach (['queued', 'running', 'succeeded', 'failed', 'cancelled'] as $state) {
+        $attemptStates[$state] = analytics_reliability_exact_count(
+            $rawAttemptStates[$state] ?? null
+        );
+    }
+    $rawPlanner = is_array($value['planner'] ?? null) ? $value['planner'] : [];
+    $plannerMode = (string)($rawPlanner['mode'] ?? '');
+    $plannerCounts = [];
+    foreach (
+        [
+            'scanned_terminal_events', 'scanned_missing_slots',
+            'planned_chains', 'planned_sources', 'skipped_events',
+        ] as $key
+    ) {
+        $plannerCounts[$key] = analytics_reliability_exact_count(
+            $rawPlanner[$key] ?? null
+        );
+    }
+    if (
+        !in_array($ledgerStatus, ['not_initialized', 'empty', 'observed'], true)
+        || $policyVersion === null
+        || $policyVersion < 1
+        || $totalChains === null
+        || $affectedSources === null
+        || $totalAttempts === null
+        || $paidRequests === null
+        || preg_match('/^\d+\.\d{6}$/D', $paidCost) !== 1
+        || in_array(null, $chainStates, true)
+        || array_sum($chainStates) !== $totalChains
+        || in_array(null, $attemptStates, true)
+        || array_sum($attemptStates) !== $totalAttempts
+        || !in_array($plannerMode, ['off', 'shadow'], true)
+        || in_array(null, $plannerCounts, true)
+        || ($ledgerStatus !== 'observed' && $totalChains !== 0)
+    ) {
+        return $empty;
+    }
+    return [
+        'reported' => true,
+        'ledger_status' => $ledgerStatus,
+        'policy_version' => $policyVersion,
+        'total_chains' => $totalChains,
+        'affected_sources' => $affectedSources,
+        'chain_states' => $chainStates,
+        'total_attempts' => $totalAttempts,
+        'attempt_states' => $attemptStates,
+        'paid_requests' => $paidRequests,
+        'paid_cost_usd' => $paidCost,
+        'last_updated_at' => isset($value['last_updated_at'])
+            ? (string)$value['last_updated_at']
+            : null,
+        'planner' => [
+            'mode' => $plannerMode,
+            'last_run_at' => isset($rawPlanner['last_run_at'])
+                ? (string)$rawPlanner['last_run_at']
+                : null,
+            ...$plannerCounts,
+        ],
+    ];
+}
+
 function analytics_empty_reliability_slo(): array
 {
     return [
@@ -1147,6 +1271,7 @@ function analytics_normalize_parsing_reliability(
         'cached' => $cached,
         'stale_cache' => $staleCache,
         'cache_age' => $cacheAge,
+        'convergence' => analytics_empty_convergence(),
         'windows' => [],
     ];
     if (
@@ -1354,6 +1479,9 @@ function analytics_normalize_parsing_reliability(
         'cached' => $cached,
         'stale_cache' => $staleCache,
         'cache_age' => $cacheAge,
+        'convergence' => analytics_normalize_convergence(
+            $data['convergence'] ?? null
+        ),
         'windows' => $windows,
     ];
 }

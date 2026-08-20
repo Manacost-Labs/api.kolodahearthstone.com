@@ -451,6 +451,66 @@
             countCard('Остаток', freshnessSlo.remainingAttempts, 'отрицательное значение означает превышение')
         );
         budgetSection.append(budgetHead, budgetRates, budgetCounts);
+
+        const convergence = model.convergence || {
+            reported: false,
+            ledgerStatus: 'not_initialized',
+            totalChains: null,
+            affectedSources: null,
+            chainStates: {},
+            totalAttempts: null,
+            paidRequests: null,
+            paidCostUsd: null,
+            planner: {mode: 'off', lastRunAt: null},
+        };
+        const convergenceSection = document.createElement('section');
+        convergenceSection.className = 'parsing-completeness parsing-convergence';
+        convergenceSection.setAttribute('aria-labelledby', 'parsing-convergence-title');
+        const convergenceHead = document.createElement('header');
+        convergenceHead.className = 'parsing-completeness-head';
+        const convergenceHeadingGroup = document.createElement('div');
+        const convergenceHeading = document.createElement('h4');
+        convergenceHeading.id = 'parsing-convergence-title';
+        convergenceHeading.textContent = 'Сходимость к свежим данным';
+        const convergenceCopy = document.createElement('p');
+        convergenceCopy.textContent = 'Recovery-цепочки показываются отдельно от основного fresh-only процента. Fresh здесь означает, что повтор действительно завершился новой валидной публикацией; LKG успехом не считается.';
+        convergenceHeadingGroup.append(convergenceHeading, convergenceCopy);
+        const convergenceBadge = document.createElement('span');
+        convergenceBadge.className = `parsing-reliability-badge ${convergence.reported && convergence.planner.mode === 'shadow' ? 'is-preliminary' : 'is-collecting'}`;
+        convergenceBadge.textContent = convergence.reported
+            ? (convergence.planner.mode === 'shadow'
+                ? 'Shadow · без автозапросов'
+                : 'Контур не запущен')
+            : 'Нет согласованных данных';
+        convergenceHead.append(convergenceHeadingGroup, convergenceBadge);
+        const chainStates = convergence.chainStates || {};
+        const activeChains = convergence.reported
+            ? chainStates.waiting + chainStates.running
+            : null;
+        const interventionChains = convergence.reported
+            ? chainStates.paused + chainStates.quarantined + chainStates.diagnosis_required
+            : null;
+        const convergenceCounts = document.createElement('div');
+        convergenceCounts.className = 'parsing-completeness-counts';
+        convergenceCounts.append(
+            countCard('Fresh после recovery', convergence.reported ? chainStates.fresh : null, 'только новая проверенная публикация'),
+            countCard('Ждут или выполняются', activeChains, 'bounded retry по политике и дедлайну'),
+            countCard('Ждём upstream', convergence.reported ? chainStates.upstream_pending : null, 'платный fetch пока запрещён'),
+            countCard('Нужно вмешательство', interventionChains, 'пауза, карантин или диагностика'),
+            countCard('Исчерпаны', convergence.reported ? chainStates.exhausted : null, 'дедлайн или лимит попыток достигнут'),
+            countCard('Затронуто источников', convergence.affectedSources, 'без раскрытия внутренних идентификаторов'),
+            countCard('Recovery-попытки', convergence.totalAttempts, 'не входят повторно в primary SLO'),
+            countCard('Платные запросы', convergence.paidRequests, 'фактическое потребление recovery-контура'),
+            countCard(
+                'Стоимость recovery',
+                null,
+                'только подтверждённые расходы',
+                convergence.reported && convergence.paidCostUsd !== null
+                    ? `$${convergence.paidCostUsd}`
+                    : '—'
+            )
+        );
+        convergenceSection.append(convergenceHead, convergenceCounts);
         const ratioDetail = (numerator, denominator, noun) => (
             numerator === null || numerator === undefined
             || denominator === null || denominator === undefined
@@ -879,6 +939,7 @@
             rates,
             counts,
             budgetSection,
+            convergenceSection,
             parsesUnixSection,
             scheduleSection,
             completeness,

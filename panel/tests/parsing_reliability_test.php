@@ -33,6 +33,43 @@ $envelope = [
         ],
         'generated_at' => '2026-08-11T03:30:00+00:00',
         'coverage_started_at' => '2026-08-01T00:00:00+00:00',
+        'convergence' => [
+            'ledger_status' => 'observed',
+            'policy_version' => 1,
+            'total_chains' => 5,
+            'affected_sources' => 4,
+            'chain_states' => [
+                'waiting' => 1,
+                'running' => 0,
+                'fresh' => 2,
+                'upstream_pending' => 1,
+                'paused' => 0,
+                'quarantined' => 0,
+                'diagnosis_required' => 0,
+                'exhausted' => 1,
+                'cancelled' => 0,
+            ],
+            'total_attempts' => 3,
+            'attempt_states' => [
+                'queued' => 0,
+                'running' => 0,
+                'succeeded' => 2,
+                'failed' => 1,
+                'cancelled' => 0,
+            ],
+            'paid_requests' => 1,
+            'paid_cost_usd' => '0.001500',
+            'last_updated_at' => '2026-08-11T03:29:00+00:00',
+            'planner' => [
+                'mode' => 'shadow',
+                'last_run_at' => '2026-08-11T03:29:00+00:00',
+                'scanned_terminal_events' => 4,
+                'scanned_missing_slots' => 1,
+                'planned_chains' => 2,
+                'planned_sources' => 2,
+                'skipped_events' => 2,
+            ],
+        ],
         'windows' => [
             [
                 'window' => '24h',
@@ -298,6 +335,30 @@ assert_same(
     -11.0,
     $normalized['windows'][1]['freshness_slo']['error_budget_remaining_attempts'],
     'A negative remaining budget must not be hidden.'
+);
+assert_same(
+    true,
+    $normalized['convergence']['reported'],
+    'A coherent convergence ledger must reach the panel.'
+);
+assert_same(
+    2,
+    $normalized['convergence']['chain_states']['fresh'],
+    'Fresh recovery chains must remain separate from the primary SLO.'
+);
+assert_same(
+    '0.001500',
+    $normalized['convergence']['paid_cost_usd'],
+    'Confirmed recovery spend must remain visible.'
+);
+
+$invalidConvergence = $envelope;
+$invalidConvergence['data']['convergence']['chain_states']['fresh'] = 3;
+$invalidConvergence = analytics_normalize_parsing_reliability($invalidConvergence);
+assert_same(
+    false,
+    $invalidConvergence['convergence']['reported'],
+    'Contradictory convergence totals must fail closed.'
 );
 
 $invalidFreshnessBudget = $envelope;
