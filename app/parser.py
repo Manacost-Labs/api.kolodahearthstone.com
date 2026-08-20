@@ -3,15 +3,15 @@ from __future__ import annotations
 import json
 import re
 from typing import Any
+from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
 from .cards_index import resolve_card_name
 from .hsreplay_extract import extract_for_source, parse_bg_trinkets_api_payload
 from .sources import Source
-from .trinket_slices import TRINKET_SLICE_BY_SOURCE_ID, TRINKET_SLICE_SOURCE_IDS
 from .structured import build_structured
-
+from .trinket_slices import TRINKET_SLICE_BY_SOURCE_ID, TRINKET_SLICE_SOURCE_IDS
 
 DECK_CODE_RE = re.compile(r"\bAAE[A-Za-z0-9+/=]{24,}\b")
 
@@ -20,24 +20,82 @@ def _clean_text(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
 
 
-def _extract_tables(soup: BeautifulSoup) -> list[dict[str, Any]]:
+def _deck_code_from_cell(cell: Any) -> str | None:
+    candidates = [cell, *cell.find_all(True)]
+    for node in candidates:
+        for attribute in ("data-clipboard-text", "data-deck-code", "value"):
+            value = node.get(attribute)
+            if not isinstance(value, str):
+                continue
+            match = DECK_CODE_RE.search(value)
+            if match:
+                return match.group(0)
+    return None
+
+
+def _extract_tables(
+    soup: BeautifulSoup,
+    *,
+    base_url: str = "",
+) -> list[dict[str, Any]]:
     tables: list[dict[str, Any]] = []
     for index, table in enumerate(soup.find_all("table")):
-        rows = []
+        rows: list[list[str]] = []
+        row_links: list[list[str | None]] = []
+        row_deck_codes: list[str | None] = []
         for tr in table.find_all("tr"):
-            cells = [_clean_text(cell.get_text(" ")) for cell in tr.find_all(["th", "td"])]
+            cell_nodes = tr.find_all(["th", "td"])
+            cells = [_clean_text(cell.get_text(" ")) for cell in cell_nodes]
             if any(cells):
                 rows.append(cells)
+                row_links.append(
+                    [
+                        (
+                            urljoin(base_url, str(anchor.get("href")))
+                            if (anchor := cell.find("a", href=True)) is not None
+                            else None
+                        )
+                        for cell in cell_nodes
+                    ]
+                )
+                row_deck_codes.append(
+                    next(
+                        (
+                            code
+                            for cell in cell_nodes
+                            if (code := _deck_code_from_cell(cell)) is not None
+                        ),
+                        None,
+                    )
+                )
         if not rows:
             continue
         headers = rows[0] if table.find("th") else []
         data_rows = rows[1:] if headers else rows
+        data_links = row_links[1:] if headers else row_links
+        data_deck_codes = row_deck_codes[1:] if headers else row_deck_codes
         objects = []
         if headers:
-            for row in data_rows:
+            for row_index, row in enumerate(data_rows):
                 item = {}
                 for pos, header in enumerate(headers):
-                    item[header or f"column_{pos + 1}"] = row[pos] if pos < len(row) else None
+                    field = header or f"column_{pos + 1}"
+                    item[field] = row[pos] if pos < len(row) else None
+                    link = (
+                        data_links[row_index][pos]
+                        if row_index < len(data_links)
+                        and pos < len(data_links[row_index])
+                        else None
+                    )
+                    if link:
+                        item[f"{field}_url"] = link
+                deck_code = (
+                    data_deck_codes[row_index]
+                    if row_index < len(data_deck_codes)
+                    else None
+                )
+                if deck_code:
+                    item["deck_code"] = deck_code
                 objects.append(item)
         tables.append(
             {
@@ -120,7 +178,7 @@ def _json_body_payload(
         candidates.append(pre.get_text().strip())
     if snapshot and snapshot.get("lines"):
         snapshot_text = "\n".join(str(line) for line in snapshot["lines"]).strip()
-        snapshot_text = re.sub(r"^```(?:json)?\s*", "", snapshot_text, flags=re.I)
+        snapshot_text = re.sub(r"^```(?:json)?\s*", "", snapshot_text, flags=re.IGNORECASE)
         snapshot_text = re.sub(r"\s*```$", "", snapshot_text)
         candidates.append(snapshot_text)
     for candidate in candidates:
@@ -148,7 +206,7 @@ def parse_html(source: Source, html: str, snapshot: dict[str, Any] | None = None
             text_lines = snap_lines
     deck_codes = sorted(set(DECK_CODE_RE.findall(html)))
     json_scripts = _extract_json_scripts(soup)
-    tables = _extract_tables(soup)
+    tables = _extract_tables(soup, base_url=source.fetch_url)
     if snapshot and snapshot.get("tables"):
         snap_tables = _tables_from_snapshot(snapshot)
         if sum(len(t.get("rows") or []) for t in snap_tables) > sum(
@@ -171,11 +229,15 @@ def parse_html(source: Source, html: str, snapshot: dict[str, Any] | None = None
             name = None
             name_idx = 0
             for i, cell in enumerate(row):
-                if len(cell) > 2 and not _clean_text(cell).isdigit() and "%" not in cell:
-                    if resolve_card_name(cell).get("id") or len(cell) > 4:
-                        name = cell
-                        name_idx = i
-                        break
+                if (
+                    len(cell) > 2
+                    and not _clean_text(cell).isdigit()
+                    and "%" not in cell
+                    and (resolve_card_name(cell).get("id") or len(cell) > 4)
+                ):
+                    name = cell
+                    name_idx = i
+                    break
             if not name:
                 continue
             obj = {"Card": name}

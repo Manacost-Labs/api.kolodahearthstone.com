@@ -1,6 +1,14 @@
 from __future__ import annotations
 
-from app.fetcher import _dedupe_streamer_decks_parsed
+import asyncio
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
+
+from app.fetcher import (
+    _dedupe_streamer_decks_parsed,
+    _enrich_streamer_deck_codes_with_parsesunix,
+)
+from app.parser import parse_html
 from app.source_contracts import contract_quality_report
 from app.sources import SOURCE_BY_ID
 from app.structured import build_structured
@@ -132,6 +140,65 @@ def test_hsguru_streamer_deduplication_reconciles_retrieval_evidence() -> None:
     }
     assert report["ok"], report["warnings"]
     assert report["retrieval_complete"] is True
+
+
+def test_hsguru_streamer_preserves_detail_url_and_hydrates_missing_code() -> None:
+    deck_code = (
+        "AAEBAf0GBs30Av76A4f7A564BtvXB63ZBwycENfOA4j0A8b5A8f5A63p"
+        "BdCeBu6hBom1BoSZB+C+B43cBwAA"
+    )
+    source = SOURCE_BY_ID["hsguru_streamer_decks_legend_1000"]
+    html = """
+    <html><head><title>Streamer decks</title></head><body>
+      <table>
+        <tr><th>Deck</th><th>Streamer</th></tr>
+        <tr><td><a href="/deck/41520944">Fresh deck</a></td><td>Streamer</td></tr>
+      </table>
+    </body></html>
+    """
+    parsed = parse_html(source, html)
+
+    with patch(
+        "app.fetcher.fetch_direct_with_parsesunix",
+        new=AsyncMock(
+            return_value=SimpleNamespace(
+                transport_validated=True,
+                body=f"<html><body><main>{deck_code}</main></body></html>",
+            )
+        ),
+    ) as fetch_detail:
+        enriched = asyncio.run(
+            _enrich_streamer_deck_codes_with_parsesunix(parsed)
+        )
+
+    row = enriched["structured"]["rows"][0]
+    assert row["Deck_url"] == "https://www.hsguru.com/deck/41520944"
+    assert row["deck_code"] == deck_code
+    assert enriched["counts"]["deck_codes"] == 1
+    fetch_detail.assert_awaited_once()
+
+
+def test_hsguru_streamer_reads_deck_code_from_copy_attribute_without_hydration() -> None:
+    deck_code = (
+        "AAEBAf0GBs30Av76A4f7A564BtvXB63ZBwycENfOA4j0A8b5A8f5A63p"
+        "BdCeBu6hBom1BoSZB+C+B43cBwAA"
+    )
+    source = SOURCE_BY_ID["hsguru_streamer_decks_legend_1000"]
+    html = f"""
+    <html><body><table>
+      <tr><th>Deck</th><th>Streamer</th></tr>
+      <tr>
+        <td><a href="/deck/41520944">Fresh deck</a>
+          <button data-clipboard-text="{deck_code}">Copy</button>
+        </td>
+        <td>Streamer</td>
+      </tr>
+    </table></body></html>
+    """
+
+    parsed = parse_html(source, html)
+
+    assert parsed["structured"]["rows"][0]["deck_code"] == deck_code
 
 
 def _matchup_table(

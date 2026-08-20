@@ -5,6 +5,7 @@ import hashlib
 import html
 import logging
 import random
+import re
 import time
 import uuid
 from collections import Counter
@@ -14,6 +15,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -57,6 +59,7 @@ from .fetch_routes import source_can_run_without_residential_proxy
 from .parser import parse_html
 from .parsesunix_contracts import (
     SPECIALIZED_API_SOURCE_IDS,
+    hsguru_deck_detail_response_contract,
     page_response_contract,
     specialized_api_response_contract,
 )
@@ -69,6 +72,7 @@ from .parsesunix_transport import (
 from .parsesunix_transport import (
     fetch as fetch_with_parsesunix,
 )
+from .parsesunix_transport import fetch_direct as fetch_direct_with_parsesunix
 from .parsesunix_transport import validate_acquired_response
 from .post_patch_policy import (
     EARLY_SOURCE_IDS,
@@ -1408,6 +1412,9 @@ async def _complete_parsesunix_shadow(
 
     try:
         parsed = parse_html(source, evidence.body)
+        if source.id == "hsguru_streamer_decks_legend_1000":
+            parsed = await _enrich_streamer_deck_codes_with_parsesunix(parsed)
+            parsed = _dedupe_streamer_decks_parsed(parsed)
         gate = validate_candidate_for_publish(
             source,
             parsed,
@@ -2001,6 +2008,92 @@ def _dedupe_streamer_decks_parsed(parsed: dict[str, Any]) -> dict[str, Any]:
                 unexplained_reasons=unexplained,
                 scope=str(evidence.get("scope") or "hsguru_streamer_first_table"),
             )
+    return parsed
+
+
+def _hsguru_deck_detail_url(value: object) -> str | None:
+    raw = str(value or "").strip()
+    try:
+        parsed = urlsplit(raw)
+        port = parsed.port
+    except ValueError:
+        return None
+    parts = [part for part in parsed.path.split("/") if part]
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname not in {"hsguru.com", "www.hsguru.com"}
+        or parsed.username is not None
+        or parsed.password is not None
+        or port not in {None, 443}
+        or len(parts) != 2
+        or parts[0] != "deck"
+        or re.fullmatch(r"[A-Za-z0-9_-]+", parts[1]) is None
+    ):
+        return None
+    return parsed._replace(query="", fragment="").geturl()
+
+
+async def _enrich_streamer_deck_codes_with_parsesunix(
+    parsed: dict[str, Any],
+) -> dict[str, Any]:
+    """Hydrate missing streamer deckstrings from free, validated detail pages."""
+
+    from .deck_decode import first_deck_code_from_text
+
+    tables = parsed.get("tables") or []
+    if not tables or not isinstance(tables[0], dict):
+        return parsed
+    objects = tables[0].get("objects") or []
+    if not isinstance(objects, list):
+        return parsed
+
+    rows_by_url: dict[str, list[dict[str, Any]]] = {}
+    for row in objects:
+        if not isinstance(row, dict):
+            continue
+        deck_text = str(row.get("Deck") or "")
+        existing = str(row.get("deck_code") or "").strip()
+        if existing or first_deck_code_from_text(deck_text):
+            continue
+        detail_url = _hsguru_deck_detail_url(row.get("Deck_url"))
+        if detail_url:
+            rows_by_url.setdefault(detail_url, []).append(row)
+
+    semaphore = asyncio.Semaphore(4)
+
+    async def hydrate(detail_url: str) -> tuple[str, str | None]:
+        async with semaphore:
+            evidence = await fetch_direct_with_parsesunix(
+                detail_url,
+                hsguru_deck_detail_response_contract(),
+            )
+        if not evidence.transport_validated:
+            return detail_url, None
+        return detail_url, first_deck_code_from_text(evidence.body)
+
+    results = await asyncio.gather(
+        *(hydrate(detail_url) for detail_url in rows_by_url),
+        return_exceptions=True,
+    )
+    for result in results:
+        if not isinstance(result, tuple):
+            continue
+        detail_url, deck_code = result
+        if not deck_code:
+            continue
+        for row in rows_by_url.get(detail_url, []):
+            row["deck_code"] = deck_code
+
+    deck_codes = {
+        code
+        for row in objects
+        if isinstance(row, dict)
+        and (code := str(row.get("deck_code") or "").strip())
+    }
+    parsed["deck_codes"] = sorted(deck_codes)
+    counts = parsed.get("counts")
+    if isinstance(counts, dict):
+        counts["deck_codes"] = len(deck_codes)
     return parsed
 
 
@@ -3395,6 +3488,9 @@ async def _fetch_source_with_active_lifecycle(
 
     log_action("parse.html", source_id=source.id, backend=backend, bytes_out=content_length)
     parsed = parse_html(source, body, page_snapshot)
+    if source.id == "hsguru_streamer_decks_legend_1000":
+        parsed = await _enrich_streamer_deck_codes_with_parsesunix(parsed)
+        parsed = _dedupe_streamer_decks_parsed(parsed)
     gate = validate_candidate_for_publish(source, parsed, backend=backend)
     ok, reason = gate.ok, gate.reason
     qmetrics = quality_metrics(source, parsed)

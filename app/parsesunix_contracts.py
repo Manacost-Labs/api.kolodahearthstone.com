@@ -118,3 +118,12 @@ def specialized_api_response_contract(source: Source) -> ResponseContract:
         required_json_paths=("type",),
         min_body_bytes=20,
     )
+
+
+def hsguru_deck_detail_response_contract() -> ResponseContract:
+    """Require a visible deckstring before a detail page can enrich a row."""
+
+    return ResponseContract.html(
+        canaries=("AAE",),
+        min_body_bytes=1_000,
+    )
