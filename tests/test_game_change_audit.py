@@ -53,6 +53,42 @@ class GameChangeAuditTest(unittest.TestCase):
         ):
             self.assertEqual(current_patch_from_catalog(), "36.2.0")
 
+    def test_recent_wiki_patch_wins_when_catalog_index_lags(self) -> None:
+        recent_changes = [
+            {"title": "Patch 36.2.2.249896"},
+            {"title": "Battlegrounds/Dark Gift"},
+        ]
+        with patch(
+            "app.game_change_audit.list_patches",
+            return_value={"patches": [{"version": "36.2.0.248348"}]},
+        ):
+            self.assertEqual(
+                current_patch_from_catalog(recent_changes=recent_changes),
+                "36.2.2",
+            )
+
+    def test_audit_excludes_operationally_disabled_source(self) -> None:
+        now = datetime(2026, 8, 20, tzinfo=UTC)
+
+        with patch(
+            "app.game_change_audit.source_operationally_enabled",
+            side_effect=lambda source_id: source_id != "firestone_standard",
+        ):
+            rows, issues = audit_critical_sources(
+                now=now,
+                status_loader=lambda _source_id: {"state": "ok"},
+                dataset_loader=lambda _source_id: None,
+            )
+
+        disabled = next(
+            row for row in rows if row["source_id"] == "firestone_standard"
+        )
+        self.assertEqual(disabled["state"], "excluded")
+        self.assertEqual(disabled["exclusion_reason"], "operationally-disabled")
+        self.assertNotIn(
+            "firestone_standard", {row["source_id"] for row in issues}
+        )
+
     def test_each_strategy_provider_is_checked_independently(self) -> None:
         now = datetime(2026, 8, 6, tzinfo=UTC)
         healthy_time = (now - timedelta(hours=1)).isoformat()
