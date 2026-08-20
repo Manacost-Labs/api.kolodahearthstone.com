@@ -4,10 +4,36 @@ import unittest
 from unittest.mock import patch
 from urllib.parse import urlparse
 
+from app.config import fetch_proxy_url, fetch_require_proxy
 from app.scrapers import proxy
 
 
 class IPRoyalProxyUrlTest(unittest.TestCase):
+    def test_leftover_proxy_url_is_ignored_without_explicit_enable(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "HS_FETCH_PROXY_URL": "http://user:pass@geo.iproyal.com:12321",
+                "HS_FETCH_REQUIRE_PROXY": "true",
+            },
+            clear=True,
+        ):
+            self.assertIsNone(fetch_proxy_url())
+            self.assertFalse(fetch_require_proxy())
+
+    def test_residential_proxy_requires_explicit_enable(self) -> None:
+        url = "http://user:pass@geo.iproyal.com:12321"
+        with patch.dict(
+            "os.environ",
+            {
+                "HS_RESIDENTIAL_PROXY_ENABLED": "true",
+                "HS_FETCH_PROXY_URL": url,
+            },
+            clear=True,
+        ):
+            self.assertEqual(fetch_proxy_url(), url)
+            self.assertFalse(fetch_require_proxy())
+
     def test_session_is_added_to_password(self) -> None:
         base = "http://user:pass_country-us@geo.iproyal.com:12321"
 

@@ -44,7 +44,7 @@ flowchart TB
 
 | Слой | Механизм | Файл |
 |------|----------|------|
-| Residential fallback | `HS_FETCH_REQUIRE_PROXY=true` сохраняет IPRoyal для разрешённых proxy-backed маршрутов; независимые proxyless/cloud-маршруты выполняются раньше | `proxy.py`, `config.py`, `fetch_routes.py` |
+| Residential fallback | По умолчанию выключен. Только `HS_RESIDENTIAL_PROXY_ENABLED=true` разрешает IPRoyal для proxy-backed маршрутов; независимые proxyless/cloud-маршруты выполняются раньше | `proxy.py`, `config.py`, `fetch_routes.py` |
 | Route-aware preflight | Proxy/FlareSolverr блокируют только selection без независимого полезного маршрута | `fetch_routes.py`, `preflight.py` |
 | Cloud fallback | Scrape.do → Firecrawl → Bright Data opt-in → Scrapfly | `firecrawl_backend.py`, `brightdata_backend.py` |
 | Ротация бэкендов | HSGuru: FS → patchright → scrapling → curl → cloudscraper; cap `HS_FETCH_BACKEND_MAX_SECONDS` | `rotator.py` |
@@ -63,11 +63,13 @@ flowchart TB
 
 | Переменная | По умолчанию | Эффект |
 |------------|--------------|--------|
+| `HS_RESIDENTIAL_PROXY_ENABLED` | `false` | Главный fail-closed переключатель. Без него даже сохранённый `HS_FETCH_PROXY_URL` игнорируется |
+| `HS_FETCH_REQUIRE_PROXY` | `false` | При включённом residential делает его обязательным только для selection без независимого маршрута |
 | `HS_PROXY_STICKY_MODE` | `domain` | **Рекомендуется:** один IP на `hsguru.com` / `hsreplay.net` (снижает day-2 баны) |
 | `HS_IPROYAL_SESSION_PER_SOURCE` | `false` | `user_session-SOURCE_ID` — липкий IP **на каждый source_id** (часть тарифов даёт **407**) |
 | `HS_IPROYAL_ROTATE_PER_FETCH` | `false` | Новый `_session-<random>` на **каждый** запрос — только для отладки |
 | `HS_HTTP_RETRY_ATTEMPTS` | `3` | HTTP retries с backoff 5s → 15s → 45s + burn сессии при 403/401/429 |
-| *(оба false)* | **текущий прод** | Rotating residential: **новый IP на новое TCP-соединение** |
+| *(оба false)* | Только при включённом residential | Rotating residential: **новый IP на новое TCP-соединение** |
 | `HS_FLARESOLVERR_SESSION_PER_SOURCE` | `true` | Новый браузер FlareSolverr на каждый source в `refresh` |
 
 ### Проверка ротации
@@ -149,7 +151,9 @@ BG comps: markdown с валидацией `_markdown_body_usable`; при пр�
 ## Рекомендуемые настройки продакшена
 
 ```env
-HS_FETCH_REQUIRE_PROXY=true
+HS_RESIDENTIAL_PROXY_ENABLED=false
+HS_FETCH_REQUIRE_PROXY=false
+HS_FETCH_PROXY_URL=
 HS_FETCH_DIRECT_ENABLED=false
 HS_API_REQUEST_DELAY_SECONDS=8
 HS_FETCH_MAX_RETRIES=3
@@ -175,7 +179,9 @@ HS_STALE_HOURS=12
 /srv/hs-data-api/venv/bin/python /srv/hs-data-api/scripts/cleanup-orphan-statuses.py
 ```
 
-При частых 429/403 на одном IP: сначала увеличьте delay до 12–15с; затем попробуйте `HS_IPROYAL_ROTATE_PER_FETCH=true` (если IPRoyal не отвечает 407).
+Residential следует включать только после отдельной проверки тарифа и лимита.
+Если он включён и часто получает 429/403 на одном IP: сначала увеличьте delay
+до 12–15с; затем попробуйте `HS_IPROYAL_ROTATE_PER_FETCH=true`.
 
 ## Слабые места (мониторить)
 

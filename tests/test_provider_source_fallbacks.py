@@ -49,6 +49,10 @@ HSREPLAY_SOURCE = Source(
     site="hsreplay",
     category="ranked",
 )
+RESIDENTIAL_ENV = {
+    "HS_RESIDENTIAL_PROXY_ENABLED": "true",
+    "HS_FETCH_PROXY_URL": "http://user:pass@geo.iproyal.com:1234",
+}
 
 
 def _heartharena_html() -> str:
@@ -183,7 +187,7 @@ class ProviderSourceFallbackTest(unittest.TestCase):
         self.assertNotIn("_fetch_backend", parsed["hsreplay_extracted"])
         with patch.dict(
             "os.environ",
-            {"HS_FETCH_PROXY_URL": "http://user:pass@geo.iproyal.com:1234"},
+            RESIDENTIAL_ENV,
         ):
             self.assertFalse(
                 _source_uses_residential_proxy(
@@ -270,7 +274,7 @@ class ProviderSourceFallbackTest(unittest.TestCase):
             patch("app.fetcher.log_action"),
             patch.dict(
                 "os.environ",
-                {"HS_FETCH_PROXY_URL": "http://user:pass@geo.iproyal.com:1234"},
+                RESIDENTIAL_ENV,
             ),
         ):
             status = _preserve_cached_ok_status(HEARTHARENA_SOURCE, failed)
@@ -349,7 +353,7 @@ class ProviderSourceFallbackTest(unittest.TestCase):
             patch("app.storage.data_dir", return_value=Path(temp_dir)),
             patch.dict(
                 "os.environ",
-                {"HS_FETCH_PROXY_URL": "http://user:pass@geo.iproyal.com:1234"},
+                RESIDENTIAL_ENV,
             ),
             patch(
                 "app.fetcher._fetch_hsreplay_api_source",
@@ -443,7 +447,7 @@ class ProviderSourceFallbackTest(unittest.TestCase):
         self.assertEqual(parsed["_transport_backend"], "scrape_do")
         with patch.dict(
             "os.environ",
-            {"HS_FETCH_PROXY_URL": "http://user:pass@geo.iproyal.com:1234"},
+            RESIDENTIAL_ENV,
         ):
             self.assertFalse(
                 _source_uses_residential_proxy(
@@ -455,7 +459,7 @@ class ProviderSourceFallbackTest(unittest.TestCase):
     def test_proxyless_transport_labels_do_not_change_legacy_backend_accounting(self) -> None:
         with patch.dict(
             "os.environ",
-            {"HS_FETCH_PROXY_URL": "http://user:pass@geo.iproyal.com:1234"},
+            RESIDENTIAL_ENV,
         ):
             self.assertTrue(_source_uses_residential_proxy(HSREPLAY_SOURCE, "direct"))
             self.assertTrue(
@@ -524,7 +528,7 @@ class ProviderSourceFallbackTest(unittest.TestCase):
         self.assertNotIn("_fetch_backend", parsed["structured"])
         with patch.dict(
             "os.environ",
-            {"HS_FETCH_PROXY_URL": "http://user:pass@geo.iproyal.com:1234"},
+            RESIDENTIAL_ENV,
         ):
             self.assertTrue(
                 _source_uses_residential_proxy(

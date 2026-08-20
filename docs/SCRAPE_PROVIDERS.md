@@ -42,6 +42,11 @@ Route-aware preflight не считает residential proxy или локаль�
 маршрута. Неудача одного provider/source также не должна останавливать
 независимые источники той же выборки.
 
+Residential-маршрут fail-closed: сохранённый `HS_FETCH_PROXY_URL` сам по себе
+его не включает. Для осознанного возврата этого платного fallback нужны
+`HS_RESIDENTIAL_PROXY_ENABLED=true` и проверенный тариф; штатный production
+оставляет переключатель выключенным и предпочитает Scrape.do.
+
 Интерактивные и Legend-каталоги HSGuru сохраняют Scrape.do как первый
 оплаченный маршрут. Большой плановый all-rank fan-out сначала использует
 локальный FlareSolverr: production-замер показал, что успешные Scrape.do

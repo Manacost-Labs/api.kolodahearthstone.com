@@ -306,13 +306,28 @@ def user_agent() -> str:
     )
 
 
+def residential_proxy_enabled() -> bool:
+    """Keep the metered residential route fail-closed unless explicitly enabled."""
+
+    return os.environ.get("HS_RESIDENTIAL_PROXY_ENABLED", "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
 def fetch_proxy_url() -> str | None:
+    if not residential_proxy_enabled():
+        return None
     value = os.environ.get("HS_FETCH_PROXY_URL", "").strip()
     return value or None
 
 
 def fetch_require_proxy() -> bool:
-    return os.environ.get("HS_FETCH_REQUIRE_PROXY", "true").strip().lower() in {
+    if not residential_proxy_enabled():
+        return False
+    return os.environ.get("HS_FETCH_REQUIRE_PROXY", "false").strip().lower() in {
         "1",
         "true",
         "yes",
