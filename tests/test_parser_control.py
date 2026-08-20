@@ -8,6 +8,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import AsyncMock, patch
 
 from app.parser_control import (
+    InvalidControlRequest,
     ParserControlStore,
     ParserRunWorker,
     RevisionConflict,
@@ -46,6 +47,57 @@ class ParserControlRegistryTest(unittest.TestCase):
 
 
 class ParserControlStoreTest(unittest.TestCase):
+    def test_recovery_run_requires_stable_correlation_and_deduplicates_it(self) -> None:
+        with TemporaryDirectory() as directory:
+            store = ParserControlStore(Path(directory))
+            kwargs = {
+                "source_ids": ["hsguru_meta_standard_legend"],
+                "requested_by": "convergence-controller",
+                "reason": "recover provisional",
+                "request_id": "convergence:chain-1:attempt-1",
+                "attempt_purpose": "recovery",
+                "origin_occurrence_id": "schedule:20260820T100000Z",
+                "recovery_chain_id": "chain-1",
+            }
+
+            created, deduplicated = store.enqueue_run(**kwargs)
+            repeated, repeated_deduplicated = store.enqueue_run(**kwargs)
+
+            self.assertFalse(deduplicated)
+            self.assertTrue(repeated_deduplicated)
+            self.assertEqual(repeated["id"], created["id"])
+            self.assertEqual(created["attemptPurpose"], "recovery")
+            self.assertEqual(
+                created["originOccurrenceId"],
+                kwargs["origin_occurrence_id"],
+            )
+            self.assertEqual(created["recoveryChainId"], "chain-1")
+            with self.assertRaisesRegex(
+                InvalidControlRequest,
+                "selection or attempt context",
+            ):
+                store.enqueue_run(
+                    **{
+                        **kwargs,
+                        "recovery_chain_id": "chain-2",
+                    }
+                )
+
+    def test_recovery_run_without_chain_fails_closed(self) -> None:
+        with TemporaryDirectory() as directory:
+            store = ParserControlStore(Path(directory))
+
+            with self.assertRaisesRegex(
+                InvalidControlRequest,
+                "require a recovery chain ID",
+            ):
+                store.enqueue_run(
+                    source_ids=["hsguru_meta_standard_legend"],
+                    requested_by="convergence-controller",
+                    reason="recover provisional",
+                    attempt_purpose="recovery",
+                )
+
     def test_policy_update_is_persisted_and_uses_optimistic_revision(self) -> None:
         with TemporaryDirectory() as directory:
             store = ParserControlStore(Path(directory))

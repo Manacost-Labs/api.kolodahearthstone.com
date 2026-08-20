@@ -1164,6 +1164,9 @@ def _orchestrator_run_view(run: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": str(run.get("id") or ""),
         "status": status,
+        "attemptPurpose": str(run.get("attemptPurpose") or "manual"),
+        "originOccurrenceId": run.get("originOccurrenceId"),
+        "recoveryChainId": run.get("recoveryChainId"),
         "sourceIds": source_ids,
         "totalSources": total,
         "completedSources": count("completedSources"),
@@ -1291,6 +1294,9 @@ def create_orchestrated_parser_run(
         "sourceIds",
         "sectionIds",
         "reason",
+        "attemptPurpose",
+        "originOccurrenceId",
+        "recoveryChainId",
     }
     if not isinstance(payload, dict):
         raise HTTPException(status_code=422, detail="Request body must be an object")
@@ -1326,6 +1332,9 @@ def create_orchestrated_parser_run(
             requested_by="trigger.dev",
             reason=reason,
             request_id=request_id,
+            attempt_purpose=str(payload.get("attemptPurpose") or "manual"),
+            origin_occurrence_id=payload.get("originOccurrenceId"),
+            recovery_chain_id=payload.get("recoveryChainId"),
         )
         return {
             "run": _orchestrator_run_view(run),

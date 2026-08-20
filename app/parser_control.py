@@ -35,6 +35,7 @@ MAX_RUN_SOURCES = len(SOURCE_BY_ID)
 MAX_ORCHESTRATOR_REQUESTS = 1000
 ACTIVE_RUN_STATUSES = {"queued", "running"}
 RUN_STATUSES = ACTIVE_RUN_STATUSES | {"succeeded", "partial", "failed"}
+ATTEMPT_PURPOSES = {"primary", "recovery", "manual", "diagnostic"}
 _logger = logging.getLogger(__name__)
 _REQUEST_ID_CHARACTERS = frozenset(
     "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._:-"
@@ -316,9 +317,46 @@ def _with_warning(
     return {**payload, "warnings": [*warnings, warning]}
 
 
+def _normalise_attempt_context(
+    *,
+    attempt_purpose: object,
+    origin_occurrence_id: object,
+    recovery_chain_id: object,
+) -> tuple[str, str | None, str | None]:
+    purpose = str(attempt_purpose or "").strip().lower()
+    if purpose not in ATTEMPT_PURPOSES:
+        raise InvalidControlRequest("Invalid parser run attempt purpose")
+
+    def correlation_id(value: object, *, field: str) -> str | None:
+        if value is None:
+            return None
+        identifier = str(value).strip()
+        if not identifier:
+            return None
+        if len(identifier) > 160 or any(
+            character not in _REQUEST_ID_CHARACTERS for character in identifier
+        ):
+            raise InvalidControlRequest(f"Invalid parser run {field}")
+        return identifier
+
+    origin = correlation_id(origin_occurrence_id, field="origin occurrence ID")
+    chain = correlation_id(recovery_chain_id, field="recovery chain ID")
+    if purpose == "recovery" and chain is None:
+        raise InvalidControlRequest("Recovery parser runs require a recovery chain ID")
+    if purpose != "recovery" and chain is not None:
+        raise InvalidControlRequest(
+            "Recovery chain ID is only valid for recovery parser runs"
+        )
+    if purpose != "recovery" and origin is not None:
+        raise InvalidControlRequest(
+            "Origin occurrence ID is only valid for recovery parser runs"
+        )
+    return purpose, origin, chain
+
+
 def _default_state() -> dict[str, Any]:
     return {
-        "schemaVersion": 3,
+        "schemaVersion": 4,
         "revision": 1,
         "policyConfigured": False,
         "policy": {
@@ -346,7 +384,7 @@ def _normalise_state(raw: dict[str, Any]) -> dict[str, Any]:
     state["revision"] = revision
     # Normalising an older file upgrades the in-memory representation; the
     # next mutation persists the current schema version.
-    state["schemaVersion"] = 3
+    state["schemaVersion"] = 4
 
     policy = raw.get("policy") or {}
     if not isinstance(policy, dict):
@@ -393,7 +431,26 @@ def _normalise_state(raw: dict[str, Any]) -> dict[str, Any]:
     runs = raw.get("runs") or []
     if not isinstance(runs, list):
         raise ParserControlStorageError("Parser control runs are invalid")
-    state["runs"] = [run for run in runs if isinstance(run, dict)][-MAX_RECENT_RUNS:]
+    normalised_runs: list[dict[str, Any]] = []
+    for raw_run in runs:
+        if not isinstance(raw_run, dict):
+            continue
+        run = dict(raw_run)
+        try:
+            purpose, origin, chain = _normalise_attempt_context(
+                attempt_purpose=run.get("attemptPurpose", "manual"),
+                origin_occurrence_id=run.get("originOccurrenceId"),
+                recovery_chain_id=run.get("recoveryChainId"),
+            )
+        except InvalidControlRequest as exc:
+            raise ParserControlStorageError(
+                "Parser control run attempt context is invalid"
+            ) from exc
+        run["attemptPurpose"] = purpose
+        run["originOccurrenceId"] = origin
+        run["recoveryChainId"] = chain
+        normalised_runs.append(run)
+    state["runs"] = normalised_runs[-MAX_RECENT_RUNS:]
 
     requests = raw.get("orchestratorRequests") or []
     if not isinstance(requests, list):
@@ -416,11 +473,24 @@ def _normalise_state(raw: dict[str, Any]) -> dict[str, Any]:
             or any(not isinstance(source_id, str) for source_id in source_ids)
         ):
             continue
+        try:
+            purpose, origin, chain = _normalise_attempt_context(
+                attempt_purpose=entry.get("attemptPurpose", "manual"),
+                origin_occurrence_id=entry.get("originOccurrenceId"),
+                recovery_chain_id=entry.get("recoveryChainId"),
+            )
+        except InvalidControlRequest as exc:
+            raise ParserControlStorageError(
+                "Parser orchestrator request attempt context is invalid"
+            ) from exc
         normalised_requests.append(
             {
                 "requestId": request_id,
                 "runId": run_id,
                 "requestedSourceIds": sorted(set(source_ids)),
+                "attemptPurpose": purpose,
+                "originOccurrenceId": origin,
+                "recoveryChainId": chain,
                 "createdAt": entry.get("createdAt"),
             }
         )
@@ -436,6 +506,9 @@ def _normalise_state(raw: dict[str, Any]) -> dict[str, Any]:
                 "requestedSourceIds": sorted(
                     set(run.get("requestedSourceIds") or run.get("sourceIds") or [])
                 ),
+                "attemptPurpose": run.get("attemptPurpose", "manual"),
+                "originOccurrenceId": run.get("originOccurrenceId"),
+                "recoveryChainId": run.get("recoveryChainId"),
                 "createdAt": run.get("createdAt"),
             }
         )
@@ -450,6 +523,9 @@ def _record_orchestrator_request(
     request_id: str,
     run_id: str,
     requested_source_ids: list[str],
+    attempt_purpose: str,
+    origin_occurrence_id: str | None,
+    recovery_chain_id: str | None,
 ) -> None:
     requests = [
         entry
@@ -461,6 +537,9 @@ def _record_orchestrator_request(
             "requestId": request_id,
             "runId": run_id,
             "requestedSourceIds": list(requested_source_ids),
+            "attemptPurpose": attempt_purpose,
+            "originOccurrenceId": origin_occurrence_id,
+            "recoveryChainId": recovery_chain_id,
             "createdAt": _iso(),
         }
     )
@@ -968,6 +1047,9 @@ class ParserControlStore:
         requested_by: str,
         reason: str | None,
         request_id: str | None = None,
+        attempt_purpose: str = "manual",
+        origin_occurrence_id: str | None = None,
+        recovery_chain_id: str | None = None,
     ) -> tuple[dict[str, Any], bool]:
         normalised = sorted(set(source_ids))
         if not normalised:
@@ -980,6 +1062,11 @@ class ParserControlStore:
         actor = str(requested_by or "admin-api").strip()[:120] or "admin-api"
         clean_reason = str(reason or "").strip()[:500] or None
         clean_request_id = str(request_id or "").strip() or None
+        purpose, origin, chain = _normalise_attempt_context(
+            attempt_purpose=attempt_purpose,
+            origin_occurrence_id=origin_occurrence_id,
+            recovery_chain_id=recovery_chain_id,
+        )
         if clean_request_id and (
             len(clean_request_id) > 160
             or any(character not in _REQUEST_ID_CHARACTERS for character in clean_request_id)
@@ -997,9 +1084,19 @@ class ParserControlStore:
                 )
                 if request_entry is not None:
                     existing_selection = request_entry["requestedSourceIds"]
-                    if existing_selection != normalised:
+                    existing_context = (
+                        request_entry.get("attemptPurpose", "manual"),
+                        request_entry.get("originOccurrenceId"),
+                        request_entry.get("recoveryChainId"),
+                    )
+                    if existing_selection != normalised or existing_context != (
+                        purpose,
+                        origin,
+                        chain,
+                    ):
                         raise InvalidControlRequest(
-                            "Orchestrator request ID was already used for another selection"
+                            "Orchestrator request ID was already used for another "
+                            "selection or attempt context"
                         )
                     existing = next(
                         (
@@ -1069,6 +1166,9 @@ class ParserControlStore:
                         request_id=clean_request_id,
                         run_id=str(exact_covering["id"]),
                         requested_source_ids=normalised,
+                        attempt_purpose=purpose,
+                        origin_occurrence_id=origin,
+                        recovery_chain_id=chain,
                     )
                     self._write_locked(state)
                     return view, True
@@ -1111,6 +1211,9 @@ class ParserControlStore:
                 "requestedBy": actor,
                 "requestId": clean_request_id,
                 "reason": clean_reason,
+                "attemptPurpose": purpose,
+                "originOccurrenceId": origin,
+                "recoveryChainId": chain,
                 "createdAt": _iso(),
                 "startedAt": None,
                 "finishedAt": None,
@@ -1128,6 +1231,9 @@ class ParserControlStore:
                     request_id=clean_request_id,
                     run_id=str(run["id"]),
                     requested_source_ids=normalised,
+                    attempt_purpose=purpose,
+                    origin_occurrence_id=origin,
+                    recovery_chain_id=chain,
                 )
             self._write_locked(state)
             return _run_public_view(run), bool(deduplicated_source_ids)
@@ -1767,12 +1873,18 @@ class ParserRunWorker:
         requested_by: str,
         reason: str | None,
         request_id: str | None = None,
+        attempt_purpose: str = "manual",
+        origin_occurrence_id: str | None = None,
+        recovery_chain_id: str | None = None,
     ) -> tuple[dict[str, Any], bool]:
         run, deduplicated = self.store.enqueue_run(
             source_ids=source_ids,
             requested_by=requested_by,
             reason=reason,
             request_id=request_id,
+            attempt_purpose=attempt_purpose,
+            origin_occurrence_id=origin_occurrence_id,
+            recovery_chain_id=recovery_chain_id,
         )
         self.start()
         self._wake.set()

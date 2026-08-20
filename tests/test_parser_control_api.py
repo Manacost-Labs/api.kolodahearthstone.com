@@ -83,6 +83,9 @@ class ParserControlApiTest(unittest.TestCase):
                     requested_by="trigger.dev",
                     reason="canary",
                     request_id="trigger:run_abc:attempt:1",
+                    attempt_purpose="manual",
+                    origin_occurrence_id=None,
+                    recovery_chain_id=None,
                 )
 
     def test_orchestrator_rejects_fields_outside_the_scoped_contract(self) -> None:
@@ -201,6 +204,9 @@ class ParserControlApiTest(unittest.TestCase):
             {
                 "id",
                 "status",
+                "attemptPurpose",
+                "originOccurrenceId",
+                "recoveryChainId",
                 "sourceIds",
                 "totalSources",
                 "completedSources",
@@ -217,6 +223,57 @@ class ParserControlApiTest(unittest.TestCase):
                     "servingCachedDataset": True,
                 }
             ],
+        )
+
+    def test_orchestrator_accepts_only_a_fully_correlated_recovery_run(self) -> None:
+        with TemporaryDirectory() as directory, patch.dict(
+            os.environ,
+            {
+                "HS_API_DATA_DIR": directory,
+                "HS_ORCHESTRATOR_API_KEY": ORCHESTRATOR_TOKEN,
+            },
+            clear=False,
+        ), patch("app.parser_control._RUN_WORKER") as worker, TestClient(app) as client:
+            worker.enqueue.return_value = (
+                {
+                    "id": "0" * 32,
+                    "status": "queued",
+                    "attemptPurpose": "recovery",
+                    "originOccurrenceId": "schedule:20260820T100000Z",
+                    "recoveryChainId": "chain-1",
+                    "sourceIds": ["hsguru_meta_standard_legend"],
+                    "totalSources": 1,
+                    "completedSources": 0,
+                    "failedSources": 0,
+                    "results": [],
+                },
+                False,
+            )
+            payload = {
+                "requestId": "convergence:chain-1:attempt-1",
+                "sourceIds": ["hsguru_meta_standard_legend"],
+                "attemptPurpose": "recovery",
+                "originOccurrenceId": "schedule:20260820T100000Z",
+                "recoveryChainId": "chain-1",
+            }
+
+            response = client.post(
+                "/admin/orchestrator/parser-runs",
+                headers={"X-Orchestrator-Key": ORCHESTRATOR_TOKEN},
+                json=payload,
+            )
+
+        self.assertEqual(response.status_code, 202, response.text)
+        self.assertEqual(response.json()["run"]["attemptPurpose"], "recovery")
+        self.assertEqual(response.json()["run"]["recoveryChainId"], "chain-1")
+        worker.enqueue.assert_called_once_with(
+            source_ids=["hsguru_meta_standard_legend"],
+            requested_by="trigger.dev",
+            reason=None,
+            request_id="convergence:chain-1:attempt-1",
+            attempt_purpose="recovery",
+            origin_occurrence_id="schedule:20260820T100000Z",
+            recovery_chain_id="chain-1",
         )
 
     def test_parser_runs_exposes_normalized_source_result_contract(self) -> None:
