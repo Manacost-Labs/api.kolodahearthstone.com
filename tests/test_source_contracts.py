@@ -312,6 +312,43 @@ class SourceContractsTest(unittest.TestCase):
         self.assertFalse(report["ok"])
         self.assertIn("too few rows (9 < 10)", report["warnings"])
 
+    def test_hsguru_meta_strict_completeness_requires_unique_archetypes(self) -> None:
+        strategies = [
+            {
+                "Archetype": f"Deck {index}",
+                "Winrate↓": "51%",
+                "Popularity": "2%",
+            }
+            for index in range(10)
+        ]
+        structured = {
+            "type": "meta",
+            "strategies": strategies,
+            "completeness_schema_version": 1,
+            "row_retrieval": {
+                "raw_rows": 10,
+                "eligible_rows": 10,
+                "normalized_rows": 10,
+                "explained_drops": 0,
+                "unexplained_drops": 0,
+                "drop_reasons": {"explained": {}, "unexplained": {}},
+            },
+        }
+
+        complete = contract_quality_report("hsguru_meta_wild_legend", structured)
+        duplicate = contract_quality_report(
+            "hsguru_meta_wild_legend",
+            {
+                **structured,
+                "strategies": [*strategies[:-1], dict(strategies[0])],
+            },
+        )
+
+        self.assertTrue(complete["retrieval_complete"])
+        self.assertTrue(complete["identity_checks"]["strategies"]["complete"])
+        self.assertFalse(duplicate["retrieval_complete"])
+        self.assertFalse(duplicate["identity_checks"]["strategies"]["complete"])
+
     def test_firestone_comps_still_rejects_truncated_post_patch_response(self) -> None:
         comps = [
             {

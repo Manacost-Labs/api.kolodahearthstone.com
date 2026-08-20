@@ -5,6 +5,7 @@ import re
 from typing import Any
 
 from .cards_index import cards_by_id, resolve_card_name
+from .completeness import COMPLETENESS_SCHEMA_VERSION, row_retrieval_evidence
 from .parsing_normalize import is_percent, looks_like_name
 from .sources import SOURCE_BY_ID, Source
 
@@ -695,7 +696,17 @@ def build_structured(source: Source, data: dict[str, Any]) -> dict[str, Any]:
             rows = []
             for table in tables:
                 rows.extend(table.get("objects") or [])
-            return {"type": "meta", "strategies": rows}
+            return {
+                "type": "meta",
+                "strategies": rows,
+                "completeness_schema_version": COMPLETENESS_SCHEMA_VERSION,
+                "row_retrieval": row_retrieval_evidence(
+                    raw_rows=len(rows),
+                    eligible_rows=len(rows),
+                    normalized_rows=len(rows),
+                    scope="hsguru_meta_tables",
+                ),
+            }
         if source.category == "streamer_decks":
             return {"type": "streamer_decks", "rows": tables[0].get("objects") if tables else []}
         if source.category == "matchups":
