@@ -71,6 +71,8 @@ from .post_patch_policy import (
     build_provisional_metadata,
     capture_publication_policy,
     early_policy_changed_since_capture,
+    policy_for,
+    stable_validation_mode,
 )
 from .proxy_errors import ProxyPaymentRequiredError
 from .publish_gate import (
@@ -108,6 +110,7 @@ from .source_tiers import (
 )
 from .sources import SOURCE_BY_ID, SOURCES, Source
 from .storage import (
+    load_baseline,
     load_dataset,
     load_status,
     save_baseline,
@@ -1585,9 +1588,82 @@ def _save_dataset_with_checks(
             },
         )
         return True, message, {}
-    reg, msg, extra = check_dataset_regression(
-        source, previous_data=prev_data, new_data=new_data
-    )
+    try:
+        metadata_time = datetime.fromisoformat(fetched_at.replace("Z", "+00:00"))
+    except ValueError:
+        metadata_time = None
+
+    early_policy_active = policy_for(source.id, at=metadata_time) is not None
+    strict_validation_ok = False
+    strict_validation_reason: str | None = None
+    strict_regression = False
+    strict_regression_message: str | None = None
+    strict_extra: dict[str, Any] = {}
+    if early_policy_active:
+        previous_structured = (prev_data or {}).get("structured") or {}
+        strict_previous_data = prev_data
+        if previous_structured.get("provisional") is True:
+            stable_baseline = load_baseline(
+                source.id,
+                STABLE_PUBLICATION_BASELINE_LABEL,
+            ) or load_baseline(source.id, POST_PATCH_BASELINE_LABEL)
+            strict_previous_data = (stable_baseline or {}).get("data") or prev_data
+        with stable_validation_mode():
+            from .scrapers.quality import validate_parsed_data
+
+            strict_validation_ok, strict_validation_reason = validate_parsed_data(
+                source,
+                new_data,
+                emit_telemetry=False,
+            )
+            if strict_validation_ok:
+                (
+                    strict_regression,
+                    strict_regression_message,
+                    strict_extra,
+                ) = check_dataset_regression(
+                    source,
+                    previous_data=strict_previous_data,
+                    new_data=new_data,
+                )
+
+    if early_policy_active and strict_validation_ok and not strict_regression:
+        reg, msg = False, None
+        extra = {
+            **strict_extra,
+            "post_patch_strict_validation": True,
+            "post_patch_publication_mode": "stable",
+        }
+    else:
+        reg, msg, extra = check_dataset_regression(
+            source,
+            previous_data=prev_data,
+            new_data=new_data,
+        )
+        if early_policy_active:
+            strict_failure = (
+                strict_regression_message
+                if strict_regression
+                else strict_validation_reason
+            )
+            extra.update(
+                {
+                    "post_patch_strict_validation": False,
+                    "post_patch_publication_mode": "provisional",
+                    "post_patch_strict_failure": strict_failure,
+                }
+            )
+            log_action(
+                "quality.post_patch.strict_deferred",
+                source_id=source.id,
+                state=SourceState.PARTIAL,
+                level="info",
+                detail=strict_failure,
+                extra={
+                    "strict_regression": strict_regression,
+                    "strict_rows": strict_extra.get("rows_after"),
+                },
+            )
     if reg:
         log_action(
             "quality.regression.warn",
@@ -1618,15 +1694,15 @@ def _save_dataset_with_checks(
     else:
         baseline_rows = estimate_metric_count(source, prev_data or {})
     accepted_rows = estimate_metric_count(source, new_data)
-    try:
-        metadata_time = datetime.fromisoformat(fetched_at.replace("Z", "+00:00"))
-    except ValueError:
-        metadata_time = None
-    provisional_metadata = build_provisional_metadata(
-        source.id,
-        accepted_rows=accepted_rows,
-        baseline_rows=baseline_rows or accepted_rows,
-        at=metadata_time,
+    provisional_metadata = (
+        build_provisional_metadata(
+            source.id,
+            accepted_rows=accepted_rows,
+            baseline_rows=baseline_rows or accepted_rows,
+            at=metadata_time,
+        )
+        if not strict_validation_ok or strict_regression
+        else {}
     )
     if provisional_metadata:
         if previous is not None and not previous_structured.get("provisional"):

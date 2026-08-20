@@ -45,6 +45,10 @@ _CAPTURED_POLICY: ContextVar[CapturedPublicationPolicy | None] = ContextVar(
     "captured_publication_policy",
     default=None,
 )
+_FORCE_STABLE_VALIDATION: ContextVar[bool] = ContextVar(
+    "force_stable_post_patch_validation",
+    default=False,
+)
 
 
 ARENA_EARLY_SOURCE_IDS = frozenset(
@@ -170,6 +174,22 @@ def captured_publication_policy(source_id: str) -> CapturedPublicationPolicy | N
     return captured
 
 
+@contextmanager
+def stable_validation_mode() -> Iterator[None]:
+    """Temporarily evaluate validators against the normal stable policy.
+
+    Early mode is a fallback publication policy. Callers use this context to
+    prove whether a candidate already satisfies the full stable contract before
+    considering provisional publication.
+    """
+
+    reset_token = _FORCE_STABLE_VALIDATION.set(True)
+    try:
+        yield
+    finally:
+        _FORCE_STABLE_VALIDATION.reset(reset_token)
+
+
 def early_policy_changed_since_capture(
     source_id: str,
 ) -> tuple[bool, CapturedPublicationPolicy | None, dict[str, Any] | None]:
@@ -187,6 +207,8 @@ def early_policy_changed_since_capture(
 
 
 def policy_for(source_id: str, *, at: datetime | None = None) -> PostPatchPolicy | None:
+    if _FORCE_STABLE_VALIDATION.get():
+        return None
     if source_id not in EARLY_SOURCE_IDS:
         return None
     captured = captured_publication_policy(source_id)

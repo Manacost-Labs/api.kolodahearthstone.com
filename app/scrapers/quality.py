@@ -135,7 +135,12 @@ def quality_metrics(source: Source, parsed: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def validate_parsed_data(source: Source, parsed: dict[str, Any]) -> tuple[bool, str]:
+def validate_parsed_data(
+    source: Source,
+    parsed: dict[str, Any],
+    *,
+    emit_telemetry: bool = True,
+) -> tuple[bool, str]:
     title = (parsed.get("title") or "").lower()
     structured = parsed.get("structured") or parsed.get("hsreplay_extracted") or {}
     # JSON/API collectors intentionally publish structured payloads without an
@@ -154,27 +159,30 @@ def validate_parsed_data(source: Source, parsed: dict[str, Any]) -> tuple[bool, 
             source.id, structured
         )
         if not contract_ok:
-            _log_quality_action(
-                "source_contract.validate.fail",
-                source_id=source.id,
-                level="warn",
-                detail=contract_reason,
-                extra={"quality_report": _contract_report},
-            )
-            if _contract_report.get("critical_fields"):
+            if emit_telemetry:
                 _log_quality_action(
-                    "quality.field_fill.warn",
+                    "source_contract.validate.fail",
                     source_id=source.id,
                     level="warn",
                     detail=contract_reason,
-                    extra={"critical_fields": _contract_report.get("critical_fields")},
+                    extra={"quality_report": _contract_report},
                 )
+                if _contract_report.get("critical_fields"):
+                    _log_quality_action(
+                        "quality.field_fill.warn",
+                        source_id=source.id,
+                        level="warn",
+                        detail=contract_reason,
+                        extra={
+                            "critical_fields": _contract_report.get("critical_fields")
+                        },
+                    )
             return False, f"source contract failed: {contract_reason}"
         semantic_report = validate_structured(source.id, structured)
         semantic_warnings = [
             issue for issue in semantic_report.issues if issue.severity == "warning"
         ]
-        if semantic_warnings:
+        if semantic_warnings and emit_telemetry:
             _log_quality_action(
                 "source_semantic.validate.warn",
                 source_id=source.id,
@@ -195,25 +203,26 @@ def validate_parsed_data(source: Source, parsed: dict[str, Any]) -> tuple[bool, 
                 },
             )
         if not semantic_report.ok:
-            _log_quality_action(
-                "source_semantic.validate.fail",
-                source_id=source.id,
-                level="warn",
-                detail=semantic_report.reason,
-                extra={
-                    "semantic_score": semantic_report.score,
-                    "semantic_metrics": semantic_report.metrics,
-                    "semantic_issues": [
-                        {
-                            "code": issue.code,
-                            "field": issue.field,
-                            "severity": issue.severity,
-                            "message": issue.message,
-                        }
-                        for issue in semantic_report.issues
-                    ],
-                },
-            )
+            if emit_telemetry:
+                _log_quality_action(
+                    "source_semantic.validate.fail",
+                    source_id=source.id,
+                    level="warn",
+                    detail=semantic_report.reason,
+                    extra={
+                        "semantic_score": semantic_report.score,
+                        "semantic_metrics": semantic_report.metrics,
+                        "semantic_issues": [
+                            {
+                                "code": issue.code,
+                                "field": issue.field,
+                                "severity": issue.severity,
+                                "message": issue.message,
+                            }
+                            for issue in semantic_report.issues
+                        ],
+                    },
+                )
             return False, f"source semantic validation failed: {semantic_report.reason}"
 
     if source.site == "hsguru":

@@ -14,6 +14,7 @@ from app.post_patch_policy import (
     effective_contract_min_rows,
     effective_firestone_minimum_sample,
     policy_for,
+    stable_validation_mode,
 )
 from app.scrapers.quality import looks_like_real_page
 from app.source_contracts import contract_quality_report
@@ -102,6 +103,16 @@ class PostPatchPolicyTest(unittest.TestCase):
         self.assertIsNone(policy_for("hsreplay_cards_legend_1d", at=WINDOW_TIME))
         self.assertIsNone(policy_for("hsreplay_arena_cards_advanced", at=BEFORE_WINDOW))
         self.assertIsNone(policy_for("hsreplay_arena_cards_advanced", at=AFTER_WINDOW))
+
+    def test_stable_validation_mode_ignores_active_early_policy(self) -> None:
+        self.assertIsNotNone(policy_for("hsreplay_arena_cards_advanced", at=WINDOW_TIME))
+
+        with stable_validation_mode():
+            self.assertIsNone(
+                policy_for("hsreplay_arena_cards_advanced", at=WINDOW_TIME)
+            )
+
+        self.assertIsNotNone(policy_for("hsreplay_arena_cards_advanced", at=WINDOW_TIME))
 
     def test_policy_explicitly_covers_hsguru_and_only_current_patch_card_periods(self) -> None:
         self.assertIn("hsguru_meta_standard_legend", EARLY_SOURCE_IDS)
@@ -688,6 +699,51 @@ class PostPatchPolicyTest(unittest.TestCase):
         self.assertEqual(structured["baseline_rows"], 1000)
         self.assertEqual(structured["coverage_ratio"], 0.02)
         save_baseline.assert_not_called()
+
+    def test_strict_candidate_is_full_fresh_during_early_window(self) -> None:
+        source = SOURCE_BY_ID["hsreplay_arena_cards_advanced"]
+        previous = {
+            "data": {
+                "structured": {
+                    "type": "arena_card_tiers",
+                    "cards": _arena_cards(1000),
+                }
+            }
+        }
+        candidate = {
+            "data": {
+                "structured": {
+                    "type": "arena_card_tiers",
+                    "cards": _arena_cards(1000),
+                }
+            }
+        }
+
+        with (
+            patch("app.post_patch_policy.current_time", return_value=WINDOW_TIME),
+            patch("app.fetcher.load_dataset", return_value=previous),
+            patch("app.fetcher.load_baseline", return_value=None),
+            patch("app.fetcher.save_dataset") as save_dataset,
+            patch("app.fetcher.save_baseline") as save_stable,
+            patch("app.fetcher.save_baseline_once"),
+            patch("app.fetcher.log_action"),
+        ):
+            regression, message, provisional_metadata = _save_dataset_with_checks(
+                source,
+                candidate,
+                fetched_at=WINDOW_TIME.isoformat(),
+            )
+
+        self.assertFalse(regression)
+        self.assertIsNone(message)
+        self.assertEqual(provisional_metadata, {})
+        saved = save_dataset.call_args.args[1]
+        self.assertNotIn("provisional", saved["data"]["structured"])
+        save_stable.assert_called_once_with(
+            source.id,
+            "stable-publication",
+            candidate,
+        )
 
     def test_first_provisional_publish_preserves_previous_stable_dataset(self) -> None:
         source = SOURCE_BY_ID["hsreplay_arena_cards_advanced"]
