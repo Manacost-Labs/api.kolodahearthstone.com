@@ -7,7 +7,11 @@ from app.api_only_sources import blocks_browser_fallback
 from app.fetcher import _fetch_hsreplay_api_source, _preserve_cached_ok_status
 from app.hsreplay_bg_trinkets import fetch_battlegrounds_trinkets
 from app.publish_gate import validate_candidate_for_publish
-from app.source_contracts import HSREPLAY_JSON_CHANNELS, get_contract
+from app.source_contracts import (
+    HSREPLAY_JSON_CHANNELS,
+    contract_quality_report,
+    get_contract,
+)
 from app.source_tiers import BROWSER_PROTECTED_IDS, MEDIUM_API_IDS, SourceTier, tier_for
 from app.sources import SOURCE_BY_ID
 from app.trinket_slices import (
@@ -77,10 +81,23 @@ def test_legacy_trinket_adapter_filters_group_and_reuses_slice_cache_key() -> No
 
     assert structured["type"] == "bg_trinkets"
     assert structured["parser_level"] == "primary"
+    assert structured["completeness_schema_version"] == 1
     assert structured["dropped_rows"] == 0
     assert [row["trinket_id"] for row in structured["trinkets"]] == ["BG_TEST_1001"]
     assert structured["source"]["mmr_percentile"] == "TOP_1_PERCENT"
     assert structured["source"]["time_range"] == "LAST_7_DAYS"
+    assert structured["row_retrieval"] == {
+        "raw_rows": 2,
+        "eligible_rows": 1,
+        "normalized_rows": 1,
+        "explained_drops": 1,
+        "unexplained_drops": 0,
+        "drop_reasons": {
+            "explained": {"unselected_trinket_tier": 1},
+            "unexplained": {},
+        },
+        "scope": "hsreplay_trinkets:TOP_1_PERCENT:LAST_7_DAYS",
+    }
     fetch_json.assert_awaited_once_with(
         source.fetch_url,
         source_id=source.id,
@@ -115,6 +132,7 @@ def test_combined_trinket_slice_keeps_lesser_and_greater_rows() -> None:
             return await fetch_battlegrounds_trinkets(source)
 
     structured = asyncio.run(run())
+    report = contract_quality_report(source.id, structured)
 
     assert {row["trinket_tier"] for row in structured["trinkets"]} == {
         "Lesser",
@@ -122,8 +140,49 @@ def test_combined_trinket_slice_keeps_lesser_and_greater_rows() -> None:
     }
     assert structured["active_trinkets"] == 272
     assert structured["dropped_rows"] == 0
+    assert structured["completeness_schema_version"] == 1
+    assert structured["row_retrieval"]["raw_rows"] == 272
+    assert structured["row_retrieval"]["normalized_rows"] == 272
+    assert structured["row_retrieval"]["unexplained_drops"] == 0
     assert structured["source"]["mmr_percentile"] == "TOP_20_PERCENT"
     assert structured["source"]["time_range"] == "CURRENT_BATTLEGROUNDS_PATCH"
+    assert report["ok"], report["warnings"]
+    assert report["retrieval_complete"] is True
+    assert report["identity_checks"]["trinkets"]["complete"] is True
+
+
+def test_trinket_retrieval_fails_closed_on_unexplained_normalization_loss() -> None:
+    source = SOURCE_BY_ID["hsreplay_battlegrounds_trinkets_lesser"]
+    raw_rows = [_raw_trinket(4_000 + index, "lesser") for index in range(80)]
+    raw_rows[-1]["final_placement_distribution"] = [100]
+    payload = {"data": raw_rows}
+    cards = {
+        int(row["trinket_dbf_id"]): _card(int(row["trinket_dbf_id"]))
+        for row in raw_rows
+    }
+
+    async def run() -> dict[str, object]:
+        with (
+            patch(
+                "app.hsreplay_bg_trinkets.fetch_hsreplay_json",
+                new=AsyncMock(return_value=payload),
+            ),
+            patch("app.hsreplay_extract.cards_by_dbfid", return_value=cards),
+            patch("app.structured.cards_by_id", return_value={}),
+        ):
+            return await fetch_battlegrounds_trinkets(source)
+
+    structured = asyncio.run(run())
+    report = contract_quality_report(source.id, structured)
+
+    assert structured["row_retrieval"]["raw_rows"] == 80
+    assert structured["row_retrieval"]["normalized_rows"] == 79
+    assert structured["row_retrieval"]["unexplained_drops"] == 1
+    assert structured["row_retrieval"]["drop_reasons"]["unexplained"] == {
+        "normalization_loss": 1
+    }
+    assert report["retrieval_complete"] is False
+    assert "row_retrieval has unexplained dropped rows" in report["warnings"]
 
 
 def test_all_trinket_sources_are_api_only_medium_sources_with_strict_contracts() -> None:

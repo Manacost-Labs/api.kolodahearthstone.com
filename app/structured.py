@@ -7,7 +7,7 @@ from typing import Any
 from .cards_index import cards_by_id, resolve_card_name
 from .completeness import COMPLETENESS_SCHEMA_VERSION, row_retrieval_evidence
 from .parsing_normalize import is_percent, looks_like_name
-from .sources import SOURCE_BY_ID, Source
+from .sources import Source
 
 INT_RE = re.compile(r"^\d+$")
 # HSReplay serves localized deck rows ("Winrate ... Games" or "Побед ... Игр"),
@@ -746,7 +746,27 @@ def build_structured(source: Source, data: dict[str, Any]) -> dict[str, Any]:
                 ),
             }
         if source.category == "streamer_decks":
-            return {"type": "streamer_decks", "rows": tables[0].get("objects") if tables else []}
+            raw_rows = tables[0].get("objects") if tables else []
+            if not isinstance(raw_rows, list):
+                raw_rows = []
+            rows = [row for row in raw_rows if isinstance(row, dict)]
+            dropped_rows = len(raw_rows) - len(rows)
+            return {
+                "type": "streamer_decks",
+                "rows": rows,
+                "completeness_schema_version": COMPLETENESS_SCHEMA_VERSION,
+                "row_retrieval": row_retrieval_evidence(
+                    raw_rows=len(raw_rows),
+                    eligible_rows=len(raw_rows),
+                    normalized_rows=len(rows),
+                    unexplained_reasons=(
+                        {"non_object_table_row": dropped_rows}
+                        if dropped_rows
+                        else None
+                    ),
+                    scope="hsguru_streamer_first_table",
+                ),
+            }
         if source.category == "matchups":
             matchups, row_retrieval = _parse_hsguru_matchups_with_evidence(tables)
             return {

@@ -446,10 +446,12 @@ Source ID: `vicious_syndicate_radars`, тип `vicious_syndicate_radars`.
 
 ### Честная полнота v1
 
-У `hsreplay_battlegrounds_minions`, `hsreplay_battlegrounds_compositions`,
-`hsreplay_arena_cards_advanced`, `hsreplay_arena_legendaries` и
-`firestone_standard` новый snapshot содержит
-`completeness_schema_version=1`. Он включает два независимых доказательства:
+У источников с реализованным source-specific retrieval-контрактом новый
+snapshot содержит `completeness_schema_version=1`. К ним относятся, в
+частности, `hsreplay_battlegrounds_minions`,
+`hsreplay_battlegrounds_compositions`, `hsreplay_arena_cards_advanced`,
+`hsreplay_arena_legendaries`, `firestone_standard` и перечисленные ниже
+семейства. Схема включает два независимых доказательства:
 
 - `field_availability` у критичных полей отличает реальное значение,
   детерминированно отсутствующую upstream-метрику и необъяснённую потерю;
@@ -540,6 +542,13 @@ JSON `card_list` с нормализованными картами и пров�
 Три `hsguru_matchups_*` среза сверяют все ячейки матрицы и уникальность пары
 `(archetype, vs)`; только диагональная self-matchup ячейка считается
 детерминированно неприменимой.
+Одиннадцать `hsreplay_battlegrounds_trinkets_*` срезов сверяют каждую строку
+JSON API и уникальность `variant_key`; для двух legacy-срезов отбрасывание
+противоположного Lesser/Greater tier является детерминированным, любая другая
+потеря остаётся необъяснённой. Часовой
+`hsguru_streamer_decks_legend_1000` также сверяет все строки первой таблицы;
+малое окно из одной или двух полностью валидных колод допустимо, пустое или
+повреждённое окно — нет.
 
 Поле `macro_target_met` вычисляется backend по точным дробям до округления и
 является единственным безопасным сигналом прохождения macro-gate для панели.

@@ -43,6 +43,52 @@ def test_hsguru_meta_emits_reconciled_completeness_evidence() -> None:
     assert report["retrieval_completeness_score"] == 1.0
 
 
+def test_hsguru_streamer_emits_reconciled_completeness_evidence() -> None:
+    rows = [
+        {
+            "Deck": "Fresh deck",
+            "Streamer": "Streamer",
+            "deck_code": (
+                "AAEBAf0GBs30Av76A4f7A564BtvXB63ZBwycENfOA4j0A8b5A8f5A63p"
+                "BdCeBu6hBom1BoSZB+C+B43cBwAA"
+            ),
+        }
+    ]
+    source = SOURCE_BY_ID["hsguru_streamer_decks_legend_1000"]
+
+    structured = build_structured(
+        source,
+        {"tables": [{"objects": rows}], "text_preview": [], "links": []},
+    )
+    report = contract_quality_report(source.id, structured)
+
+    assert structured["completeness_schema_version"] == 1
+    assert structured["row_retrieval"] == {
+        "raw_rows": 1,
+        "eligible_rows": 1,
+        "normalized_rows": 1,
+        "explained_drops": 0,
+        "unexplained_drops": 0,
+        "drop_reasons": {"explained": {}, "unexplained": {}},
+        "scope": "hsguru_streamer_first_table",
+    }
+    assert report["ok"] is True
+    assert report["low_activity"] is True
+    assert report["retrieval_complete"] is True
+
+
+def test_hsguru_streamer_rejects_non_object_table_rows() -> None:
+    source = SOURCE_BY_ID["hsguru_streamer_decks_legend_1000"]
+    structured = build_structured(
+        source,
+        {"tables": [{"objects": ["broken"]}], "text_preview": [], "links": []},
+    )
+    report = contract_quality_report(source.id, structured)
+
+    assert structured["row_retrieval"]["unexplained_drops"] == 1
+    assert report["retrieval_complete"] is False
+
+
 def _matchup_table(*, missing_non_self: bool = False) -> dict:
     archetypes = ["Deck A", "Deck B", "Deck C"]
     rows = []

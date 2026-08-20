@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .completeness import COMPLETENESS_SCHEMA_VERSION, row_retrieval_evidence
 from .hsreplay_client import fetch_hsreplay_json
 from .hsreplay_extract import parse_bg_trinkets_api_payload
 from .sources import Source
@@ -40,6 +41,8 @@ async def fetch_battlegrounds_trinkets(source: Source) -> dict[str, Any]:
         source_id=source.id,
         cache_key=f"bg:trinkets:{mmr_percentile}:{time_range}",
     )
+    payload_data = payload.get("data")
+    raw_payload_rows = len(payload_data) if isinstance(payload_data, list) else 0
     raw_rows = _payload_rows(payload)
     trinkets = [
         row
@@ -55,12 +58,43 @@ async def fetch_battlegrounds_trinkets(source: Source) -> dict[str, Any]:
         for row in raw_rows
         if str(row.get("group") or "").strip().lower() in selected_groups
     )
+    unselected_rows = len(raw_rows) - selected_raw_rows
+    explained_unselected_rows = (
+        unselected_rows
+        if source.id in LEGACY_DEFAULT_TRINKET_SOURCE_IDS
+        else 0
+    )
+    unexplained_reasons = {
+        reason: count
+        for reason, count in (
+            ("non_object_payload_row", raw_payload_rows - len(raw_rows)),
+            (
+                "unknown_trinket_tier",
+                unselected_rows - explained_unselected_rows,
+            ),
+            ("normalization_loss", selected_raw_rows - len(trinkets)),
+        )
+        if count
+    }
     return {
         "type": "bg_trinkets",
         "trinkets": trinkets,
         "active_trinkets": len(trinkets),
         "parser_level": "primary",
         "dropped_rows": max(0, selected_raw_rows - len(trinkets)),
+        "completeness_schema_version": COMPLETENESS_SCHEMA_VERSION,
+        "row_retrieval": row_retrieval_evidence(
+            raw_rows=raw_payload_rows,
+            eligible_rows=selected_raw_rows,
+            normalized_rows=len(trinkets),
+            explained_reasons=(
+                {"unselected_trinket_tier": explained_unselected_rows}
+                if explained_unselected_rows
+                else None
+            ),
+            unexplained_reasons=unexplained_reasons,
+            scope=f"hsreplay_trinkets:{mmr_percentile}:{time_range}",
+        ),
         "source": {
             "key": "hsreplay",
             "url": source.url,

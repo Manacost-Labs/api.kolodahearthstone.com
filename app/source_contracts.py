@@ -100,6 +100,13 @@ for _hsguru_matchups_source_id in (
     EXPLAINED_ROW_DROP_REASONS[_hsguru_matchups_source_id] = frozenset(
         {"self_matchup_not_applicable"}
     )
+for _legacy_trinket_source_id in (
+    "hsreplay_battlegrounds_trinkets_lesser",
+    "hsreplay_battlegrounds_trinkets_greater",
+):
+    EXPLAINED_ROW_DROP_REASONS[_legacy_trinket_source_id] = frozenset(
+        {"unselected_trinket_tier"}
+    )
 HSREPLAY_FRESHNESS_GATED_SOURCE_IDS = frozenset(
     {
         "hsreplay_battlegrounds_minions",
@@ -1593,6 +1600,8 @@ def contract_quality_report(
             identity_specs.append(("cards", rows, "dbfId"))
         elif structured.get("type") == "meta":
             identity_specs.append(("strategies", rows, "Archetype"))
+        elif structured.get("type") == "bg_trinkets":
+            identity_specs.append(("trinkets", rows, "variant_key"))
         elif source_id == "hsreplay_battlegrounds_minions":
             identity_specs.append(("minions", rows, "minion_dbf_id"))
         elif source_id == "hsreplay_battlegrounds_compositions":
