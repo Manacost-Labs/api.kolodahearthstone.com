@@ -23,6 +23,7 @@ _FIRST_RUN_LOOKBACK = timedelta(hours=24)
 class PlannerSummary:
     mode: PlannerMode
     scanned_terminal_events: int
+    scanned_missing_slots: int
     planned_chains: int
     planned_sources: int
     skipped_events: int
@@ -94,6 +95,51 @@ def _terminal_events(
         connection.close()
 
 
+def _missing_schedule_slots(path: Path, *, now: datetime) -> list[sqlite3.Row]:
+    connection = sqlite3.connect(path)
+    connection.row_factory = sqlite3.Row
+    try:
+        try:
+            return list(
+                connection.execute(
+                    """
+                    SELECT
+                        slots.occurrence_id,
+                        slots.source_id,
+                        slots.deadline_at
+                    FROM schedule_source_windows AS slots
+                    WHERE slots.eligible = 1
+                      AND slots.deadline_at > ?
+                      AND slots.deadline_at <= ?
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM source_attempts AS attempts
+                          WHERE attempts.refresh_window_id = slots.occurrence_id
+                            AND attempts.source_id = slots.source_id
+                            AND (
+                                attempts.outcome != 'skipped'
+                                OR attempts.independently_ineligible_reason =
+                                   'upstream_not_published'
+                            )
+                      )
+                    ORDER BY slots.deadline_at, slots.occurrence_id, slots.source_id
+                    LIMIT ?
+                    """,
+                    (
+                        (now - _FIRST_RUN_LOOKBACK).timestamp(),
+                        now.timestamp(),
+                        _BATCH_LIMIT,
+                    ),
+                )
+            )
+        except sqlite3.OperationalError as exc:
+            if "no such table" not in str(exc):
+                raise
+            return []
+    finally:
+        connection.close()
+
+
 def plan_once(
     *,
     path: Path,
@@ -102,7 +148,7 @@ def plan_once(
 ) -> PlannerSummary:
     effective_mode = mode or convergence_mode()
     if effective_mode == "off":
-        return PlannerSummary("off", 0, 0, 0, 0, False)
+        return PlannerSummary("off", 0, 0, 0, 0, 0, False)
     moment_value = now or datetime.now(UTC)
     if moment_value.tzinfo is None:
         raise ValueError("now must be timezone-aware")
@@ -111,6 +157,7 @@ def plan_once(
     store.initialize()
     cursor = store.planner_cursor()
     rows = _terminal_events(path, cursor=cursor, now=moment)
+    missing_slots = _missing_schedule_slots(path, now=moment)
     planned_chain_ids: set[str] = set()
     planned_sources: set[str] = set()
     skipped = 0
@@ -154,6 +201,27 @@ def plan_once(
         planned_chain_ids.add(chain.chain_id)
         planned_sources.add(source_id)
 
+    for row in missing_slots:
+        source_id = str(row["source_id"])
+        cohort_id = SOURCE_TO_RECOVERY_COHORT.get(source_id)
+        if cohort_id is None:
+            skipped += 1
+            continue
+        observed_at = datetime.fromtimestamp(float(row["deadline_at"]), tz=UTC)
+        decision = decide_recovery(outcome="missing", reason_code="unknown")
+        chain = store.create_or_get_chain(
+            cohort_id=cohort_id,
+            source_ids=[source_id],
+            origin_occurrence_id=str(row["occurrence_id"]),
+            decision=decision,
+            outcome="missing",
+            reason_code="unknown",
+            observed_at=observed_at,
+            deadline_at=_deadline_for(decision.action, observed_at),
+        )
+        planned_chain_ids.add(chain.chain_id)
+        planned_sources.add(source_id)
+
     cursor_advanced = bool(rows)
     if rows:
         last = rows[-1]
@@ -165,6 +233,7 @@ def plan_once(
     return PlannerSummary(
         effective_mode,
         len(rows),
+        len(missing_slots),
         len(planned_chain_ids),
         len(planned_sources),
         skipped,

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from app.convergence_planner import plan_once
 from app.reliability_telemetry import record_terminal_results
+from app.schedule_ledger import ensure_schema as ensure_schedule_schema
 
 
 def _status(source_id: str, **values: object) -> dict[str, object]:
@@ -53,6 +54,7 @@ def test_shadow_planner_creates_idempotent_chains_only_for_nonfresh_primary(
     repeated = plan_once(path=path, now=now, mode="shadow")
 
     assert first.scanned_terminal_events == 2
+    assert first.scanned_missing_slots == 0
     assert first.planned_chains == 1
     assert first.planned_sources == 1
     assert first.skipped_events == 1
@@ -114,3 +116,56 @@ def test_shadow_planner_turns_verified_upstream_gap_into_unpaid_probe(
             """
         ).fetchone()
     assert chain == ("probe_upstream", "upstream_pending", 0)
+
+
+def test_shadow_planner_creates_unpaid_chain_for_missing_schedule_slot(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "parser-telemetry.sqlite3"
+    now = datetime(2026, 8, 20, 12, 0, tzinfo=UTC)
+    # Initialize source_attempts without creating a terminal for this slot.
+    record_terminal_results(
+        "unrelated-fresh",
+        [_status("metastats_decks")],
+        path=path,
+        finished_at=now - timedelta(minutes=5),
+    )
+    with sqlite3.connect(path) as connection:
+        ensure_schedule_schema(connection)
+        connection.execute(
+            """
+            INSERT INTO schedule_source_windows (
+                occurrence_id, schedule_id, scheduled_for, deadline_at,
+                source_id, inventory_version, cohort_hash, eligible,
+                exclusion_reason, recorded_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, '', ?)
+            """,
+            (
+                "refresh-post-patch-tierlists:20260820T090000Z",
+                "refresh-post-patch-tierlists",
+                (now - timedelta(hours=3)).timestamp(),
+                (now - timedelta(hours=1)).timestamp(),
+                "hsguru_matchups_legend",
+                "test-inventory",
+                "a" * 64,
+                now.timestamp(),
+            ),
+        )
+        connection.commit()
+
+    summary = plan_once(path=path, now=now, mode="shadow")
+
+    assert summary.scanned_missing_slots == 1
+    assert summary.planned_chains == 1
+    with sqlite3.connect(path) as connection:
+        chain = connection.execute(
+            """
+            SELECT origin_occurrence_id, action, paid_fetch_allowed
+            FROM convergence_chains
+            """
+        ).fetchone()
+    assert chain == (
+        "refresh-post-patch-tierlists:20260820T090000Z",
+        "retry_scheduler",
+        0,
+    )
