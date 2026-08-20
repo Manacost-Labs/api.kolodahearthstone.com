@@ -29,6 +29,7 @@ CHAIN_STATES = (
     "cancelled",
 )
 ATTEMPT_STATES = ("queued", "running", "succeeded", "failed", "cancelled")
+PLANNER_MODES = ("shadow",)
 
 _schema_lock = threading.Lock()
 _IDENTIFIER_CHARACTERS = frozenset(
@@ -289,6 +290,184 @@ class ConvergenceStore:
             raise
         finally:
             connection.close()
+
+    def record_planner_run(
+        self,
+        *,
+        mode: str,
+        scanned_terminal_events: int,
+        scanned_missing_slots: int,
+        planned_chains: int,
+        planned_sources: int,
+        skipped_events: int,
+        finished_at: datetime,
+    ) -> None:
+        normalized_mode = str(mode or "").strip().lower()
+        if normalized_mode not in PLANNER_MODES:
+            raise ValueError("mode is invalid")
+        counts = (
+            scanned_terminal_events,
+            scanned_missing_slots,
+            planned_chains,
+            planned_sources,
+            skipped_events,
+        )
+        if any(not isinstance(value, int) or value < 0 for value in counts):
+            raise ValueError("Planner counters must be non-negative integers")
+        moment = _as_utc(finished_at, field="finished_at")
+        connection = self._connect()
+        try:
+            _ensure_schema(connection)
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                """
+                INSERT INTO convergence_planner_status (
+                    singleton, last_mode, last_run_at,
+                    scanned_terminal_events, scanned_missing_slots,
+                    planned_chains, planned_sources, skipped_events
+                ) VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(singleton) DO UPDATE SET
+                    last_mode = excluded.last_mode,
+                    last_run_at = excluded.last_run_at,
+                    scanned_terminal_events = excluded.scanned_terminal_events,
+                    scanned_missing_slots = excluded.scanned_missing_slots,
+                    planned_chains = excluded.planned_chains,
+                    planned_sources = excluded.planned_sources,
+                    skipped_events = excluded.skipped_events
+                """,
+                (normalized_mode, moment.timestamp(), *counts),
+            )
+            connection.commit()
+        except BaseException:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def public_summary(self) -> dict[str, object]:
+        """Return bounded aggregates without exposing sources or correlations."""
+
+        empty = _empty_public_summary()
+        try:
+            exists = self.path.exists()
+        except OSError:
+            return empty
+        if not exists:
+            return empty
+        try:
+            connection = sqlite3.connect(
+                f"file:{self.path}?mode=ro",
+                timeout=10.0,
+                isolation_level=None,
+                uri=True,
+            )
+        except sqlite3.Error:
+            return empty
+        connection.row_factory = sqlite3.Row
+        try:
+            connection.execute("PRAGMA query_only = ON")
+            tables = {
+                str(row[0])
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                )
+            }
+            if "convergence_chains" not in tables:
+                return empty
+            chain_row = connection.execute(
+                """
+                SELECT
+                    COUNT(*) AS total_chains,
+                    COALESCE(SUM(paid_requests_total), 0) AS paid_requests,
+                    COALESCE(SUM(paid_cost_microusd_total), 0) AS paid_cost,
+                    MAX(updated_at) AS last_updated_at
+                FROM convergence_chains
+                """
+            ).fetchone()
+            state_rows = connection.execute(
+                """
+                SELECT state, COUNT(*) AS events
+                FROM convergence_chains
+                GROUP BY state
+                """
+            ).fetchall()
+            source_count = int(
+                connection.execute(
+                    "SELECT COUNT(DISTINCT source_id) "
+                    "FROM convergence_chain_sources"
+                ).fetchone()[0]
+            )
+            attempt_rows = connection.execute(
+                """
+                SELECT state, COUNT(*) AS events
+                FROM convergence_attempts
+                GROUP BY state
+                """
+            ).fetchall()
+            planner = (
+                connection.execute(
+                    "SELECT * FROM convergence_planner_status WHERE singleton = 1"
+                ).fetchone()
+                if "convergence_planner_status" in tables
+                else None
+            )
+        except sqlite3.Error:
+            return empty
+        finally:
+            connection.close()
+
+        total_chains = int(chain_row["total_chains"] or 0)
+        chain_states = {state: 0 for state in CHAIN_STATES}
+        for row in state_rows:
+            state = str(row["state"])
+            if state in chain_states:
+                chain_states[state] = int(row["events"])
+        attempt_states = {state: 0 for state in ATTEMPT_STATES}
+        for row in attempt_rows:
+            state = str(row["state"])
+            if state in attempt_states:
+                attempt_states[state] = int(row["events"])
+        paid_cost = int(chain_row["paid_cost"] or 0)
+        planner_summary = {
+            "mode": str(planner["last_mode"]) if planner is not None else "off",
+            "last_run_at": (
+                _from_epoch(planner["last_run_at"]).isoformat()
+                if planner is not None
+                else None
+            ),
+            "scanned_terminal_events": (
+                int(planner["scanned_terminal_events"]) if planner is not None else 0
+            ),
+            "scanned_missing_slots": (
+                int(planner["scanned_missing_slots"]) if planner is not None else 0
+            ),
+            "planned_chains": (
+                int(planner["planned_chains"]) if planner is not None else 0
+            ),
+            "planned_sources": (
+                int(planner["planned_sources"]) if planner is not None else 0
+            ),
+            "skipped_events": (
+                int(planner["skipped_events"]) if planner is not None else 0
+            ),
+        }
+        return {
+            "ledger_status": "observed" if total_chains else "empty",
+            "policy_version": CONVERGENCE_POLICY_VERSION,
+            "total_chains": total_chains,
+            "affected_sources": source_count,
+            "chain_states": chain_states,
+            "total_attempts": sum(attempt_states.values()),
+            "attempt_states": attempt_states,
+            "paid_requests": int(chain_row["paid_requests"] or 0),
+            "paid_cost_usd": f"{paid_cost / 1_000_000:.6f}",
+            "last_updated_at": (
+                _from_epoch(chain_row["last_updated_at"]).isoformat()
+                if chain_row["last_updated_at"] is not None
+                else None
+            ),
+            "planner": planner_summary,
+        }
 
     def claim_due(
         self,
@@ -753,6 +932,24 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
                 )
                 """
             )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS convergence_planner_status (
+                    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+                    last_mode TEXT NOT NULL CHECK (last_mode = 'shadow'),
+                    last_run_at REAL NOT NULL,
+                    scanned_terminal_events INTEGER NOT NULL CHECK (
+                        scanned_terminal_events >= 0
+                    ),
+                    scanned_missing_slots INTEGER NOT NULL CHECK (
+                        scanned_missing_slots >= 0
+                    ),
+                    planned_chains INTEGER NOT NULL CHECK (planned_chains >= 0),
+                    planned_sources INTEGER NOT NULL CHECK (planned_sources >= 0),
+                    skipped_events INTEGER NOT NULL CHECK (skipped_events >= 0)
+                )
+                """
+            )
             attempt_columns = {
                 str(row[1])
                 for row in connection.execute(
@@ -780,3 +977,27 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
         except BaseException:
             connection.rollback()
             raise
+
+
+def _empty_public_summary() -> dict[str, object]:
+    return {
+        "ledger_status": "not_initialized",
+        "policy_version": CONVERGENCE_POLICY_VERSION,
+        "total_chains": 0,
+        "affected_sources": 0,
+        "chain_states": {state: 0 for state in CHAIN_STATES},
+        "total_attempts": 0,
+        "attempt_states": {state: 0 for state in ATTEMPT_STATES},
+        "paid_requests": 0,
+        "paid_cost_usd": "0.000000",
+        "last_updated_at": None,
+        "planner": {
+            "mode": "off",
+            "last_run_at": None,
+            "scanned_terminal_events": 0,
+            "scanned_missing_slots": 0,
+            "planned_chains": 0,
+            "planned_sources": 0,
+            "skipped_events": 0,
+        },
+    }

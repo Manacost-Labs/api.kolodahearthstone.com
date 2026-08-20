@@ -5,6 +5,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..convergence_store import ConvergenceStore
 from ..parser_control import load_resolved_public_dataset
 from ..reliability_telemetry import build_reliability_report
 from ..sources import SOURCES
@@ -286,6 +287,50 @@ class ParsesUnixRolloutSummary(BaseModel):
     paid_cost_usd: str | None = Field(default=None, pattern=r"^\d+\.\d{6}$")
 
 
+class ConvergenceChainStates(BaseModel):
+    waiting: int = Field(ge=0)
+    running: int = Field(ge=0)
+    fresh: int = Field(ge=0)
+    upstream_pending: int = Field(ge=0)
+    paused: int = Field(ge=0)
+    quarantined: int = Field(ge=0)
+    diagnosis_required: int = Field(ge=0)
+    exhausted: int = Field(ge=0)
+    cancelled: int = Field(ge=0)
+
+
+class ConvergenceAttemptStates(BaseModel):
+    queued: int = Field(ge=0)
+    running: int = Field(ge=0)
+    succeeded: int = Field(ge=0)
+    failed: int = Field(ge=0)
+    cancelled: int = Field(ge=0)
+
+
+class ConvergencePlannerSummary(BaseModel):
+    mode: Literal["off", "shadow"]
+    last_run_at: str | None = None
+    scanned_terminal_events: int = Field(ge=0)
+    scanned_missing_slots: int = Field(ge=0)
+    planned_chains: int = Field(ge=0)
+    planned_sources: int = Field(ge=0)
+    skipped_events: int = Field(ge=0)
+
+
+class ConvergenceSummary(BaseModel):
+    ledger_status: Literal["not_initialized", "empty", "observed"]
+    policy_version: int = Field(ge=1)
+    total_chains: int = Field(ge=0)
+    affected_sources: int = Field(ge=0)
+    chain_states: ConvergenceChainStates
+    total_attempts: int = Field(ge=0)
+    attempt_states: ConvergenceAttemptStates
+    paid_requests: int = Field(ge=0)
+    paid_cost_usd: str = Field(pattern=r"^\d+\.\d{6}$")
+    last_updated_at: str | None = None
+    planner: ConvergencePlannerSummary
+
+
 class ReliabilityWindow(BaseModel):
     window: Literal["24h", "7d", "30d"]
     from_at: str
@@ -352,6 +397,7 @@ class ReliabilityReport(BaseModel):
         pattern=r"^[a-f0-9]{64}$",
     )
     coverage_started_at: str | None = None
+    convergence: ConvergenceSummary
     windows: list[ReliabilityWindow]
 
 
@@ -465,7 +511,11 @@ def health() -> Envelope[dict[str, Any]]:
 )
 def parsing_reliability(response: Response) -> Envelope[ReliabilityReport]:
     response.headers["Cache-Control"] = "no-store"
-    report = ReliabilityReport.model_validate(build_reliability_report())
+    report_payload = {
+        **build_reliability_report(),
+        "convergence": ConvergenceStore().public_summary(),
+    }
+    report = ReliabilityReport.model_validate(report_payload)
     day = next((window for window in report.windows if window.window == "24h"), None)
     eligible_attempts = day.eligible_attempts if day is not None else 0
     return Envelope(

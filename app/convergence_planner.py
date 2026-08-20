@@ -230,7 +230,7 @@ def plan_once(
             attempt_id=str(last["attempt_id"]),
             updated_at=moment,
         )
-    return PlannerSummary(
+    summary = PlannerSummary(
         effective_mode,
         len(rows),
         len(missing_slots),
@@ -239,6 +239,16 @@ def plan_once(
         skipped,
         cursor_advanced,
     )
+    store.record_planner_run(
+        mode=summary.mode,
+        scanned_terminal_events=summary.scanned_terminal_events,
+        scanned_missing_slots=summary.scanned_missing_slots,
+        planned_chains=summary.planned_chains,
+        planned_sources=summary.planned_sources,
+        skipped_events=summary.skipped_events,
+        finished_at=moment,
+    )
+    return summary
 
 
 def main() -> int:

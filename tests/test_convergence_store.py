@@ -48,6 +48,18 @@ def test_initialize_creates_bounded_convergence_schema(tmp_path: Path) -> None:
     assert foreign_keys
 
 
+def test_public_summary_does_not_create_missing_ledger(tmp_path: Path) -> None:
+    path = tmp_path / "missing" / "parser-telemetry.sqlite3"
+
+    summary = ConvergenceStore(path).public_summary()
+
+    assert summary["ledger_status"] == "not_initialized"
+    assert summary["total_chains"] == 0
+    assert summary["paid_cost_usd"] == "0.000000"
+    assert summary["planner"]["mode"] == "off"
+    assert not path.exists()
+
+
 def _create_transport_chain(path: Path):
     observed = datetime(2026, 8, 20, 12, 0, tzinfo=UTC)
     return ConvergenceStore(path).create_or_get_chain(
@@ -269,6 +281,80 @@ def test_fresh_attempt_completes_chain_and_is_idempotent(tmp_path: Path) -> None
             """
         ).fetchone()
     assert stored == ("succeeded", "parser-control:run-1", "fresh_published")
+
+
+def test_public_summary_reports_only_bounded_aggregates(tmp_path: Path) -> None:
+    path = tmp_path / "parser-telemetry.sqlite3"
+    chain = _create_transport_chain(path)
+    store = ConvergenceStore(path)
+    due_at = datetime(2026, 8, 20, 12, 5, tzinfo=UTC)
+    claim = store.claim_due(owner="worker", now=due_at)
+    assert claim is not None
+    store.finish_attempt(
+        attempt_id=claim.attempt_id,
+        owner="worker",
+        outcome="fresh_published",
+        reason_code="none",
+        decision=decide_recovery(outcome="fresh_published"),
+        finished_at=due_at + timedelta(minutes=1),
+        execution_succeeded=True,
+        parser_run_id="parser-control:run-1",
+        paid_requests=1,
+        paid_cost_microusd=1500,
+    )
+    store.record_planner_run(
+        mode="shadow",
+        scanned_terminal_events=2,
+        scanned_missing_slots=1,
+        planned_chains=1,
+        planned_sources=1,
+        skipped_events=1,
+        finished_at=due_at + timedelta(minutes=2),
+    )
+
+    summary = store.public_summary()
+    serialized = str(summary)
+
+    assert summary["ledger_status"] == "observed"
+    assert summary["total_chains"] == 1
+    assert summary["affected_sources"] == 1
+    assert summary["chain_states"]["fresh"] == 1
+    assert sum(summary["chain_states"].values()) == 1
+    assert summary["total_attempts"] == 1
+    assert summary["attempt_states"]["succeeded"] == 1
+    assert summary["paid_requests"] == 1
+    assert summary["paid_cost_usd"] == "0.001500"
+    assert summary["planner"]["mode"] == "shadow"
+    assert summary["planner"]["planned_chains"] == 1
+    assert chain.chain_id not in serialized
+    assert "hsguru_meta_standard_legend" not in serialized
+    assert "schedule:20260820T100000Z" not in serialized
+
+
+def test_planner_status_rejects_invalid_mode_and_counters(tmp_path: Path) -> None:
+    store = ConvergenceStore(tmp_path / "parser-telemetry.sqlite3")
+    now = datetime(2026, 8, 20, 12, 0, tzinfo=UTC)
+
+    with pytest.raises(ValueError, match="mode"):
+        store.record_planner_run(
+            mode="active",
+            scanned_terminal_events=0,
+            scanned_missing_slots=0,
+            planned_chains=0,
+            planned_sources=0,
+            skipped_events=0,
+            finished_at=now,
+        )
+    with pytest.raises(ValueError, match="counters"):
+        store.record_planner_run(
+            mode="shadow",
+            scanned_terminal_events=-1,
+            scanned_missing_slots=0,
+            planned_chains=0,
+            planned_sources=0,
+            skipped_events=0,
+            finished_at=now,
+        )
 
 
 def test_transport_failure_reschedules_then_exhausts_bounded_attempts(

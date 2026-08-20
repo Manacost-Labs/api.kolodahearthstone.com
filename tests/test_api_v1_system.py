@@ -321,14 +321,57 @@ def test_v1_parsing_reliability_returns_sanitized_public_contract() -> None:
         ],
     }
 
-    with patch("app.routers.system.build_reliability_report", return_value=report):
+    convergence = {
+        "ledger_status": "observed",
+        "policy_version": 1,
+        "total_chains": 3,
+        "affected_sources": 2,
+        "chain_states": {
+            "waiting": 1,
+            "running": 0,
+            "fresh": 1,
+            "upstream_pending": 1,
+            "paused": 0,
+            "quarantined": 0,
+            "diagnosis_required": 0,
+            "exhausted": 0,
+            "cancelled": 0,
+        },
+        "total_attempts": 1,
+        "attempt_states": {
+            "queued": 0,
+            "running": 0,
+            "succeeded": 1,
+            "failed": 0,
+            "cancelled": 0,
+        },
+        "paid_requests": 1,
+        "paid_cost_usd": "0.001500",
+        "last_updated_at": "2026-08-11T11:59:00+00:00",
+        "planner": {
+            "mode": "shadow",
+            "last_run_at": "2026-08-11T11:59:00+00:00",
+            "scanned_terminal_events": 2,
+            "scanned_missing_slots": 1,
+            "planned_chains": 1,
+            "planned_sources": 1,
+            "skipped_events": 1,
+        },
+    }
+    with (
+        patch("app.routers.system.build_reliability_report", return_value=report),
+        patch(
+            "app.routers.system.ConvergenceStore.public_summary",
+            return_value=convergence,
+        ),
+    ):
         response = client.get("/v1/system/parsing-reliability")
 
     assert response.status_code == 200
     assert response.headers["cache-control"] == "no-store"
     assert "etag" not in response.headers
     body = response.json()
-    assert body["data"] == report
+    assert body["data"] == {**report, "convergence": convergence}
     assert body["meta"] == {
         "source_id": "parser_reliability",
         "fetched_at": "2026-08-11T12:00:00+00:00",
