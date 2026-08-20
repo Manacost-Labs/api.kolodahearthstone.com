@@ -29,6 +29,8 @@ from .config import (
     user_agent,
 )
 from .hsreplay_auth import hsreplay_cookies_for_fetch
+from .parsesunix_contracts import hsreplay_json_contract_for_source
+from .parsesunix_transport import validate_acquired_response
 from .proxy_errors import ProxyPaymentRequiredError, proxy_tunnel_error
 from .refresh_context import get_cached_hsreplay_json, set_cached_hsreplay_json
 from .refresh_log import log_action
@@ -999,6 +1001,36 @@ async def _fetch_hsreplay_json_serialized(
                 source_id,
                 fetch_url,
             )
+            response_contract = hsreplay_json_contract_for_source(source_id, api_url)
+            if response_contract is not None:
+                evidence = validate_acquired_response(
+                    api_url,
+                    body,
+                    response_contract,
+                    headers=target_headers,
+                    final_url=api_url,
+                    backend=f"hsreplay_{label}",
+                )
+                log_action(
+                    "parsesunix.transport.observe",
+                    source_id=source_id,
+                    backend=f"hsreplay_{label}",
+                    extra={"channel": label, **evidence.telemetry()},
+                )
+                if not evidence.transport_validated:
+                    err = f"{label}: response contract {evidence.verdict}"
+                    errors.append(err)
+                    log_action(
+                        "routing.channel.fail",
+                        source_id=source_id,
+                        detail=err,
+                        level="warn",
+                        extra={
+                            "channel": label,
+                            "contract_reason": evidence.reason,
+                        },
+                    )
+                    continue
             payload = extract_json_payload(body)
             if isinstance(payload, (dict, list)):
                 result = _payload_to_dict(payload)

@@ -13,6 +13,14 @@ from web_scraper import ResponseContract
 
 from .source_contracts import get_contract
 from .sources import Source
+from .trinket_slices import (
+    LEGACY_DEFAULT_TRINKET_SOURCE_IDS,
+    TRINKET_SLICE_SOURCE_IDS,
+)
+
+STRICT_HSREPLAY_TRINKET_SOURCE_IDS = frozenset(
+    (*LEGACY_DEFAULT_TRINKET_SOURCE_IDS, *TRINKET_SLICE_SOURCE_IDS)
+)
 
 
 def page_response_contract(source: Source) -> ResponseContract:
@@ -73,3 +81,14 @@ def hsreplay_json_response_contract(url: str) -> ResponseContract:
             min_body_bytes=20,
         )
     raise ValueError(f"No HSReplay JSON response contract for path {path}")
+
+
+def hsreplay_json_contract_for_source(
+    source_id: str,
+    url: str,
+) -> ResponseContract | None:
+    """Return the first bounded HSReplay API rollout slice, or no contract yet."""
+
+    if source_id not in STRICT_HSREPLAY_TRINKET_SOURCE_IDS:
+        return None
+    return hsreplay_json_response_contract(url)

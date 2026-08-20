@@ -6,10 +6,15 @@ from web_scraper import ContentKind, validate_response
 from web_scraper.fetchers import RawResponse
 
 from app.parsesunix_contracts import (
+    STRICT_HSREPLAY_TRINKET_SOURCE_IDS,
     hsreplay_json_response_contract,
     page_response_contract,
 )
 from app.sources import SOURCE_BY_ID
+from app.trinket_slices import (
+    LEGACY_DEFAULT_TRINKET_SOURCE_IDS,
+    TRINKET_SLICE_SOURCE_IDS,
+)
 
 
 def _response(body: str, *, content_type: str) -> RawResponse:
@@ -64,6 +69,13 @@ def test_hsreplay_trinkets_contract_requires_real_metric_shape() -> None:
 
     assert accepted.transport_validated is True
     assert rejected.transport_validated is False
+
+
+def test_strict_hsreplay_rollout_starts_with_all_eleven_trinket_sources() -> None:
+    assert STRICT_HSREPLAY_TRINKET_SOURCE_IDS == frozenset(
+        (*LEGACY_DEFAULT_TRINKET_SOURCE_IDS, *TRINKET_SLICE_SOURCE_IDS)
+    )
+    assert len(STRICT_HSREPLAY_TRINKET_SOURCE_IDS) == 11
 
 
 def test_hsreplay_analytics_contract_requires_series_data() -> None:

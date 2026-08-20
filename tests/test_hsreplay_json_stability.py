@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import sys
 from types import ModuleType, SimpleNamespace
@@ -110,6 +111,71 @@ def test_hsreplay_json_accepts_drf_browsable_api_response() -> None:
         consume_hsreplay_json_transport_backend("drf-test")
         == "proxyless_flaresolverr"
     )
+
+
+def test_trinket_slice_rejects_decoy_json_before_accepting_valid_channel() -> None:
+    calls: list[str] = []
+    valid_payload = json.dumps(
+        [
+            {
+                "trinket_dbf_id": 123,
+                "group": "lesser",
+                "pick_rate": 0.25,
+                "avg_final_placement": 4.1,
+                "padding": "x" * 80,
+            }
+        ]
+    )
+
+    async def fetch(label: str, _url: str, *, source_id: str) -> str:
+        del source_id
+        calls.append(label)
+        if label == "flaresolverr":
+            return json.dumps({"data": "plausible but wrong"}).ljust(120)
+        return valid_payload
+
+    with (
+        patch(
+            "app.hsreplay_client._channel_urls",
+            return_value=[
+                (
+                    "flaresolverr",
+                    "https://hsreplay.net/api/v1/battlegrounds/trinkets/",
+                ),
+                (
+                    "scrape_do",
+                    "https://hsreplay.net/api/v1/battlegrounds/trinkets/",
+                ),
+            ],
+        ),
+        patch("app.hsreplay_client._fetch_body_for_channel", side_effect=fetch),
+        patch(
+            "app.hsreplay_client._channel_uses_residential_proxy",
+            return_value=False,
+        ),
+        patch("app.hsreplay_client.api_json_retry_delay_seconds", return_value=0),
+        patch("app.hsreplay_client.get_cached_hsreplay_json", return_value=None),
+        patch("app.hsreplay_client.set_cached_hsreplay_json"),
+        patch("app.hsreplay_client.log_action") as log_action,
+    ):
+        result = asyncio.run(
+            fetch_hsreplay_json(
+                "https://hsreplay.net/api/v1/battlegrounds/trinkets/?format=json",
+                source_id="hsreplay_battlegrounds_trinkets_lesser",
+            )
+        )
+
+    assert result == {"data": json.loads(valid_payload)}
+    assert calls == ["flaresolverr", "scrape_do"]
+    observations = [
+        call
+        for call in log_action.call_args_list
+        if call.args[0] == "parsesunix.transport.observe"
+    ]
+    assert [call.kwargs["extra"]["transport_validated"] for call in observations] == [
+        False,
+        True,
+    ]
 
 
 def test_cost_first_order_uses_scrape_do_before_residential_curl() -> None:
