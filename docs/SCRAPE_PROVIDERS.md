@@ -221,18 +221,22 @@ API-first и Firecrawl-primary маршруты сохраняют свой пр
 | `HS_BRIGHTDATA_CIRCUIT_FAILURE_THRESHOLD` | Последовательные ошибки до open circuit, default `3`. |
 | `HS_BRIGHTDATA_CIRCUIT_COOLDOWN_SECONDS` | Cooldown open circuit, минимум `60`, default `1800`. |
 
-Для безопасного production-наблюдения трёх HSGuru matchup-источников без
-платных запросов используется zero-cost shadow canary:
+Управляемый production-rollout трёх HSGuru matchup-источников имеет три режима:
 
 ```bash
-sudo scripts/configure-parsesunix-hsguru-shadow.sh /srv/hs-data-api/.env.docker
+sudo scripts/configure-parsesunix-hsguru.sh shadow /srv/hs-data-api/.env.docker
+sudo scripts/configure-parsesunix-hsguru.sh active /srv/hs-data-api/.env.docker
+sudo scripts/configure-parsesunix-hsguru.sh disable /srv/hs-data-api/.env.docker
 sudo docker compose -f /srv/hs-data-api/docker-compose.yml up -d api
 ```
 
 Shadow не меняет опубликованный набор: штатный транспорт остаётся основным, а
 ParsesUnix отдельно записывает transport/candidate evidence. Переводить source
 в `HS_PARSESUNIX_ACTIVE_SOURCE_IDS` можно только после серии успешных shadow
-наблюдений с прошедшими candidate и completeness gates.
+наблюдений с прошедшими candidate и completeness gates. Active начинает с
+бесплатного direct и допускает только дешёвую стратегию Scrape.do `normal`:
+не более трёх запросов на один refresh и десяти credits за UTC-день. Bright
+Data в этом rollout не участвует. `disable` является быстрым откатом к legacy.
 
 Минимальный безопасный шаблон до canary:
 
