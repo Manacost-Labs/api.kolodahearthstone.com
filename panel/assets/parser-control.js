@@ -60,6 +60,20 @@
         return badge;
     };
 
+    const sourceDiagnostics = (source) => {
+        if (!source.lastError) return null;
+        const details = element('details', 'parser-source-diagnostics');
+        const summary = element('summary', '', 'Подробности ошибки');
+        const body = element('div', 'parser-source-diagnostics-body');
+        body.append(
+            element('b', '', view.errorSummary(source.lastError)),
+            element('p', '', 'Технический ответ последней попытки:'),
+            element('pre', '', source.lastError),
+        );
+        details.append(summary, body);
+        return details;
+    };
+
     const setSummary = (key, value, detail, tone = '') => {
         const card = summaryHost?.querySelector(`[data-summary-card="${key}"]`);
         if (!card) return;
@@ -72,8 +86,15 @@
         const summary = view.buildSummary(snapshot);
         const active = summary.activeRun;
         setSummary('active', active ? '1' : '0', active ? 'выполняется или ожидает' : 'очередь свободна', active ? 'info' : 'good');
-        setSummary('health', `${summary.healthy}/${summary.total}`, 'работают стабильно', summary.healthy === summary.total ? 'good' : '');
-        setSummary('issues', view.formatNumber(summary.issues), summary.issues === 1 ? 'источник требует внимания' : 'источников требуют внимания', summary.issues > 0 ? 'warning' : 'good');
+        setSummary('health', `${summary.fresh}/${summary.operational}`, 'со свежими опубликованными данными', summary.fresh === summary.operational ? 'good' : '');
+        setSummary(
+            'issues',
+            view.formatNumber(summary.fallback),
+            summary.unavailable > 0
+                ? `${view.formatNumber(summary.unavailable)} без доступных данных`
+                : 'резерв доступен · полных отказов нет',
+            summary.unavailable > 0 ? 'bad' : (summary.fallback > 0 ? 'warning' : 'good'),
+        );
         const next = view.formatDate(summary.nextRunAt);
         setSummary('next', next === '—' ? '—' : next.relative, next === '—' ? 'нет активного расписания' : next.exact, '');
         summaryHost?.setAttribute('aria-busy', 'false');
@@ -100,14 +121,10 @@
 
     const sourceMatches = (source) => {
         const query = (search?.value || '').trim().toLocaleLowerCase('ru-RU');
-        const state = String(source.health || source.state || 'missing').toLowerCase();
-        const enabled = source.sectionEnabled !== false && source.enabled !== false;
-        const issues = new Set(['warning', 'partial', 'missing', 'error', 'failed']);
+        const presentation = view.sourcePresentation(source);
         const status = statusFilter?.value || 'all';
         const statusMatches = status === 'all'
-            || (status === 'issues' && issues.has(state))
-            || (status === 'ok' && ['ok', 'ready', 'upstream_pending'].includes(state) && enabled)
-            || (status === 'disabled' && !enabled);
+            || status === presentation.filter;
         const haystack = `${source.label || ''} ${source.id || ''} ${source.sectionLabel || ''}`.toLocaleLowerCase('ru-RU');
         return statusMatches
             && (selectedSection === 'all' || source.sectionId === selectedSection)
@@ -130,9 +147,10 @@
 
     const renderSources = () => {
         const allSources = view.flattenSources(snapshot);
-        const priority = { error: 0, failed: 0, warning: 1, partial: 1, missing: 2, ok: 3, ready: 3 };
+        const priority = { unavailable: 0, fallback: 1, upstream_pending: 2, fresh: 3, disabled: 4 };
         const sources = allSources.filter(sourceMatches).sort((left, right) => {
-            const stateOrder = (priority[left.health] ?? 2) - (priority[right.health] ?? 2);
+            const stateOrder = (priority[view.sourcePresentation(left).key] ?? 2)
+                - (priority[view.sourcePresentation(right).key] ?? 2);
             return stateOrder || String(left.label || left.id).localeCompare(String(right.label || right.id), 'ru');
         });
         sourcesBody.replaceChildren();
@@ -143,21 +161,34 @@
             const id = element('code', '', source.id);
             sourceCell.append(name, id, element('small', '', source.sectionLabel));
 
-            const stateCell = document.createElement('td');
-            const effectiveState = source.sectionEnabled === false || source.enabled === false ? 'disabled' : (source.health || source.state);
-            stateCell.append(statusBadge(effectiveState));
-            if (source.lastError) {
-                const error = element('small', 'parser-source-error', source.lastError);
-                error.title = source.lastError;
-                stateCell.append(error);
-            }
+            const presentation = view.sourcePresentation(source);
+            const stateCell = element('td', 'parser-current-data');
+            stateCell.append(
+                statusBadge(presentation.key),
+                element('small', 'parser-source-state-copy', presentation.description),
+            );
+            const lastSuccess = view.formatDate(source.lastSuccessAt);
+            stateCell.append(element(
+                'small',
+                'parser-source-success',
+                lastSuccess === '—' ? 'Успешных публикаций ещё нет' : `Последний успех ${lastSuccess.relative}`,
+            ));
+
+            const attemptCell = element('td', 'parser-last-attempt');
+            const attemptState = presentation.attemptFailed ? 'Ошибка получения' : 'Успешно';
+            attemptCell.append(element(
+                'span',
+                `parser-attempt-state is-${presentation.attemptFailed ? 'bad' : 'good'}`,
+                attemptState,
+            ));
+            attemptCell.append(dateCell(source.lastAttemptAt || source.lastSuccessAt));
+            const diagnostics = sourceDiagnostics(source);
+            if (diagnostics) attemptCell.append(diagnostics);
 
             const rowsCell = document.createElement('td');
             rowsCell.append(element('b', 'parser-row-count', view.formatNumber(source.rowsTotal)));
-            if (source.publicationChannel) rowsCell.append(element('small', '', source.publicationChannel));
+            rowsCell.append(element('small', '', view.publicationLabel(source.publicationChannel)));
 
-            const successCell = document.createElement('td');
-            successCell.append(dateCell(source.lastSuccessAt));
             const scheduleCell = document.createElement('td');
             scheduleCell.append(element('span', 'parser-schedule', source.schedule || 'Ручной запуск'));
             const nextCell = document.createElement('td');
@@ -169,7 +200,7 @@
             button.disabled = source.canRunManually === false || source.sectionEnabled === false;
             button.addEventListener('click', () => openRunDialog({ sourceId: source.id, label: source.label || source.id }));
             actionCell.append(button);
-            row.append(sourceCell, stateCell, rowsCell, successCell, scheduleCell, nextCell, actionCell);
+            row.append(sourceCell, stateCell, attemptCell, rowsCell, scheduleCell, nextCell, actionCell);
             sourcesBody.append(row);
         });
         empty.hidden = sources.length > 0;

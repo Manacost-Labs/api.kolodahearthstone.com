@@ -5390,7 +5390,7 @@ td {
 
 .parser-source-table {
     width: 100%;
-    min-width: 1040px;
+    min-width: 1260px;
     border-collapse: separate;
     border-spacing: 0;
 }
@@ -5480,6 +5480,22 @@ td {
     font-size: 10px;
 }
 
+.parser-current-data {
+    width: 240px;
+    min-width: 240px;
+}
+
+.parser-source-state-copy,
+.parser-source-success {
+    max-width: 230px;
+    line-height: 1.35;
+    white-space: normal;
+}
+
+.parser-source-success {
+    color: var(--label) !important;
+}
+
 .parser-status {
     display: inline-flex;
     align-items: center;
@@ -5513,6 +5529,85 @@ td {
     color: var(--bad) !important;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.parser-last-attempt {
+    width: 245px;
+    min-width: 245px;
+}
+
+.parser-attempt-state {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    margin-bottom: 3px;
+    font-size: 11px;
+    font-weight: 850;
+}
+
+.parser-attempt-state::before {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    content: "";
+}
+
+.parser-attempt-state.is-good { color: var(--good); }
+.parser-attempt-state.is-bad { color: var(--bad); }
+
+.parser-source-diagnostics {
+    margin-top: 5px;
+    color: var(--bad);
+    font-size: 10px;
+}
+
+.parser-source-diagnostics summary {
+    width: max-content;
+    max-width: 100%;
+    border-radius: 4px;
+    color: var(--bad);
+    cursor: pointer;
+    font-weight: 850;
+}
+
+.parser-source-diagnostics summary:hover,
+.parser-source-diagnostics summary:focus-visible {
+    color: var(--text);
+}
+
+.parser-source-diagnostics-body {
+    width: 360px;
+    max-width: calc(100vw - 56px);
+    margin-top: 6px;
+    border: 1px solid var(--bad-line);
+    border-radius: 7px;
+    padding: 9px;
+    background: var(--bad-soft);
+    color: var(--text);
+}
+
+.parser-source-diagnostics-body b,
+.parser-source-diagnostics-body p {
+    display: block;
+    margin: 0;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+}
+
+.parser-source-diagnostics-body p {
+    margin-top: 7px;
+    color: var(--muted);
+}
+
+.parser-source-diagnostics-body pre {
+    max-height: 132px;
+    margin: 5px 0 0;
+    overflow: auto;
+    color: var(--label);
+    font: 10px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
 }
 
 .parser-row-count {
@@ -5790,6 +5885,8 @@ td {
 
 .parser-workspace.is-compact .parser-source-name small,
 .parser-workspace.is-compact .parser-date small,
+.parser-workspace.is-compact .parser-source-state-copy,
+.parser-workspace.is-compact .parser-source-success,
 .parser-workspace.is-compact .parser-source-table td > small {
     display: none;
 }

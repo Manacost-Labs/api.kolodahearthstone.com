@@ -8,6 +8,9 @@
     const statusCatalog = {
         ok: { label: 'Работает', tone: 'good' },
         ready: { label: 'Работает', tone: 'good' },
+        fresh: { label: 'Свежие данные', tone: 'good' },
+        fallback: { label: 'Резервный набор', tone: 'warning' },
+        unavailable: { label: 'Данных нет', tone: 'bad' },
         running: { label: 'Выполняется', tone: 'info' },
         queued: { label: 'В очереди', tone: 'info' },
         succeeded: { label: 'Успешно', tone: 'good' },
@@ -38,18 +41,115 @@
         });
     }
 
+    function sourcePresentation(source) {
+        const health = String(source?.health || source?.state || 'missing').toLowerCase();
+        const disabled = source?.sectionEnabled === false
+            || source?.enabled === false
+            || health === 'disabled';
+        const hasPublishedData = Boolean(source?.lastSuccessAt)
+            || Number(source?.rowsTotal) > 0
+            || !['', 'unavailable'].includes(String(source?.publicationChannel || ''));
+        const servingFallback = source?.servingCachedDataset === true
+            || (hasPublishedData && ['warning', 'partial', 'error', 'failed'].includes(health));
+
+        if (disabled) {
+            return {
+                key: 'disabled', filter: 'disabled', label: 'Отключён', tone: 'muted',
+                dataAvailable: hasPublishedData, attemptFailed: false,
+                description: 'Автоматические и ручные запуски отключены.',
+            };
+        }
+        if (health === 'upstream_pending') {
+            return {
+                key: 'upstream_pending', filter: 'fallback', label: 'Ожидает публикации', tone: 'info',
+                dataAvailable: hasPublishedData, attemptFailed: false,
+                description: 'Текущие данные доступны; источник ещё не опубликовал обновление.',
+            };
+        }
+        if (servingFallback) {
+            return {
+                key: 'fallback', filter: 'fallback', label: 'Резервный набор', tone: 'warning',
+                dataAvailable: true, attemptFailed: Boolean(source?.lastError) || health !== 'ok',
+                description: 'Публичный API продолжает отдавать последний успешный набор.',
+            };
+        }
+        if (['ok', 'ready'].includes(health)) {
+            return {
+                key: 'fresh', filter: 'fresh', label: 'Свежие данные', tone: 'good',
+                dataAvailable: true, attemptFailed: false,
+                description: 'Последний сбор опубликован и доступен.',
+            };
+        }
+        if (health === 'partial' && hasPublishedData) {
+            return {
+                key: 'fallback', filter: 'fallback', label: 'Частичные данные', tone: 'warning',
+                dataAvailable: true, attemptFailed: true,
+                description: 'Опубликована только подтверждённая часть набора.',
+            };
+        }
+        return {
+            key: 'unavailable', filter: 'unavailable', label: 'Данных нет', tone: 'bad',
+            dataAvailable: false, attemptFailed: true,
+            description: health === 'missing'
+                ? 'Источник ещё не создал пригодный набор.'
+                : 'Последняя попытка завершилась без пригодных данных.',
+        };
+    }
+
+    function errorSummary(value) {
+        const message = String(value || '').trim();
+        if (!message) return '';
+        const normalized = message.toLowerCase();
+        if (normalized.includes('row_retrieval has unexplained dropped rows')) {
+            return 'Проверка полноты обнаружила необъяснённые пропуски строк.';
+        }
+        if (normalized.includes('proxy_payment') || normalized.includes('payment required')) {
+            return 'Прокси отклонил запрос из-за ограничения оплаты.';
+        }
+        if (normalized.includes('timeout') || normalized.includes('timed out')) {
+            return 'Источник не ответил за отведённое время.';
+        }
+        if (normalized.includes('cloudflare') || normalized.includes('captcha') || normalized.includes('403')) {
+            return 'Источник заблокировал автоматический запрос.';
+        }
+        if (normalized.includes('contract failed') || normalized.includes('quality check failed')) {
+            return 'Ответ не прошёл проверку структуры и качества.';
+        }
+        if (normalized.includes('parse')) {
+            return 'Страница получена, но данные не удалось корректно разобрать.';
+        }
+        const first = message.split(';', 1)[0].replace(/\s+/g, ' ');
+        return first.length > 180 ? `${first.slice(0, 177)}…` : first;
+    }
+
+    function publicationLabel(value) {
+        const channel = String(value || '').toLowerCase();
+        if (channel === 'stable') return 'Опубликованный набор';
+        if (channel === 'early') return 'Предварительный набор';
+        if (channel === 'stable_baseline' || channel === 'stable baseline') return 'Стабильный резерв';
+        if (channel === 'unavailable') return 'Набор отсутствует';
+        return value ? String(value) : 'Канал не указан';
+    }
+
     function buildSummary(snapshot) {
         const sources = flattenSources(snapshot);
         const activeRun = snapshot?.activeRun || null;
-        const issueStates = new Set(['warning', 'partial', 'missing', 'error', 'failed']);
-        const issues = sources.filter((source) => issueStates.has(String(source.health || source.state || '').toLowerCase())).length;
-        const healthy = sources.filter((source) => ['ok', 'ready', 'upstream_pending'].includes(String(source.health || source.state || '').toLowerCase())).length;
+        const presentations = sources.map(sourcePresentation);
+        const fresh = presentations.filter((item) => item.filter === 'fresh').length;
+        const fallback = presentations.filter((item) => item.filter === 'fallback').length;
+        const unavailable = presentations.filter((item) => item.filter === 'unavailable').length;
+        const disabled = presentations.filter((item) => item.filter === 'disabled').length;
+        const issues = presentations.filter((item) => item.attemptFailed).length;
+        const healthy = fresh + fallback;
         const nextRunAt = sources
             .map((source) => source.nextRunAt)
             .filter(Boolean)
             .sort()[0] || null;
         const rows = sources.reduce((total, source) => total + (Number.isFinite(Number(source.rowsTotal)) ? Number(source.rowsTotal) : 0), 0);
-        return { total: sources.length, healthy, issues, rows, nextRunAt, activeRun };
+        return {
+            total: sources.length, healthy, issues, fresh, fallback, unavailable, disabled,
+            operational: sources.length - disabled, rows, nextRunAt, activeRun,
+        };
     }
 
     function formatNumber(value) {
@@ -89,5 +189,8 @@
         return { total, done, percent: total > 0 ? Math.round((done / total) * 100) : 0 };
     }
 
-    return { statusMeta, flattenSources, buildSummary, formatNumber, formatDate, runProgress };
+    return {
+        statusMeta, flattenSources, sourcePresentation, errorSummary, publicationLabel,
+        buildSummary, formatNumber, formatDate, runProgress,
+    };
 }));

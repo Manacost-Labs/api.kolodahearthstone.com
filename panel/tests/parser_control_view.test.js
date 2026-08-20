@@ -24,11 +24,54 @@ test('flattens sources while preserving section context', () => {
 test('builds action-oriented parser summary', () => {
     const summary = view.buildSummary(snapshot);
     assert.equal(summary.total, 2);
-    assert.equal(summary.healthy, 1);
+    assert.equal(summary.healthy, 2);
     assert.equal(summary.issues, 1);
+    assert.equal(summary.fresh, 1);
+    assert.equal(summary.fallback, 1);
+    assert.equal(summary.unavailable, 0);
     assert.equal(summary.rows, 140);
     assert.equal(summary.nextRunAt, '2026-08-13T01:00:00Z');
     assert.equal(summary.activeRun.id, 'run-1');
+});
+
+test('separates fresh data, fallback data, and a failure without data', () => {
+    const fresh = view.sourcePresentation({ health: 'ok', rowsTotal: 53 });
+    const fallback = view.sourcePresentation({
+        health: 'warning',
+        servingCachedDataset: true,
+        rowsTotal: 53,
+        lastSuccessAt: '2026-08-13T01:00:00Z',
+        lastError: 'origin timeout',
+    });
+    const unavailable = view.sourcePresentation({
+        health: 'error', rowsTotal: 0, publicationChannel: 'unavailable',
+    });
+    const disabled = view.sourcePresentation({ health: 'ok', enabled: false, rowsTotal: 53 });
+
+    assert.deepEqual(
+        { key: fresh.key, filter: fresh.filter, dataAvailable: fresh.dataAvailable },
+        { key: 'fresh', filter: 'fresh', dataAvailable: true },
+    );
+    assert.deepEqual(
+        { key: fallback.key, filter: fallback.filter, attemptFailed: fallback.attemptFailed },
+        { key: 'fallback', filter: 'fallback', attemptFailed: true },
+    );
+    assert.deepEqual(
+        { key: unavailable.key, filter: unavailable.filter, dataAvailable: unavailable.dataAvailable },
+        { key: 'unavailable', filter: 'unavailable', dataAvailable: false },
+    );
+    assert.equal(disabled.key, 'disabled');
+});
+
+test('turns repeated transport diagnostics into a concise operator message', () => {
+    const raw = 'curl_cffi: quality check failed: source contract failed: row_retrieval has unexplained dropped rows; flaresolverr: repeated failure';
+
+    assert.equal(
+        view.errorSummary(raw),
+        'Проверка полноты обнаружила необъяснённые пропуски строк.',
+    );
+    assert.equal(view.errorSummary('origin timeout'), 'Источник не ответил за отведённое время.');
+    assert.equal(view.publicationLabel('stable_baseline'), 'Стабильный резерв');
 });
 
 test('treats confirmed upstream publication wait as operationally healthy', () => {

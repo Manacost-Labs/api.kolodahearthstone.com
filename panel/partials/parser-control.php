@@ -30,8 +30,8 @@ declare(strict_types=1);
 
     <section class="parser-summary" aria-label="Состояние парсеров" data-parser-summary aria-busy="true">
         <article data-summary-card="active"><span>Сейчас</span><b>—</b><small>активных запусков</small></article>
-        <article data-summary-card="health"><span>Источники</span><b>—</b><small>работают стабильно</small></article>
-        <article data-summary-card="issues"><span>Внимание</span><b>—</b><small>источников с проблемами</small></article>
+        <article data-summary-card="health"><span>Свежие данные</span><b>—</b><small>последний сбор опубликован</small></article>
+        <article data-summary-card="issues"><span>На резерве</span><b>—</b><small>данные доступны из последнего успеха</small></article>
         <article data-summary-card="next"><span>Следующий запуск</span><b>—</b><small>по расписанию</small></article>
     </section>
 
@@ -64,8 +64,9 @@ declare(strict_types=1);
                 <span class="visually-hidden">Состояние источника</span>
                 <select data-parser-status>
                     <option value="all">Все состояния</option>
-                    <option value="issues">Требуют внимания</option>
-                    <option value="ok">Работают</option>
+                    <option value="fresh">Свежие данные</option>
+                    <option value="fallback">Работают на резерве</option>
+                    <option value="unavailable">Данных нет</option>
                     <option value="disabled">Отключены</option>
                 </select>
             </label>
@@ -80,9 +81,9 @@ declare(strict_types=1);
             <table class="parser-source-table">
                 <thead><tr>
                     <th>Источник</th>
-                    <th>Состояние</th>
-                    <th>Данные</th>
-                    <th>Последний успех</th>
+                    <th>Данные сейчас</th>
+                    <th>Последняя попытка</th>
+                    <th>Записей</th>
                     <th>Расписание</th>
                     <th>Следующий запуск</th>
                     <th><span class="visually-hidden">Действия</span></th>
