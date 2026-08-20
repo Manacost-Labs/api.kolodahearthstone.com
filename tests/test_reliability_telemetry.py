@@ -272,6 +272,102 @@ def test_report_separates_confirmed_upstream_absence_from_parser_reliability(
     assert day["end_to_end_freshness_slo"]["bad_attempts"] == 1
 
 
+def test_report_explains_how_provisional_and_lkg_events_were_resolved(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "reliability.sqlite3"
+    now = datetime(2026, 8, 20, 12, 0, tzinfo=UTC)
+    events = (
+        (
+            "provisional-recovered",
+            _status("provisional-recovered", provisional=True),
+            timedelta(hours=5),
+        ),
+        (
+            "provisional-fresh",
+            _status("provisional-recovered"),
+            timedelta(hours=4),
+        ),
+        (
+            "provisional-unresolved",
+            _status("provisional-unresolved", provisional=True),
+            timedelta(hours=3),
+        ),
+        (
+            "lkg-recovered",
+            _status("lkg-recovered", serving_cached_dataset=True),
+            timedelta(hours=5),
+        ),
+        (
+            "lkg-fresh",
+            _status("lkg-recovered"),
+            timedelta(hours=4),
+        ),
+        (
+            "lkg-upstream-unverified",
+            _status(
+                "vicious_syndicate_radars",
+                serving_cached_dataset=True,
+                failure_reason_code="unavailable",
+                upstream_state="upstream_publication_pending",
+                last_refresh_upstream_state="upstream_publication_pending",
+            ),
+            timedelta(hours=5),
+        ),
+        (
+            "lkg-unresolved",
+            _status("lkg-unresolved", serving_cached_dataset=True),
+            timedelta(hours=2),
+        ),
+    )
+    for run_id, status, age in events:
+        record_terminal_results(
+            run_id,
+            [status],
+            finished_at=now - age,
+            path=path,
+        )
+    record_terminal_results(
+        "lkg-upstream-verified",
+        [
+            _status(
+                "vicious_syndicate_radars",
+                serving_cached_dataset=True,
+                failure_reason_code="unavailable",
+                upstream_state="upstream_publication_pending",
+                last_refresh_upstream_state="upstream_publication_pending",
+                last_refresh_at="2026-08-20T11:00:00+00:00",
+                last_refresh_upstream_readiness={
+                    "latest_report_issue": "355",
+                    "candidate_issue": "354",
+                    "full_discovery_at": "2026-08-20T10:55:00+00:00",
+                },
+            )
+        ],
+        finished_at=now - timedelta(hours=1),
+        path=path,
+    )
+
+    recovery = build_reliability_report(now=now, path=path)["windows"][0][
+        "outcome_recovery"
+    ]
+
+    assert recovery == {
+        "provisional": {
+            "events": 2,
+            "recovered_to_fresh": 1,
+            "reclassified_upstream_pending": 0,
+            "unresolved": 1,
+        },
+        "lkg_served": {
+            "events": 3,
+            "recovered_to_fresh": 1,
+            "reclassified_upstream_pending": 1,
+            "unresolved": 1,
+        },
+    }
+
+
 @pytest.mark.parametrize(
     ("status", "reason"),
     [
@@ -917,6 +1013,20 @@ def test_empty_report_never_claims_one_hundred_percent(tmp_path: Path) -> None:
         assert window["measurement_status"] == "collecting"
         assert window["freshness_slo"]["objective_status"] == "collecting"
         assert window["freshness_slo"]["error_budget_consumed_pct"] is None
+        assert window["outcome_recovery"] == {
+            "provisional": {
+                "events": 0,
+                "recovered_to_fresh": 0,
+                "reclassified_upstream_pending": 0,
+                "unresolved": 0,
+            },
+            "lkg_served": {
+                "events": 0,
+                "recovered_to_fresh": 0,
+                "reclassified_upstream_pending": 0,
+                "unresolved": 0,
+            },
+        }
         assert window["verified_completeness"] == {
             "instrumented_sources": instrumented_sources,
             "catalog_sources": catalog_sources,

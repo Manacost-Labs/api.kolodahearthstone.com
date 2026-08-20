@@ -52,7 +52,7 @@ def test_v1_system_paths_do_not_replace_legacy_paths() -> None:
 def test_v1_parsing_reliability_returns_sanitized_public_contract() -> None:
     report = {
         "methodology": {
-            "version": "logical-source-observed-v14",
+            "version": "logical-source-observed-v15",
             "unit": "one terminal outcome per source in a refresh run",
             "scope": "observed_scrape_and_pipeline_sources",
             "completeness": "observed_attempts_plus_recorded_run_deficits",
@@ -128,6 +128,20 @@ def test_v1_parsing_reliability_returns_sanitized_public_contract() -> None:
                     "failed": 1,
                     "timed_out": 0,
                     "skipped": 0,
+                },
+                "outcome_recovery": {
+                    "provisional": {
+                        "events": 1,
+                        "recovered_to_fresh": 1,
+                        "reclassified_upstream_pending": 0,
+                        "unresolved": 0,
+                    },
+                    "lkg_served": {
+                        "events": 0,
+                        "recovered_to_fresh": 0,
+                        "reclassified_upstream_pending": 0,
+                        "unresolved": 0,
+                    },
                 },
                 "failure_reasons": {
                     "proxy_payment": 0,

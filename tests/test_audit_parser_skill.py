@@ -39,6 +39,20 @@ def test_audit_distinguishes_full_fresh_from_availability() -> None:
                             "timed_out": 0,
                             "skipped": 2,
                         },
+                        "outcome_recovery": {
+                            "provisional": {
+                                "events": 10,
+                                "recovered_to_fresh": 9,
+                                "reclassified_upstream_pending": 0,
+                                "unresolved": 1,
+                            },
+                            "lkg_served": {
+                                "events": 9,
+                                "recovered_to_fresh": 5,
+                                "reclassified_upstream_pending": 3,
+                                "unresolved": 1,
+                            },
+                        },
                         "full_fresh_rate_pct": 80.0,
                         "end_to_end_fresh_rate_pct": 78.43,
                         "accepted_fresh_rate_pct": 90.0,
@@ -79,12 +93,16 @@ def test_audit_distinguishes_full_fresh_from_availability() -> None:
         == 100.0
     )
     assert window["allowed_bad_attempts"] == 1.0
+    assert window["outcome_recovery"]["reported"] is True
+    assert window["outcome_recovery"]["provisional"]["recovered_to_fresh"] == 9
+    assert window["outcome_recovery"]["lkg_served"]["unresolved"] == 1
     assert {finding["code"] for finding in audit["findings"]} >= {
         "freshness_below_target",
         "upstream_publication_pending",
         "measurement_incomplete",
-        "provisional_candidates",
-        "lkg_dependency",
+        "provisional_unresolved",
+        "lkg_unresolved",
+        "lkg_upstream_reclassified",
         "unknown_failures",
         "completeness_catalog_gap",
         "completeness_observation_gap",

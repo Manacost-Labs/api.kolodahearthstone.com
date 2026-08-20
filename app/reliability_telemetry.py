@@ -39,7 +39,7 @@ WINDOWS = (
     ("7d", timedelta(days=7)),
     ("30d", timedelta(days=30)),
 )
-METHODOLOGY_VERSION = "logical-source-observed-v14"
+METHODOLOGY_VERSION = "logical-source-observed-v15"
 SLO_TARGET_RATE_PCT = 99.0
 PIPELINE_SCHEDULE_LEDGER_READY = False
 COVERAGE_BUCKET_SECONDS = 24 * 60 * 60
@@ -1539,6 +1539,110 @@ def _empty_parsesunix_rollout() -> dict[str, Any]:
     }
 
 
+def _empty_outcome_recovery() -> dict[str, dict[str, int]]:
+    return {
+        outcome: {
+            "events": 0,
+            "recovered_to_fresh": 0,
+            "reclassified_upstream_pending": 0,
+            "unresolved": 0,
+        }
+        for outcome in ("provisional", "lkg_served")
+    }
+
+
+def _query_outcome_recovery(
+    connection: sqlite3.Connection,
+    *,
+    from_epoch: float,
+    to_epoch: float,
+) -> dict[str, dict[str, int]]:
+    """Explain whether provisional and LKG logical events later recovered.
+
+    Historical bad events remain in the SLO denominator. This additive view only
+    distinguishes recovered events, verified upstream publication delays, and
+    incidents that still have no later terminal explanation.
+    """
+
+    rows = connection.execute(
+        """
+        WITH ranked_attempts AS (
+            SELECT
+                attempt_id,
+                source_id,
+                outcome,
+                finished_at,
+                ROW_NUMBER() OVER (
+                    PARTITION BY
+                        source_id,
+                        CASE
+                            WHEN refresh_window_id != ''
+                                THEN 'window:' || refresh_window_id
+                            ELSE 'attempt:' || attempt_id
+                        END
+                    ORDER BY
+                        CASE WHEN outcome = 'skipped' THEN 1 ELSE 0 END,
+                        finished_at DESC,
+                        recorded_at DESC,
+                        attempt_id DESC
+                ) AS logical_rank
+            FROM source_attempts
+            WHERE finished_at >= ? AND finished_at <= ?
+        ),
+        bad_events AS (
+            SELECT source_id, outcome, finished_at
+            FROM ranked_attempts
+            WHERE logical_rank = 1
+              AND outcome IN ('provisional', 'lkg_served')
+        ),
+        classified AS (
+            SELECT
+                bad.outcome,
+                CASE
+                    WHEN EXISTS (
+                        SELECT 1
+                        FROM source_attempts AS later
+                        WHERE later.source_id = bad.source_id
+                          AND later.outcome = 'fresh_published'
+                          AND later.finished_at > bad.finished_at
+                          AND later.finished_at <= ?
+                    ) THEN 'recovered_to_fresh'
+                    WHEN EXISTS (
+                        SELECT 1
+                        FROM source_attempts AS later
+                        WHERE later.source_id = bad.source_id
+                          AND later.outcome = 'skipped'
+                          AND later.independently_ineligible_reason =
+                              'upstream_not_published'
+                          AND later.finished_at > bad.finished_at
+                          AND later.finished_at <= ?
+                    ) THEN 'reclassified_upstream_pending'
+                    ELSE 'unresolved'
+                END AS resolution
+            FROM bad_events AS bad
+        )
+        SELECT outcome, resolution, COUNT(*)
+        FROM classified
+        GROUP BY outcome, resolution
+        """,
+        (from_epoch, to_epoch, to_epoch, to_epoch),
+    ).fetchall()
+    recovery = _empty_outcome_recovery()
+    for outcome, resolution, count in rows:
+        normalized_outcome = str(outcome)
+        normalized_resolution = str(resolution)
+        if (
+            normalized_outcome not in recovery
+            or normalized_resolution not in recovery[normalized_outcome]
+            or normalized_resolution == "events"
+        ):
+            continue
+        bounded_count = max(0, int(count or 0))
+        recovery[normalized_outcome][normalized_resolution] += bounded_count
+        recovery[normalized_outcome]["events"] += bounded_count
+    return recovery
+
+
 def _query_window(
     connection: sqlite3.Connection,
     *,
@@ -1676,6 +1780,11 @@ def _query_window(
         from_at=from_at,
         report_at=report_at,
     )
+    outcome_recovery = _query_outcome_recovery(
+        connection,
+        from_epoch=from_at.timestamp(),
+        to_epoch=report_at.timestamp(),
+    )
     return {
         "window": label,
         "from_at": from_at.isoformat(),
@@ -1690,6 +1799,7 @@ def _query_window(
         "upstream_pending_attempts": upstream_pending_attempts,
         "end_to_end_attempts": end_to_end_attempts,
         "counts": counts,
+        "outcome_recovery": outcome_recovery,
         "failure_reasons": failure_reasons,
         "full_fresh_rate_pct": _percentage(full_fresh, eligible_attempts),
         "end_to_end_fresh_rate_pct": _percentage(full_fresh, end_to_end_attempts),
@@ -1738,6 +1848,7 @@ def _empty_report(report_at: datetime) -> dict[str, Any]:
                 "upstream_pending_attempts": 0,
                 "end_to_end_attempts": 0,
                 "counts": {outcome: 0 for outcome in OUTCOMES},
+                "outcome_recovery": _empty_outcome_recovery(),
                 "failure_reasons": {reason: 0 for reason in FAILURE_REASONS},
                 "full_fresh_rate_pct": None,
                 "end_to_end_fresh_rate_pct": None,

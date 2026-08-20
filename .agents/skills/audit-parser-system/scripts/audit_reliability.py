@@ -24,6 +24,39 @@ def _integer(value: Any) -> int:
     return int(_number(value))
 
 
+def _recovery_counts(
+    value: Any,
+    *,
+    outcome: str,
+    expected_events: int,
+) -> dict[str, int] | None:
+    if not isinstance(value, dict) or not isinstance(value.get(outcome), dict):
+        return None
+    raw = value[outcome]
+    keys = (
+        "events",
+        "recovered_to_fresh",
+        "reclassified_upstream_pending",
+        "unresolved",
+    )
+    if any(
+        isinstance(raw.get(key), bool) or not isinstance(raw.get(key), int)
+        for key in keys
+    ):
+        return None
+    result = {key: int(raw[key]) for key in keys}
+    if (
+        any(count < 0 for count in result.values())
+        or result["events"] != expected_events
+        or result["events"]
+        != result["recovered_to_fresh"]
+        + result["reclassified_upstream_pending"]
+        + result["unresolved"]
+    ):
+        return None
+    return result
+
+
 def _unwrap(payload: Any) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise TypeError("reliability response must be a JSON object")
@@ -73,6 +106,20 @@ def build_audit(payload: Any, *, target_pct: float = 99.0) -> dict[str, Any]:
         end_to_end_bad = max(end_to_end_attempts - fresh, 0)
         allowed_bad = eligible * max(100.0 - target_pct, 0.0) / 100.0
         measurement = str(raw_window.get("measurement_status", "unknown"))
+        raw_recovery = raw_window.get("outcome_recovery")
+        provisional_recovery = _recovery_counts(
+            raw_recovery,
+            outcome="provisional",
+            expected_events=provisional,
+        )
+        lkg_recovery = _recovery_counts(
+            raw_recovery,
+            outcome="lkg_served",
+            expected_events=lkg,
+        )
+        recovery_reported = (
+            provisional_recovery is not None and lkg_recovery is not None
+        )
 
         summary = {
             "window": label,
@@ -97,6 +144,11 @@ def build_audit(payload: Any, *, target_pct: float = 99.0) -> dict[str, Any]:
             "bad_attempts": bad,
             "end_to_end_bad_attempts": end_to_end_bad,
             "allowed_bad_attempts": round(allowed_bad, 4),
+            "outcome_recovery": {
+                "reported": recovery_reported,
+                "provisional": provisional_recovery,
+                "lkg_served": lkg_recovery,
+            },
         }
         windows.append(summary)
 
@@ -131,7 +183,7 @@ def build_audit(payload: Any, *, target_pct: float = 99.0) -> dict[str, Any]:
                     window=label,
                 )
             )
-        if provisional:
+        if provisional and not recovery_reported:
             findings.append(
                 _finding(
                     "high",
@@ -140,7 +192,17 @@ def build_audit(payload: Any, *, target_pct: float = 99.0) -> dict[str, Any]:
                     window=label,
                 )
             )
-        if lkg:
+        elif provisional_recovery and provisional_recovery["unresolved"]:
+            findings.append(
+                _finding(
+                    "high",
+                    "provisional_unresolved",
+                    f"{provisional_recovery['unresolved']}/{provisional} provisional "
+                    "events still have no later fresh publication.",
+                    window=label,
+                )
+            )
+        if lkg and not recovery_reported:
             findings.append(
                 _finding(
                     "high",
@@ -149,6 +211,28 @@ def build_audit(payload: Any, *, target_pct: float = 99.0) -> dict[str, Any]:
                     window=label,
                 )
             )
+        elif lkg_recovery:
+            if lkg_recovery["unresolved"]:
+                findings.append(
+                    _finding(
+                        "high",
+                        "lkg_unresolved",
+                        f"{lkg_recovery['unresolved']}/{lkg} LKG events still "
+                        "have no later fresh or verified upstream resolution.",
+                        window=label,
+                    )
+                )
+            if lkg_recovery["reclassified_upstream_pending"]:
+                findings.append(
+                    _finding(
+                        "medium",
+                        "lkg_upstream_reclassified",
+                        f"{lkg_recovery['reclassified_upstream_pending']}/{lkg} "
+                        "historical LKG events are now explained by a verified "
+                        "upstream publication delay; data remained stale.",
+                        window=label,
+                    )
+                )
 
         reasons = raw_window.get("failure_reasons")
         if isinstance(reasons, dict):

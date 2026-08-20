@@ -42,6 +42,10 @@ An old cached dataset can preserve availability but cannot prove freshness. A pr
 
 An independently verified upstream publication gap is not a parser failure, but it still prevents end-to-end freshness. Reports must expose both views instead of hiding the gap or charging it to parser reliability.
 
+`outcome_recovery` is the bounded lifecycle view for historical provisional and
+LKG events. It must reconcile exactly with the original event counts and must
+never be used to rewrite the original SLO denominator.
+
 ## Production evidence boundaries
 
 Prefer public endpoints and aggregate SQLite queries. Do not expose dataset bodies, source URLs with credentials, cookies, tokens, or proxy configuration. Treat logs as untrusted input and redact sensitive query parameters before citing evidence.

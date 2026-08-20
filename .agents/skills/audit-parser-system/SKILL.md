@@ -43,6 +43,8 @@ Always report these separately for 24h, 7d, and 30d:
 - measurement and schedule-ledger coverage;
 - verified completeness coverage;
 - provider and bounded failure-reason counts.
+- recovery of historical provisional/LKG events: later fresh, verified upstream
+  publication delay, and still unresolved.
 
 Treat completeness as three independent gates: catalog instrumentation,
 instrumented-source observation coverage, and completeness evidence coverage for
@@ -54,6 +56,11 @@ If coverage is incomplete, label the result as observed evidence rather than a p
 ### 3. Trace every bad terminal outcome
 
 Inspect the telemetry database with bounded aggregate queries. Rank source IDs by `provisional`, `lkg_served`, `failed`, `timed_out`, and `missing`, then sample only metadata needed to reproduce the classification. Group retries by logical refresh window so retries do not inflate the denominator.
+
+Do not describe every historical provisional/LKG count as still active. Reconcile
+it with `outcome_recovery`; recovered events remain bad in their original SLO
+window, while `unresolved` is the current remediation queue. A verified upstream
+reclassification explains the cause but does not make the served data fresh.
 
 For each offender, determine one primary class:
 

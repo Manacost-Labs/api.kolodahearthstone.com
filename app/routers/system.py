@@ -44,6 +44,18 @@ class ReliabilityCounts(BaseModel):
     skipped: int = Field(ge=0)
 
 
+class ReliabilityOutcomeRecoveryCounts(BaseModel):
+    events: int = Field(ge=0)
+    recovered_to_fresh: int = Field(ge=0)
+    reclassified_upstream_pending: int = Field(ge=0)
+    unresolved: int = Field(ge=0)
+
+
+class ReliabilityOutcomeRecovery(BaseModel):
+    provisional: ReliabilityOutcomeRecoveryCounts
+    lkg_served: ReliabilityOutcomeRecoveryCounts
+
+
 class ReliabilityFailureReasons(BaseModel):
     proxy_payment: int = Field(ge=0)
     authentication: int = Field(ge=0)
@@ -288,6 +300,7 @@ class ReliabilityWindow(BaseModel):
     upstream_pending_attempts: int = Field(ge=0)
     end_to_end_attempts: int = Field(ge=0)
     counts: ReliabilityCounts
+    outcome_recovery: ReliabilityOutcomeRecovery
     failure_reasons: ReliabilityFailureReasons
     full_fresh_rate_pct: float | None = Field(default=None, ge=0.0, le=100.0)
     end_to_end_fresh_rate_pct: float | None = Field(default=None, ge=0.0, le=100.0)
