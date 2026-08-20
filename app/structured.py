@@ -181,16 +181,31 @@ def parse_bg_heroes(lines: list[str]) -> list[dict[str, Any]]:
     return [h for h in heroes if h.get("pick_rate")][:50]
 
 
-def parse_hsguru_matchups(tables: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _parse_hsguru_matchups_with_evidence(
+    tables: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     if not tables:
-        return []
+        return [], row_retrieval_evidence(
+            raw_rows=0,
+            eligible_rows=0,
+            normalized_rows=0,
+            scope="hsguru_matchup_cells",
+        )
     table = tables[0]
     headers = table.get("headers") or []
     rows = table.get("rows") or []
     if len(headers) < 3 or not rows:
-        return []
+        return [], row_retrieval_evidence(
+            raw_rows=0,
+            eligible_rows=0,
+            normalized_rows=0,
+            scope="hsguru_matchup_cells",
+        )
     columns = headers[2:]
     pairs: list[dict[str, Any]] = []
+    raw_cells = 0
+    explained_self_matchups = 0
+    unexplained_missing_cells = 0
     for row in rows:
         if len(row) < 2:
             continue
@@ -201,10 +216,13 @@ def parse_hsguru_matchups(tables: list[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
         for ci, col in enumerate(columns):
             idx = ci + 2
-            if idx >= len(row):
-                break
-            val = row[idx]
+            raw_cells += 1
+            val = row[idx] if idx < len(row) else None
             if val is None or val == "":
+                if str(row_arch).strip().casefold() == str(col).strip().casefold():
+                    explained_self_matchups += 1
+                else:
+                    unexplained_missing_cells += 1
                 continue
             pairs.append(
                 {
@@ -213,6 +231,26 @@ def parse_hsguru_matchups(tables: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     "winrate": val if "%" in str(val) else f"{val}%",
                 }
             )
+    return pairs, row_retrieval_evidence(
+        raw_rows=raw_cells,
+        eligible_rows=raw_cells,
+        normalized_rows=len(pairs),
+        explained_reasons=(
+            {"self_matchup_not_applicable": explained_self_matchups}
+            if explained_self_matchups
+            else None
+        ),
+        unexplained_reasons=(
+            {"missing_matchup_cell": unexplained_missing_cells}
+            if unexplained_missing_cells
+            else None
+        ),
+        scope="hsguru_matchup_cells",
+    )
+
+
+def parse_hsguru_matchups(tables: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    pairs, _ = _parse_hsguru_matchups_with_evidence(tables)
     return pairs
 
 
@@ -710,7 +748,13 @@ def build_structured(source: Source, data: dict[str, Any]) -> dict[str, Any]:
         if source.category == "streamer_decks":
             return {"type": "streamer_decks", "rows": tables[0].get("objects") if tables else []}
         if source.category == "matchups":
-            return {"type": "matchups", "matchups": parse_hsguru_matchups(tables)}
+            matchups, row_retrieval = _parse_hsguru_matchups_with_evidence(tables)
+            return {
+                "type": "matchups",
+                "matchups": matchups,
+                "completeness_schema_version": COMPLETENESS_SCHEMA_VERSION,
+                "row_retrieval": row_retrieval,
+            }
 
     if sid == "hsreplay_arena_legendaries":
         return {"type": "arena_legendary_groups", "groups": parse_legendary_groups(lines)}

@@ -41,3 +41,47 @@ def test_hsguru_meta_emits_reconciled_completeness_evidence() -> None:
     assert report["ok"] is True
     assert report["retrieval_complete"] is True
     assert report["retrieval_completeness_score"] == 1.0
+
+
+def _matchup_table(*, missing_non_self: bool = False) -> dict:
+    archetypes = ["Deck A", "Deck B", "Deck C"]
+    rows = []
+    for row_index, archetype in enumerate(archetypes):
+        values: list[str] = []
+        for column_index, _opponent in enumerate(archetypes):
+            if row_index == column_index or (
+                missing_non_self and row_index == 0 and column_index == 1
+            ):
+                values.append("")
+            else:
+                values.append("51%")
+        rows.append(["", archetype, *values])
+    return {"headers": ["Rank", "Archetype", *archetypes], "rows": rows}
+
+
+def test_hsguru_matchups_explains_only_self_matchup_cells() -> None:
+    source = SOURCE_BY_ID["hsguru_matchups_legend"]
+    complete = build_structured(
+        source,
+        {"tables": [_matchup_table()], "text_preview": [], "links": []},
+    )
+    incomplete = build_structured(
+        source,
+        {
+            "tables": [_matchup_table(missing_non_self=True)],
+            "text_preview": [],
+            "links": [],
+        },
+    )
+
+    complete_report = contract_quality_report(source.id, complete)
+    incomplete_report = contract_quality_report(source.id, incomplete)
+
+    assert complete["row_retrieval"]["raw_rows"] == 9
+    assert complete["row_retrieval"]["normalized_rows"] == 6
+    assert complete["row_retrieval"]["explained_drops"] == 3
+    assert complete["row_retrieval"]["unexplained_drops"] == 0
+    assert complete_report["retrieval_complete"] is True
+    assert complete_report["identity_checks"]["matchups"]["complete"] is True
+    assert incomplete["row_retrieval"]["unexplained_drops"] == 1
+    assert incomplete_report["retrieval_complete"] is False

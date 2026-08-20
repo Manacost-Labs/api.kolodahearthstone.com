@@ -92,6 +92,14 @@ EXPLAINED_ROW_DROP_REASONS: dict[str, frozenset[str]] = {
         "firestone_standard",
     )
 }
+for _hsguru_matchups_source_id in (
+    "hsguru_matchups_legend",
+    "hsguru_matchups_wild_legend",
+    "hsguru_matchups_diamond_4to1",
+):
+    EXPLAINED_ROW_DROP_REASONS[_hsguru_matchups_source_id] = frozenset(
+        {"self_matchup_not_applicable"}
+    )
 HSREPLAY_FRESHNESS_GATED_SOURCE_IDS = frozenset(
     {
         "hsreplay_battlegrounds_minions",
@@ -1259,6 +1267,38 @@ def _identity_quality_report(
     }
 
 
+def _matchup_identity_quality_report(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    identities: list[tuple[str, str]] = []
+    missing = 0
+    for row in rows:
+        archetype = row.get("archetype")
+        opponent = row.get("vs")
+        if (
+            isinstance(archetype, str)
+            and archetype.strip()
+            and isinstance(opponent, str)
+            and opponent.strip()
+        ):
+            identities.append((archetype.strip(), opponent.strip()))
+        else:
+            missing += 1
+    unique = len(set(identities))
+    duplicates = len(identities) - unique
+    total = len(rows)
+    return {
+        "fields": ["archetype", "vs"],
+        "total": total,
+        "unique": unique,
+        "missing": missing,
+        "duplicates": duplicates,
+        "retrieval_completeness_rate": round(
+            unique / total if total else 0.0,
+            4,
+        ),
+        "complete": bool(total) and not missing and not duplicates,
+    }
+
+
 def contract_quality_report(
     source_id: str,
     structured: dict[str, Any],
@@ -1595,6 +1635,20 @@ def contract_quality_report(
                     f"{collection} identity {field_path} is incomplete or duplicated "
                     f"(missing={identity_report['missing']}, "
                     f"duplicates={identity_report['duplicates']})"
+                )
+        if structured.get("type") == "matchups":
+            matchup_identity = _matchup_identity_quality_report(rows)
+            report["identity_checks"]["matchups"] = matchup_identity
+            retrieval_rates.append(
+                float(matchup_identity["retrieval_completeness_rate"])
+            )
+            if not matchup_identity["complete"]:
+                report["ok"] = False
+                report["retrieval_complete"] = False
+                report["warnings"].append(
+                    "matchup (archetype, vs) identity is incomplete or duplicated "
+                    f"(missing={matchup_identity['missing']}, "
+                    f"duplicates={matchup_identity['duplicates']})"
                 )
         if source_id == "hsreplay_battlegrounds_minions":
             domain_errors = _strict_bg_minion_domain_errors(rows)
