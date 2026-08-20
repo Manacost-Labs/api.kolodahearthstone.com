@@ -161,6 +161,12 @@ docker exec hs-data-api python -m app.cli brightdata-init-usage --billed-request
 | --- | --- |
 | `HS_SCRAPE_DO_TOKEN` | API token основного провайдера. |
 | `HS_SCRAPE_DO_TIMEOUT_SECONDS` | Wall timeout Scrape.do, `120`. |
+| `HS_PARSESUNIX_ENABLED` | Главный выключатель нового transport layer; строго `true` или `false`, default `false`. |
+| `HS_PARSESUNIX_SHADOW_SOURCE_IDS` | Источники, которые сравниваются с новым транспортом без публикации его результата. |
+| `HS_PARSESUNIX_ACTIVE_SOURCE_IDS` | Источники, для которых новый транспорт станет основным после shadow-проверки. Не может пересекаться с shadow allowlist. |
+| `HS_PARSESUNIX_ALLOWED_PROVIDERS` | Явный ordered allowlist; на первом этапе допускается только `scrape.do`. Пустое значение запрещает все платные вызовы. |
+| `HS_PARSESUNIX_MAX_CONCURRENCY` | Отдельный предел параллельных sync-вызовов нового ядра, `1..8`, default `2`. |
+| `HS_PARSESUNIX_TIMEOUT_SECONDS` | Общий deadline одного transport-вызова, `5..300`, default `150`. |
 | `HS_HSREPLAY_JSON_CHANNELS` | Каскад HSReplay JSON; default `flaresolverr,scrape_do,curl_cffi`: бесплатный локальный solver, затем оплаченная подписка Scrape.do, затем residential `curl_cffi`. Предпочтения контракта идут первыми, затем добавляются настроенные каналы без дублей. |
 | `HS_HSREPLAY_SCRAPE_DO_MAX_REQUESTS` | Атомарный лимит зарезервированных HSReplay JSON-вызовов Scrape.do на refresh, default `120`. Этого достаточно для текущего полного набора архетипов с запасом. |
 | `HS_HSREPLAY_SCRAPE_DO_MAX_CREDITS` | Атомарный stop threshold HSReplay JSON на refresh, default `160`. Ошибочные и отклонённые вызовы не возвращают резерв. Фактическая цена известна только из ответа, поэтому один уже выполненный вызов может превысить threshold; следующий вызов будет заблокирован. |

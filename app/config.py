@@ -13,6 +13,7 @@ DEFAULT_BACKENDS_LAB = (
 )
 DEFAULT_HSREPLAY_JSON_CHANNELS = "flaresolverr,scrape_do,curl_cffi"
 DEFAULT_HSREPLAY_MARKDOWN_CHANNELS = "flaresolverr,curl_cffi"
+PARSESUNIX_SUPPORTED_PROVIDERS = frozenset({"scrape.do"})
 
 
 def runtime_display() -> str | None:
@@ -54,6 +55,83 @@ def python_environment() -> str:
 
 def data_dir() -> Path:
     return Path(os.environ.get("HS_API_DATA_DIR", DEFAULT_DATA_DIR))
+
+
+def parsesunix_state_dir() -> Path:
+    """Keep transport-learning state separate from authoritative datasets."""
+
+    return data_dir() / "parsesunix"
+
+
+def parsesunix_enabled() -> bool:
+    raw = os.environ.get("HS_PARSESUNIX_ENABLED", "false").strip().lower()
+    if raw == "true":
+        return True
+    if raw == "false":
+        return False
+    raise ValueError("HS_PARSESUNIX_ENABLED must be 'true' or 'false'")
+
+
+def _parsesunix_source_ids(name: str) -> frozenset[str]:
+    raw = os.environ.get(name, "")
+    values = tuple(part.strip() for part in raw.split(",") if part.strip())
+    if len(values) != len(set(values)):
+        raise ValueError(f"{name} must not contain duplicate source IDs")
+    return frozenset(values)
+
+
+def parsesunix_shadow_source_ids() -> frozenset[str]:
+    return _parsesunix_source_ids("HS_PARSESUNIX_SHADOW_SOURCE_IDS")
+
+
+def parsesunix_active_source_ids() -> frozenset[str]:
+    return _parsesunix_source_ids("HS_PARSESUNIX_ACTIVE_SOURCE_IDS")
+
+
+def parsesunix_mode_for_source(source_id: str) -> str:
+    if not parsesunix_enabled():
+        return "legacy"
+    shadow = parsesunix_shadow_source_ids()
+    active = parsesunix_active_source_ids()
+    overlap = shadow & active
+    if overlap:
+        raise ValueError(
+            "ParsesUnix shadow and active source lists overlap: "
+            + ", ".join(sorted(overlap))
+        )
+    if source_id in active:
+        return "parsesunix"
+    if source_id in shadow:
+        return "shadow"
+    return "legacy"
+
+
+def parsesunix_allowed_providers() -> tuple[str, ...]:
+    raw = os.environ.get("HS_PARSESUNIX_ALLOWED_PROVIDERS", "")
+    providers = tuple(part.strip().lower() for part in raw.split(",") if part.strip())
+    if len(providers) != len(set(providers)):
+        raise ValueError("HS_PARSESUNIX_ALLOWED_PROVIDERS must not contain duplicates")
+    unknown = sorted(set(providers) - PARSESUNIX_SUPPORTED_PROVIDERS)
+    if unknown:
+        raise ValueError(
+            "HS_PARSESUNIX_ALLOWED_PROVIDERS contains unsupported providers: "
+            + ", ".join(unknown)
+        )
+    return providers
+
+
+def parsesunix_max_concurrency() -> int:
+    value = int(os.environ.get("HS_PARSESUNIX_MAX_CONCURRENCY", "2"))
+    if not 1 <= value <= 8:
+        raise ValueError("HS_PARSESUNIX_MAX_CONCURRENCY must be between 1 and 8")
+    return value
+
+
+def parsesunix_timeout_seconds() -> float:
+    value = float(os.environ.get("HS_PARSESUNIX_TIMEOUT_SECONDS", "150"))
+    if not 5 <= value <= 300:
+        raise ValueError("HS_PARSESUNIX_TIMEOUT_SECONDS must be between 5 and 300")
+    return value
 
 
 def bind_host() -> str:
