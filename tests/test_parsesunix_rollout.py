@@ -151,6 +151,77 @@ def test_invalid_rollout_configuration_fails_before_any_transport(
     parsesunix.assert_not_awaited()
 
 
+def test_active_parsesunix_overrides_firecrawl_primary_without_changing_shadow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        fetcher, "firecrawl_primary_source_ids", lambda: {SOURCE.id}
+    )
+
+    assert fetcher._firecrawl_primary_enabled(SOURCE.id, "legacy") is True
+    assert fetcher._firecrawl_primary_enabled(SOURCE.id, "shadow") is True
+    assert fetcher._firecrawl_primary_enabled(SOURCE.id, "parsesunix") is False
+
+
+def test_firecrawl_primary_records_parsesunix_shadow_without_changing_publication(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    published = {
+        "source_id": SOURCE.id,
+        "state": "ok",
+        "backend": "scrape_do",
+        "http_status": 200,
+        "rows_total": 12,
+    }
+    monkeypatch.setattr(
+        fetcher, "parsesunix_mode_for_source", lambda _source_id: "shadow"
+    )
+    monkeypatch.setattr(
+        fetcher, "firecrawl_primary_source_ids", lambda: {SOURCE.id}
+    )
+    monkeypatch.setattr(
+        fetcher,
+        "_try_firecrawl_html",
+        AsyncMock(return_value=dict(published)),
+    )
+    monkeypatch.setattr(
+        fetcher,
+        "fetch_with_parsesunix",
+        AsyncMock(return_value=_evidence("<html>shadow candidate</html>")),
+    )
+    monkeypatch.setattr(
+        fetcher, "parse_html", lambda _source, _body: {"rows": [1, 2]}
+    )
+    monkeypatch.setattr(
+        fetcher,
+        "validate_candidate_for_publish",
+        lambda *_args, **_kwargs: SimpleNamespace(ok=True, reason="accepted"),
+    )
+    monkeypatch.setattr(fetcher, "estimate_metric_count", lambda _parsed: 2)
+    monkeypatch.setattr(fetcher, "complete_source_trace", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(fetcher, "log_action", lambda *_args, **_kwargs: None)
+
+    result = asyncio.run(
+        fetcher._fetch_source_with_active_lifecycle(
+            None,
+            SOURCE,
+            True,
+            started=0.0,
+            fetched_at="2026-08-20T17:00:00+00:00",
+            publication_attempt=None,
+            previous={},
+            preferred_backend="legacy_browser",
+            source_tier="browser_protected",
+            trace_id="shadow-test",
+        )
+    )
+
+    assert {key: result[key] for key in published} == published
+    assert result["parsesunix_shadow"]["transport_validated"] is True
+    assert result["parsesunix_shadow"]["candidate_validated"] is True
+    assert result["parsesunix_shadow"]["publication_validated"] is None
+
+
 def test_parsesunix_never_reenters_the_legacy_paid_chain() -> None:
     blocked = ParsesUnixTransportRejected(_evidence("challenge", verdict="BLOCKED"))
     origin_down = ParsesUnixTransportRejected(

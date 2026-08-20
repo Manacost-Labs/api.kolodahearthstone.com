@@ -1416,18 +1416,31 @@ async def _complete_parsesunix_shadow(
     return observation
 
 
+def _configured_parsesunix_mode(source_id: str) -> str:
+    try:
+        return parsesunix_mode_for_source(source_id)
+    except ValueError as exc:
+        raise ParsesUnixExecutionError(
+            f"Invalid ParsesUnix rollout configuration: {exc}"
+        ) from exc
+
+
+def _firecrawl_primary_enabled(source_id: str, parsesunix_mode: str) -> bool:
+    """Keep shadow non-authoritative while allowing active rollout to take over."""
+
+    return (
+        source_id in firecrawl_primary_source_ids()
+        and parsesunix_mode != "parsesunix"
+    )
+
+
 async def _fetch_generic_html(
     client: httpx.AsyncClient | None,
     source: Source,
     *,
     preferred_backend: str,
 ) -> _GenericHtmlFetch:
-    try:
-        mode = parsesunix_mode_for_source(source.id)
-    except ValueError as exc:
-        raise ParsesUnixExecutionError(
-            f"Invalid ParsesUnix rollout configuration: {exc}"
-        ) from exc
+    mode = _configured_parsesunix_mode(source.id)
     shadow_task: asyncio.Task[TransportEvidence] | None = None
     if mode == "shadow":
         shadow_task = asyncio.create_task(
@@ -2595,13 +2608,33 @@ async def _fetch_source_with_active_lifecycle(
             )
         return status
 
-    if source.id in firecrawl_primary_source_ids():
+    parsesunix_mode = _configured_parsesunix_mode(source.id)
+    if _firecrawl_primary_enabled(source.id, parsesunix_mode):
         firecrawl_status = await _try_firecrawl_html(
             source,
             fetched_at=fetched_at,
             reason="primary",
         )
         if firecrawl_status is not None:
+            if parsesunix_mode == "shadow":
+                shadow = await _complete_parsesunix_shadow(
+                    asyncio.create_task(fetch_with_parsesunix(source.fetch_url)),
+                    source,
+                    legacy_body=None,
+                    legacy_http_status=firecrawl_status.get("http_status"),
+                    legacy_backend=str(firecrawl_status.get("backend") or "firecrawl"),
+                )
+                _attach_parsesunix_observation(
+                    firecrawl_status,
+                    mode="shadow",
+                    observation=shadow,
+                )
+                log_action(
+                    "parsesunix.shadow.observe",
+                    source_id=source.id,
+                    level="info",
+                    extra=shadow,
+                )
             return _finish(firecrawl_status)
 
     if (

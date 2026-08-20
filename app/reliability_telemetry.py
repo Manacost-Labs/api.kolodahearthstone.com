@@ -450,10 +450,12 @@ def _parsesunix_terminal_fields(
     if evidence is None:
         return ("none", "not_observed", None, None, None, None, None, None, None)
 
-    verdict = _bounded_enum(
-        evidence.get("verdict"),
-        PARSESUNIX_VERDICTS,
-        default="not_observed",
+    raw_verdict = str(evidence.get("verdict") or "").strip()
+    canonical_verdict = raw_verdict.upper()
+    verdict = (
+        canonical_verdict
+        if canonical_verdict in PARSESUNIX_VERDICTS
+        else "not_observed"
     )
     paid_requests = _bounded_nonnegative_int(
         evidence.get("paid_requests"), maximum=1_000_000

@@ -2024,6 +2024,18 @@ def test_parsesunix_rollout_is_reported_as_separate_honest_funnel(
         path=path,
     )
 
+    with sqlite3.connect(path) as connection:
+        persisted_verdicts = dict(
+            connection.execute(
+                "SELECT source_id, parsesunix_verdict FROM source_attempts"
+            ).fetchall()
+        )
+    assert persisted_verdicts == {
+        "active-lkg": "ORIGIN_DOWN",
+        "active-published": "OK",
+        "shadow-source": "OK",
+    }
+
     rollout = build_reliability_report(now=now, path=path)["windows"][0][
         "parsesunix_rollout"
     ]
