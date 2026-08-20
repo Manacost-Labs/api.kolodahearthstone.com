@@ -63,3 +63,16 @@ def test_streamer_job_does_not_hide_derived_refresh_failure() -> None:
         result = module.main()
 
     assert result == 1
+
+
+def test_streamer_job_forwards_durable_schedule_id() -> None:
+    module = _load_script()
+    module.cli_main = Mock(return_value=1)
+
+    result = module.main(["--schedule-id", "refresh-streamer-decks"])
+
+    assert result == 1
+    assert module.cli_main.call_args.args[0][-2:] == [
+        "--schedule-id",
+        "refresh-streamer-decks",
+    ]

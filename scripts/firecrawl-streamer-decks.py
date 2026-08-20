@@ -43,7 +43,7 @@ def _refresh_derived_fun_decks() -> dict[str, Any]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--schedule-id")
-    args = parser.parse_args(argv)
+    args = parser.parse_args([] if argv is None else argv)
     refresh_args = [
         "refresh",
         "--source",
@@ -69,4 +69,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))
