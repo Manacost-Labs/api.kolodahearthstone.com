@@ -86,6 +86,8 @@ class PostPatchPolicyTest(unittest.TestCase):
     def test_policy_explicitly_covers_hsguru_and_only_current_patch_card_periods(self) -> None:
         self.assertIn("hsguru_meta_standard_legend", EARLY_SOURCE_IDS)
         self.assertIn("hsguru_matchups_legend", EARLY_SOURCE_IDS)
+        self.assertIn("metastats_decks", EARLY_SOURCE_IDS)
+        self.assertEqual(policy_for("metastats_decks", at=WINDOW_TIME).minimum_rows, 40)
         self.assertIn("hsreplay_cards_legend_patch", EARLY_SOURCE_IDS)
         self.assertIn("hsreplay_cards_wild_platinum_patch", EARLY_SOURCE_IDS)
         self.assertNotIn("hsreplay_cards_legend_1d", EARLY_SOURCE_IDS)

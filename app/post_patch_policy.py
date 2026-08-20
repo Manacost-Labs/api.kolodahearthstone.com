@@ -71,6 +71,8 @@ HSGURU_EARLY_SOURCE_IDS = frozenset(
     }
 )
 
+METASTATS_EARLY_SOURCE_IDS = frozenset({"metastats_decks"})
+
 FIRESTONE_STANDARD_EARLY_SOURCE_IDS = frozenset({"firestone_standard"})
 
 HSREPLAY_CURRENT_PATCH_EARLY_SOURCE_IDS = frozenset(
@@ -86,6 +88,7 @@ TRINKET_EARLY_SOURCE_IDS = frozenset(LEGACY_DEFAULT_TRINKET_SOURCE_IDS) | frozen
 EARLY_SOURCE_IDS = frozenset(
     ARENA_EARLY_SOURCE_IDS
     | HSGURU_EARLY_SOURCE_IDS
+    | METASTATS_EARLY_SOURCE_IDS
     | FIRESTONE_STANDARD_EARLY_SOURCE_IDS
     | HSREPLAY_CURRENT_PATCH_EARLY_SOURCE_IDS
     | TRINKET_EARLY_SOURCE_IDS
@@ -95,6 +98,8 @@ EARLY_SOURCE_IDS = frozenset(
 def _policy_for_source(source_id: str) -> PostPatchPolicy:
     if source_id in HSGURU_EARLY_SOURCE_IDS:
         minimum_rows = 3
+    elif source_id in METASTATS_EARLY_SOURCE_IDS:
+        minimum_rows = 40
     elif source_id in LEGACY_DEFAULT_TRINKET_SOURCE_IDS:
         minimum_rows = 8
     elif source_id in TRINKET_SLICE_SOURCE_IDS:
