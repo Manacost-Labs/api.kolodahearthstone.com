@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
+from web_scraper import ResponseContract
 from web_scraper.fetchers import RawResponse
 from web_scraper.providers.base import (
     ProviderCost,
@@ -21,8 +22,17 @@ class FakeTransport:
     def __init__(self, **_kwargs: object) -> None:
         pass
 
-    def fetch(self, _url: str) -> RawResponse:
+    def fetch(self, _url: str, *, headers=None) -> RawResponse:
         return self.response
+
+
+HTML_CONTRACT = ResponseContract.html(
+    canaries=("content",),
+    min_body_bytes=200,
+)
+JSON_CONTRACT = ResponseContract.json(
+    required_json_paths=("data.0.id",),
+)
 
 
 class FakeScrapeDoProvider:
@@ -95,7 +105,10 @@ def test_direct_transport_returns_validated_secret_free_evidence(monkeypatch) ->
     monkeypatch.setattr(parsesunix_transport, "UrllibTransport", FakeTransport)
 
     evidence = asyncio.run(
-        parsesunix_transport.fetch_direct("https://example.com/list?private=value")
+        parsesunix_transport.fetch_direct(
+            "https://example.com/list?private=value",
+            HTML_CONTRACT,
+        )
     )
 
     assert evidence.body == body.decode()
@@ -121,7 +134,9 @@ def test_direct_transport_does_not_accept_soft_block(monkeypatch) -> None:
     )
     monkeypatch.setattr(parsesunix_transport, "UrllibTransport", FakeTransport)
 
-    evidence = asyncio.run(parsesunix_transport.fetch_direct("https://example.com"))
+    evidence = asyncio.run(
+        parsesunix_transport.fetch_direct("https://example.com", HTML_CONTRACT)
+    )
 
     assert evidence.transport_validated is False
     assert evidence.verdict == "SOFT_BLOCK"
@@ -139,12 +154,14 @@ def test_truncated_response_is_never_transport_validated(monkeypatch) -> None:
     )
     monkeypatch.setattr(parsesunix_transport, "UrllibTransport", FakeTransport)
 
-    evidence = asyncio.run(parsesunix_transport.fetch_direct("https://example.com"))
+    evidence = asyncio.run(
+        parsesunix_transport.fetch_direct("https://example.com", HTML_CONTRACT)
+    )
 
     assert evidence.transport_validated is False
     assert evidence.verdict == "PARSE_FAIL"
     assert evidence.paid_escalation_allowed is False
-    assert "configured" in evidence.reason
+    assert "truncated" in evidence.reason
 
 
 def test_transport_error_is_sanitized(monkeypatch) -> None:
@@ -159,7 +176,10 @@ def test_transport_error_is_sanitized(monkeypatch) -> None:
     monkeypatch.setattr(parsesunix_transport, "UrllibTransport", FakeTransport)
 
     evidence = asyncio.run(
-        parsesunix_transport.fetch_direct("https://example.com?token=secret")
+        parsesunix_transport.fetch_direct(
+            "https://example.com?token=secret",
+            HTML_CONTRACT,
+        )
     )
 
     assert evidence.transport_validated is False
@@ -179,7 +199,9 @@ def test_budgeted_scrape_do_runs_only_after_deterministic_block(
 
     begin_refresh_run()
     try:
-        evidence = asyncio.run(parsesunix_transport.fetch("https://example.com"))
+        evidence = asyncio.run(
+            parsesunix_transport.fetch("https://example.com", HTML_CONTRACT)
+        )
     finally:
         end_refresh_run()
 
@@ -207,7 +229,9 @@ def test_paid_provider_is_not_called_for_origin_outage(monkeypatch, tmp_path) ->
 
     begin_refresh_run()
     try:
-        evidence = asyncio.run(parsesunix_transport.fetch("https://example.com"))
+        evidence = asyncio.run(
+            parsesunix_transport.fetch("https://example.com", HTML_CONTRACT)
+        )
     finally:
         end_refresh_run()
 
@@ -225,14 +249,18 @@ def test_paid_provider_requires_nonzero_limits_and_refresh_context(
     FakeTransport.response = _soft_block_response()
     monkeypatch.setattr(parsesunix_transport, "UrllibTransport", FakeTransport)
 
-    evidence = asyncio.run(parsesunix_transport.fetch("https://example.com"))
+    evidence = asyncio.run(
+        parsesunix_transport.fetch("https://example.com", HTML_CONTRACT)
+    )
     assert FakeScrapeDoProvider.calls == 0
     assert evidence.backend == "parsesunix_direct"
 
     monkeypatch.setenv("HS_PARSESUNIX_SCRAPE_DO_DAILY_CREDIT_LIMIT", "0")
     begin_refresh_run()
     try:
-        evidence = asyncio.run(parsesunix_transport.fetch("https://example.com"))
+        evidence = asyncio.run(
+            parsesunix_transport.fetch("https://example.com", HTML_CONTRACT)
+        )
     finally:
         end_refresh_run()
     assert FakeScrapeDoProvider.calls == 0
@@ -246,8 +274,12 @@ def test_paid_request_cap_is_atomic_per_refresh(monkeypatch, tmp_path) -> None:
 
     begin_refresh_run()
     try:
-        first = asyncio.run(parsesunix_transport.fetch("https://example.com/one"))
-        second = asyncio.run(parsesunix_transport.fetch("https://example.com/two"))
+        first = asyncio.run(
+            parsesunix_transport.fetch("https://example.com/one", HTML_CONTRACT)
+        )
+        second = asyncio.run(
+            parsesunix_transport.fetch("https://example.com/two", HTML_CONTRACT)
+        )
     finally:
         end_refresh_run()
 
@@ -272,7 +304,9 @@ def test_unknown_provider_spend_is_never_reported_as_zero(
 
     begin_refresh_run()
     try:
-        evidence = asyncio.run(parsesunix_transport.fetch("https://example.com"))
+        evidence = asyncio.run(
+            parsesunix_transport.fetch("https://example.com", HTML_CONTRACT)
+        )
     finally:
         end_refresh_run()
 
@@ -282,3 +316,30 @@ def test_unknown_provider_spend_is_never_reported_as_zero(
     assert evidence.paid_cost_usd == ""
     assert evidence.cost_certainty == "unknown"
     assert evidence.telemetry()["cost_certainty"] == "unknown"
+
+
+def test_existing_transport_json_is_checked_by_the_same_contract() -> None:
+    evidence = parsesunix_transport.validate_acquired_response(
+        "https://example.com/api?token=secret",
+        '{"data": [{"id": 7}]}',
+        JSON_CONTRACT,
+        headers={"Content-Type": "application/json"},
+        backend="existing_json",
+    )
+
+    assert evidence.transport_validated is True
+    assert evidence.content_kind == "JSON"
+    assert evidence.backend == "existing_json"
+    assert "secret" not in repr(evidence.telemetry())
+
+
+def test_existing_transport_rejects_html_under_json_contract() -> None:
+    evidence = parsesunix_transport.validate_acquired_response(
+        "https://example.com/api",
+        "<html><body>content shell</body></html>" * 20,
+        JSON_CONTRACT,
+        headers={"Content-Type": "text/html"},
+    )
+
+    assert evidence.transport_validated is False
+    assert evidence.verdict == "PARSE_FAIL"

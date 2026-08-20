@@ -3,14 +3,21 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import threading
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from decimal import Decimal
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from web_scraper import PAID_ESCALATION_VERDICTS, ContentRules, Verdict
+from web_scraper import (
+    PAID_ESCALATION_VERDICTS,
+    ResponseContract,
+    ValidatedResponse,
+    Verdict,
+    fetch_validated,
+    validate_response,
+)
 from web_scraper.budget import BudgetLedger
 from web_scraper.fetchers import RawResponse, UrllibTransport
 from web_scraper.providers.base import (
@@ -23,7 +30,6 @@ from web_scraper.providers.multi_escalation import MultiProviderEscalator, PaidA
 from web_scraper.providers.multi_router import MultiProviderRouter
 from web_scraper.providers.scrape_do import ScrapeDoProvider
 from web_scraper.providers.stats import ProviderStatsStore
-from web_scraper.triage import classify_response
 
 from .config import (
     parsesunix_allowed_providers,
@@ -58,6 +64,7 @@ class TransportEvidence:
     elapsed_ms: int | None
     truncated: bool
     content_sha256: str
+    content_kind: str | None = None
     backend: str = "parsesunix_direct"
     route: str = "direct"
     provider: str | None = None
@@ -89,6 +96,7 @@ class TransportEvidence:
             "elapsed_ms": self.elapsed_ms,
             "truncated": self.truncated,
             "content_sha256": self.content_sha256,
+            "content_kind": self.content_kind,
             "attempts": self.attempts,
             "paid_requests": self.paid_requests,
             "paid_cost_usd": self.paid_cost_usd,
@@ -128,7 +136,81 @@ def _safe_reason(response: RawResponse, reason: str) -> str:
     return reason[:500]
 
 
-def _fetch_direct_sync(url: str) -> TransportEvidence:
+def _evidence_from_validated(
+    validated: ValidatedResponse,
+    *,
+    backend: str,
+    route: str,
+    provider: str | None = None,
+    attempts: int = 1,
+    paid_requests: int = 0,
+    paid_cost_usd: str = "0",
+    cost_certainty: str = "exact",
+) -> TransportEvidence:
+    response = validated.response
+    triage = validated.triage
+    return TransportEvidence(
+        body=response.body.decode("utf-8", errors="replace"),
+        http_status=response.status,
+        final_url=response.final_url,
+        verdict=triage.verdict.value,
+        reason=_safe_reason(response, triage.reason),
+        body_bytes=len(response.body),
+        elapsed_ms=response.elapsed_ms,
+        truncated=response.truncated,
+        content_sha256=validated.content_sha256,
+        content_kind=validated.content_kind.value,
+        backend=backend,
+        route=route,
+        provider=provider,
+        attempts=attempts,
+        paid_requests=paid_requests,
+        paid_cost_usd=paid_cost_usd,
+        cost_certainty=cost_certainty,
+    )
+
+
+def validate_acquired_response(
+    url: str,
+    body: str | bytes,
+    contract: ResponseContract,
+    *,
+    status: int | None = 200,
+    headers: Mapping[str, str] | None = None,
+    final_url: str | None = None,
+    elapsed_ms: int | None = None,
+    truncated: bool = False,
+    transport_error: str | None = None,
+    backend: str = "existing_transport",
+) -> TransportEvidence:
+    """Apply the same core contract to a response acquired by an existing client."""
+
+    encoded = body if isinstance(body, bytes) else body.encode("utf-8")
+    validated = validate_response(
+        RawResponse(
+            requested_url=url,
+            final_url=final_url or url,
+            status=status,
+            headers=dict(headers or {}),
+            body=encoded,
+            elapsed_ms=elapsed_ms,
+            truncated=truncated,
+            transport_error=transport_error,
+        ),
+        contract,
+    )
+    return _evidence_from_validated(
+        validated,
+        backend=backend,
+        route="existing",
+    )
+
+
+def _fetch_direct_sync(
+    url: str,
+    contract: ResponseContract,
+    headers: Mapping[str, str] | None,
+) -> TransportEvidence:
     max_body_bytes = parsesunix_max_body_bytes()
     transport = UrllibTransport(
         allow_private=False,
@@ -137,39 +219,29 @@ def _fetch_direct_sync(url: str) -> TransportEvidence:
         user_agent=user_agent(),
     )
     with _limiter(parsesunix_max_concurrency()):
-        response = transport.fetch(url)
+        validated = fetch_validated(
+            transport,
+            url,
+            contract,
+            headers=headers,
+        )
 
-    triage = classify_response(
-        status=response.status,
-        body=response.body,
-        headers=response.headers,
-        rules=ContentRules(min_body_bytes=200, expected_content_type="html"),
-        source="target",
-        transport_error="network failure" if response.transport_error else None,
-    )
-    verdict = triage.verdict.value
-    reason = _safe_reason(response, triage.reason)
-    if response.truncated:
-        verdict = Verdict.PARSE_FAIL.value
-        reason = f"response exceeded the configured {max_body_bytes}-byte limit"
-
-    return TransportEvidence(
-        body=response.body.decode("utf-8", errors="replace"),
-        http_status=response.status,
-        final_url=response.final_url,
-        verdict=verdict,
-        reason=reason,
-        body_bytes=len(response.body),
-        elapsed_ms=response.elapsed_ms,
-        truncated=response.truncated,
-        content_sha256=hashlib.sha256(response.body).hexdigest(),
+    return _evidence_from_validated(
+        validated,
+        backend="parsesunix_direct",
+        route="direct",
     )
 
 
-async def fetch_direct(url: str) -> TransportEvidence:
+async def fetch_direct(
+    url: str,
+    contract: ResponseContract,
+    *,
+    headers: Mapping[str, str] | None = None,
+) -> TransportEvidence:
     """Fetch one public URL on the bounded free ParsesUnix worker pool."""
 
-    return await asyncio.to_thread(_fetch_direct_sync, url)
+    return await asyncio.to_thread(_fetch_direct_sync, url, contract, headers)
 
 
 class _ConfiguredScrapeDoProvider:
@@ -203,6 +275,7 @@ class _ConfiguredScrapeDoProvider:
 def _paid_evidence(
     direct: TransportEvidence,
     attempt: PaidAttempt,
+    contract: ResponseContract,
 ) -> TransportEvidence:
     certainty = attempt.cost.certainty.value.lower()
     paid_cost_usd = (
@@ -224,24 +297,20 @@ def _paid_evidence(
             cost_certainty=certainty,
         )
 
-    body = response.body
-    verdict = attempt.triage.verdict.value
-    reason = attempt.triage.reason[:500]
-    if response.truncated:
-        verdict = Verdict.PARSE_FAIL.value
-        reason = (
-            f"response exceeded the configured {parsesunix_max_body_bytes()}-byte limit"
-        )
-    return TransportEvidence(
-        body=body.decode("utf-8", errors="replace"),
-        http_status=response.target_status,
-        final_url=response.final_url or direct.final_url,
-        verdict=verdict,
-        reason=reason,
-        body_bytes=len(body),
-        elapsed_ms=response.latency_ms,
-        truncated=response.truncated,
-        content_sha256=hashlib.sha256(body).hexdigest(),
+    validated = validate_response(
+        RawResponse(
+            requested_url=direct.final_url,
+            final_url=response.final_url or direct.final_url,
+            status=response.target_status,
+            headers=response.headers,
+            body=response.body,
+            elapsed_ms=response.latency_ms,
+            truncated=response.truncated,
+        ),
+        contract,
+    )
+    return _evidence_from_validated(
+        validated,
         backend="parsesunix_scrape_do",
         route="paid",
         provider=attempt.provider,
@@ -252,7 +321,11 @@ def _paid_evidence(
     )
 
 
-def _fetch_paid_sync(url: str, direct: TransportEvidence) -> TransportEvidence:
+def _fetch_paid_sync(
+    url: str,
+    direct: TransportEvidence,
+    contract: ResponseContract,
+) -> TransportEvidence:
     if direct.verdict not in {verdict.value for verdict in PAID_ESCALATION_VERDICTS}:
         return direct
     if "scrape.do" not in parsesunix_allowed_providers() or not scrape_do_token():
@@ -287,9 +360,10 @@ def _fetch_paid_sync(url: str, direct: TransportEvidence) -> TransportEvidence:
         )
         verdict = Verdict(direct.verdict)
         domain = urlsplit(url).hostname or "unknown"
+        url_class = f"embedded_{contract.expected_kind.value.lower()}"
         decision = router.choose(
             domain=domain,
-            url_class="generic_html",
+            url_class=url_class,
             verdict=verdict,
         )
         if not decision.chosen or not budget.state().allows_paid_work:
@@ -305,16 +379,21 @@ def _fetch_paid_sync(url: str, direct: TransportEvidence) -> TransportEvidence:
             url,
             verdict=verdict,
             domain=domain,
-            url_class="generic_html",
-            rules=ContentRules(min_body_bytes=200, expected_content_type="html"),
+            url_class=url_class,
+            rules=contract.content_rules(),
         )
-    return _paid_evidence(direct, attempt) if attempt.attempted else direct
+    return _paid_evidence(direct, attempt, contract) if attempt.attempted else direct
 
 
-async def fetch(url: str) -> TransportEvidence:
+async def fetch(
+    url: str,
+    contract: ResponseContract,
+    *,
+    headers: Mapping[str, str] | None = None,
+) -> TransportEvidence:
     """Use direct transport first, then one budgeted Scrape.do attempt if justified."""
 
-    direct = await fetch_direct(url)
+    direct = await fetch_direct(url, contract, headers=headers)
     if not direct.paid_escalation_allowed:
         return direct
-    return await asyncio.to_thread(_fetch_paid_sync, url, direct)
+    return await asyncio.to_thread(_fetch_paid_sync, url, direct, contract)

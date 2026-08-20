@@ -55,6 +55,7 @@ from .config import (
 from .dataset_regression import check_dataset_regression, estimate_metric_count
 from .fetch_routes import source_can_run_without_residential_proxy
 from .parser import parse_html
+from .parsesunix_contracts import page_response_contract
 from .parsesunix_transport import (
     ParsesUnixExecutionError,
     ParsesUnixIntegrationError,
@@ -1444,14 +1445,20 @@ async def _fetch_generic_html(
     shadow_task: asyncio.Task[TransportEvidence] | None = None
     if mode == "shadow":
         shadow_task = asyncio.create_task(
-            fetch_with_parsesunix(source.fetch_url),
+            fetch_with_parsesunix(
+                source.fetch_url,
+                page_response_contract(source),
+            ),
             name=f"parsesunix-shadow:{source.id}",
         )
 
     try:
         if mode == "parsesunix":
             try:
-                evidence = await fetch_with_parsesunix(source.fetch_url)
+                evidence = await fetch_with_parsesunix(
+                    source.fetch_url,
+                    page_response_contract(source),
+                )
             except Exception as exc:
                 raise ParsesUnixExecutionError(
                     f"ParsesUnix direct transport failed: {type(exc).__name__}"
@@ -2618,7 +2625,12 @@ async def _fetch_source_with_active_lifecycle(
         if firecrawl_status is not None:
             if parsesunix_mode == "shadow":
                 shadow = await _complete_parsesunix_shadow(
-                    asyncio.create_task(fetch_with_parsesunix(source.fetch_url)),
+                    asyncio.create_task(
+                        fetch_with_parsesunix(
+                            source.fetch_url,
+                            page_response_contract(source),
+                        )
+                    ),
                     source,
                     legacy_body=None,
                     legacy_http_status=firecrawl_status.get("http_status"),
