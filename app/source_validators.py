@@ -2047,7 +2047,7 @@ def _validate_hsguru_meta(source_id: str, structured: dict[str, Any]) -> Validat
         for row in strategies:
             archetype = str(row.get("Archetype") or "").strip()
             winrate = _parse_arena_percent(row.get("Winrate↓"))
-            popularity = _parse_arena_percent(row.get("Popularity"))
+            popularity = parse_percent(row.get("Popularity"), embedded=True)
             if (
                 _valid_name(archetype)
                 and winrate is not None

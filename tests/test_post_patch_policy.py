@@ -126,6 +126,21 @@ class PostPatchPolicyTest(unittest.TestCase):
         self.assertFalse(rejected["ok"])
         self.assertTrue(semantic.ok, semantic.reason)
 
+    def test_hsguru_early_mode_accepts_composite_popularity_with_game_count(self) -> None:
+        source_id = "hsguru_meta_standard_diamond_4to1"
+        rows = _hsguru_meta_rows(3)
+        for row in rows:
+            row["Winrate↓"] = "52.1"
+            row["Popularity"] = "1.2% (872)"
+
+        with patch("app.post_patch_policy.current_time", return_value=WINDOW_TIME):
+            semantic = validate_structured(
+                source_id,
+                {"type": "meta", "strategies": rows},
+            )
+
+        self.assertTrue(semantic.ok, semantic.reason)
+
     def test_hsguru_matchups_early_mode_requires_three_complete_rows(self) -> None:
         source_id = "hsguru_matchups_legend"
         complete = [
