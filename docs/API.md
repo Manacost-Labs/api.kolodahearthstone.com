@@ -124,9 +124,9 @@ Endpoint возвращает независимые окна `24h`, `7d` и `30
 
 | Поле | Знаменатель и смысл |
 | --- | --- |
-| `instrumented_sources / catalog_sources` | Охват строгим контрактом всего текущего каталога источников. |
+| `instrumented_sources / catalog_sources` | Охват completeness-телеметрией текущего operational-каталога. Отсутствие строгого retrieval-доказательства даёт `unknown`, а не успех. |
 | `observed_instrumented_sources / instrumented_sources` | Сколько инструментированных источников реально наблюдалось в окне. |
-| `tracked_attempts / eligible_attempts` | Охват строгой полнотой всех учитываемых parser-attempts, включая записанные terminal deficits. |
+| `tracked_attempts / eligible_attempts` | Доля parser-attempts с явным completeness-состоянием; отсутствие строгого evidence сохраняется как `unknown`, включая влияние terminal deficits на знаменатель. |
 | `complete_fresh / tracked_attempts` | Взвешенный процент попыток: опубликован новый кандидат, retrieval полный и freshness доказана. |
 | `states` | Число `complete`, доказанно `incomplete` и `unknown`; сумма равна `tracked_attempts`. |
 | `macro_complete_fresh_rate_pct` | Невзвешенное среднее per-source rates по всем инструментированным источникам; ненаблюдавшийся источник даёт 0. |

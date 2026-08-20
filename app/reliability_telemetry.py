@@ -20,10 +20,7 @@ from typing import Any
 
 from .completeness import COMPLETENESS_SCHEMA_VERSION
 from .config import source_operationally_enabled
-from .source_contracts import (
-    FIELD_UNAVAILABLE_REASONS,
-    HSREPLAY_FRESHNESS_GATED_SOURCE_IDS,
-)
+from .source_contracts import HSREPLAY_FRESHNESS_GATED_SOURCE_IDS
 from .source_state import SourceState
 from .storage import root_dir
 
@@ -42,7 +39,7 @@ WINDOWS = (
     ("7d", timedelta(days=7)),
     ("30d", timedelta(days=30)),
 )
-METHODOLOGY_VERSION = "logical-source-observed-v12"
+METHODOLOGY_VERSION = "logical-source-observed-v13"
 SLO_TARGET_RATE_PCT = 99.0
 PIPELINE_SCHEDULE_LEDGER_READY = False
 COVERAGE_BUCKET_SECONDS = 24 * 60 * 60
@@ -107,7 +104,11 @@ PARSESUNIX_VERDICTS = (
     "PROVIDER_ERROR",
     "PARSE_FAIL",
 )
-COMPLETENESS_TRACKED_SOURCE_IDS = frozenset(FIELD_UNAVAILABLE_REASONS)
+# ``None`` means every current operational source participates in completeness
+# telemetry. Tests and bounded rollouts may replace it with an explicit subset.
+# Sources without source-specific retrieval evidence remain ``unknown``; this
+# exposes the gap without manufacturing success.
+COMPLETENESS_TRACKED_SOURCE_IDS: frozenset[str] | None = None
 # Keep telemetry anchored to the same canonical freshness policy as publish
 # validation. A duplicated list can silently overstate strict completeness
 # when a newly instrumented HSReplay source is added in only one place.
@@ -358,10 +359,8 @@ def _completeness_terminal_fields(
 ) -> tuple[int, str, float | None]:
     """Return only rollout-scoped, bounded completeness telemetry."""
 
-    if (
-        source_id not in COMPLETENESS_TRACKED_SOURCE_IDS
-        or not source_operationally_enabled(source_id)
-    ):
+    instrumented_source_ids, _ = _completeness_source_catalog()
+    if source_id not in instrumented_source_ids:
         return 0, "unknown", None
 
     quality = status.get("quality")
@@ -1355,10 +1354,13 @@ def _completeness_source_catalog() -> tuple[frozenset[str], int]:
     catalog_source_ids = frozenset(
         source.id for source in SOURCES if source_operationally_enabled(source.id)
     )
-    return (
-        catalog_source_ids & COMPLETENESS_TRACKED_SOURCE_IDS,
-        len(catalog_source_ids),
+    tracked_source_ids = COMPLETENESS_TRACKED_SOURCE_IDS
+    instrumented_source_ids = (
+        catalog_source_ids
+        if tracked_source_ids is None
+        else catalog_source_ids & tracked_source_ids
     )
+    return instrumented_source_ids, len(catalog_source_ids)
 
 
 def _query_parsesunix_rollout(

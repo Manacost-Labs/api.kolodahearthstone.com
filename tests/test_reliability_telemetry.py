@@ -111,7 +111,7 @@ def test_hsreplay_verified_completeness_requires_fresh_upstream_evidence() -> No
 
 
 def test_disabled_firestone_is_not_in_verified_completeness_catalog() -> None:
-    expected_without_firestone = frozenset(FIELD_UNAVAILABLE_REASONS) - {
+    expected_without_firestone = frozenset(SOURCE_BY_ID) - {
         "firestone_standard"
     }
     with patch.dict("os.environ", {}, clear=True):
@@ -129,8 +129,18 @@ def test_disabled_firestone_is_not_in_verified_completeness_catalog() -> None:
         instrumented, catalog_count = (
             reliability_telemetry._completeness_source_catalog()
         )
-        assert instrumented == frozenset(FIELD_UNAVAILABLE_REASONS)
+        assert instrumented == frozenset(SOURCE_BY_ID)
         assert catalog_count == len(SOURCE_BY_ID)
+
+
+def test_every_operational_source_is_tracked_without_inventing_completeness() -> None:
+    source_id = "hsguru_meta_standard_legend"
+
+    assert source_id not in FIELD_UNAVAILABLE_REASONS
+    assert reliability_telemetry._completeness_terminal_fields(
+        source_id,
+        {"quality": {}},
+    ) == (1, "unknown", None)
 
 
 def _record_process_attempt(args: tuple[str, int, float]) -> int:
@@ -1167,7 +1177,7 @@ def test_verified_completeness_window_folds_recovery_and_requires_fresh_data(
     verified = build_reliability_report(now=now, path=path)["windows"][0][
         "verified_completeness"
     ]
-    instrumented_sources = len(source_ids)
+    instrumented_sources = len(SOURCE_BY_ID)
     catalog_sources = len(SOURCE_BY_ID)
     observed_sources = 4
     target_sources = 1
@@ -1175,10 +1185,7 @@ def test_verified_completeness_window_folds_recovery_and_requires_fresh_data(
     assert verified == {
         "instrumented_sources": instrumented_sources,
         "catalog_sources": catalog_sources,
-        "source_catalog_coverage_pct": round(
-            instrumented_sources / catalog_sources * 100,
-            2,
-        ),
+        "source_catalog_coverage_pct": 100.0,
         "observed_instrumented_sources": observed_sources,
         "instrumented_source_observation_coverage_pct": round(
             observed_sources / instrumented_sources * 100,
@@ -1280,7 +1287,7 @@ def test_verified_completeness_objective_requires_all_three_coverage_gates(
     assert verified["objective_status"] == objective_status
 
 
-def test_verified_completeness_cannot_meet_target_for_partial_catalog_rollout(
+def test_verified_completeness_cannot_meet_target_before_catalog_is_observed(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1309,20 +1316,28 @@ def test_verified_completeness_cannot_meet_target_for_partial_catalog_rollout(
         "verified_completeness"
     ]
 
-    assert verified["instrumented_sources"] == len(tracked_sources)
+    assert verified["instrumented_sources"] == len(SOURCE_BY_ID)
     assert verified["catalog_sources"] == len(SOURCE_BY_ID)
-    assert verified["source_catalog_coverage_pct"] == round(
+    assert verified["source_catalog_coverage_pct"] == 100.0
+    assert verified["observed_instrumented_sources"] == len(tracked_sources)
+    assert verified["instrumented_source_observation_coverage_pct"] == round(
         len(tracked_sources) / len(SOURCE_BY_ID) * 100,
         2,
     )
-    assert verified["observed_instrumented_sources"] == len(tracked_sources)
-    assert verified["instrumented_source_observation_coverage_pct"] == 100.0
     assert verified["sources_meeting_target"] == len(tracked_sources)
     assert verified["sources_below_target"] == 0
-    assert verified["sources_without_observations"] == 0
-    assert verified["source_target_attainment_pct"] == 100.0
-    assert verified["macro_complete_fresh_rate_pct"] == 100.0
-    assert verified["macro_target_met"] is True
+    assert verified["sources_without_observations"] == (
+        len(SOURCE_BY_ID) - len(tracked_sources)
+    )
+    assert verified["source_target_attainment_pct"] == round(
+        len(tracked_sources) / len(SOURCE_BY_ID) * 100,
+        2,
+    )
+    assert verified["macro_complete_fresh_rate_pct"] == round(
+        len(tracked_sources) / len(SOURCE_BY_ID) * 100,
+        2,
+    )
+    assert verified["macro_target_met"] is False
     assert verified["worst_observed_source_rate_pct"] == 100.0
     assert verified["coverage_of_all_parser_attempts_pct"] == 100.0
     assert verified["complete_fresh_rate_pct"] == 100.0

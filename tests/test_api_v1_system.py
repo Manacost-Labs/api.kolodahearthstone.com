@@ -52,7 +52,7 @@ def test_v1_system_paths_do_not_replace_legacy_paths() -> None:
 def test_v1_parsing_reliability_returns_sanitized_public_contract() -> None:
     report = {
         "methodology": {
-            "version": "logical-source-observed-v12",
+            "version": "logical-source-observed-v13",
             "unit": "one terminal outcome per source in a refresh run",
             "scope": "observed_scrape_and_pipeline_sources",
             "completeness": "observed_attempts_plus_recorded_run_deficits",

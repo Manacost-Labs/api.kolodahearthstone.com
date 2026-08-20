@@ -529,6 +529,10 @@ rates (ненаблюдавшиеся дают 0), а `sources_meeting_target / 
 самостоятельных coverage gates. Полный справочник полей и знаменателей находится
 в [API.md](API.md#get-v1systemparsing-reliability).
 
+Все operational-источники включаются в completeness-телеметрию сразу. Это не
+делает их автоматически полными: до появления source-specific retrieval
+evidence их попытки остаются `unknown` и не попадают в `complete_fresh`.
+
 Поле `macro_target_met` вычисляется backend по точным дробям до округления и
 является единственным безопасным сигналом прохождения macro-gate для панели.
 
