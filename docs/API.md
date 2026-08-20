@@ -148,11 +148,11 @@ Endpoint возвращает независимые окна `24h`, `7d` и `30
 | `missing` | После дедлайна нет ни одного non-skipped terminal. |
 | `excluded_slots` | Сохранённые, но не включённые в знаменатель решения (`section-disabled` или `operationally-disabled`). |
 
-Граница 99% проверяется по целым счётчикам до округления. Ledger уже обнаруживает
-полностью не стартовавшие запуски для `refresh-all-daily` и
-`refresh-api-daily`. Пока остальные primary timers не подключены или выбранное
-временное окно не накоплено полностью, `ledger_status=partial`, а его
-`measurement_status` и `objective_status` остаются `collecting`.
+Граница 99% проверяется по целым счётчикам до округления. Ledger охватывает все
+15 primary-расписаний и обнаруживает полностью не стартовавшие запуски;
+условный post-patch timer вне активного окна материализуется как исключённый.
+Пока выбранное временное окно не накоплено полностью, `ledger_status=partial`,
+а его `measurement_status` и `objective_status` остаются `collecting`.
 
 ### `GET /health`
 
