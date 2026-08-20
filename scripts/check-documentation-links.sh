@@ -7,7 +7,8 @@ cd "${repository_root}"
 
 mapfile -t markdown_files < <(
     find README.md CONTRIBUTING.md docs wiki panel platform orchestration \
-        -type f -name '*.md' -print | sort
+        -type d \( -name node_modules -o -name vendor -o -name .test-dist \) \
+        -prune -o -type f -name '*.md' -print | sort
 )
 
 failures=0
