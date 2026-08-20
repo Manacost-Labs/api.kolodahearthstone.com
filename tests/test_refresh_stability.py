@@ -1544,7 +1544,12 @@ class HSReplayCardsApiFirstTest(unittest.IsolatedAsyncioTestCase):
             patch("app.hsreplay_cards_api.parse_cards_from_api_payloads", return_value=cards),
             patch("app.scrapers.browser_pool.PatchrightPool.get", new_callable=AsyncMock) as pool_get,
         ):
-            fetch_json.return_value = {"series": {"data": []}}
+            fetch_json.return_value = {
+                "data": [
+                    {"dbf_id": index, "included_popularity": 1.0}
+                    for index in range(40)
+                ]
+            }
             from app.hsreplay_cards_api import fetch_hsreplay_ranked_cards
 
             structured = await fetch_hsreplay_ranked_cards(source)
@@ -1567,7 +1572,9 @@ class HSReplayCardsApiFirstTest(unittest.IsolatedAsyncioTestCase):
             patch("app.scrapers.browser_pool.PatchrightPool.get", new_callable=AsyncMock) as pool_get,
             patch("app.refresh_log.log_action"),
         ):
-            fetch_json.return_value = {"series": {"data": []}}
+            fetch_json.return_value = {
+                "data": [{"dbf_id": 1, "included_popularity": 1.0}]
+            }
             from app.hsreplay_cards_api import fetch_hsreplay_ranked_cards
 
             with self.assertRaisesRegex(RuntimeError, "HSReplay cards API sparse"):
