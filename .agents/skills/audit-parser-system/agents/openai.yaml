@@ -1,0 +1,4 @@
+interface:
+  display_name: "Audit Parser System"
+  short_description: "Deep freshness and reliability audit"
+  default_prompt: "Use $audit-parser-system to audit parser freshness, reliability, completeness, schedules, and provider failures, then rank safe fixes."

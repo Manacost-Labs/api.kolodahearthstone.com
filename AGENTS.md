@@ -7,6 +7,7 @@ FastAPI-сервис собирает и нормализует данные Hea
 ## Работа с кодом
 
 - Перед чтением связей и изменением Python-кода использовать CodeGraph.
+- Для глубокого аудита свежести и надёжности использовать `.agents/skills/audit-parser-system/SKILL.md`.
 - Не выполнять реальные premium/API запросы в тестах; внешнюю сеть и время подменять fixtures/mocks.
 - Не менять contracts источников, схемы SQLite и publication gates без regression tests.
 - Не читать и не выводить `.env`, proxy credentials, cookies и auth tokens.
