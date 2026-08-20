@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
+from app.convergence_policy import decide_recovery
 from app.convergence_store import ConvergenceStore
 
 
@@ -43,3 +46,107 @@ def test_initialize_creates_bounded_convergence_schema(tmp_path: Path) -> None:
         "convergence_attempts",
     }.issubset(tables)
     assert foreign_keys
+
+
+def _create_transport_chain(path: Path):
+    observed = datetime(2026, 8, 20, 12, 0, tzinfo=UTC)
+    return ConvergenceStore(path).create_or_get_chain(
+        cohort_id="hsguru-meta-slices",
+        source_ids=["hsguru_meta_standard_legend"],
+        origin_occurrence_id="schedule:20260820T100000Z",
+        decision=decide_recovery(outcome="failed", reason_code="transport"),
+        outcome="failed",
+        reason_code="transport",
+        observed_at=observed,
+        deadline_at=observed + timedelta(hours=12),
+    )
+
+
+def test_create_chain_is_deterministic_and_survives_store_restart(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "parser-telemetry.sqlite3"
+
+    first = _create_transport_chain(path)
+    repeated = _create_transport_chain(path)
+    restored = ConvergenceStore(path).get_chain(first.chain_id)
+
+    assert repeated.chain_id == first.chain_id
+    assert restored == first
+    assert first.source_ids == ("hsguru_meta_standard_legend",)
+    assert first.state == "waiting"
+    assert first.delays_seconds == (300, 1200, 3600)
+    assert first.next_attempt_at == datetime(2026, 8, 20, 12, 5, tzinfo=UTC)
+    assert first.paid_fetch_allowed is True
+    with sqlite3.connect(path) as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM convergence_chains"
+        ).fetchone() == (1,)
+        assert connection.execute(
+            "SELECT COUNT(*) FROM convergence_chain_sources"
+        ).fetchone() == (1,)
+
+
+def test_repeated_occurrence_merges_sources_only_within_the_same_cohort(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "parser-telemetry.sqlite3"
+    first = _create_transport_chain(path)
+    observed = datetime(2026, 8, 20, 12, 0, tzinfo=UTC)
+
+    merged = ConvergenceStore(path).create_or_get_chain(
+        cohort_id="hsguru-meta-slices",
+        source_ids=["hsguru_meta_standard_diamond_4to1"],
+        origin_occurrence_id="schedule:20260820T100000Z",
+        decision=decide_recovery(outcome="failed", reason_code="transport"),
+        outcome="failed",
+        reason_code="transport",
+        observed_at=observed,
+        deadline_at=observed + timedelta(hours=12),
+    )
+
+    assert merged.chain_id == first.chain_id
+    assert set(merged.source_ids) == {
+        "hsguru_meta_standard_legend",
+        "hsguru_meta_standard_diamond_4to1",
+    }
+    with pytest.raises(ValueError, match="selected recovery cohort"):
+        ConvergenceStore(path).create_or_get_chain(
+            cohort_id="hsguru-meta-slices",
+            source_ids=["metastats_decks"],
+            origin_occurrence_id="schedule:20260820T100000Z",
+            decision=decide_recovery(outcome="failed", reason_code="transport"),
+            outcome="failed",
+            reason_code="transport",
+            observed_at=observed,
+            deadline_at=observed + timedelta(hours=12),
+        )
+
+
+def test_concurrent_creation_returns_one_chain(tmp_path: Path) -> None:
+    path = tmp_path / "parser-telemetry.sqlite3"
+
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        chains = list(pool.map(lambda _index: _create_transport_chain(path), range(12)))
+
+    assert len({chain.chain_id for chain in chains}) == 1
+    with sqlite3.connect(path) as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM convergence_chains"
+        ).fetchone() == (1,)
+
+
+def test_fresh_outcome_never_creates_a_chain(tmp_path: Path) -> None:
+    observed = datetime(2026, 8, 20, 12, 0, tzinfo=UTC)
+
+    with pytest.raises(ValueError, match="Fresh outcomes"):
+        ConvergenceStore(tmp_path / "parser-telemetry.sqlite3").create_or_get_chain(
+            cohort_id="hsguru-meta-slices",
+            source_ids=["hsguru_meta_standard_legend"],
+            origin_occurrence_id="schedule:20260820T100000Z",
+            decision=decide_recovery(outcome="fresh_published"),
+            outcome="fresh_published",
+            reason_code="none",
+            observed_at=observed,
+            deadline_at=observed + timedelta(hours=12),
+        )
