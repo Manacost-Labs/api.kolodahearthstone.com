@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import parse_qs
 
+from .completeness import COMPLETENESS_SCHEMA_VERSION, row_retrieval_evidence
 from .firecrawl_backend import scrape_source
 from .hsreplay_client import fetch_hsreplay_json
 from .sources import Source
@@ -128,6 +129,58 @@ def normalize_meta_archetypes(
     return classes
 
 
+def _meta_archetype_row_evidence(
+    payload: dict[str, Any],
+    *,
+    normalized_rows: int,
+) -> dict[str, Any]:
+    data = ((payload.get("series") or {}).get("data") or {})
+    if not isinstance(data, dict):
+        return row_retrieval_evidence(
+            raw_rows=1,
+            eligible_rows=1,
+            normalized_rows=0,
+            unexplained_reasons={"invalid_class_payload": 1},
+            scope="hsreplay_meta_archetype_rows",
+        )
+
+    raw_rows = 0
+    invalid_class_payloads = 0
+    invalid_archetype_rows = 0
+    for rows in data.values():
+        if not isinstance(rows, list):
+            raw_rows += 1
+            invalid_class_payloads += 1
+            continue
+        raw_rows += len(rows)
+        invalid_archetype_rows += sum(
+            1
+            for row in rows
+            if not isinstance(row, dict) or row.get("archetype_id") is None
+        )
+
+    unexplained_reasons = {
+        reason: count
+        for reason, count in (
+            ("invalid_class_payload", invalid_class_payloads),
+            ("invalid_archetype_row", invalid_archetype_rows),
+        )
+        if count
+    }
+    unclassified_loss = raw_rows - normalized_rows - sum(
+        unexplained_reasons.values()
+    )
+    if unclassified_loss:
+        unexplained_reasons["normalization_loss"] = unclassified_loss
+    return row_retrieval_evidence(
+        raw_rows=raw_rows,
+        eligible_rows=raw_rows,
+        normalized_rows=normalized_rows,
+        unexplained_reasons=unexplained_reasons,
+        scope="hsreplay_meta_archetype_rows",
+    )
+
+
 async def fetch_hsreplay_meta_archetypes(source: Source) -> dict[str, Any]:
     api_url = _meta_archetypes_url(source)
     firecrawl_page: dict[str, Any] = {}
@@ -154,6 +207,11 @@ async def fetch_hsreplay_meta_archetypes(source: Source) -> dict[str, Any]:
     return {
         "type": "hsreplay_meta_archetypes",
         "classes": classes,
+        "completeness_schema_version": COMPLETENESS_SCHEMA_VERSION,
+        "row_retrieval": _meta_archetype_row_evidence(
+            payload,
+            normalized_rows=total_archetypes,
+        ),
         "total_classes": len(classes),
         "total_archetypes": total_archetypes,
         "filters": {

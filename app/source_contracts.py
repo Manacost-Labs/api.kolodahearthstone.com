@@ -1606,6 +1606,8 @@ def contract_quality_report(
             identity_specs.append(("cards", rows, "dbfId"))
         elif structured.get("type") == "meta":
             identity_specs.append(("strategies", rows, "Archetype"))
+        elif structured.get("type") == "hsreplay_meta_archetypes":
+            identity_specs.append(("archetypes", rows, "archetype_id"))
         elif structured.get("type") == "bg_trinkets":
             identity_specs.append(("trinkets", rows, "variant_key"))
         elif source_id == "hsreplay_battlegrounds_minions":
