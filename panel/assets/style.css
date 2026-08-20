@@ -3589,6 +3589,10 @@ thead th:last-child {
     margin-top: 8px;
 }
 
+.parsing-parsesunix-counts {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
 .parsing-completeness-source-counts {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));

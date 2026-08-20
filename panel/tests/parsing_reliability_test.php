@@ -222,6 +222,100 @@ assert_same(
     'The schedule objective must reconcile with exact due and on-time counts.'
 );
 
+$validParsesUnixRollout = [
+    'observed_attempts' => 3,
+    'observed_sources' => 3,
+    'shadow_attempts' => 1,
+    'active_attempts' => 2,
+    'transport_checked' => 3,
+    'transport_validated' => 2,
+    'transport_validated_rate_pct' => 66.67,
+    'candidate_checked' => 2,
+    'candidate_validated' => 2,
+    'candidate_validated_rate_pct' => 100.0,
+    'publication_checked' => 2,
+    'publication_validated' => 1,
+    'publication_validated_rate_pct' => 50.0,
+    'http_status_compared' => 1,
+    'http_status_matches' => 1,
+    'http_status_match_rate_pct' => 100.0,
+    'content_hash_compared' => 1,
+    'content_hash_matches' => 0,
+    'content_hash_match_rate_pct' => 0.0,
+    'paid_requests_known_attempts' => 3,
+    'paid_requests' => 0,
+    'paid_cost_known_attempts' => 3,
+    'paid_cost_usd' => '0.000000',
+];
+$normalizedParsesUnixRollout = analytics_normalize_parsesunix_rollout(
+    $validParsesUnixRollout
+);
+assert_same(
+    true,
+    $normalizedParsesUnixRollout['reported'],
+    'A coherent ParsesUnix rollout funnel must reach the panel.'
+);
+assert_same(
+    66.67,
+    $normalizedParsesUnixRollout['transport_validated_rate_pct'],
+    'Transport validation must stay separate from candidate and publication validation.'
+);
+assert_same(
+    50.0,
+    $normalizedParsesUnixRollout['publication_validated_rate_pct'],
+    'Only active attempts may contribute to the publication funnel.'
+);
+assert_same(
+    '0.000000',
+    $normalizedParsesUnixRollout['paid_cost_usd'],
+    'A fully known exact zero cost may remain visible after observed attempts.'
+);
+
+$envelopeWithParsesUnix = $envelope;
+$envelopeWithParsesUnix['data']['windows'][0]['parsesunix_rollout'] =
+    $validParsesUnixRollout;
+$envelopeWithParsesUnix = analytics_normalize_parsing_reliability(
+    $envelopeWithParsesUnix
+);
+assert_same(
+    true,
+    $envelopeWithParsesUnix['windows'][0]['parsesunix_rollout']['reported'],
+    'The normalized reliability window must expose its separate rollout block.'
+);
+
+$contradictoryParsesUnix = $validParsesUnixRollout;
+$contradictoryParsesUnix['candidate_checked'] = 3;
+$contradictoryParsesUnix = analytics_normalize_parsesunix_rollout(
+    $contradictoryParsesUnix
+);
+assert_same(
+    false,
+    $contradictoryParsesUnix['reported'],
+    'Candidate checks cannot exceed transports that passed validation.'
+);
+assert_same(
+    null,
+    $contradictoryParsesUnix['candidate_validated_rate_pct'],
+    'Contradictory rollout telemetry must not leak a plausible percentage.'
+);
+
+$unknownParsesUnixCost = $validParsesUnixRollout;
+$unknownParsesUnixCost['paid_cost_known_attempts'] = 2;
+$unknownParsesUnixCost['paid_cost_usd'] = null;
+$unknownParsesUnixCost = analytics_normalize_parsesunix_rollout(
+    $unknownParsesUnixCost
+);
+assert_same(
+    true,
+    $unknownParsesUnixCost['reported'],
+    'A rollout with partial cost coverage may still expose its validation funnel.'
+);
+assert_same(
+    null,
+    $unknownParsesUnixCost['paid_cost_usd'],
+    'Unknown paid cost must remain null instead of becoming zero.'
+);
+
 $missingScheduleLedger = $envelope;
 unset($missingScheduleLedger['data']['windows'][0]['scheduled_reliability']);
 $missingScheduleLedger = analytics_normalize_parsing_reliability($missingScheduleLedger);

@@ -34,6 +34,138 @@
         return Number.isInteger(number) && number >= 0 ? number : null;
     };
 
+    const buildParsesUnixRollout = (rollout) => {
+        const fallback = {
+            reported: false,
+            hasObservations: false,
+            observedAttempts: null,
+            observedSources: null,
+            shadowAttempts: null,
+            activeAttempts: null,
+            transportChecked: null,
+            transportValidated: null,
+            transportValidatedRate: '—',
+            candidateChecked: null,
+            candidateValidated: null,
+            candidateValidatedRate: '—',
+            publicationChecked: null,
+            publicationValidated: null,
+            publicationValidatedRate: '—',
+            httpStatusCompared: null,
+            httpStatusMatches: null,
+            httpStatusMatchRate: '—',
+            contentHashCompared: null,
+            contentHashMatches: null,
+            contentHashMatchRate: '—',
+            paidRequestsKnownAttempts: null,
+            paidRequests: null,
+            paidCostKnownAttempts: null,
+            paidCostUsd: null,
+        };
+        if (!rollout || rollout.reported !== true) return fallback;
+
+        const countKeys = [
+            'observed_attempts', 'observed_sources', 'shadow_attempts',
+            'active_attempts', 'transport_checked', 'transport_validated',
+            'candidate_checked', 'candidate_validated', 'publication_checked',
+            'publication_validated', 'http_status_compared',
+            'http_status_matches', 'content_hash_compared',
+            'content_hash_matches', 'paid_requests_known_attempts',
+            'paid_cost_known_attempts',
+        ];
+        const counts = Object.fromEntries(countKeys.map((key) => [
+            key,
+            exactNonNegativeCount(rollout[key]),
+        ]));
+        if (Object.values(counts).some((value) => value === null)) return fallback;
+
+        const ratePairs = {
+            transport_validated_rate_pct: ['transport_validated', 'transport_checked'],
+            candidate_validated_rate_pct: ['candidate_validated', 'candidate_checked'],
+            publication_validated_rate_pct: ['publication_validated', 'publication_checked'],
+            http_status_match_rate_pct: ['http_status_matches', 'http_status_compared'],
+            content_hash_match_rate_pct: ['content_hash_matches', 'content_hash_compared'],
+        };
+        const rates = {};
+        for (const [rateKey, [numeratorKey, denominatorKey]] of Object.entries(ratePairs)) {
+            const rate = boundedPercentage(rollout[rateKey]);
+            const denominator = counts[denominatorKey];
+            const expected = denominator === 0
+                ? null
+                : Math.round((counts[numeratorKey] / denominator) * 10000) / 100;
+            if (
+                (expected === null && rate !== null)
+                || (expected !== null && (rate === null || Math.abs(rate - expected) > 0.011))
+            ) return fallback;
+            rates[rateKey] = rate;
+        }
+
+        const observedAttempts = counts.observed_attempts;
+        const countsValid = counts.shadow_attempts + counts.active_attempts === observedAttempts
+            && counts.observed_sources <= observedAttempts
+            && counts.transport_checked <= observedAttempts
+            && counts.transport_validated <= counts.transport_checked
+            && counts.candidate_checked <= counts.transport_validated
+            && counts.candidate_validated <= counts.candidate_checked
+            && counts.publication_checked <= counts.active_attempts
+            && counts.publication_validated <= counts.publication_checked
+            && counts.http_status_compared <= counts.shadow_attempts
+            && counts.http_status_matches <= counts.http_status_compared
+            && counts.content_hash_compared <= counts.shadow_attempts
+            && counts.content_hash_matches <= counts.content_hash_compared
+            && counts.paid_requests_known_attempts <= observedAttempts
+            && counts.paid_cost_known_attempts <= observedAttempts;
+        if (!countsValid) return fallback;
+
+        const paidRequestsComplete = counts.paid_requests_known_attempts === observedAttempts;
+        const paidRequests = paidRequestsComplete
+            ? exactNonNegativeCount(rollout.paid_requests)
+            : null;
+        if (
+            (paidRequestsComplete && paidRequests === null)
+            || (!paidRequestsComplete && rollout.paid_requests != null)
+        ) return fallback;
+
+        const paidCostComplete = counts.paid_cost_known_attempts === observedAttempts;
+        const paidCostUsd = paidCostComplete
+            && typeof rollout.paid_cost_usd === 'string'
+            && /^\d+\.\d{6}$/.test(rollout.paid_cost_usd)
+            ? rollout.paid_cost_usd
+            : null;
+        if (
+            (paidCostComplete && paidCostUsd === null)
+            || (!paidCostComplete && rollout.paid_cost_usd != null)
+        ) return fallback;
+
+        return {
+            reported: true,
+            hasObservations: observedAttempts > 0,
+            observedAttempts,
+            observedSources: counts.observed_sources,
+            shadowAttempts: counts.shadow_attempts,
+            activeAttempts: counts.active_attempts,
+            transportChecked: counts.transport_checked,
+            transportValidated: counts.transport_validated,
+            transportValidatedRate: percentage(rates.transport_validated_rate_pct),
+            candidateChecked: counts.candidate_checked,
+            candidateValidated: counts.candidate_validated,
+            candidateValidatedRate: percentage(rates.candidate_validated_rate_pct),
+            publicationChecked: counts.publication_checked,
+            publicationValidated: counts.publication_validated,
+            publicationValidatedRate: percentage(rates.publication_validated_rate_pct),
+            httpStatusCompared: counts.http_status_compared,
+            httpStatusMatches: counts.http_status_matches,
+            httpStatusMatchRate: percentage(rates.http_status_match_rate_pct),
+            contentHashCompared: counts.content_hash_compared,
+            contentHashMatches: counts.content_hash_matches,
+            contentHashMatchRate: percentage(rates.content_hash_match_rate_pct),
+            paidRequestsKnownAttempts: counts.paid_requests_known_attempts,
+            paidRequests: observedAttempts > 0 ? paidRequests : null,
+            paidCostKnownAttempts: counts.paid_cost_known_attempts,
+            paidCostUsd: observedAttempts > 0 ? paidCostUsd : null,
+        };
+    };
+
     const buildScheduledReliability = (scheduled, stale = false) => {
         const fallback = {
             reported: false,
@@ -455,6 +587,9 @@
             window?.scheduled_reliability,
             stale
         );
+        const parsesUnixRollout = buildParsesUnixRollout(
+            window?.parsesunix_rollout
+        );
         const badge = observed
             ? 'Наблюдаемый срез'
             : (preliminary ? 'Предварительный срез' : 'Накапливаем статистику');
@@ -485,6 +620,7 @@
             },
             verifiedCompleteness,
             scheduledReliability,
+            parsesUnixRollout,
             generatedAt: reliability?.generated_at || null,
             message: reliability?.message || 'Накапливаем статистику',
         };

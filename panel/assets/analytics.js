@@ -368,13 +368,15 @@
             )
         );
 
-        const countCard = (label, value, detail) => {
+        const countCard = (label, value, detail, displayValue = null) => {
             const card = document.createElement('div');
             card.className = 'parsing-reliability-count';
             const cardLabel = document.createElement('span');
             cardLabel.textContent = label;
             const cardValue = document.createElement('strong');
-            cardValue.textContent = value === null || value === undefined ? '—' : integerFormatter.format(value);
+            cardValue.textContent = displayValue === null
+                ? (value === null || value === undefined ? '—' : integerFormatter.format(value))
+                : displayValue;
             const cardDetail = document.createElement('small');
             cardDetail.textContent = detail;
             card.append(cardLabel, cardValue, cardDetail);
@@ -394,6 +396,156 @@
                 ? 'Недостаточно наблюдений.'
                 : `${integerFormatter.format(numerator)} из ${integerFormatter.format(denominator)} ${noun}.`
         );
+
+        const parsesUnix = model.parsesUnixRollout || {
+            reported: false,
+            hasObservations: false,
+            observedAttempts: null,
+            observedSources: null,
+            shadowAttempts: null,
+            activeAttempts: null,
+            transportChecked: null,
+            transportValidated: null,
+            transportValidatedRate: '—',
+            candidateChecked: null,
+            candidateValidated: null,
+            candidateValidatedRate: '—',
+            publicationChecked: null,
+            publicationValidated: null,
+            publicationValidatedRate: '—',
+            httpStatusCompared: null,
+            httpStatusMatches: null,
+            httpStatusMatchRate: '—',
+            contentHashCompared: null,
+            contentHashMatches: null,
+            contentHashMatchRate: '—',
+            paidRequestsKnownAttempts: null,
+            paidRequests: null,
+            paidCostKnownAttempts: null,
+            paidCostUsd: null,
+        };
+        const parsesUnixSection = document.createElement('section');
+        parsesUnixSection.className = 'parsing-completeness parsing-parsesunix-rollout';
+        parsesUnixSection.setAttribute('aria-labelledby', 'parsing-parsesunix-title');
+        const parsesUnixHead = document.createElement('header');
+        parsesUnixHead.className = 'parsing-completeness-head';
+        const parsesUnixHeadingGroup = document.createElement('div');
+        const parsesUnixHeading = document.createElement('h4');
+        parsesUnixHeading.id = 'parsing-parsesunix-title';
+        parsesUnixHeading.textContent = 'Внедрение ParsesUnix';
+        const parsesUnixCopy = document.createElement('p');
+        parsesUnixCopy.textContent = 'Отдельный экспериментальный срез нового ядра: он не заменяет и не улучшает главный процент свежих публикаций. Shadow-попытки только сравниваются и ничего не публикуют.';
+        parsesUnixHeadingGroup.append(parsesUnixHeading, parsesUnixCopy);
+        const parsesUnixBadge = document.createElement('span');
+        parsesUnixBadge.className = `parsing-reliability-badge ${parsesUnix.hasObservations ? 'is-preliminary' : 'is-collecting'}`;
+        parsesUnixBadge.textContent = parsesUnix.hasObservations
+            ? 'Экспериментальный срез'
+            : 'Нет наблюдений · collecting';
+        parsesUnixHead.append(parsesUnixHeadingGroup, parsesUnixBadge);
+
+        const parsesUnixRates = document.createElement('div');
+        parsesUnixRates.className = 'parsing-completeness-gates';
+        parsesUnixRates.append(
+            rateCard(
+                'Транспорт подтверждён',
+                parsesUnix.transportValidatedRate,
+                ratioDetail(
+                    parsesUnix.transportValidated,
+                    parsesUnix.transportChecked,
+                    'ответов прошли проверку транспорта'
+                ),
+                'is-primary'
+            ),
+            rateCard(
+                'Кандидат пригоден',
+                parsesUnix.candidateValidatedRate,
+                ratioDetail(
+                    parsesUnix.candidateValidated,
+                    parsesUnix.candidateChecked,
+                    'кандидатов прошли парсер и quality gate'
+                )
+            ),
+            rateCard(
+                'Публикация подтверждена',
+                parsesUnix.publicationValidatedRate,
+                ratioDetail(
+                    parsesUnix.publicationValidated,
+                    parsesUnix.publicationChecked,
+                    'active-попыток дали новую валидную публикацию'
+                )
+            )
+        );
+        const parsesUnixParity = document.createElement('div');
+        parsesUnixParity.className = 'parsing-completeness-rates';
+        parsesUnixParity.append(
+            rateCard(
+                'HTTP-паритет с legacy',
+                parsesUnix.httpStatusMatchRate,
+                ratioDetail(
+                    parsesUnix.httpStatusMatches,
+                    parsesUnix.httpStatusCompared,
+                    'shadow-сравнений совпали по HTTP-статусу'
+                )
+            ),
+            rateCard(
+                'Паритет содержимого',
+                parsesUnix.contentHashMatchRate,
+                ratioDetail(
+                    parsesUnix.contentHashMatches,
+                    parsesUnix.contentHashCompared,
+                    'shadow-сравнений совпали по хешу ответа'
+                )
+            )
+        );
+        const parsesUnixCounts = document.createElement('div');
+        parsesUnixCounts.className = 'parsing-completeness-counts parsing-parsesunix-counts';
+        const paidCostDisplay = parsesUnix.paidCostUsd === null
+            ? '—'
+            : `$${parsesUnix.paidCostUsd}`;
+        parsesUnixCounts.append(
+            countCard('Попытки', parsesUnix.observedAttempts, 'инструментированные логические попытки'),
+            countCard('Источники', parsesUnix.observedSources, 'наблюдавшиеся источники'),
+            countCard('Shadow', parsesUnix.shadowAttempts, 'сравнение без публикации'),
+            countCard('Active', parsesUnix.activeAttempts, 'ядро участвовало в публикации'),
+            countCard(
+                'Платные запросы',
+                parsesUnix.paidRequests,
+                ratioDetail(
+                    parsesUnix.paidRequestsKnownAttempts,
+                    parsesUnix.observedAttempts,
+                    'попыток имеют точный учёт запросов'
+                )
+            ),
+            countCard(
+                'Стоимость, USD',
+                null,
+                ratioDetail(
+                    parsesUnix.paidCostKnownAttempts,
+                    parsesUnix.observedAttempts,
+                    'попыток имеют точный учёт стоимости'
+                ),
+                paidCostDisplay
+            )
+        );
+        parsesUnixSection.append(
+            parsesUnixHead,
+            parsesUnixRates,
+            parsesUnixParity,
+            parsesUnixCounts
+        );
+        if (!parsesUnix.reported || !parsesUnix.hasObservations) {
+            const parsesUnixEmpty = document.createElement('div');
+            parsesUnixEmpty.className = 'parsing-completeness-empty';
+            parsesUnixEmpty.setAttribute('role', 'status');
+            const parsesUnixEmptyTitle = document.createElement('strong');
+            parsesUnixEmptyTitle.textContent = parsesUnix.reported
+                ? 'Эксперимент ещё не запускался'
+                : 'Телеметрия эксперимента недоступна';
+            const parsesUnixEmptyCopy = document.createElement('p');
+            parsesUnixEmptyCopy.textContent = 'Показываем collecting без выдуманных процентов и без нулевой оценки неизвестной стоимости.';
+            parsesUnixEmpty.append(parsesUnixEmptyTitle, parsesUnixEmptyCopy);
+            parsesUnixSection.append(parsesUnixEmpty);
+        }
 
         const scheduled = model.scheduledReliability || {
             reported: false,
@@ -653,6 +805,7 @@
             windowNav,
             rates,
             counts,
+            parsesUnixSection,
             scheduleSection,
             completeness,
             foot

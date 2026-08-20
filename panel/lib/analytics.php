@@ -543,6 +543,134 @@ function analytics_empty_verified_completeness(): array
     ];
 }
 
+function analytics_empty_parsesunix_rollout(): array
+{
+    return [
+        'reported' => false,
+        'observed_attempts' => null,
+        'observed_sources' => null,
+        'shadow_attempts' => null,
+        'active_attempts' => null,
+        'transport_checked' => null,
+        'transport_validated' => null,
+        'transport_validated_rate_pct' => null,
+        'candidate_checked' => null,
+        'candidate_validated' => null,
+        'candidate_validated_rate_pct' => null,
+        'publication_checked' => null,
+        'publication_validated' => null,
+        'publication_validated_rate_pct' => null,
+        'http_status_compared' => null,
+        'http_status_matches' => null,
+        'http_status_match_rate_pct' => null,
+        'content_hash_compared' => null,
+        'content_hash_matches' => null,
+        'content_hash_match_rate_pct' => null,
+        'paid_requests_known_attempts' => null,
+        'paid_requests' => null,
+        'paid_cost_known_attempts' => null,
+        'paid_cost_usd' => null,
+    ];
+}
+
+function analytics_normalize_parsesunix_rollout($raw): array
+{
+    $empty = analytics_empty_parsesunix_rollout();
+    if (!is_array($raw)) {
+        return $empty;
+    }
+
+    $countKeys = [
+        'observed_attempts', 'observed_sources', 'shadow_attempts', 'active_attempts',
+        'transport_checked', 'transport_validated', 'candidate_checked',
+        'candidate_validated', 'publication_checked', 'publication_validated',
+        'http_status_compared', 'http_status_matches', 'content_hash_compared',
+        'content_hash_matches', 'paid_requests_known_attempts',
+        'paid_cost_known_attempts',
+    ];
+    $counts = [];
+    foreach ($countKeys as $key) {
+        $counts[$key] = analytics_reliability_exact_count($raw[$key] ?? null);
+        if ($counts[$key] === null) {
+            return $empty;
+        }
+    }
+
+    $ratePairs = [
+        'transport_validated_rate_pct' => ['transport_validated', 'transport_checked'],
+        'candidate_validated_rate_pct' => ['candidate_validated', 'candidate_checked'],
+        'publication_validated_rate_pct' => ['publication_validated', 'publication_checked'],
+        'http_status_match_rate_pct' => ['http_status_matches', 'http_status_compared'],
+        'content_hash_match_rate_pct' => ['content_hash_matches', 'content_hash_compared'],
+    ];
+    $rates = [];
+    foreach ($ratePairs as $rateKey => [$numeratorKey, $denominatorKey]) {
+        $rates[$rateKey] = analytics_reliability_percentage($raw[$rateKey] ?? null);
+        $expected = $counts[$denominatorKey] === 0
+            ? null
+            : round($counts[$numeratorKey] / $counts[$denominatorKey] * 100, 2);
+        if (
+            ($expected === null && $rates[$rateKey] !== null)
+            || ($expected !== null && (
+                $rates[$rateKey] === null || abs($rates[$rateKey] - $expected) > 0.011
+            ))
+        ) {
+            return $empty;
+        }
+    }
+
+    $observedAttempts = $counts['observed_attempts'];
+    if (
+        $counts['shadow_attempts'] + $counts['active_attempts'] !== $observedAttempts
+        || $counts['observed_sources'] > $observedAttempts
+        || $counts['transport_checked'] > $observedAttempts
+        || $counts['transport_validated'] > $counts['transport_checked']
+        || $counts['candidate_checked'] > $counts['transport_validated']
+        || $counts['candidate_validated'] > $counts['candidate_checked']
+        || $counts['publication_checked'] > $counts['active_attempts']
+        || $counts['publication_validated'] > $counts['publication_checked']
+        || $counts['http_status_compared'] > $counts['shadow_attempts']
+        || $counts['http_status_matches'] > $counts['http_status_compared']
+        || $counts['content_hash_compared'] > $counts['shadow_attempts']
+        || $counts['content_hash_matches'] > $counts['content_hash_compared']
+        || $counts['paid_requests_known_attempts'] > $observedAttempts
+        || $counts['paid_cost_known_attempts'] > $observedAttempts
+    ) {
+        return $empty;
+    }
+
+    $paidRequests = null;
+    if ($counts['paid_requests_known_attempts'] === $observedAttempts) {
+        $paidRequests = analytics_reliability_exact_count($raw['paid_requests'] ?? null);
+        if ($paidRequests === null) {
+            return $empty;
+        }
+    } elseif (($raw['paid_requests'] ?? null) !== null) {
+        return $empty;
+    }
+
+    $paidCost = null;
+    if ($counts['paid_cost_known_attempts'] === $observedAttempts) {
+        $rawPaidCost = $raw['paid_cost_usd'] ?? null;
+        if (!is_string($rawPaidCost) || !preg_match('/^\d+\.\d{6}$/D', $rawPaidCost)) {
+            return $empty;
+        }
+        $paidCost = $rawPaidCost;
+    } elseif (($raw['paid_cost_usd'] ?? null) !== null) {
+        return $empty;
+    }
+
+    return array_merge(
+        ['reported' => true],
+        $counts,
+        $rates,
+        [
+            'paid_requests' => $paidRequests,
+            'paid_cost_usd' => $paidCost,
+        ]
+    );
+}
+
 function analytics_normalize_verified_completeness(
     $raw,
     int $allParserAttempts,
@@ -932,6 +1060,9 @@ function analytics_normalize_parsing_reliability(
             'data_available_rate_pct' => $dataAvailable,
             'rates_available' => $ratesAvailable,
             'rates_observed' => $ratesObserved,
+            'parsesunix_rollout' => analytics_normalize_parsesunix_rollout(
+                $rawWindow['parsesunix_rollout'] ?? null
+            ),
             'verified_completeness' => $verifiedCompleteness,
             'scheduled_reliability' => analytics_normalize_scheduled_reliability(
                 $rawWindow['scheduled_reliability'] ?? null,

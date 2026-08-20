@@ -81,6 +81,33 @@ const coveredSchedule = {
     objective_status: 'breached',
 };
 
+const parsesUnixRollout = {
+    reported: true,
+    observed_attempts: 3,
+    observed_sources: 3,
+    shadow_attempts: 1,
+    active_attempts: 2,
+    transport_checked: 3,
+    transport_validated: 2,
+    transport_validated_rate_pct: 66.67,
+    candidate_checked: 2,
+    candidate_validated: 2,
+    candidate_validated_rate_pct: 100,
+    publication_checked: 2,
+    publication_validated: 1,
+    publication_validated_rate_pct: 50,
+    http_status_compared: 1,
+    http_status_matches: 1,
+    http_status_match_rate_pct: 100,
+    content_hash_compared: 1,
+    content_hash_matches: 0,
+    content_hash_match_rate_pct: 0,
+    paid_requests_known_attempts: 3,
+    paid_requests: 0,
+    paid_cost_known_attempts: 3,
+    paid_cost_usd: '0.000000',
+};
+
 test('describes extraction evidence without claiming full upstream pages', () => {
     const renderer = fs.readFileSync(
         path.join(__dirname, '../assets/analytics.js'),
@@ -98,8 +125,119 @@ test('describes extraction evidence without claiming full upstream pages', () =>
     assert.match(renderer, /Выполнение расписания/);
     assert.match(renderer, /On-time fresh/);
     assert.match(renderer, /Покрытие расписаний/);
+    assert.match(renderer, /Внедрение ParsesUnix/);
+    assert.match(renderer, /Транспорт подтверждён/);
+    assert.match(renderer, /Кандидат пригоден/);
+    assert.match(renderer, /Публикация подтверждена/);
+    assert.match(renderer, /Shadow-попытки только сравниваются/);
+    assert.match(renderer, /без нулевой оценки неизвестной стоимости/);
     assert.match(renderer, /предварительно/i);
     assert.doesNotMatch(renderer, /Полное получение данных|страница получена целиком/);
+});
+
+test('shows the ParsesUnix rollout as a separate validated funnel', () => {
+    const model = buildReliabilityViewModel({
+        state: 'available',
+        default_window: '7d',
+        windows: [{...observedWindow, parsesunix_rollout: parsesUnixRollout}],
+    });
+
+    assert.equal(model.parsesUnixRollout.reported, true);
+    assert.equal(model.parsesUnixRollout.hasObservations, true);
+    assert.equal(model.parsesUnixRollout.observedAttempts, 3);
+    assert.equal(model.parsesUnixRollout.observedSources, 3);
+    assert.equal(model.parsesUnixRollout.shadowAttempts, 1);
+    assert.equal(model.parsesUnixRollout.activeAttempts, 2);
+    assert.equal(model.parsesUnixRollout.transportValidatedRate, '66,67%');
+    assert.equal(model.parsesUnixRollout.candidateValidatedRate, '100%');
+    assert.equal(model.parsesUnixRollout.publicationValidatedRate, '50%');
+    assert.equal(model.parsesUnixRollout.httpStatusMatchRate, '100%');
+    assert.equal(model.parsesUnixRollout.contentHashMatchRate, '0%');
+    assert.equal(model.parsesUnixRollout.paidRequests, 0);
+    assert.equal(model.parsesUnixRollout.paidCostUsd, '0.000000');
+});
+
+test('fails the ParsesUnix rollout closed on contradictory counts or rates', () => {
+    const invalidBlocks = [
+        {...parsesUnixRollout, candidate_checked: 3},
+        {...parsesUnixRollout, transport_validated_rate_pct: 100},
+        {...parsesUnixRollout, shadow_attempts: 2},
+        {...parsesUnixRollout, paid_cost_usd: '0'},
+    ];
+
+    invalidBlocks.forEach((parsesunix_rollout) => {
+        const model = buildReliabilityViewModel({
+            state: 'available',
+            default_window: '7d',
+            windows: [{...observedWindow, parsesunix_rollout}],
+        });
+        assert.equal(model.parsesUnixRollout.reported, false);
+        assert.equal(model.parsesUnixRollout.hasObservations, false);
+        assert.equal(model.parsesUnixRollout.transportValidatedRate, '—');
+        assert.equal(model.parsesUnixRollout.paidCostUsd, null);
+    });
+});
+
+test('keeps an unknown ParsesUnix cost unknown instead of showing zero', () => {
+    const model = buildReliabilityViewModel({
+        state: 'available',
+        default_window: '7d',
+        windows: [{
+            ...observedWindow,
+            parsesunix_rollout: {
+                reported: true,
+                observed_attempts: 1,
+                observed_sources: 1,
+                shadow_attempts: 0,
+                active_attempts: 1,
+                transport_checked: 1,
+                transport_validated: 0,
+                transport_validated_rate_pct: 0,
+                candidate_checked: 0,
+                candidate_validated: 0,
+                candidate_validated_rate_pct: null,
+                publication_checked: 1,
+                publication_validated: 0,
+                publication_validated_rate_pct: 0,
+                http_status_compared: 0,
+                http_status_matches: 0,
+                http_status_match_rate_pct: null,
+                content_hash_compared: 0,
+                content_hash_matches: 0,
+                content_hash_match_rate_pct: null,
+                paid_requests_known_attempts: 1,
+                paid_requests: 1,
+                paid_cost_known_attempts: 0,
+                paid_cost_usd: null,
+            },
+        }],
+    });
+
+    assert.equal(model.parsesUnixRollout.reported, true);
+    assert.equal(model.parsesUnixRollout.paidRequests, 1);
+    assert.equal(model.parsesUnixRollout.paidCostKnownAttempts, 0);
+    assert.equal(model.parsesUnixRollout.paidCostUsd, null);
+});
+
+test('does not display zero cost as evidence before the first rollout attempt', () => {
+    const emptyRollout = Object.fromEntries(
+        Object.keys(parsesUnixRollout).map((key) => {
+            if (key === 'reported') return [key, true];
+            if (key.endsWith('_rate_pct')) return [key, null];
+            if (key === 'paid_cost_usd') return [key, '0.000000'];
+            return [key, 0];
+        })
+    );
+    const model = buildReliabilityViewModel({
+        state: 'available',
+        default_window: '7d',
+        windows: [{...observedWindow, parsesunix_rollout: emptyRollout}],
+    });
+
+    assert.equal(model.parsesUnixRollout.reported, true);
+    assert.equal(model.parsesUnixRollout.hasObservations, false);
+    assert.equal(model.parsesUnixRollout.paidRequests, null);
+    assert.equal(model.parsesUnixRollout.paidCostUsd, null);
 });
 
 test('shows an observed schedule objective only for a fully covered ledger', () => {
