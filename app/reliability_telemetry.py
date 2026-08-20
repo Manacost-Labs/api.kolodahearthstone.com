@@ -42,7 +42,7 @@ WINDOWS = (
     ("7d", timedelta(days=7)),
     ("30d", timedelta(days=30)),
 )
-METHODOLOGY_VERSION = "logical-source-observed-v11"
+METHODOLOGY_VERSION = "logical-source-observed-v12"
 SLO_TARGET_RATE_PCT = 99.0
 PIPELINE_SCHEDULE_LEDGER_READY = False
 COVERAGE_BUCKET_SECONDS = 24 * 60 * 60
@@ -152,6 +152,41 @@ def reliability_cache_revision(*, path: Path | None = None) -> str:
     return "|".join(fingerprints) or "not-collected"
 
 
+def _confirmed_upstream_publication_pending(status: Mapping[str, object]) -> bool:
+    """Return true only for independently discovered, current Vicious absence."""
+
+    if status.get("source_id") != "vicious_syndicate_radars":
+        return False
+    if status.get("failure_reason_code") != "unavailable":
+        return False
+    if (
+        status.get("upstream_state") != "upstream_publication_pending"
+        or status.get("last_refresh_upstream_state")
+        != "upstream_publication_pending"
+    ):
+        return False
+    readiness = status.get("last_refresh_upstream_readiness")
+    if not isinstance(readiness, Mapping):
+        return False
+    latest = str(readiness.get("latest_report_issue") or "")
+    candidate = str(readiness.get("candidate_issue") or "")
+    if not latest.isdigit() or not candidate.isdigit() or int(candidate) >= int(latest):
+        return False
+    try:
+        discovered_at = datetime.fromisoformat(
+            str(readiness.get("full_discovery_at") or "").replace("Z", "+00:00")
+        )
+        refreshed_at = datetime.fromisoformat(
+            str(status.get("last_refresh_at") or "").replace("Z", "+00:00")
+        )
+    except ValueError:
+        return False
+    if discovered_at.tzinfo is None or refreshed_at.tzinfo is None:
+        return False
+    discovery_age = refreshed_at - discovered_at
+    return timedelta(0) <= discovery_age <= timedelta(hours=12)
+
+
 def classify_terminal_status(status: Mapping[str, object]) -> str:
     """Map a terminal source status to one stable, bounded outcome."""
 
@@ -161,6 +196,8 @@ def classify_terminal_status(status: Mapping[str, object]) -> str:
         or status.get("skipped") is True
         or state in {"diagnostic", "diagnostic_failed", "locked", "skipped"}
     ):
+        return "skipped"
+    if _confirmed_upstream_publication_pending(status):
         return "skipped"
     if state == SourceState.TIMED_OUT:
         return OUTCOME_TIMED_OUT

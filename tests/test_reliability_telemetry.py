@@ -164,6 +164,36 @@ def test_terminal_statuses_have_stable_honest_outcomes() -> None:
     )
 
 
+def test_confirmed_vicious_upstream_absence_is_not_a_parser_failure() -> None:
+    pending = _status(
+        "vicious_syndicate_radars",
+        serving_cached_dataset=True,
+        failure_reason_code="unavailable",
+        upstream_state="upstream_publication_pending",
+        last_refresh_upstream_state="upstream_publication_pending",
+        last_refresh_at="2026-08-20T10:00:00+00:00",
+        last_refresh_upstream_readiness={
+            "latest_report_issue": "355",
+            "candidate_issue": "354",
+            "full_discovery_at": "2026-08-20T05:00:00+00:00",
+        },
+    )
+
+    assert classify_terminal_status(pending) == "skipped"
+
+
+def test_unverified_vicious_pending_state_remains_lkg() -> None:
+    unverified = _status(
+        "vicious_syndicate_radars",
+        serving_cached_dataset=True,
+        failure_reason_code="unavailable",
+        upstream_state="upstream_publication_pending",
+        last_refresh_upstream_state="upstream_publication_pending",
+    )
+
+    assert classify_terminal_status(unverified) == "lkg_served"
+
+
 @pytest.mark.parametrize(
     ("status", "reason"),
     [
