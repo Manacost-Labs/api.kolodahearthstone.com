@@ -88,6 +88,7 @@ AI_DIAGNOSIS_DOMAINS = (
 )
 COMPLETENESS_STATES = ("complete", "incomplete", "unknown")
 PARSESUNIX_MODES = ("none", "shadow", "active")
+ATTEMPT_PURPOSES = ("primary", "recovery", "manual", "diagnostic")
 PARSESUNIX_VERDICTS = (
     "not_observed",
     "OK",
@@ -115,6 +116,27 @@ COMPLETENESS_TRACKED_SOURCE_IDS: frozenset[str] | None = None
 HSREPLAY_UPSTREAM_FRESHNESS_SOURCE_IDS = HSREPLAY_FRESHNESS_GATED_SOURCE_IDS
 
 _schema_lock = threading.Lock()
+_CORRELATION_ID_CHARACTERS = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._:-"
+)
+
+
+def _normalise_attempt_purpose(value: object) -> str:
+    purpose = str(value or "").strip().lower()
+    if purpose not in ATTEMPT_PURPOSES:
+        raise ValueError("attempt_purpose is invalid")
+    return purpose
+
+
+def _normalise_correlation_id(value: object, *, field: str) -> str:
+    identifier = str(value or "").strip()
+    if not identifier:
+        return ""
+    if len(identifier) > 160 or any(
+        character not in _CORRELATION_ID_CHARACTERS for character in identifier
+    ):
+        raise ValueError(f"{field} is invalid")
+    return identifier
 
 
 def telemetry_db_path() -> Path:
@@ -548,6 +570,9 @@ def record_terminal_results(
     coverage_scope: str = "partial",
     expected_source_count: int | None = None,
     refresh_window_id: str | None = None,
+    attempt_purpose: str = "primary",
+    origin_occurrence_id: str | None = None,
+    recovery_chain_id: str | None = None,
 ) -> int:
     """Persist terminal source results atomically and idempotently.
 
@@ -555,7 +580,10 @@ def record_terminal_results(
     from creating a duplicate physical attempt. When retries share an explicit
     ``refresh_window_id``, reports use their latest non-skipped terminal result
     as one logical SLO outcome while retaining every row for cost accounting.
-    Only bounded operational fields are stored.
+    ``attempt_purpose`` keeps primary SLO work distinct from recovery, manual,
+    and diagnostic runs. Recovery correlation is stored separately instead of
+    reusing the primary refresh window, so a late success cannot rewrite the
+    original schedule outcome. Only bounded operational fields are stored.
     """
 
     completed_at = _as_utc(finished_at or datetime.now(UTC))
@@ -564,6 +592,19 @@ def record_terminal_results(
     normalized_run_id = str(run_id).strip()[:160]
     if not normalized_run_id:
         raise ValueError("run_id is required")
+    normalized_purpose = _normalise_attempt_purpose(attempt_purpose)
+    normalized_origin_occurrence_id = _normalise_correlation_id(
+        origin_occurrence_id,
+        field="origin_occurrence_id",
+    )
+    normalized_recovery_chain_id = _normalise_correlation_id(
+        recovery_chain_id,
+        field="recovery_chain_id",
+    )
+    if normalized_purpose == "recovery" and not normalized_recovery_chain_id:
+        raise ValueError("recovery_chain_id is required for recovery attempts")
+    if normalized_purpose != "recovery" and normalized_recovery_chain_id:
+        raise ValueError("recovery_chain_id is only valid for recovery attempts")
 
     rows: list[tuple[object, ...]] = []
     seen_sources: set[str] = set()
@@ -601,6 +642,9 @@ def record_terminal_results(
                 *ai_fields,
                 *completeness_fields,
                 *parsesunix_fields,
+                normalized_purpose,
+                normalized_origin_occurrence_id,
+                normalized_recovery_chain_id,
                 recorded_epoch,
             )
         )
@@ -663,11 +707,14 @@ def record_terminal_results(
                     parsesunix_content_hash_match,
                     parsesunix_paid_requests,
                     parsesunix_paid_cost_microusd,
+                    attempt_purpose,
+                    origin_occurrence_id,
+                    recovery_chain_id,
                     recorded_at
                 ) VALUES (
                     ?, ?, ?, ?, ?, ?, ?, ?, ?,
                     ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                 )
                 """,
                 row,
@@ -683,8 +730,11 @@ def record_terminal_results(
                 cohort_hash,
                 expected_sources,
                 observed_sources,
+                attempt_purpose,
+                origin_occurrence_id,
+                recovery_chain_id,
                 recorded_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(run_id) DO UPDATE SET
                 observed_sources = MAX(
                     refresh_runs.observed_sources,
@@ -695,6 +745,9 @@ def record_terminal_results(
               AND refresh_runs.scope = excluded.scope
               AND refresh_runs.cohort_hash = excluded.cohort_hash
               AND refresh_runs.expected_sources = excluded.expected_sources
+              AND refresh_runs.attempt_purpose = excluded.attempt_purpose
+              AND refresh_runs.origin_occurrence_id = excluded.origin_occurrence_id
+              AND refresh_runs.recovery_chain_id = excluded.recovery_chain_id
             """,
             (
                 normalized_run_id,
@@ -704,6 +757,9 @@ def record_terminal_results(
                 cohort_hash,
                 expected_sources,
                 observed_sources,
+                normalized_purpose,
+                normalized_origin_occurrence_id,
+                normalized_recovery_chain_id,
                 recorded_epoch,
             ),
         )
@@ -885,6 +941,9 @@ def _schema_is_current(connection: sqlite3.Connection) -> bool:
         "parsesunix_content_hash_match",
         "parsesunix_paid_requests",
         "parsesunix_paid_cost_microusd",
+        "attempt_purpose",
+        "origin_occurrence_id",
+        "recovery_chain_id",
         "recorded_at",
     }.issubset(source_columns) and {
         "run_id",
@@ -894,6 +953,9 @@ def _schema_is_current(connection: sqlite3.Connection) -> bool:
         "cohort_hash",
         "expected_sources",
         "observed_sources",
+        "attempt_purpose",
+        "origin_occurrence_id",
+        "recovery_chain_id",
         "recorded_at",
     }.issubset(run_columns)
 
@@ -986,6 +1048,13 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
                         parsesunix_paid_cost_microusd IS NULL OR
                         parsesunix_paid_cost_microusd >= 0
                     ),
+                    attempt_purpose TEXT NOT NULL DEFAULT 'primary' CHECK (
+                        attempt_purpose IN (
+                            'primary', 'recovery', 'manual', 'diagnostic'
+                        )
+                    ),
+                    origin_occurrence_id TEXT NOT NULL DEFAULT '',
+                    recovery_chain_id TEXT NOT NULL DEFAULT '',
                     recorded_at REAL NOT NULL
                 )
                 """
@@ -1049,6 +1118,13 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
                     "INTEGER CHECK (parsesunix_paid_cost_microusd IS NULL OR "
                     "parsesunix_paid_cost_microusd >= 0)"
                 ),
+                "attempt_purpose": (
+                    "TEXT NOT NULL DEFAULT 'primary' "
+                    "CHECK (attempt_purpose IN "
+                    "('primary', 'recovery', 'manual', 'diagnostic'))"
+                ),
+                "origin_occurrence_id": "TEXT NOT NULL DEFAULT ''",
+                "recovery_chain_id": "TEXT NOT NULL DEFAULT ''",
             }
             for column, definition in migrations.items():
                 if column not in columns:
@@ -1077,6 +1153,13 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
                     cohort_hash TEXT NOT NULL DEFAULT '',
                     expected_sources INTEGER NOT NULL,
                     observed_sources INTEGER NOT NULL,
+                    attempt_purpose TEXT NOT NULL DEFAULT 'primary' CHECK (
+                        attempt_purpose IN (
+                            'primary', 'recovery', 'manual', 'diagnostic'
+                        )
+                    ),
+                    origin_occurrence_id TEXT NOT NULL DEFAULT '',
+                    recovery_chain_id TEXT NOT NULL DEFAULT '',
                     recorded_at REAL NOT NULL
                 )
                 """
@@ -1117,6 +1200,23 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
                         ''
                     )
                     """
+                )
+            if "attempt_purpose" not in run_columns:
+                connection.execute(
+                    "ALTER TABLE refresh_runs "
+                    "ADD COLUMN attempt_purpose TEXT NOT NULL DEFAULT 'primary' "
+                    "CHECK (attempt_purpose IN "
+                    "('primary', 'recovery', 'manual', 'diagnostic'))"
+                )
+            if "origin_occurrence_id" not in run_columns:
+                connection.execute(
+                    "ALTER TABLE refresh_runs "
+                    "ADD COLUMN origin_occurrence_id TEXT NOT NULL DEFAULT ''"
+                )
+            if "recovery_chain_id" not in run_columns:
+                connection.execute(
+                    "ALTER TABLE refresh_runs "
+                    "ADD COLUMN recovery_chain_id TEXT NOT NULL DEFAULT ''"
                 )
             connection.execute(
                 """

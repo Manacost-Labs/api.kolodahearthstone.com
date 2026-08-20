@@ -1125,6 +1125,13 @@ def test_schema_migrates_existing_database_without_losing_rows(tmp_path: Path) -
             WHERE attempt_id = 'old'
             """
         ).fetchone()
+        legacy_correlation = connection.execute(
+            """
+            SELECT attempt_purpose, origin_occurrence_id, recovery_chain_id
+            FROM source_attempts
+            WHERE attempt_id = 'old'
+            """
+        ).fetchone()
     assert "refresh_window_id" in columns
     assert {
         "completeness_tracked",
@@ -1134,6 +1141,85 @@ def test_schema_migrates_existing_database_without_losing_rows(tmp_path: Path) -
     assert "independently_ineligible_reason" in columns
     assert legacy_window == ("", "")
     assert legacy_completeness == (0, "unknown", None)
+    assert legacy_correlation == ("primary", "", "")
+
+
+def test_recovery_attempt_persists_bounded_correlation_without_reusing_primary_window(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "reliability.sqlite3"
+    now = datetime(2026, 8, 20, 12, 0, tzinfo=UTC)
+
+    record_terminal_results(
+        "recovery-run",
+        [_status("hsguru_meta_standard_legend")],
+        finished_at=now,
+        path=path,
+        refresh_window_id="recovery:chain-1:attempt-1",
+        attempt_purpose="recovery",
+        origin_occurrence_id="refresh-post-patch-tierlists:20260820T102000Z",
+        recovery_chain_id="chain-1",
+    )
+
+    with sqlite3.connect(path) as connection:
+        attempt = connection.execute(
+            """
+            SELECT
+                refresh_window_id,
+                attempt_purpose,
+                origin_occurrence_id,
+                recovery_chain_id
+            FROM source_attempts
+            """
+        ).fetchone()
+        run = connection.execute(
+            """
+            SELECT
+                refresh_window_id,
+                attempt_purpose,
+                origin_occurrence_id,
+                recovery_chain_id
+            FROM refresh_runs
+            """
+        ).fetchone()
+
+    expected = (
+        "recovery:chain-1:attempt-1",
+        "recovery",
+        "refresh-post-patch-tierlists:20260820T102000Z",
+        "chain-1",
+    )
+    assert attempt == expected
+    assert run == expected
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"attempt_purpose": "unknown"}, "attempt_purpose"),
+        ({"attempt_purpose": "recovery"}, "recovery_chain_id is required"),
+        (
+            {"attempt_purpose": "primary", "recovery_chain_id": "chain-1"},
+            "only valid for recovery",
+        ),
+        (
+            {"origin_occurrence_id": "contains a space"},
+            "origin_occurrence_id",
+        ),
+    ],
+)
+def test_attempt_correlation_fails_closed(
+    tmp_path: Path,
+    kwargs: dict[str, object],
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        record_terminal_results(
+            "run",
+            [_status("source")],
+            path=tmp_path / "reliability.sqlite3",
+            **kwargs,
+        )
 
 
 @pytest.mark.parametrize("source_id", tuple(FIELD_UNAVAILABLE_REASONS))
