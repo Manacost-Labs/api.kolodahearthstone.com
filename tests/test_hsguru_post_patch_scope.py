@@ -74,4 +74,5 @@ def test_fetch_source_scopes_hsguru_to_current_patch_during_early_mode() -> None
     query = parse_qs(urlsplit(result["url"]).query)
     assert query["format"] == ["2"]
     assert query["rank"] == ["diamond_4to1"]
+    assert query["min_games"] == ["100"]
     assert query["period"] == ["patch_36.2.2"]

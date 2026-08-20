@@ -28,6 +28,8 @@ def source_for_current_patch(
     period = resolve_current_patch_period(cached_matrix)
     parsed = urlsplit(source.url)
     query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    if source.category == "meta":
+        query.setdefault("min_games", "100")
     query["period"] = period
     scoped_url = urlunsplit(
         (parsed.scheme, parsed.netloc, parsed.path, urlencode(query), parsed.fragment)
