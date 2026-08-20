@@ -7,6 +7,11 @@ patch version is confirmed, it atomically enables a four-day `early` policy in
 parser-control before advancing the patch baseline. A failed policy write keeps
 the old baseline, so the next audit retries activation.
 
+While that policy is active, the recurring post-patch timer refreshes every
+operational early-policy scrape source at 00:20, 05:20, 10:20, 15:20 and 20:20
+Europe/Warsaw. Outside the bounded window the command exits successfully before
+making provider requests. Section switches in parser-control are still honored.
+
 The audit compares four independent surfaces:
 
 1. The current patch from Blizzard patch notes plus the wiki.gg patch catalog.

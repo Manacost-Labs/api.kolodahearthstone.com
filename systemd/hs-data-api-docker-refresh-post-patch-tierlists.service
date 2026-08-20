@@ -1,5 +1,5 @@
 [Unit]
-Description=Refresh post-patch Arena tier lists in Docker
+Description=Refresh active post-patch freshness sources in Docker
 Requires=hs-data-api-docker.service
 After=hs-data-api-docker.service network-online.target
 StartLimitIntervalSec=4h30min
@@ -9,11 +9,11 @@ StartLimitBurst=3
 Type=oneshot
 SuccessExitStatus=10
 WorkingDirectory=/srv/hs-data-api
-ExecStart=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm -e HS_ARENA_POST_PATCH_ENABLED=true -e HS_ARENA_POST_PATCH_FROM=2026-07-21 -e HS_ARENA_POST_PATCH_UNTIL=2026-07-28 api python -m app.cli refresh --source hsreplay_arena_cards_advanced --source heartharena_tierlist --source firestone_arena_cards_normal --require-all-ok --scheduled
+ExecStart=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm api python -m app.cli refresh-post-patch
 ExecStopPost=-/usr/bin/curl --fail --silent --show-error --max-time 20 --request POST http://127.0.0.1:3101/_internal/tierlist/cache-bust?source=hsreplay
 ExecStopPost=-/usr/bin/curl --fail --silent --show-error --max-time 20 --request POST http://127.0.0.1:3101/_internal/tierlist/cache-bust?source=heartharena
 ExecStopPost=-/usr/bin/curl --fail --silent --show-error --max-time 20 --request POST http://127.0.0.1:3101/_internal/tierlist/cache-bust?source=firestone
-TimeoutStartSec=30min
+TimeoutStartSec=60min
 Restart=on-failure
 RestartSec=15min
 RestartPreventExitStatus=2

@@ -209,6 +209,29 @@ def policy_for(source_id: str, *, at: datetime | None = None) -> PostPatchPolicy
     return _policy_for_source(source_id)
 
 
+def active_post_patch_refresh_source_ids(
+    *,
+    at: datetime | None = None,
+) -> tuple[str, ...]:
+    """Return operational scrape sources that need accelerated post-patch refreshes."""
+
+    from .config import source_operationally_enabled
+    from .sources import SOURCE_BY_ID
+
+    candidates = tuple(
+        sorted(
+            source_id
+            for source_id in EARLY_SOURCE_IDS
+            if (source := SOURCE_BY_ID.get(source_id)) is not None
+            and source.kind == "scrape"
+            and source_operationally_enabled(source_id)
+        )
+    )
+    if not candidates or policy_for(candidates[0], at=at) is None:
+        return ()
+    return candidates
+
+
 def effective_contract_min_rows(
     source_id: str,
     default: int,

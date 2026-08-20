@@ -9,6 +9,7 @@ from app.dataset_regression import check_dataset_regression
 from app.fetcher import _attach_provisional_status, _save_dataset_with_checks
 from app.post_patch_policy import (
     EARLY_SOURCE_IDS,
+    active_post_patch_refresh_source_ids,
     build_provisional_metadata,
     effective_contract_min_rows,
     effective_firestone_minimum_sample,
@@ -66,6 +67,25 @@ def _patch_cards(count: int) -> list[dict]:
 
 
 class PostPatchPolicyTest(unittest.TestCase):
+    def test_active_refresh_scope_covers_every_operational_early_scrape(self) -> None:
+        with (
+            patch("app.post_patch_policy.policy_for", return_value=object()),
+            patch(
+                "app.config.source_operationally_enabled",
+                side_effect=lambda source_id: source_id != "firestone_standard",
+            ),
+        ):
+            selected = active_post_patch_refresh_source_ids(at=WINDOW_TIME)
+
+        expected = sorted(EARLY_SOURCE_IDS - {"firestone_standard"})
+        self.assertEqual(list(selected), expected)
+
+    def test_inactive_policy_has_no_accelerated_refresh_scope(self) -> None:
+        with patch("app.post_patch_policy.policy_for", return_value=None):
+            selected = active_post_patch_refresh_source_ids(at=AFTER_WINDOW)
+
+        self.assertEqual(selected, ())
+
     def setUp(self) -> None:
         self._enabled = patch.dict(
             "os.environ", {"HS_ARENA_POST_PATCH_ENABLED": "true"}

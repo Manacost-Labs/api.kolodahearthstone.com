@@ -432,6 +432,57 @@ class CliTest(unittest.TestCase):
 
         self.assertEqual(exit_code, 10)
 
+    def test_post_patch_refresh_skips_without_provider_calls_when_inactive(self) -> None:
+        refresh = AsyncMock()
+        output = io.StringIO()
+        with (
+            patch("app.cli.load_env_file"),
+            patch(
+                "app.post_patch_policy.active_post_patch_refresh_source_ids",
+                return_value=(),
+            ),
+            patch("app.cli.refresh_sources", new=refresh),
+            redirect_stdout(output),
+        ):
+            exit_code = cli.main(["refresh-post-patch"])
+
+        self.assertEqual(exit_code, 0)
+        refresh.assert_not_awaited()
+        self.assertEqual(
+            json.loads(output.getvalue())["reason"],
+            "post_patch_policy_inactive",
+        )
+
+    def test_post_patch_refresh_fetches_every_enabled_early_source(self) -> None:
+        selected = ("heartharena_tierlist", "hsreplay_arena_cards_advanced")
+        results = [
+            {"source_id": source_id, "state": "ok"}
+            for source_id in selected
+        ]
+        refresh = AsyncMock(return_value=results)
+        output = io.StringIO()
+        with (
+            patch("app.cli.load_env_file"),
+            patch(
+                "app.post_patch_policy.active_post_patch_refresh_source_ids",
+                return_value=selected,
+            ),
+            patch(
+                "app.parser_control.filter_scheduled_source_ids",
+                return_value=list(selected),
+            ),
+            patch("app.cli.refresh_sources", new=refresh),
+            redirect_stdout(output),
+        ):
+            exit_code = cli.main(["refresh-post-patch"])
+
+        self.assertEqual(exit_code, 0)
+        refresh.assert_awaited_once_with(
+            list(selected),
+            respect_section_controls=True,
+        )
+        self.assertEqual(json.loads(output.getvalue())["source_ids"], list(selected))
+
     def test_freshness_execution_mode_reports_degradation_not_crash(self) -> None:
         summary = {
             "freshness": {"ok": False, "stale_count": 2},

@@ -15,11 +15,12 @@ from zoneinfo import ZoneInfo
 from .config import data_dir, source_operationally_enabled
 from .hsreplay_card_periods import HSREPLAY_CARD_PERIOD_SOURCE_IDS
 from .parser_control_registry import SOURCE_TO_SECTION
+from .post_patch_policy import EARLY_SOURCE_IDS
 from .source_tiers import LIGHT_API_IDS, MEDIUM_API_IDS
 from .sources import SOURCE_BY_ID
 
 SCHEDULE_INVENTORY_SCHEMA_VERSION = 2
-SCHEDULE_INVENTORY_VERSION = "2026-08-12.2"
+SCHEDULE_INVENTORY_VERSION = "2026-08-20.1"
 SCHEDULE_TIMEZONE = "Europe/Warsaw"
 
 _SYSTEMCTL_SEARCH_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
@@ -58,28 +59,11 @@ class _ScheduleSpec:
     weekdays: tuple[int, ...] = ()
     explicit_local_datetimes: tuple[datetime, ...] = ()
     purpose: SchedulePurpose = "primary"
+    required_publication_mode: str | None = None
 
 
 def _times(*values: tuple[int, int]) -> tuple[time, ...]:
     return tuple(time(hour, minute) for hour, minute in values)
-
-
-def _explicit_post_patch_datetimes() -> tuple[datetime, ...]:
-    timezone = ZoneInfo(SCHEDULE_TIMEZONE)
-    hours_by_day = {
-        21: (0, 5, 10, 15, 20),
-        22: (1, 6, 11, 16, 21),
-        23: (2, 7, 12, 17, 22),
-        24: (3, 8, 13, 18, 23),
-        25: (4, 9, 14, 19),
-        26: (0, 5, 10, 15, 20),
-        27: (1, 6, 11, 16, 21),
-    }
-    return tuple(
-        datetime(2026, 7, day, hour, 20, tzinfo=timezone)
-        for day, hours in hours_by_day.items()
-        for hour in hours
-    )
 
 
 _SCRAPE_SOURCE_IDS = frozenset(
@@ -261,26 +245,13 @@ _SCHEDULES: tuple[_ScheduleSpec, ...] = (
     ),
     _ScheduleSpec(
         id="refresh-post-patch-tierlists",
-        label="Каждые 5 часов с 21 по 27 июля 2026 года",
+        label="До каждых 5 часов в активном post-patch режиме",
         systemd_unit="hs-data-api-docker-refresh-post-patch-tierlists.timer",
-        on_calendar=(
-            "2026-07-21 00,05,10,15,20:20:00 Europe/Warsaw",
-            "2026-07-22 01,06,11,16,21:20:00 Europe/Warsaw",
-            "2026-07-23 02,07,12,17,22:20:00 Europe/Warsaw",
-            "2026-07-24 03,08,13,18,23:20:00 Europe/Warsaw",
-            "2026-07-25 04,09,14,19:20:00 Europe/Warsaw",
-            "2026-07-26 00,05,10,15,20:20:00 Europe/Warsaw",
-            "2026-07-27 01,06,11,16,21:20:00 Europe/Warsaw",
-        ),
-        source_ids=frozenset(
-            {
-                "hsreplay_arena_cards_advanced",
-                "heartharena_tierlist",
-                "firestone_arena_cards_normal",
-            }
-        ),
-        recurrence="explicit",
-        explicit_local_datetimes=_explicit_post_patch_datetimes(),
+        on_calendar=("*-*-* 00,05,10,15,20:20:00 Europe/Warsaw",),
+        source_ids=EARLY_SOURCE_IDS,
+        recurrence="daily",
+        local_times=_times((0, 20), (5, 20), (10, 20), (15, 20), (20, 20)),
+        required_publication_mode="early",
     ),
 )
 
@@ -830,6 +801,7 @@ def build_schedule_inventory(
     *,
     at: datetime | None = None,
     include_runtime: bool = True,
+    publication_mode: str | None = None,
 ) -> dict[str, Any]:
     """Return versioned nominal schedules enriched with bounded runtime health.
 
@@ -862,17 +834,22 @@ def build_schedule_inventory(
     runtime_complete = runtime_probe.get("status") == "ok"
     schedule_rows: list[dict[str, Any]] = []
     for spec in _SCHEDULES:
+        condition_met = (
+            spec.required_publication_mode is None
+            or publication_mode is None
+            or publication_mode == spec.required_publication_mode
+        )
         source_ids = sorted(
             source_id
             for source_id in spec.source_ids
             if source_operationally_enabled(source_id)
         )
-        nominal_next_run = _next_run(spec, at=moment)
+        nominal_next_run = _next_run(spec, at=moment) if condition_met else None
         runtime = runtime_units.get(spec.systemd_unit)
         if not isinstance(runtime, dict):
             runtime = {}
         runtime_available = runtime.get("available") is True
-        use_runtime_timing = runtime_available and timing_available
+        use_runtime_timing = condition_met and runtime_available and timing_available
         runtime_next_run = (
             _parse_iso_datetime(runtime.get("nextRunAt"))
             if use_runtime_timing
@@ -891,6 +868,8 @@ def build_schedule_inventory(
                 "id": spec.id,
                 "label": spec.label,
                 "purpose": spec.purpose,
+                "requiredPublicationMode": spec.required_publication_mode,
+                "conditionMet": condition_met,
                 "systemdUnit": spec.systemd_unit,
                 "onCalendar": list(spec.on_calendar),
                 "timezone": SCHEDULE_TIMEZONE,
@@ -902,7 +881,7 @@ def build_schedule_inventory(
                 "nextRunAt": _iso(effective_next_run),
                 "nextRunAtSource": "runtime" if use_runtime_timing else "nominal",
                 "validUntil": _iso(last_explicit),
-                "isActive": nominal_next_run is not None,
+                "isActive": condition_met and nominal_next_run is not None,
                 "runtimeStateAvailable": runtime_available,
                 "enabled": runtime.get("enabled") if runtime_available else None,
                 "active": runtime.get("active") if runtime_available else None,

@@ -1,18 +1,11 @@
 [Unit]
-Description=Post-patch Arena tier lists every five hours through 27 July 2026
+Description=Check active post-patch freshness sources at most every five hours
 
 [Timer]
-OnCalendar=2026-07-21 00,05,10,15,20:20:00 Europe/Warsaw
-OnCalendar=2026-07-22 01,06,11,16,21:20:00 Europe/Warsaw
-OnCalendar=2026-07-23 02,07,12,17,22:20:00 Europe/Warsaw
-OnCalendar=2026-07-24 03,08,13,18,23:20:00 Europe/Warsaw
-OnCalendar=2026-07-25 04,09,14,19:20:00 Europe/Warsaw
-OnCalendar=2026-07-26 00,05,10,15,20:20:00 Europe/Warsaw
-OnCalendar=2026-07-27 01,06,11,16,21:20:00 Europe/Warsaw
+OnCalendar=*-*-* 00,05,10,15,20:20:00 Europe/Warsaw
 AccuracySec=1s
 RandomizedDelaySec=0
-Persistent=false
-RemainAfterElapse=no
+Persistent=true
 Unit=hs-data-api-docker-refresh-post-patch-tierlists.service
 
 [Install]

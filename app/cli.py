@@ -322,6 +322,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--schedule-id",
         help="Bind a scheduled run to an existing durable ledger occurrence.",
     )
+    sub.add_parser(
+        "refresh-post-patch",
+        help=(
+            "Refresh every operational early-policy scrape source while the "
+            "bounded post-patch window is active."
+        ),
+    )
     refresh_api_tiers = sub.add_parser(
         "refresh-api-tiers",
         help=(
@@ -1448,6 +1455,49 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
+    if args.command == "refresh-post-patch":
+        from .parser_control import filter_scheduled_source_ids
+        from .post_patch_policy import active_post_patch_refresh_source_ids
+
+        selected = list(active_post_patch_refresh_source_ids())
+        if not selected:
+            print(
+                json.dumps(
+                    {
+                        "ok": True,
+                        "skipped": True,
+                        "reason": "post_patch_policy_inactive",
+                        "source_ids": [],
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return int(ExitCode.OK)
+        expected_ids = set(filter_scheduled_source_ids(selected))
+        results = asyncio.run(
+            refresh_sources(
+                selected,
+                respect_section_controls=True,
+            )
+        )
+        exit_code = _scheduled_refresh_exit_code(
+            results,
+            expected_ids=expected_ids,
+        )
+        print(
+            json.dumps(
+                {
+                    "ok": exit_code == int(ExitCode.OK),
+                    "skipped": False,
+                    "source_ids": selected,
+                    "results": results,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return exit_code
     if args.command == "refresh":
         if not args.all and not args.source and not args.tier:
             print("Use --all, --tier TIER, or --source SOURCE_ID", file=sys.stderr)

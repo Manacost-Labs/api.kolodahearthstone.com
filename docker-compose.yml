@@ -18,11 +18,9 @@ services:
       HS_API_PORT: "8000"
       HS_FLARESOLVERR_URL: "http://flaresolverr:8191/v1"
       HS_CLOAKBROWSER_DISPLAY: ":99"
-      # Date-bounded policy is shared by the API and every compose refresh job.
-      # It automatically becomes inactive at the beginning of 28 July in Warsaw.
-      HS_ARENA_POST_PATCH_ENABLED: "true"
-      HS_ARENA_POST_PATCH_FROM: "2026-07-21"
-      HS_ARENA_POST_PATCH_UNTIL: "2026-07-28"
+      # Persisted parser-control policy is authoritative. The legacy dated
+      # environment fallback stays disabled so an old patch cannot reactivate.
+      HS_ARENA_POST_PATCH_ENABLED: "false"
       DISPLAY: ":99"
     volumes:
       - ./data:/var/lib/hs-data-api

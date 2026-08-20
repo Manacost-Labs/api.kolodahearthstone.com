@@ -122,7 +122,7 @@ def test_schedule_inventory_calculates_nominal_next_runs_in_utc() -> None:
         "2026-07-21T03:20:00+00:00"
     )
     assert sources["hsguru_meta_standard_legend"]["nextRunAt"] == (
-        "2026-07-21T05:00:00+00:00"
+        "2026-07-21T03:20:00+00:00"
     )
     streamer = sources["hsguru_streamer_decks_legend_1000"]
     assert streamer["nextRunAt"] == "2026-07-21T00:15:00+00:00"
@@ -151,16 +151,29 @@ def test_nominal_next_run_skips_nonexistent_warsaw_dst_time() -> None:
     )
 
 
-def test_expired_bounded_schedule_remains_in_inventory_without_a_next_run() -> None:
+def test_post_patch_schedule_recurs_and_is_conditionally_active() -> None:
     inventory = build_schedule_inventory(
-        at=datetime(2026, 7, 28, 0, 0, tzinfo=UTC),
+        at=datetime(2026, 8, 20, 0, 0, tzinfo=UTC),
         include_runtime=False,
+        publication_mode="early",
     )
 
-    bounded = _schedule(inventory, "refresh-post-patch-tierlists")
-    assert bounded["nextRunAt"] is None
-    assert bounded["validUntil"] == "2026-07-27T21:20:00+02:00"
-    assert bounded["isActive"] is False
+    recurring = _schedule(inventory, "refresh-post-patch-tierlists")
+    assert recurring["nextRunAt"] == "2026-08-20T03:20:00+00:00"
+    assert recurring["validUntil"] is None
+    assert recurring["requiredPublicationMode"] == "early"
+    assert recurring["conditionMet"] is True
+    assert recurring["isActive"] is True
+
+    stable_inventory = build_schedule_inventory(
+        at=datetime(2026, 8, 20, 0, 0, tzinfo=UTC),
+        include_runtime=False,
+        publication_mode="stable",
+    )
+    inactive = _schedule(stable_inventory, "refresh-post-patch-tierlists")
+    assert inactive["nextRunAt"] is None
+    assert inactive["conditionMet"] is False
+    assert inactive["isActive"] is False
 
 
 def test_every_inventory_unit_is_a_versioned_docker_timer() -> None:
@@ -211,11 +224,11 @@ def test_parser_control_snapshot_exposes_effective_section_and_source_schedule()
         assert snapshot["scheduleInventory"]["schemaVersion"] == 2
         assert arena["scheduleIds"]
         assert arena["schedule"]
-        assert arena["nextRunAt"] == "2026-07-21T03:20:00+00:00"
+        assert arena["nextRunAt"] == "2026-07-21T05:00:00+00:00"
         assert advanced["enabled"] is True
         assert advanced["scheduleIds"]
         assert advanced["schedule"]
-        assert advanced["nextRunAt"] == "2026-07-21T03:20:00+00:00"
+        assert advanced["nextRunAt"] == "2026-07-21T05:00:00+00:00"
 
         disabled = store.update_sections(
             expected_revision=1,

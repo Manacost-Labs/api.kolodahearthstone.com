@@ -685,7 +685,10 @@ class ParserControlStore:
         policy_view = _policy_view(state, persisted=persisted, at=moment)
         from .parser_control_schedule import build_schedule_inventory
 
-        schedule_inventory = build_schedule_inventory(at=moment)
+        schedule_inventory = build_schedule_inventory(
+            at=moment,
+            publication_mode=str(policy_view["effectiveMode"]),
+        )
         sections: list[dict[str, Any]] = []
         for section in SECTIONS:
             section_enabled = state["sections"].get(section.id, True)

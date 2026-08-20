@@ -13,41 +13,32 @@ TIMER_PATH = ROOT / "systemd" / "hs-data-api-docker-refresh-post-patch-tierlists
 
 
 def _scheduled_moments() -> list[datetime]:
-    moments: list[datetime] = []
-    for line in TIMER_PATH.read_text(encoding="utf-8").splitlines():
-        if not line.startswith("OnCalendar="):
-            continue
-        calendar = line.removeprefix("OnCalendar=")
-        date_text, time_text, timezone_name = calendar.split()
-        hours_text, minute_text, second_text = time_text.split(":")
-        timezone = ZoneInfo(timezone_name)
-        for hour_text in hours_text.split(","):
-            moments.append(
-                datetime.fromisoformat(
-                    f"{date_text}T{hour_text}:{minute_text}:{second_text}"
-                ).replace(tzinfo=timezone)
-            )
-    return sorted(moments)
+    timezone = ZoneInfo("Europe/Warsaw")
+    return [
+        datetime(2026, 8, day, hour, 20, tzinfo=timezone)
+        for day in (20, 21)
+        for hour in (0, 5, 10, 15, 20)
+    ]
 
 
-def test_timer_has_exact_five_hour_schedule_through_july_27() -> None:
+def test_timer_has_a_recurring_schedule_with_no_gap_over_five_hours() -> None:
+    timer = TIMER_PATH.read_text(encoding="utf-8")
     moments = _scheduled_moments()
 
-    assert len(moments) == 34
-    assert moments[0].isoformat() == "2026-07-21T00:20:00+02:00"
-    assert moments[-1].isoformat() == "2026-07-27T21:20:00+02:00"
+    assert "OnCalendar=*-*-* 00,05,10,15,20:20:00 Europe/Warsaw" in timer
+    assert "AccuracySec=1s" in timer
+    assert "RandomizedDelaySec=0" in timer
     assert all(
-        right - left == timedelta(hours=5)
+        right - left <= timedelta(hours=5)
         for left, right in zip(moments, moments[1:])
     )
 
 
-def test_timer_never_catches_up_after_the_explicit_window() -> None:
+def test_timer_survives_reboots_and_contains_no_expired_patch_date() -> None:
     timer = TIMER_PATH.read_text(encoding="utf-8")
 
-    assert "Persistent=false" in timer
-    assert "Persistent=true" not in timer
-    assert all(moment.date().isoformat() <= "2026-07-27" for moment in _scheduled_moments())
+    assert "Persistent=true" in timer
+    assert "2026-07" not in timer
 
 
 def test_refresh_retries_failures_and_always_attempts_all_cache_busts() -> None:
@@ -55,7 +46,9 @@ def test_refresh_retries_failures_and_always_attempts_all_cache_busts() -> None:
     service = "\n".join(service_lines)
     cache_busts = [line for line in service_lines if line.startswith("ExecStopPost=")]
 
-    assert "--require-all-ok" in service
+    assert "python -m app.cli refresh-post-patch" in service
+    assert "HS_ARENA_POST_PATCH_FROM" not in service
+    assert "--source" not in service
     assert "Restart=on-failure" in service
     assert len(cache_busts) == 3
     assert all(line.startswith("ExecStopPost=-/usr/bin/curl ") for line in cache_busts)
@@ -66,9 +59,9 @@ def test_refresh_retries_failures_and_always_attempts_all_cache_busts() -> None:
     }
 
 
-def test_compose_shares_date_bounded_policy_with_api_and_regular_jobs() -> None:
+def test_compose_disables_the_legacy_date_bounded_policy() -> None:
     compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
 
-    assert 'HS_ARENA_POST_PATCH_ENABLED: "true"' in compose
-    assert 'HS_ARENA_POST_PATCH_FROM: "2026-07-21"' in compose
-    assert 'HS_ARENA_POST_PATCH_UNTIL: "2026-07-28"' in compose
+    assert 'HS_ARENA_POST_PATCH_ENABLED: "false"' in compose
+    assert "HS_ARENA_POST_PATCH_FROM:" not in compose
+    assert "HS_ARENA_POST_PATCH_UNTIL:" not in compose
