@@ -134,6 +134,15 @@ def parsesunix_timeout_seconds() -> float:
     return value
 
 
+def parsesunix_max_body_bytes() -> int:
+    value = int(os.environ.get("HS_PARSESUNIX_MAX_BODY_BYTES", "8388608"))
+    if not 1_048_576 <= value <= 33_554_432:
+        raise ValueError(
+            "HS_PARSESUNIX_MAX_BODY_BYTES must be between 1048576 and 33554432"
+        )
+    return value
+
+
 def bind_host() -> str:
     return os.environ.get("HS_API_BIND_HOST", "0.0.0.0")
 

@@ -15,3 +15,4 @@ hearthstone>=9.0
 strawberry-graphql[fastapi]>=0.324,<0.325
 psycopg[binary,pool]>=3.3,<3.4
 redis>=7.4,<8.0
+web-scraper-core @ https://github.com/Manacost-Labs/ParsesUnix/releases/download/v0.9.0/web_scraper_core-0.9.0-py3-none-any.whl#sha256=d73611af4a647c124482d28854bd020f26bd33dec0932e7149bbe2354d7823bd

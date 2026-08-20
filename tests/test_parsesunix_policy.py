@@ -4,6 +4,7 @@ import pytest
 
 from app.config import (
     parsesunix_allowed_providers,
+    parsesunix_max_body_bytes,
     parsesunix_max_concurrency,
     parsesunix_mode_for_source,
     parsesunix_state_dir,
@@ -71,6 +72,10 @@ def test_resource_limits_are_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("HS_PARSESUNIX_TIMEOUT_SECONDS", "301")
     with pytest.raises(ValueError, match="between 5 and 300"):
         parsesunix_timeout_seconds()
+
+    monkeypatch.setenv("HS_PARSESUNIX_MAX_BODY_BYTES", "1048575")
+    with pytest.raises(ValueError, match="between 1048576 and 33554432"):
+        parsesunix_max_body_bytes()
 
 
 def test_state_is_isolated_below_the_api_data_directory(
