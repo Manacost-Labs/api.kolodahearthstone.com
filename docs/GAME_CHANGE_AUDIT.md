@@ -2,8 +2,10 @@
 
 The production host runs `hs-data-api-docker-game-change-audit.timer` every day
 at 11:15 Europe/Warsaw, after the normal data refresh and patch-catalog refresh.
-It is a read-only publication audit: it never replaces a valid dataset with
-unverified upstream data.
+It never replaces a valid dataset with unverified upstream data. When a new
+patch version is confirmed, it atomically enables a four-day `early` policy in
+parser-control before advancing the patch baseline. A failed policy write keeps
+the old baseline, so the next audit retries activation.
 
 The audit compares four independent surfaces:
 

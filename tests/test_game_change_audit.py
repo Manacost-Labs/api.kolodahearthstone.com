@@ -1,20 +1,116 @@
 from __future__ import annotations
 
+import json
 import unittest
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from app.game_change_audit import (
     CRITICAL_SOURCES,
+    POST_PATCH_EARLY_DURATION,
+    activate_post_patch_policy,
     audit_critical_sources,
     build_card_snapshot,
     compare_card_snapshots,
     current_patch_from_catalog,
     relevant_wiki_changes,
+    run_game_change_audit,
 )
+from app.parser_control import ParserControlStore
 
 
 class GameChangeAuditTest(unittest.TestCase):
+    def test_new_patch_activates_a_bounded_early_policy_idempotently(self) -> None:
+        now = datetime(2026, 8, 20, 6, 0, tzinfo=UTC)
+        with TemporaryDirectory() as directory, patch(
+            "app.parser_control._now",
+            return_value=now,
+        ):
+            store = ParserControlStore(Path(directory))
+            first = activate_post_patch_policy("36.2.2", now=now, store=store)
+            revision = store.read_state()[0]["revision"]
+            second = activate_post_patch_policy("36.2.2", now=now, store=store)
+            state = store.read_state()[0]
+
+        self.assertTrue(first["activated"])
+        self.assertFalse(second["activated"])
+        self.assertEqual(second["reason"], "already_active")
+        self.assertEqual(state["revision"], revision)
+        self.assertEqual(state["policy"]["mode"], "early")
+        self.assertEqual(
+            state["policy"]["earlyUntil"],
+            (now + POST_PATCH_EARLY_DURATION).isoformat(),
+        )
+        self.assertIn("36.2.2", state["policy"]["reason"])
+
+    def test_audit_activates_policy_before_advancing_changed_patch_baseline(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            baseline = root / "baseline.json"
+            latest = root / "latest.json"
+            history = root / "history.json"
+            baseline.write_text(
+                json.dumps({"patch": "36.2.1", "cards": {"hashes": {}}}),
+                encoding="utf-8",
+            )
+            activation = {
+                "activated": True,
+                "reason": "patch_changed",
+                "early_until": "2026-08-24T06:00:00+00:00",
+            }
+            with (
+                patch(
+                    "app.game_change_audit.audit_paths",
+                    return_value=(baseline, latest, history),
+                ),
+                patch("app.game_change_audit.fetch_wiki_recent_changes", return_value=[]),
+                patch("app.game_change_audit.current_patch_from_catalog", return_value="36.2.2"),
+                patch("app.game_change_audit.cards_by_id", return_value={}),
+                patch("app.game_change_audit.audit_critical_sources", return_value=([], [])),
+                patch(
+                    "app.game_change_audit.activate_post_patch_policy",
+                    return_value=activation,
+                ) as activate,
+            ):
+                report = run_game_change_audit()
+
+        activate.assert_called_once()
+        self.assertTrue(report["patch"]["changed"])
+        self.assertEqual(report["post_patch_policy"], activation)
+
+    def test_failed_policy_activation_does_not_advance_patch_baseline(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            baseline = root / "baseline.json"
+            latest = root / "latest.json"
+            history = root / "history.json"
+            previous = {"patch": "36.2.1", "cards": {"hashes": {}}}
+            baseline.write_text(json.dumps(previous), encoding="utf-8")
+            with (
+                patch(
+                    "app.game_change_audit.audit_paths",
+                    return_value=(baseline, latest, history),
+                ),
+                patch("app.game_change_audit.fetch_wiki_recent_changes", return_value=[]),
+                patch("app.game_change_audit.current_patch_from_catalog", return_value="36.2.2"),
+                patch("app.game_change_audit.cards_by_id", return_value={}),
+                patch("app.game_change_audit.audit_critical_sources", return_value=([], [])),
+                patch(
+                    "app.game_change_audit.activate_post_patch_policy",
+                    side_effect=RuntimeError("control-plane unavailable"),
+                ),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "control-plane unavailable"):
+                    run_game_change_audit()
+
+            persisted = json.loads(baseline.read_text(encoding="utf-8"))
+
+        self.assertEqual(persisted["patch"], "36.2.1")
+        self.assertFalse(latest.exists())
+        self.assertFalse(history.exists())
+
     def test_card_diff_detects_additions_removals_and_balance_changes(self) -> None:
         before = build_card_snapshot(
             {

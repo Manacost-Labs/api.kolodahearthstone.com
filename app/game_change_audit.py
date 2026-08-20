@@ -20,6 +20,7 @@ from .storage import load_dataset, load_status, read_json, write_json
 WIKI_API_URL = "https://hearthstone.wiki.gg/api.php"
 USER_AGENT = "HSDataAPI/0.1 (+https://api.kolodahearthstone.com)"
 AUDIT_SCHEMA_VERSION = 1
+POST_PATCH_EARLY_DURATION = timedelta(days=4)
 
 # One representative, user-visible feed per product area. Detailed freshness
 # checks still cover every source; this list is the hard daily patch gate.
@@ -265,6 +266,50 @@ def current_patch_from_catalog(
     return max(versions, key=lambda value: tuple(int(part) for part in value.split(".")))
 
 
+def activate_post_patch_policy(
+    patch: str,
+    *,
+    now: datetime,
+    store: Any | None = None,
+) -> dict[str, Any]:
+    """Atomically activate the bounded early-publication window for a new patch."""
+
+    from .parser_control import parser_control_store
+
+    moment = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
+    moment = moment.astimezone(UTC)
+    target = store or parser_control_store()
+    early_until = moment + POST_PATCH_EARLY_DURATION
+    reason = f"Hearthstone {patch} post-patch low-volume window"
+    state, _persisted = target.read_state()
+    current = state.get("policy") or {}
+    current_until = _parse_timestamp(current.get("earlyUntil"))
+    if (
+        current.get("mode") == "early"
+        and current.get("reason") == reason
+        and current_until is not None
+        and current_until >= early_until
+    ):
+        return {
+            "activated": False,
+            "reason": "already_active",
+            "early_until": current_until.isoformat(),
+        }
+
+    target.update_policy(
+        expected_revision=int(state["revision"]),
+        mode="early",
+        early_until=early_until.isoformat(),
+        reason=reason,
+        updated_by="game-change-audit",
+    )
+    return {
+        "activated": True,
+        "reason": "patch_changed",
+        "early_until": early_until.isoformat(),
+    }
+
+
 def run_game_change_audit() -> dict[str, Any]:
     now = datetime.now(UTC)
     baseline_path, latest_path, history_path = audit_paths()
@@ -277,6 +322,15 @@ def run_game_change_audit() -> dict[str, Any]:
     source_rows, source_issues = audit_critical_sources(now=now)
     previous_patch = baseline.get("patch")
     patch_changed = bool(previous_patch and previous_patch != patch)
+    post_patch_policy = {
+        "activated": False,
+        "reason": "patch_unchanged" if previous_patch else "baseline_initialized",
+        "early_until": None,
+    }
+    if patch_changed:
+        # Activate before advancing the baseline. If the control-plane write
+        # fails, the audit fails too and the next run will retry the same patch.
+        post_patch_policy = activate_post_patch_policy(patch, now=now)
     content_changed = any(card_changes[key] for key in ("added_count", "removed_count", "changed_count"))
     requires_attention = patch_changed or content_changed or bool(source_issues)
     report = {
@@ -290,6 +344,7 @@ def run_game_change_audit() -> dict[str, Any]:
             "changed": patch_changed,
             "baseline_initialized": previous_patch is None,
         },
+        "post_patch_policy": post_patch_policy,
         "cards": {key: value for key, value in card_snapshot.items() if key != "hashes"},
         "card_changes": card_changes,
         "wiki": {
