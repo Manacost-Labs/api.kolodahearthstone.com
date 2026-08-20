@@ -6,6 +6,7 @@ from typing import Any
 from urllib.parse import parse_qs
 
 from .cards_index import card_from_id, card_label, cards_by_dbfid, resolve_card_name
+from .completeness import COMPLETENESS_SCHEMA_VERSION, row_retrieval_evidence
 from .sources import Source
 
 logger = logging.getLogger(__name__)
@@ -387,6 +388,19 @@ async def fetch_hsreplay_ranked_cards(source: Source, *, locale: str = "ruRU") -
     cards = parse_cards_from_api_payloads(
         [(api_url, api_payload)], sort_mode=sort_mode, locale=locale
     )
+    raw_rows = _flatten_api_rows(api_payload)
+    normalization_loss = max(0, len(raw_rows) - len(cards))
+    row_retrieval = row_retrieval_evidence(
+        raw_rows=len(raw_rows),
+        eligible_rows=len(raw_rows),
+        normalized_rows=len(cards),
+        unexplained_reasons=(
+            {"normalization_loss": normalization_loss}
+            if normalization_loss
+            else None
+        ),
+        scope="analytics_card_list",
+    )
     metrics = sum(1 for c in cards if _has_metric(c))
     diagnostics = {
         **_api_payload_diagnostics([(api_url, api_payload)]),
@@ -438,6 +452,8 @@ async def fetch_hsreplay_ranked_cards(source: Source, *, locale: str = "ruRU") -
         "game_type": _query_param(source, "gameType") or "RANKED_STANDARD",
         "rank_range": _query_param(source, "rankRange"),
         "time_range": _query_param(source, "timeRange"),
+        "completeness_schema_version": COMPLETENESS_SCHEMA_VERSION,
+        "row_retrieval": row_retrieval,
         "source": {
             "key": "hsreplay",
             "url": source.url,

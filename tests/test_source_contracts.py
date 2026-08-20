@@ -349,6 +349,38 @@ class SourceContractsTest(unittest.TestCase):
         self.assertIsNone(metrics["row_retrieval"])
         self.assertIn("deck_winrate", metrics["critical_fields"])
 
+    def test_hsreplay_card_api_proves_row_and_identity_completeness(self) -> None:
+        cards = [
+            {
+                "id": f"CARD_{idx}",
+                "dbfId": idx,
+                "deck_winrate": "55%",
+                "deck_popularity": "1%",
+            }
+            for idx in range(900)
+        ]
+        report = contract_quality_report(
+            "hsreplay_cards_legend_1d",
+            {
+                "type": "card_stats",
+                "cards": cards,
+                "completeness_schema_version": 1,
+                "row_retrieval": {
+                    "raw_rows": 900,
+                    "eligible_rows": 900,
+                    "normalized_rows": 900,
+                    "explained_drops": 0,
+                    "unexplained_drops": 0,
+                    "drop_reasons": {"explained": {}, "unexplained": {}},
+                },
+            },
+        )
+
+        self.assertTrue(report["ok"], report["warnings"])
+        self.assertTrue(report["retrieval_complete"])
+        self.assertEqual(report["retrieval_completeness_score"], 1.0)
+        self.assertTrue(report["identity_checks"]["cards"]["complete"])
+
     def test_structured_api_candidate_does_not_require_html_title(self) -> None:
         source = SOURCE_BY_ID["hsreplay_battlegrounds_heroes"]
         parsed = {

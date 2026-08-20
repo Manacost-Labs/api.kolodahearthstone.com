@@ -286,7 +286,12 @@ def test_ranked_cards_uses_proxy_fallback_after_direct_failure(
     async def fallback_success(_url: str, *, source_id: str) -> CardPeriodFetch:
         assert source_id == source.id
         return CardPeriodFetch(
-            payload={"series": {"data": []}},
+            payload={
+                "data": [
+                    {"dbf_id": index, "included_popularity": 1.0}
+                    for index in range(1, 31)
+                ]
+            },
             backend="scrape_do",
             attempts=({"backend": "scrape_do", "state": "ok"},),
         )
@@ -313,6 +318,16 @@ def test_ranked_cards_uses_proxy_fallback_after_direct_failure(
         "backend": "direct",
         "state": "failed",
         "error_type": "RuntimeError",
+    }
+    assert result["completeness_schema_version"] == 1
+    assert result["row_retrieval"] == {
+        "raw_rows": 30,
+        "eligible_rows": 30,
+        "normalized_rows": 30,
+        "explained_drops": 0,
+        "unexplained_drops": 0,
+        "drop_reasons": {"explained": {}, "unexplained": {}},
+        "scope": "analytics_card_list",
     }
 
 
