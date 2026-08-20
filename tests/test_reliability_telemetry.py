@@ -115,7 +115,9 @@ def test_disabled_firestone_is_not_in_verified_completeness_catalog() -> None:
         "firestone_standard"
     }
     with patch.dict("os.environ", {}, clear=True):
-        instrumented, catalog_count = reliability_telemetry._completeness_source_catalog()
+        instrumented, catalog_count = (
+            reliability_telemetry._completeness_source_catalog()
+        )
         assert instrumented == expected_without_firestone
         assert catalog_count == len(SOURCE_BY_ID) - 1
 
@@ -124,7 +126,9 @@ def test_disabled_firestone_is_not_in_verified_completeness_catalog() -> None:
         {"HS_FIRESTONE_STANDARD_AUTHORIZED": "true"},
         clear=True,
     ):
-        instrumented, catalog_count = reliability_telemetry._completeness_source_catalog()
+        instrumented, catalog_count = (
+            reliability_telemetry._completeness_source_catalog()
+        )
         assert instrumented == frozenset(FIELD_UNAVAILABLE_REASONS)
         assert catalog_count == len(SOURCE_BY_ID)
 
@@ -1285,16 +1289,18 @@ def test_verified_completeness_threshold_uses_exact_counts_not_rounded_rate() ->
 
 def test_verified_completeness_macro_gate_uses_exact_per_source_ratios() -> None:
     per_source_counts = {
-        f"frequent-{index}": (200, 199, 199, 1, 0)
-        for index in range(99)
+        f"frequent-{index}": (200, 199, 199, 1, 0) for index in range(99)
     }
     per_source_counts["rare-failure"] = (1, 0, 0, 1, 0)
 
     assert reliability_telemetry._ratio_meets_target(19_701, 19_801)
-    assert sum(
-        reliability_telemetry._ratio_meets_target(counts[1], counts[0])
-        for counts in per_source_counts.values()
-    ) == 99
+    assert (
+        sum(
+            reliability_telemetry._ratio_meets_target(counts[1], counts[0])
+            for counts in per_source_counts.values()
+        )
+        == 99
+    )
     assert not reliability_telemetry._macro_source_ratio_meets_target(
         per_source_counts,
         instrumented_sources=100,
@@ -1902,6 +1908,119 @@ def test_public_report_has_only_bounded_aggregate_fields(tmp_path: Path) -> None
     assert "secret stack" not in serialized
     assert "run-secret" not in serialized
     assert "source-public" not in serialized
+
+
+def test_parsesunix_rollout_is_reported_as_separate_honest_funnel(
+    tmp_path: Path,
+) -> None:
+    now = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
+    path = tmp_path / "reliability.sqlite3"
+    common_cost = {
+        "paid_requests": 0,
+        "paid_cost_usd": "0",
+        "cost_certainty": "exact",
+    }
+    record_terminal_results(
+        "parsesunix-run",
+        [
+            _status(
+                "shadow-source",
+                parsesunix_shadow={
+                    "verdict": "OK",
+                    "transport_validated": True,
+                    "candidate_validated": True,
+                    "publication_validated": None,
+                    "http_status_match": True,
+                    "content_hash_match": False,
+                    **common_cost,
+                },
+            ),
+            _status(
+                "active-published",
+                parsesunix_transport={
+                    "verdict": "OK",
+                    "transport_validated": True,
+                    "candidate_validated": True,
+                    "publication_validated": True,
+                    **common_cost,
+                },
+            ),
+            _status(
+                "active-lkg",
+                serving_cached_dataset=True,
+                last_refresh_parsesunix_transport={
+                    "verdict": "ORIGIN_DOWN",
+                    "transport_validated": False,
+                    "candidate_validated": None,
+                    "publication_validated": False,
+                    **common_cost,
+                },
+            ),
+        ],
+        finished_at=now,
+        path=path,
+    )
+
+    rollout = build_reliability_report(now=now, path=path)["windows"][0][
+        "parsesunix_rollout"
+    ]
+
+    assert rollout == {
+        "observed_attempts": 3,
+        "observed_sources": 3,
+        "shadow_attempts": 1,
+        "active_attempts": 2,
+        "transport_checked": 3,
+        "transport_validated": 2,
+        "transport_validated_rate_pct": 66.67,
+        "candidate_checked": 2,
+        "candidate_validated": 2,
+        "candidate_validated_rate_pct": 100.0,
+        "publication_checked": 2,
+        "publication_validated": 1,
+        "publication_validated_rate_pct": 50.0,
+        "http_status_compared": 1,
+        "http_status_matches": 1,
+        "http_status_match_rate_pct": 100.0,
+        "content_hash_compared": 1,
+        "content_hash_matches": 0,
+        "content_hash_match_rate_pct": 0.0,
+        "paid_requests_known_attempts": 3,
+        "paid_requests": 0,
+        "paid_cost_known_attempts": 3,
+        "paid_cost_usd": "0.000000",
+    }
+
+
+def test_parsesunix_unknown_cost_is_not_reported_as_zero(tmp_path: Path) -> None:
+    now = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
+    path = tmp_path / "reliability.sqlite3"
+    record_terminal_results(
+        "unknown-cost",
+        [
+            _status(
+                "active-source",
+                parsesunix_transport={
+                    "verdict": "BLOCKED",
+                    "transport_validated": False,
+                    "publication_validated": False,
+                    "paid_requests": 1,
+                    "paid_cost_usd": "0.0015",
+                    "cost_certainty": "unknown",
+                },
+            )
+        ],
+        finished_at=now,
+        path=path,
+    )
+
+    rollout = build_reliability_report(now=now, path=path)["windows"][0][
+        "parsesunix_rollout"
+    ]
+
+    assert rollout["paid_requests"] == 1
+    assert rollout["paid_cost_known_attempts"] == 0
+    assert rollout["paid_cost_usd"] is None
 
 
 def test_preflight_failure_records_terminal_failures_for_selected_sources() -> None:

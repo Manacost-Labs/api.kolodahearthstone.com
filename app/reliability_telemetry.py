@@ -13,6 +13,7 @@ import sqlite3
 import threading
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal, InvalidOperation
 from fractions import Fraction
 from pathlib import Path
 from typing import Any
@@ -41,7 +42,7 @@ WINDOWS = (
     ("7d", timedelta(days=7)),
     ("30d", timedelta(days=30)),
 )
-METHODOLOGY_VERSION = "logical-source-observed-v10"
+METHODOLOGY_VERSION = "logical-source-observed-v11"
 SLO_TARGET_RATE_PCT = 99.0
 PIPELINE_SCHEDULE_LEDGER_READY = False
 COVERAGE_BUCKET_SECONDS = 24 * 60 * 60
@@ -89,6 +90,23 @@ AI_DIAGNOSIS_DOMAINS = (
     "unknown",
 )
 COMPLETENESS_STATES = ("complete", "incomplete", "unknown")
+PARSESUNIX_MODES = ("none", "shadow", "active")
+PARSESUNIX_VERDICTS = (
+    "not_observed",
+    "OK",
+    "DEAD_URL",
+    "ORIGIN_DOWN",
+    "RATE_LIMITED",
+    "AUTH_REQUIRED",
+    "ACCESS_DENIED",
+    "BLOCKED",
+    "SOFT_BLOCK",
+    "THIN_CONTENT",
+    "CSR_REQUIRED",
+    "NOT_MODIFIED",
+    "PROVIDER_ERROR",
+    "PARSE_FAIL",
+)
 COMPLETENESS_TRACKED_SOURCE_IDS = frozenset(FIELD_UNAVAILABLE_REASONS)
 # Keep telemetry anchored to the same canonical freshness policy as publish
 # validation. A duplicated list can silently overstate strict completeness
@@ -365,6 +383,87 @@ def _completeness_terminal_fields(
     return 1, "unknown", score
 
 
+def _parsesunix_terminal_fields(
+    status: Mapping[str, object],
+) -> tuple[
+    str,
+    str,
+    int | None,
+    int | None,
+    int | None,
+    int | None,
+    int | None,
+    int | None,
+    int | None,
+]:
+    """Extract bounded rollout evidence without persisting bodies, URLs, or reasons."""
+
+    mode = "none"
+    evidence: Mapping[str, object] | None = None
+    for candidate_mode, key in (
+        ("active", "parsesunix_transport"),
+        ("shadow", "parsesunix_shadow"),
+        ("active", "last_refresh_parsesunix_transport"),
+        ("shadow", "last_refresh_parsesunix_shadow"),
+    ):
+        candidate = status.get(key)
+        if isinstance(candidate, Mapping):
+            mode = candidate_mode
+            evidence = candidate
+            break
+    if evidence is None:
+        return ("none", "not_observed", None, None, None, None, None, None, None)
+
+    verdict = _bounded_enum(
+        evidence.get("verdict"),
+        PARSESUNIX_VERDICTS,
+        default="not_observed",
+    )
+    paid_requests = _bounded_nonnegative_int(
+        evidence.get("paid_requests"), maximum=1_000_000
+    )
+    paid_cost_microusd = _bounded_exact_microusd(
+        evidence.get("paid_cost_usd"),
+        certainty=evidence.get("cost_certainty"),
+    )
+    return (
+        mode,
+        verdict,
+        _bounded_optional_bool(evidence.get("transport_validated")),
+        _bounded_optional_bool(evidence.get("candidate_validated")),
+        _bounded_optional_bool(evidence.get("publication_validated")),
+        _bounded_optional_bool(evidence.get("http_status_match")),
+        _bounded_optional_bool(evidence.get("content_hash_match")),
+        paid_requests,
+        paid_cost_microusd,
+    )
+
+
+def _bounded_optional_bool(value: object) -> int | None:
+    return int(value) if isinstance(value, bool) else None
+
+
+def _bounded_nonnegative_int(value: object, *, maximum: int) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value if 0 <= value <= maximum else None
+
+
+def _bounded_exact_microusd(value: object, *, certainty: object) -> int | None:
+    if certainty != "exact" or isinstance(value, bool):
+        return None
+    try:
+        amount = Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return None
+    if not amount.is_finite() or amount < 0 or amount > Decimal(1000000):
+        return None
+    micros = amount * Decimal(1_000_000)
+    if micros != micros.to_integral_value():
+        return None
+    return int(micros)
+
+
 def _bounded_completeness_schema_version(value: object) -> int | None:
     if isinstance(value, bool) or not isinstance(value, int):
         return None
@@ -433,6 +532,7 @@ def record_terminal_results(
         reason_code = classify_failure_reason(result)
         ai_fields = _ai_terminal_fields(result)
         completeness_fields = _completeness_terminal_fields(source_id, result)
+        parsesunix_fields = _parsesunix_terminal_fields(result)
         terminal_state = _bounded_terminal_state(result.get("state"))
         result_refresh_window_id = _bounded_refresh_window_id(
             refresh_window_id
@@ -454,6 +554,7 @@ def record_terminal_results(
                 reason_code,
                 *ai_fields,
                 *completeness_fields,
+                *parsesunix_fields,
                 recorded_epoch,
             )
         )
@@ -506,8 +607,21 @@ def record_terminal_results(
                     completeness_tracked,
                     completeness_state,
                     retrieval_completeness_score,
+                    parsesunix_mode,
+                    parsesunix_verdict,
+                    parsesunix_transport_validated,
+                    parsesunix_candidate_validated,
+                    parsesunix_publication_validated,
+                    parsesunix_http_status_match,
+                    parsesunix_content_hash_match,
+                    parsesunix_paid_requests,
+                    parsesunix_paid_cost_microusd,
                     recorded_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?
+                )
                 """,
                 row,
             )
@@ -714,6 +828,15 @@ def _schema_is_current(connection: sqlite3.Connection) -> bool:
         "completeness_tracked",
         "completeness_state",
         "retrieval_completeness_score",
+        "parsesunix_mode",
+        "parsesunix_verdict",
+        "parsesunix_transport_validated",
+        "parsesunix_candidate_validated",
+        "parsesunix_publication_validated",
+        "parsesunix_http_status_match",
+        "parsesunix_content_hash_match",
+        "parsesunix_paid_requests",
+        "parsesunix_paid_cost_microusd",
         "recorded_at",
     }.issubset(source_columns) and {
         "run_id",
@@ -782,6 +905,38 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
                             retrieval_completeness_score <= 1.0
                         )
                     ),
+                    parsesunix_mode TEXT NOT NULL DEFAULT 'none' CHECK (
+                        parsesunix_mode IN ('none', 'shadow', 'active')
+                    ),
+                    parsesunix_verdict TEXT NOT NULL DEFAULT 'not_observed',
+                    parsesunix_transport_validated INTEGER CHECK (
+                        parsesunix_transport_validated IS NULL OR
+                        parsesunix_transport_validated IN (0, 1)
+                    ),
+                    parsesunix_candidate_validated INTEGER CHECK (
+                        parsesunix_candidate_validated IS NULL OR
+                        parsesunix_candidate_validated IN (0, 1)
+                    ),
+                    parsesunix_publication_validated INTEGER CHECK (
+                        parsesunix_publication_validated IS NULL OR
+                        parsesunix_publication_validated IN (0, 1)
+                    ),
+                    parsesunix_http_status_match INTEGER CHECK (
+                        parsesunix_http_status_match IS NULL OR
+                        parsesunix_http_status_match IN (0, 1)
+                    ),
+                    parsesunix_content_hash_match INTEGER CHECK (
+                        parsesunix_content_hash_match IS NULL OR
+                        parsesunix_content_hash_match IN (0, 1)
+                    ),
+                    parsesunix_paid_requests INTEGER CHECK (
+                        parsesunix_paid_requests IS NULL OR
+                        parsesunix_paid_requests >= 0
+                    ),
+                    parsesunix_paid_cost_microusd INTEGER CHECK (
+                        parsesunix_paid_cost_microusd IS NULL OR
+                        parsesunix_paid_cost_microusd >= 0
+                    ),
                     recorded_at REAL NOT NULL
                 )
                 """
@@ -810,6 +965,39 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
                     "REAL CHECK (retrieval_completeness_score IS NULL OR "
                     "(retrieval_completeness_score >= 0.0 AND "
                     "retrieval_completeness_score <= 1.0))"
+                ),
+                "parsesunix_mode": (
+                    "TEXT NOT NULL DEFAULT 'none' "
+                    "CHECK (parsesunix_mode IN ('none', 'shadow', 'active'))"
+                ),
+                "parsesunix_verdict": "TEXT NOT NULL DEFAULT 'not_observed'",
+                "parsesunix_transport_validated": (
+                    "INTEGER CHECK (parsesunix_transport_validated IS NULL OR "
+                    "parsesunix_transport_validated IN (0, 1))"
+                ),
+                "parsesunix_candidate_validated": (
+                    "INTEGER CHECK (parsesunix_candidate_validated IS NULL OR "
+                    "parsesunix_candidate_validated IN (0, 1))"
+                ),
+                "parsesunix_publication_validated": (
+                    "INTEGER CHECK (parsesunix_publication_validated IS NULL OR "
+                    "parsesunix_publication_validated IN (0, 1))"
+                ),
+                "parsesunix_http_status_match": (
+                    "INTEGER CHECK (parsesunix_http_status_match IS NULL OR "
+                    "parsesunix_http_status_match IN (0, 1))"
+                ),
+                "parsesunix_content_hash_match": (
+                    "INTEGER CHECK (parsesunix_content_hash_match IS NULL OR "
+                    "parsesunix_content_hash_match IN (0, 1))"
+                ),
+                "parsesunix_paid_requests": (
+                    "INTEGER CHECK (parsesunix_paid_requests IS NULL OR "
+                    "parsesunix_paid_requests >= 0)"
+                ),
+                "parsesunix_paid_cost_microusd": (
+                    "INTEGER CHECK (parsesunix_paid_cost_microusd IS NULL OR "
+                    "parsesunix_paid_cost_microusd >= 0)"
                 ),
             }
             for column, definition in migrations.items():
@@ -1136,6 +1324,168 @@ def _completeness_source_catalog() -> tuple[frozenset[str], int]:
     )
 
 
+def _query_parsesunix_rollout(
+    connection: sqlite3.Connection,
+    *,
+    from_epoch: float,
+    to_epoch: float,
+) -> dict[str, Any]:
+    row = connection.execute(
+        """
+        WITH ranked_attempts AS (
+            SELECT
+                attempt_id,
+                source_id,
+                outcome,
+                parsesunix_mode,
+                parsesunix_transport_validated,
+                parsesunix_candidate_validated,
+                parsesunix_publication_validated,
+                parsesunix_http_status_match,
+                parsesunix_content_hash_match,
+                parsesunix_paid_requests,
+                parsesunix_paid_cost_microusd,
+                ROW_NUMBER() OVER (
+                    PARTITION BY
+                        source_id,
+                        CASE
+                            WHEN refresh_window_id != ''
+                                THEN 'window:' || refresh_window_id
+                            ELSE 'attempt:' || attempt_id
+                        END
+                    ORDER BY
+                        CASE WHEN outcome = 'skipped' THEN 1 ELSE 0 END,
+                        finished_at DESC,
+                        recorded_at DESC,
+                        attempt_id DESC
+                ) AS logical_rank
+            FROM source_attempts
+            WHERE finished_at >= ? AND finished_at <= ?
+        )
+        SELECT
+            COUNT(*),
+            COUNT(DISTINCT source_id),
+            COALESCE(SUM(CASE WHEN parsesunix_mode = 'shadow' THEN 1 ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN parsesunix_mode = 'active' THEN 1 ELSE 0 END), 0),
+            COUNT(parsesunix_transport_validated),
+            COALESCE(SUM(parsesunix_transport_validated), 0),
+            COUNT(parsesunix_candidate_validated),
+            COALESCE(SUM(parsesunix_candidate_validated), 0),
+            COUNT(parsesunix_publication_validated),
+            COALESCE(SUM(parsesunix_publication_validated), 0),
+            COUNT(parsesunix_http_status_match),
+            COALESCE(SUM(parsesunix_http_status_match), 0),
+            COUNT(parsesunix_content_hash_match),
+            COALESCE(SUM(parsesunix_content_hash_match), 0),
+            COUNT(parsesunix_paid_requests),
+            COALESCE(SUM(parsesunix_paid_requests), 0),
+            COUNT(parsesunix_paid_cost_microusd),
+            COALESCE(SUM(parsesunix_paid_cost_microusd), 0)
+        FROM ranked_attempts
+        WHERE logical_rank = 1
+          AND parsesunix_mode != 'none'
+        """,
+        (from_epoch, to_epoch),
+    ).fetchone()
+    values = tuple(int(value or 0) for value in (row or (0,) * 18))
+    (
+        observed_attempts,
+        observed_sources,
+        shadow_attempts,
+        active_attempts,
+        transport_checked,
+        transport_validated,
+        candidate_checked,
+        candidate_validated,
+        publication_checked,
+        publication_validated,
+        http_status_compared,
+        http_status_matches,
+        content_hash_compared,
+        content_hash_matches,
+        paid_requests_known_attempts,
+        paid_requests_total,
+        paid_cost_known_attempts,
+        paid_cost_microusd,
+    ) = values
+    return {
+        "observed_attempts": observed_attempts,
+        "observed_sources": observed_sources,
+        "shadow_attempts": shadow_attempts,
+        "active_attempts": active_attempts,
+        "transport_checked": transport_checked,
+        "transport_validated": transport_validated,
+        "transport_validated_rate_pct": _percentage(
+            transport_validated,
+            transport_checked,
+        ),
+        "candidate_checked": candidate_checked,
+        "candidate_validated": candidate_validated,
+        "candidate_validated_rate_pct": _percentage(
+            candidate_validated,
+            candidate_checked,
+        ),
+        "publication_checked": publication_checked,
+        "publication_validated": publication_validated,
+        "publication_validated_rate_pct": _percentage(
+            publication_validated,
+            publication_checked,
+        ),
+        "http_status_compared": http_status_compared,
+        "http_status_matches": http_status_matches,
+        "http_status_match_rate_pct": _percentage(
+            http_status_matches,
+            http_status_compared,
+        ),
+        "content_hash_compared": content_hash_compared,
+        "content_hash_matches": content_hash_matches,
+        "content_hash_match_rate_pct": _percentage(
+            content_hash_matches,
+            content_hash_compared,
+        ),
+        "paid_requests_known_attempts": paid_requests_known_attempts,
+        "paid_requests": (
+            paid_requests_total
+            if paid_requests_known_attempts == observed_attempts
+            else None
+        ),
+        "paid_cost_known_attempts": paid_cost_known_attempts,
+        "paid_cost_usd": (
+            f"{Decimal(paid_cost_microusd) / Decimal(1_000_000):.6f}"
+            if paid_cost_known_attempts == observed_attempts
+            else None
+        ),
+    }
+
+
+def _empty_parsesunix_rollout() -> dict[str, Any]:
+    return {
+        "observed_attempts": 0,
+        "observed_sources": 0,
+        "shadow_attempts": 0,
+        "active_attempts": 0,
+        "transport_checked": 0,
+        "transport_validated": 0,
+        "transport_validated_rate_pct": None,
+        "candidate_checked": 0,
+        "candidate_validated": 0,
+        "candidate_validated_rate_pct": None,
+        "publication_checked": 0,
+        "publication_validated": 0,
+        "publication_validated_rate_pct": None,
+        "http_status_compared": 0,
+        "http_status_matches": 0,
+        "http_status_match_rate_pct": None,
+        "content_hash_compared": 0,
+        "content_hash_matches": 0,
+        "content_hash_match_rate_pct": None,
+        "paid_requests_known_attempts": 0,
+        "paid_requests": 0,
+        "paid_cost_known_attempts": 0,
+        "paid_cost_usd": "0.000000",
+    }
+
+
 def _query_window(
     connection: sqlite3.Connection,
     *,
@@ -1258,6 +1608,11 @@ def _query_window(
         eligible_parser_attempts=eligible_attempts,
         measurement_complete=measurement_complete,
     )
+    parsesunix_rollout = _query_parsesunix_rollout(
+        connection,
+        from_epoch=from_at.timestamp(),
+        to_epoch=report_at.timestamp(),
+    )
     scheduled_reliability = _query_scheduled_reliability(
         connection,
         from_at=from_at,
@@ -1290,6 +1645,7 @@ def _query_window(
             measurement_complete=measurement_complete,
         ),
         "verified_completeness": verified_completeness,
+        "parsesunix_rollout": parsesunix_rollout,
         "ai_quality": ai_quality,
         "scheduled_reliability": scheduled_reliability,
     }
@@ -1329,6 +1685,7 @@ def _empty_report(report_at: datetime) -> dict[str, Any]:
                     measurement_complete=False,
                 ),
                 "verified_completeness": _empty_verified_completeness(),
+                "parsesunix_rollout": _empty_parsesunix_rollout(),
                 "ai_quality": _empty_ai_quality(),
                 "scheduled_reliability": _empty_scheduled_reliability(),
             }
@@ -1387,9 +1744,7 @@ def _query_scheduled_reliability(
     try:
         window_columns = {
             str(row[1])
-            for row in connection.execute(
-                "PRAGMA table_info(schedule_source_windows)"
-            )
+            for row in connection.execute("PRAGMA table_info(schedule_source_windows)")
         }
         state_columns = {
             str(row[1])
@@ -1441,17 +1796,20 @@ def _query_scheduled_reliability(
     duration_seconds = max(1.0, report_epoch - from_epoch)
     temporal_seconds = max(
         0.0,
-        min(report_epoch, materialized_through)
-        - max(from_epoch, coverage_started_at),
+        min(report_epoch, materialized_through) - max(from_epoch, coverage_started_at),
     )
     temporal_coverage_ratio = round(
         min(1.0, temporal_seconds / duration_seconds),
         4,
     )
-    schedule_coverage_ratio = round(
-        min(1.0, tracked_schedules / catalog_schedules),
-        4,
-    ) if catalog_schedules > 0 else 0.0
+    schedule_coverage_ratio = (
+        round(
+            min(1.0, tracked_schedules / catalog_schedules),
+            4,
+        )
+        if catalog_schedules > 0
+        else 0.0
+    )
 
     counts_row = connection.execute(
         """
@@ -1550,9 +1908,7 @@ def _query_scheduled_reliability(
     objective_status = "collecting"
     if measurement_status == "observed" and due_slots > 0:
         objective_status = (
-            "meeting"
-            if _ratio_meets_target(on_time_fresh, due_slots)
-            else "breached"
+            "meeting" if _ratio_meets_target(on_time_fresh, due_slots) else "breached"
         )
     return {
         "ledger_status": "covered" if covered else "partial",
@@ -1591,6 +1947,7 @@ def _methodology() -> dict[str, Any]:
         "limitations": [
             "entirely_missing_scheduled_runs_not_detectable_until_ledger",
             "best_effort_write_gaps_not_detectable",
+            "parsesunix_rollout_rates_cover_observed_instrumented_attempts_only",
         ],
         "coverage_method": "complete_generic_refresh_per_24h_bucket",
         "coverage_scope": "generic_scrape_sources_only",

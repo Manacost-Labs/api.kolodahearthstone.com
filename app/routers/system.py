@@ -236,6 +236,36 @@ class ScheduledReliabilitySummary(BaseModel):
     objective_status: Literal["collecting", "meeting", "breached"]
 
 
+class ParsesUnixRolloutSummary(BaseModel):
+    observed_attempts: int = Field(ge=0)
+    observed_sources: int = Field(ge=0)
+    shadow_attempts: int = Field(ge=0)
+    active_attempts: int = Field(ge=0)
+    transport_checked: int = Field(ge=0)
+    transport_validated: int = Field(ge=0)
+    transport_validated_rate_pct: float | None = Field(default=None, ge=0.0, le=100.0)
+    candidate_checked: int = Field(ge=0)
+    candidate_validated: int = Field(ge=0)
+    candidate_validated_rate_pct: float | None = Field(default=None, ge=0.0, le=100.0)
+    publication_checked: int = Field(ge=0)
+    publication_validated: int = Field(ge=0)
+    publication_validated_rate_pct: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=100.0,
+    )
+    http_status_compared: int = Field(ge=0)
+    http_status_matches: int = Field(ge=0)
+    http_status_match_rate_pct: float | None = Field(default=None, ge=0.0, le=100.0)
+    content_hash_compared: int = Field(ge=0)
+    content_hash_matches: int = Field(ge=0)
+    content_hash_match_rate_pct: float | None = Field(default=None, ge=0.0, le=100.0)
+    paid_requests_known_attempts: int = Field(ge=0)
+    paid_requests: int | None = Field(default=None, ge=0)
+    paid_cost_known_attempts: int = Field(ge=0)
+    paid_cost_usd: str | None = Field(default=None, pattern=r"^\d+\.\d{6}$")
+
+
 class ReliabilityWindow(BaseModel):
     window: Literal["24h", "7d", "30d"]
     from_at: str
@@ -255,6 +285,7 @@ class ReliabilityWindow(BaseModel):
     freshness_slo: ReliabilitySLO
     availability_slo: ReliabilitySLO
     verified_completeness: VerifiedCompletenessSummary
+    parsesunix_rollout: ParsesUnixRolloutSummary
     ai_quality: AIQualitySummary
     scheduled_reliability: ScheduledReliabilitySummary
 

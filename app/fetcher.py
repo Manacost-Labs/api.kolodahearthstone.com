@@ -1329,11 +1329,14 @@ def _attach_parsesunix_observation(
     *,
     mode: str,
     observation: dict[str, object] | None,
+    candidate_validated: bool | None = None,
     publication_validated: bool | None = None,
 ) -> None:
     if observation is None or mode not in {"parsesunix", "shadow"}:
         return
     evidence = dict(observation)
+    if mode == "parsesunix" and candidate_validated is not None:
+        evidence["candidate_validated"] = candidate_validated
     if mode == "parsesunix" and publication_validated is not None:
         evidence["publication_validated"] = publication_validated
     key = "parsesunix_transport" if mode == "parsesunix" else "parsesunix_shadow"
@@ -2966,6 +2969,18 @@ async def _fetch_source_with_active_lifecycle(
         if isinstance(exc, ParsesUnixTransportRejected):
             parsesunix_mode = "parsesunix"
             parsesunix_observation = exc.evidence.telemetry()
+        elif isinstance(exc, ParsesUnixIntegrationError):
+            parsesunix_mode = "parsesunix"
+            parsesunix_observation = {
+                "error_type": type(exc).__name__,
+                "transport_validated": False,
+                "candidate_validated": None,
+                "publication_validated": None,
+                "paid_escalation_allowed": False,
+                "paid_requests": 0,
+                "paid_cost_usd": "0",
+                "cost_certainty": "exact",
+            }
         log_action(
             "browser.fetch.end",
             source_id=source.id,
@@ -3219,6 +3234,7 @@ async def _fetch_source_with_active_lifecycle(
             status,
             mode=parsesunix_mode,
             observation=parsesunix_observation,
+            candidate_validated=False,
             publication_validated=False,
         )
         status = _save_failure_status(source, status)
@@ -3240,6 +3256,7 @@ async def _fetch_source_with_active_lifecycle(
         dataset,
         mode=parsesunix_mode,
         observation=parsesunix_observation,
+        candidate_validated=True,
     )
     reg, reg_msg, provisional_metadata = _save_dataset_with_checks(
         source, dataset, fetched_at=fetched_at
@@ -3302,6 +3319,7 @@ async def _fetch_source_with_active_lifecycle(
         status,
         mode=parsesunix_mode,
         observation=parsesunix_observation,
+        candidate_validated=True,
         publication_validated=not reg,
     )
     if reg:

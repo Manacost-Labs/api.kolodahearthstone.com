@@ -19,9 +19,7 @@ def test_v1_sources_returns_registry_envelope() -> None:
         return None
 
     with patch("app.routers.system.load_resolved_public_dataset", side_effect=dataset):
-        legacy_response = client.get(
-            "/v1/system/sources?site=hsreplay&category=arena"
-        )
+        legacy_response = client.get("/v1/system/sources?site=hsreplay&category=arena")
         response = client.get("/v1/sources?site=hsreplay&category=arena")
 
     assert legacy_response.status_code == 200
@@ -54,13 +52,14 @@ def test_v1_system_paths_do_not_replace_legacy_paths() -> None:
 def test_v1_parsing_reliability_returns_sanitized_public_contract() -> None:
     report = {
         "methodology": {
-            "version": "logical-source-observed-v10",
+            "version": "logical-source-observed-v11",
             "unit": "one terminal outcome per source in a refresh run",
             "scope": "observed_scrape_and_pipeline_sources",
             "completeness": "observed_attempts_plus_recorded_run_deficits",
             "limitations": [
                 "entirely_missing_scheduled_runs_not_detectable_until_ledger",
                 "best_effort_write_gaps_not_detectable",
+                "parsesunix_rollout_rates_cover_observed_instrumented_attempts_only",
             ],
             "coverage_method": "complete_generic_refresh_per_24h_bucket",
             "coverage_scope": "generic_scrape_sources_only",
@@ -191,6 +190,31 @@ def test_v1_parsing_reliability_returns_sanitized_public_contract() -> None:
                     "complete_fresh_rate_pct": 75.0,
                     "target_rate_pct": 99.0,
                     "objective_status": "collecting",
+                },
+                "parsesunix_rollout": {
+                    "observed_attempts": 2,
+                    "observed_sources": 2,
+                    "shadow_attempts": 1,
+                    "active_attempts": 1,
+                    "transport_checked": 2,
+                    "transport_validated": 2,
+                    "transport_validated_rate_pct": 100.0,
+                    "candidate_checked": 2,
+                    "candidate_validated": 2,
+                    "candidate_validated_rate_pct": 100.0,
+                    "publication_checked": 1,
+                    "publication_validated": 1,
+                    "publication_validated_rate_pct": 100.0,
+                    "http_status_compared": 1,
+                    "http_status_matches": 1,
+                    "http_status_match_rate_pct": 100.0,
+                    "content_hash_compared": 1,
+                    "content_hash_matches": 1,
+                    "content_hash_match_rate_pct": 100.0,
+                    "paid_requests_known_attempts": 2,
+                    "paid_requests": 0,
+                    "paid_cost_known_attempts": 2,
+                    "paid_cost_usd": "0.000000",
                 },
                 "scheduled_reliability": {
                     "ledger_status": "partial",
