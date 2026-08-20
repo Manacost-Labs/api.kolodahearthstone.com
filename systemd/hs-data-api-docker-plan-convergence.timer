@@ -1,0 +1,10 @@
+[Unit]
+Description=Plan Hearthstone freshness convergence every five minutes
+
+[Timer]
+OnCalendar=*-*-* *:02/5:00 UTC
+AccuracySec=30s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

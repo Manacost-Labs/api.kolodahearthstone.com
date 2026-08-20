@@ -1,0 +1,11 @@
+[Unit]
+Description=Plan Hearthstone freshness convergence in shadow mode
+Requires=hs-data-api-docker.service
+Wants=hs-data-api-docker-reconcile-schedule-ledger.service
+After=hs-data-api-docker.service hs-data-api-docker-reconcile-schedule-ledger.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/srv/hs-data-api
+ExecStart=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm api python -m app.convergence_planner --mode shadow
+TimeoutStartSec=5min
