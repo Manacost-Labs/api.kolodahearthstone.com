@@ -8,6 +8,7 @@ from app.convergence_policy import decide_recovery
 from app.convergence_store import ConvergenceClaim, ConvergenceStore
 from app.convergence_worker import (
     RecoveryExecution,
+    eligible_transport_source_ids,
     run_once,
 )
 
@@ -37,6 +38,24 @@ def _candidate_chain(path: Path):
         reason_code="none",
         observed_at=observed,
         deadline_at=observed + timedelta(hours=24),
+    )
+
+
+def test_eligible_transport_sources_require_explicit_active_parsesunix_rollout(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("HS_PARSESUNIX_ENABLED", "true")
+    monkeypatch.setenv(
+        "HS_PARSESUNIX_ACTIVE_SOURCE_IDS",
+        "hsguru_meta_standard_legend",
+    )
+    monkeypatch.setenv(
+        "HS_PARSESUNIX_SHADOW_SOURCE_IDS",
+        "hsguru_meta_standard_diamond_4to1",
+    )
+
+    assert eligible_transport_source_ids() == frozenset(
+        {"hsguru_meta_standard_legend"}
     )
 
 
@@ -158,6 +177,31 @@ def test_transport_worker_does_not_claim_candidate_retry(tmp_path: Path) -> None
             now=datetime(2026, 8, 21, 8, 15, tzinfo=UTC),
             owner="test-worker",
             mode="active",
+        )
+    )
+
+    assert summary.claimed is False
+    assert calls == []
+    assert ConvergenceStore(path).get_chain(chain.chain_id).state == "waiting"
+
+
+def test_worker_does_not_claim_transport_outside_active_rollout(tmp_path: Path) -> None:
+    path = tmp_path / "parser-telemetry.sqlite3"
+    chain = _transport_chain(path)
+    calls: list[ConvergenceClaim] = []
+
+    async def execute(claim: ConvergenceClaim) -> RecoveryExecution:
+        calls.append(claim)
+        raise AssertionError("ineligible transport must not be executed")
+
+    summary = asyncio.run(
+        run_once(
+            store=ConvergenceStore(path),
+            executor=execute,
+            now=datetime(2026, 8, 21, 8, 5, tzinfo=UTC),
+            owner="test-worker",
+            mode="active",
+            eligible_source_ids=frozenset(),
         )
     )
 

@@ -245,6 +245,22 @@ ParsesUnix отдельно записывает transport/candidate evidence. �
 не более трёх запросов на один refresh и десяти credits за UTC-день. Bright
 Data в этом rollout не участвует. `disable` является быстрым откатом к legacy.
 
+### Автоматическое восстановление fresh
+
+`hs-data-api-docker-run-convergence.timer` раз в минуту проверяет долговечный
+ledger, но worker по умолчанию выключен (`HS_CONVERGENCE_WORKER_MODE=off`). При
+явном значении `active` он берёт не более одной просроченной transport-цепочки
+за запуск и только для source ID, уже переведённых в
+`HS_PARSESUNIX_ACTIVE_SOURCE_IDS`. `provisional`, upstream delay, scheduler и
+publication repair этим worker пока не исполняются.
+
+Каждый recovery-run имеет стабильный idempotency key, сохраняет исходный
+schedule occurrence и обязан вернуть точные `paidRequests` и
+`paidCostMicrousd`. Если стоимость неизвестна, результат не считается
+успешным и неизвестная сумма не подменяется нулём. Включать worker следует
+только после active-canary и проверки отдельного funnel ParsesUnix в
+`/v1/system/parsing-reliability`.
+
 Минимальный безопасный шаблон до canary:
 
 ```env

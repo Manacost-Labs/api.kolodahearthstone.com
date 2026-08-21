@@ -192,6 +192,22 @@ def test_convergence_planner_is_shadow_only_and_runs_after_ledger() -> None:
     assert "Persistent=true" in timer
 
 
+def test_convergence_worker_is_installed_but_remains_off_by_default() -> None:
+    service = (
+        ROOT / "systemd" / "hs-data-api-docker-run-convergence.service"
+    ).read_text(encoding="utf-8")
+    timer = (
+        ROOT / "systemd" / "hs-data-api-docker-run-convergence.timer"
+    ).read_text(encoding="utf-8")
+
+    assert "python -m app.convergence_worker" in service
+    assert "--mode active" not in service
+    assert "hs-data-api-docker-plan-convergence.service" in service
+    assert "TimeoutStartSec=25min" in service
+    assert "OnCalendar=*-*-* *:*:20 UTC" in timer
+    assert "Persistent=true" in timer
+
+
 def test_docker_bg_hero_details_accepts_degraded_exit_code() -> None:
     service_text = (
         ROOT / "systemd" / "hs-data-api-docker-refresh-bg-hero-details.service"

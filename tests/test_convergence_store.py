@@ -190,6 +190,35 @@ def test_only_one_worker_can_claim_a_due_chain(tmp_path: Path) -> None:
         ).fetchone() == (1,)
 
 
+def test_worker_claims_only_chains_whose_sources_are_explicitly_eligible(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "parser-telemetry.sqlite3"
+    observed = datetime(2026, 8, 20, 12, 0, tzinfo=UTC)
+    store = ConvergenceStore(path)
+    eligible = _create_transport_chain(path)
+    blocked = store.create_or_get_chain(
+        cohort_id="hsguru-meta-slices",
+        source_ids=["hsguru_meta_standard_diamond_4to1"],
+        origin_occurrence_id="schedule:20260820T110000Z",
+        decision=decide_recovery(outcome="failed", reason_code="transport"),
+        outcome="failed",
+        reason_code="transport",
+        observed_at=observed,
+        deadline_at=observed + timedelta(hours=12),
+    )
+
+    claim = store.claim_due(
+        owner="worker",
+        now=observed + timedelta(minutes=5),
+        eligible_source_ids=frozenset({"hsguru_meta_standard_legend"}),
+    )
+
+    assert claim is not None
+    assert claim.chain.chain_id == eligible.chain_id
+    assert store.get_chain(blocked.chain_id).state == "waiting"
+
+
 def test_expired_lease_is_recovered_as_the_next_attempt(tmp_path: Path) -> None:
     path = tmp_path / "parser-telemetry.sqlite3"
     chain = _create_transport_chain(path)

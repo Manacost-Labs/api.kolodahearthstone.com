@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import argparse
+import asyncio
+import json
 import os
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Literal, cast
 
 from .convergence_policy import decide_recovery
@@ -52,6 +56,26 @@ class WorkerSummary:
 def worker_mode() -> WorkerMode:
     value = os.environ.get("HS_CONVERGENCE_WORKER_MODE", "off").strip().lower()
     return cast(WorkerMode, value) if value in {"off", "active"} else "off"
+
+
+def eligible_transport_source_ids() -> frozenset[str]:
+    """Return only explicitly active ParsesUnix sources for automatic retries."""
+
+    from .config import parsesunix_active_source_ids, parsesunix_mode_for_source
+    from .sources import SOURCE_BY_ID
+
+    configured = parsesunix_active_source_ids()
+    unknown = sorted(configured - set(SOURCE_BY_ID))
+    if unknown:
+        raise ValueError(
+            "HS_PARSESUNIX_ACTIVE_SOURCE_IDS contains unknown sources: "
+            + ", ".join(unknown)
+        )
+    return frozenset(
+        source_id
+        for source_id in configured
+        if parsesunix_mode_for_source(source_id) == "parsesunix"
+    )
 
 
 def _source_id(result: Mapping[str, object]) -> str:
@@ -109,6 +133,8 @@ async def run_once(
     now: datetime | None = None,
     owner: str,
     mode: WorkerMode | None = None,
+    eligible_source_ids: frozenset[str] | None = None,
+    lease_seconds: int = 5 * 60,
 ) -> WorkerSummary:
     effective_mode = mode or worker_mode()
     if effective_mode == "off":
@@ -121,7 +147,9 @@ async def run_once(
     claim = store.claim_due(
         owner=owner,
         now=moment,
+        lease_seconds=lease_seconds,
         actions=SAFE_EXECUTABLE_ACTIONS,
+        eligible_source_ids=eligible_source_ids,
     )
     if claim is None:
         return WorkerSummary(mode="active", claimed=False)
@@ -163,3 +191,50 @@ async def run_once(
         reason_code=reason_code,
         final_state=final_chain.state,
     )
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--path", type=Path)
+    parser.add_argument("--mode", choices=("off", "active"))
+    parser.add_argument(
+        "--base-url",
+        default=os.environ.get("HS_CONVERGENCE_API_BASE_URL", "http://api:8000"),
+    )
+    args = parser.parse_args()
+    mode = cast(WorkerMode, args.mode) if args.mode else worker_mode()
+
+    if mode == "off":
+        # The default path is deliberately side-effect free: no ledger file,
+        # network client, or secret is touched until active mode is explicit.
+        summary = WorkerSummary(mode="off", claimed=False)
+    else:
+        from .convergence_executor import (
+            HttpParserControlClient,
+            execute_parser_control_recovery,
+        )
+
+        client = HttpParserControlClient(
+            base_url=args.base_url,
+            token=os.environ.get("HS_ORCHESTRATOR_API_KEY", ""),
+        )
+
+        async def execute(claim: ConvergenceClaim) -> RecoveryExecution:
+            return await execute_parser_control_recovery(claim, client=client)
+
+        summary = asyncio.run(
+            run_once(
+                store=ConvergenceStore(args.path),
+                executor=execute,
+                owner=f"convergence-worker-{os.getpid()}",
+                mode="active",
+                eligible_source_ids=eligible_transport_source_ids(),
+                lease_seconds=25 * 60,
+            )
+        )
+    print(json.dumps(asdict(summary), ensure_ascii=False, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

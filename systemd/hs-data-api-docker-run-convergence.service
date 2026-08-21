@@ -1,0 +1,11 @@
+[Unit]
+Description=Run one bounded Hearthstone freshness convergence attempt
+Requires=hs-data-api-docker.service
+Wants=hs-data-api-docker-plan-convergence.service
+After=hs-data-api-docker.service hs-data-api-docker-plan-convergence.service network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/srv/hs-data-api
+ExecStart=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm --no-deps api python -m app.convergence_worker
+TimeoutStartSec=25min

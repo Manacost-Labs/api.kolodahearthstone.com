@@ -476,6 +476,7 @@ class ConvergenceStore:
         now: datetime,
         lease_seconds: int = 5 * 60,
         actions: frozenset[str] | None = None,
+        eligible_source_ids: frozenset[str] | None = None,
     ) -> ConvergenceClaim | None:
         lease_owner = _identifier(owner, field="owner")
         moment = _as_utc(now, field="now")
@@ -485,6 +486,12 @@ class ConvergenceStore:
             sorted(
                 _bounded_label(action, field="action")
                 for action in (actions or ())
+            )
+        )
+        selected_source_ids = tuple(
+            sorted(
+                _identifier(source_id, field="eligible_source_id")
+                for source_id in (eligible_source_ids or ())
             )
         )
         now_epoch = moment.timestamp()
@@ -547,6 +554,22 @@ class ConvergenceStore:
                 placeholders = ", ".join("?" for _action in selected_actions)
                 action_filter = f"AND action IN ({placeholders})"
                 action_parameters = tuple(selected_actions)
+            eligibility_filter = ""
+            eligibility_parameters: tuple[object, ...] = ()
+            if eligible_source_ids is not None:
+                if not selected_source_ids:
+                    connection.commit()
+                    return None
+                placeholders = ", ".join("?" for _source in selected_source_ids)
+                eligibility_filter = f"""
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM convergence_chain_sources AS selected_sources
+                      WHERE selected_sources.chain_id = convergence_chains.chain_id
+                        AND selected_sources.source_id NOT IN ({placeholders})
+                  )
+                """
+                eligibility_parameters = tuple(selected_source_ids)
             row = connection.execute(
                 f"""
                 SELECT chain_id, attempt_index, action
@@ -557,10 +580,17 @@ class ConvergenceStore:
                   AND deadline_at > ?
                   AND (lease_until IS NULL OR lease_until <= ?)
                   {action_filter}
+                  {eligibility_filter}
                 ORDER BY next_attempt_at, created_at, chain_id
                 LIMIT 1
                 """,
-                (now_epoch, now_epoch, now_epoch, *action_parameters),
+                (
+                    now_epoch,
+                    now_epoch,
+                    now_epoch,
+                    *action_parameters,
+                    *eligibility_parameters,
+                ),
             ).fetchone()
             if row is None:
                 connection.commit()
