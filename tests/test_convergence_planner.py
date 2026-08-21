@@ -78,6 +78,100 @@ def test_shadow_planner_creates_idempotent_chains_only_for_nonfresh_primary(
     assert source == ("hsguru_meta_standard_legend",)
 
 
+def test_shadow_planner_closes_chain_superseded_by_newer_fresh_primary(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "parser-telemetry.sqlite3"
+    first_run = datetime(2026, 8, 20, 12, 0, tzinfo=UTC)
+    record_terminal_results(
+        "primary-provisional",
+        [_status("hsreplay_cards_platinum_patch", provisional=True)],
+        path=path,
+        finished_at=first_run - timedelta(minutes=10),
+        refresh_window_id="schedule:20260820T110000Z",
+    )
+
+    initial = plan_once(path=path, now=first_run, mode="shadow")
+    assert initial.planned_chains == 1
+    record_terminal_results(
+        "primary-fresh",
+        [_status("hsreplay_cards_platinum_patch")],
+        path=path,
+        finished_at=first_run + timedelta(minutes=5),
+        refresh_window_id="schedule:20260820T120000Z",
+    )
+
+    repeated = plan_once(
+        path=path,
+        now=first_run + timedelta(minutes=10),
+        mode="shadow",
+    )
+
+    assert repeated.scanned_terminal_events == 1
+    with sqlite3.connect(path) as connection:
+        chain = connection.execute(
+            """
+            SELECT action, reason_class, state, next_attempt_at,
+                   last_outcome, last_reason_code
+            FROM convergence_chains
+            """
+        ).fetchone()
+    assert chain == (
+        "complete",
+        "fresh",
+        "fresh",
+        None,
+        "fresh_published",
+        "none",
+    )
+
+
+def test_shadow_planner_waits_until_every_source_in_chain_is_fresh(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "parser-telemetry.sqlite3"
+    first_run = datetime(2026, 8, 20, 12, 0, tzinfo=UTC)
+    source_ids = (
+        "hsguru_meta_standard_legend",
+        "hsguru_meta_standard_diamond_4to1",
+    )
+    record_terminal_results(
+        "primary-provisional",
+        [_status(source_id, provisional=True) for source_id in source_ids],
+        path=path,
+        finished_at=first_run - timedelta(minutes=10),
+        refresh_window_id="schedule:20260820T110000Z",
+    )
+    initial = plan_once(path=path, now=first_run, mode="shadow")
+    assert initial.planned_chains == 1
+
+    record_terminal_results(
+        "one-fresh",
+        [_status(source_ids[0])],
+        path=path,
+        finished_at=first_run + timedelta(minutes=5),
+    )
+    plan_once(path=path, now=first_run + timedelta(minutes=10), mode="shadow")
+    with sqlite3.connect(path) as connection:
+        partial_state = connection.execute(
+            "SELECT state FROM convergence_chains"
+        ).fetchone()
+    assert partial_state == ("waiting",)
+
+    record_terminal_results(
+        "all-fresh",
+        [_status(source_ids[1])],
+        path=path,
+        finished_at=first_run + timedelta(minutes=15),
+    )
+    plan_once(path=path, now=first_run + timedelta(minutes=20), mode="shadow")
+    with sqlite3.connect(path) as connection:
+        final_state = connection.execute(
+            "SELECT state FROM convergence_chains"
+        ).fetchone()
+    assert final_state == ("fresh",)
+
+
 def test_shadow_planner_migrates_legacy_reliability_schema_before_querying(
     tmp_path: Path,
 ) -> None:

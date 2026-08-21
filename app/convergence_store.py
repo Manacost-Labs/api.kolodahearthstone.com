@@ -228,6 +228,51 @@ class ConvergenceStore:
         finally:
             connection.close()
 
+    def reconcile_fresh_primary_outcomes(self, *, updated_at: datetime) -> int:
+        """Close unresolved chains once every source has a newer fresh primary."""
+
+        moment = _as_utc(updated_at, field="updated_at")
+        connection = self._connect()
+        try:
+            _ensure_schema(connection)
+            connection.execute("BEGIN IMMEDIATE")
+            updated = connection.execute(
+                """
+                UPDATE convergence_chains
+                SET action = 'complete', reason_class = 'fresh', state = 'fresh',
+                    delays_seconds_json = '[]', paid_fetch_allowed = 0,
+                    next_attempt_at = NULL, last_outcome = 'fresh_published',
+                    last_reason_code = 'none', lease_owner = NULL,
+                    lease_until = NULL, updated_at = ?
+                WHERE state IN (
+                    'waiting', 'upstream_pending', 'paused', 'quarantined',
+                    'diagnosis_required', 'exhausted'
+                )
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM convergence_chain_sources AS chain_sources
+                      WHERE chain_sources.chain_id = convergence_chains.chain_id
+                        AND NOT EXISTS (
+                            SELECT 1
+                            FROM source_attempts AS attempts
+                            WHERE attempts.source_id = chain_sources.source_id
+                              AND attempts.attempt_purpose = 'primary'
+                              AND attempts.outcome = 'fresh_published'
+                              AND attempts.finished_at >
+                                  convergence_chains.created_at
+                        )
+                  )
+                """,
+                (moment.timestamp(),),
+            )
+            connection.commit()
+            return max(0, int(updated.rowcount))
+        except BaseException:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
     def planner_cursor(self) -> tuple[float, str] | None:
         connection = self._connect()
         try:

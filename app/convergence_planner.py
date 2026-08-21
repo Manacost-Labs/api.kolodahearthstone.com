@@ -225,6 +225,7 @@ def plan_once(
         planned_chain_ids.add(chain.chain_id)
         planned_sources.add(source_id)
 
+    store.reconcile_fresh_primary_outcomes(updated_at=moment)
     cursor_advanced = bool(rows)
     if rows:
         last = rows[-1]
