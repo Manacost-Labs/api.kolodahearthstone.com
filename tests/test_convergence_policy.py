@@ -53,7 +53,10 @@ def test_provisional_uses_maturation_backoff_instead_of_rapid_http_retry() -> No
     decision = decide_recovery(outcome="provisional", reason_code="none")
 
     assert decision.action == "retry_candidate"
-    assert decision.delays_seconds == (900, 2700, 5400, 10800, 21600, 43200)
+    assert decision.delays_seconds == (2100, 3300, 5400, 10800, 21600, 43200)
+    # Baseline confirmation requires observations at least 30 minutes apart;
+    # the five-minute margin avoids clock and queue-boundary races.
+    assert decision.delays_seconds[0] >= 35 * 60
     assert decision.paid_fetch_allowed is False
 
 

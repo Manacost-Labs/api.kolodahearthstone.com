@@ -69,8 +69,8 @@ class RecoveryDecision:
 
 _TRANSPORT_DELAYS = (5 * 60, 20 * 60, 60 * 60)
 _CANDIDATE_DELAYS = (
-    15 * 60,
-    45 * 60,
+    35 * 60,
+    55 * 60,
     90 * 60,
     3 * 60 * 60,
     6 * 60 * 60,
