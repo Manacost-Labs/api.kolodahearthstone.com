@@ -41,6 +41,24 @@ def _candidate_chain(path: Path):
     )
 
 
+def _probe_chain(path: Path):
+    observed = datetime(2026, 8, 21, 8, 0, tzinfo=UTC)
+    return ConvergenceStore(path).create_or_get_chain(
+        cohort_id="vicious-reports",
+        source_ids=["vicious_syndicate_radars"],
+        origin_occurrence_id="refresh-all:20260821T080000Z",
+        decision=decide_recovery(
+            outcome="lkg_served",
+            reason_code="unavailable",
+            upstream_pending=True,
+        ),
+        outcome="lkg_served",
+        reason_code="unavailable",
+        observed_at=observed,
+        deadline_at=observed + timedelta(hours=12),
+    )
+
+
 def test_eligible_transport_sources_require_explicit_active_parsesunix_rollout(
     monkeypatch,
 ) -> None:
@@ -208,6 +226,79 @@ def test_worker_does_not_claim_transport_outside_active_rollout(tmp_path: Path) 
     assert summary.claimed is False
     assert calls == []
     assert ConvergenceStore(path).get_chain(chain.chain_id).state == "waiting"
+
+
+def test_worker_can_run_only_the_explicit_free_probe_action(tmp_path: Path) -> None:
+    path = tmp_path / "parser-telemetry.sqlite3"
+    chain = _probe_chain(path)
+
+    async def execute(_claim: ConvergenceClaim) -> RecoveryExecution:
+        return RecoveryExecution(
+            parser_run_id=None,
+            results=(
+                {
+                    "sourceId": "vicious_syndicate_radars",
+                    "outcome": "skipped",
+                    "reasonCode": "unavailable",
+                    "upstreamPending": True,
+                },
+            ),
+        )
+
+    summary = asyncio.run(
+        run_once(
+            store=ConvergenceStore(path),
+            executor=execute,
+            now=datetime(2026, 8, 21, 8, 30, tzinfo=UTC),
+            owner="probe-worker",
+            mode="active",
+            actions=frozenset({"probe_upstream"}),
+            eligible_source_ids=frozenset({"vicious_syndicate_radars"}),
+        )
+    )
+
+    restored = ConvergenceStore(path).get_chain(chain.chain_id)
+    assert summary.claimed is True
+    assert summary.outcome == "skipped"
+    assert restored is not None
+    assert restored.action == "probe_upstream"
+    assert restored.state == "upstream_pending"
+
+
+def test_ready_probe_transitions_to_first_transport_delay(tmp_path: Path) -> None:
+    path = tmp_path / "parser-telemetry.sqlite3"
+    chain = _probe_chain(path)
+
+    async def execute(_claim: ConvergenceClaim) -> RecoveryExecution:
+        return RecoveryExecution(
+            parser_run_id=None,
+            results=(
+                {
+                    "sourceId": "vicious_syndicate_radars",
+                    "outcome": "failed",
+                    "reasonCode": "transport",
+                    "upstreamPending": False,
+                },
+            ),
+        )
+
+    summary = asyncio.run(
+        run_once(
+            store=ConvergenceStore(path),
+            executor=execute,
+            now=datetime(2026, 8, 21, 8, 30, tzinfo=UTC),
+            owner="probe-worker",
+            mode="active",
+            actions=frozenset({"probe_upstream"}),
+            eligible_source_ids=frozenset({"vicious_syndicate_radars"}),
+        )
+    )
+
+    restored = ConvergenceStore(path).get_chain(chain.chain_id)
+    assert summary.outcome == "failed"
+    assert restored is not None
+    assert restored.action == "retry_transport"
+    assert restored.next_attempt_at == datetime(2026, 8, 21, 8, 35, tzinfo=UTC)
 
 
 def test_worker_fails_closed_when_executor_returns_incomplete_source_set(

@@ -16,6 +16,7 @@ from app.vicious_syndicate import (
     classify_radar_publication,
     fetch_with_retry,
     preflight_known_pending_publication,
+    probe_known_pending_publication,
     sanitize_upstream_readiness,
     upstream_publication_metadata,
     verified_upstream_pending_readiness,
@@ -555,6 +556,55 @@ class ViciousSyndicateFetchTest(unittest.TestCase):
             self.assertEqual(pending.exception.failure_reason_code, "unavailable")
             self.assertTrue(pending.exception.skip_browser_fallback)
             self.assertEqual(_PendingRadarAsyncClient.requested_urls, [egg_url])
+
+        asyncio.run(run())
+
+    def test_cheap_upstream_probe_distinguishes_pending_from_ready(self) -> None:
+        egg_url = (
+            "https://www.vicioussyndicate.com/wp-content/datareaper/radars/"
+            "Egg%20Death%20Knight/index.html"
+        )
+        mage_url = (
+            "https://www.vicioussyndicate.com/wp-content/datareaper/radars/"
+            "Mage/index.html"
+        )
+        status = {
+            "last_refresh_upstream_readiness": {
+                "latest_report_issue": "355",
+                "candidate_issue": "354",
+                "full_discovery_at": datetime.now(UTC).isoformat(),
+                "radar_urls": [egg_url, mage_url],
+                "blocking_radar_urls": [egg_url],
+            }
+        }
+
+        async def run() -> None:
+            with (
+                patch("app.vicious_syndicate.load_status", return_value=status),
+                patch(
+                    "app.vicious_syndicate.httpx.AsyncClient",
+                    _PendingRadarAsyncClient,
+                ),
+            ):
+                pending = await probe_known_pending_publication(
+                    "vicious_syndicate_radars"
+                )
+            self.assertEqual(pending.state, "pending")
+            self.assertEqual(pending.checked_urls, 1)
+
+            _RemovedThenReadyRadarAsyncClient.requested_urls = []
+            with (
+                patch("app.vicious_syndicate.load_status", return_value=status),
+                patch(
+                    "app.vicious_syndicate.httpx.AsyncClient",
+                    _RemovedThenReadyRadarAsyncClient,
+                ),
+            ):
+                ready = await probe_known_pending_publication(
+                    "vicious_syndicate_radars"
+                )
+            self.assertEqual(ready.state, "ready")
+            self.assertEqual(ready.checked_urls, 2)
 
         asyncio.run(run())
 

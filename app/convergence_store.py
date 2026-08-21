@@ -728,8 +728,17 @@ class ConvergenceStore:
             if decision.action == "complete" and not execution_succeeded:
                 raise ValueError("A failed execution cannot complete a convergence chain")
 
-            attempt_number = int(row["attempt_number"])
             delays = tuple(int(delay) for delay in decision.delays_seconds)
+            action_attempts = int(
+                connection.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM convergence_attempts
+                    WHERE chain_id = ? AND action = ?
+                    """,
+                    (chain_id, decision.action),
+                ).fetchone()[0]
+            )
             if decision.action == "complete":
                 state = "fresh"
                 next_attempt_at = None
@@ -740,11 +749,11 @@ class ConvergenceStore:
             }:
                 state = _initial_state(decision.action)
                 next_attempt_at = None
-            elif attempt_number >= len(delays):
+            elif action_attempts >= len(delays):
                 state = "exhausted"
                 next_attempt_at = None
             else:
-                candidate_next = now_epoch + delays[attempt_number]
+                candidate_next = now_epoch + delays[action_attempts]
                 if candidate_next >= float(row["deadline_at"]):
                     state = "exhausted"
                     next_attempt_at = None

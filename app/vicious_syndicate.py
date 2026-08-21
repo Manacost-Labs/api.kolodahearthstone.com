@@ -5,8 +5,9 @@ import logging
 import posixpath
 import random
 import re
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import unquote, urlparse
 
 import httpx
@@ -128,6 +129,14 @@ class ViciousUpstreamPublicationPending(RuntimeError):
             "Vicious upstream publication pending "
             f"(candidate issue {candidate}, latest report {latest})"
         )
+
+
+@dataclass(frozen=True)
+class ViciousPublicationProbe:
+    state: Literal["pending", "ready", "inconclusive", "not_applicable"]
+    latest_report_issue: str | None
+    candidate_issue: str | None
+    checked_urls: int = 0
 
 
 def parse_latest_report_metadata(html: str) -> dict[str, str]:
@@ -504,19 +513,55 @@ async def preflight_known_pending_publication(
         return
     if readiness.get("latest_report_issue") != str(latest_issue):
         return
+    probe = await _probe_vicious_readiness(readiness, latest_issue=str(latest_issue))
+    if probe.state == "pending":
+        raise ViciousUpstreamPublicationPending(
+            readiness,
+            transport_backend=transport_backend,
+        )
+
+
+async def probe_known_pending_publication(
+    source_id: str = "vicious_syndicate_radars",
+) -> ViciousPublicationProbe:
+    """Check known official radar assets directly without any paid fallback."""
+
+    status = load_status(source_id) or {}
+    readiness = verified_upstream_pending_readiness(
+        status.get("last_refresh_upstream_readiness")
+        or status.get("upstream_readiness")
+    )
+    if readiness is None:
+        return ViciousPublicationProbe("not_applicable", None, None)
+    latest_issue = str(readiness["latest_report_issue"])
+    return await _probe_vicious_readiness(readiness, latest_issue=latest_issue)
+
+
+async def _probe_vicious_readiness(
+    readiness: dict[str, Any],
+    *,
+    latest_issue: str,
+) -> ViciousPublicationProbe:
     radar_urls = readiness.get("radar_urls") or []
     blocking_urls = readiness.get("blocking_radar_urls") or []
     ordered_urls = [
         *blocking_urls,
         *(url for url in radar_urls if url not in blocking_urls),
     ][:_MAX_READINESS_URLS]
-    if not ordered_urls:
-        return
+    candidate_issue = str(readiness.get("candidate_issue") or "") or None
+    if not ordered_urls or not str(latest_issue).isdigit():
+        return ViciousPublicationProbe(
+            "not_applicable",
+            str(latest_issue) or None,
+            candidate_issue,
+        )
 
     headers = build_fetch_headers(
         ordered_urls[0],
         accept="text/html,application/xhtml+xml",
     )
+    checked_urls = 0
+    ready_urls = 0
     try:
         async with asyncio.timeout(_READINESS_TOTAL_TIMEOUT_SECONDS):
             async with httpx.AsyncClient(
@@ -526,38 +571,60 @@ async def preflight_known_pending_publication(
             ) as client:
                 for url in ordered_urls:
                     response = await client.get(url, headers=headers)
+                    checked_urls += 1
                     if response.status_code in {404, 410}:
-                        # A previously discovered optional archetype can be
-                        # removed while the remaining radar set advances. A
-                        # missing URL therefore is not proof that the current
-                        # issue is still unpublished; keep checking the known
-                        # graph URLs and let full discovery reconcile removals.
                         continue
                     if response.status_code != 200:
-                        return
+                        return ViciousPublicationProbe(
+                            "inconclusive",
+                            latest_issue,
+                            candidate_issue,
+                            checked_urls,
+                        )
                     response_url = str(response.url)
                     if not _is_official_readiness_radar_url(response_url):
-                        return
-                    if not _valid_vicious_response(response_url, response.text):
-                        return
-                    radar_issue = _radar_issue_from_html(response.text)
-                    if (
-                        radar_issue.isdigit()
-                        and str(latest_issue).isdigit()
-                        and int(radar_issue) < int(latest_issue)
-                    ):
-                        raise ViciousUpstreamPublicationPending(
-                            readiness,
-                            transport_backend=transport_backend,
+                        return ViciousPublicationProbe(
+                            "inconclusive",
+                            latest_issue,
+                            candidate_issue,
+                            checked_urls,
                         )
-                    if radar_issue != str(latest_issue):
-                        return
-    except ViciousUpstreamPublicationPending:
-        raise
+                    if not _valid_vicious_response(response_url, response.text):
+                        return ViciousPublicationProbe(
+                            "inconclusive",
+                            latest_issue,
+                            candidate_issue,
+                            checked_urls,
+                        )
+                    radar_issue = _radar_issue_from_html(response.text)
+                    if radar_issue.isdigit() and int(radar_issue) < int(latest_issue):
+                        return ViciousPublicationProbe(
+                            "pending",
+                            latest_issue,
+                            radar_issue,
+                            checked_urls,
+                        )
+                    if radar_issue != latest_issue:
+                        return ViciousPublicationProbe(
+                            "inconclusive",
+                            latest_issue,
+                            candidate_issue,
+                            checked_urls,
+                        )
+                    ready_urls += 1
     except (TimeoutError, httpx.HTTPError):
-        # A transport failure is not proof of an incomplete publication. Let the
-        # normal resilient path classify it and use its configured providers.
-        return
+        return ViciousPublicationProbe(
+            "inconclusive",
+            latest_issue,
+            candidate_issue,
+            checked_urls,
+        )
+    return ViciousPublicationProbe(
+        "ready" if ready_urls else "inconclusive",
+        latest_issue,
+        candidate_issue,
+        checked_urls,
+    )
 
 
 def _valid_vicious_response(url: str, html: str) -> bool:

@@ -251,8 +251,10 @@ Data в этом rollout не участвует. `disable` является б�
 ledger, но worker по умолчанию выключен (`HS_CONVERGENCE_WORKER_MODE=off`). При
 явном значении `active` он берёт не более одной просроченной transport-цепочки
 за запуск и только для source ID, уже переведённых в
-`HS_PARSESUNIX_ACTIVE_SOURCE_IDS`. `provisional`, upstream delay, scheduler и
-publication repair этим worker пока не исполняются.
+`HS_PARSESUNIX_ACTIVE_SOURCE_IDS`. Отдельное исключение — бесплатный direct-only
+probe известных официальных URL Vicious Radars: он проверяет номер выпуска без
+браузера, proxy и provider fallback. `provisional`, scheduler и publication
+repair этим worker пока не исполняются.
 
 Каждый recovery-run имеет стабильный idempotency key, сохраняет исходный
 schedule occurrence и обязан вернуть точные `paidRequests` и

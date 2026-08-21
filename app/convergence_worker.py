@@ -18,10 +18,11 @@ from .convergence_store import ConvergenceClaim, ConvergenceStore
 WorkerMode = Literal["off", "active"]
 RecoveryExecutor = Callable[[ConvergenceClaim], Awaitable["RecoveryExecution"]]
 
-# Candidate confirmation, publication-only repair, scheduler repair, and
-# upstream probes need their own no-paid execution paths. Until those paths are
-# implemented, the active worker may only repeat a retryable transport fetch.
-SAFE_EXECUTABLE_ACTIONS = frozenset({"retry_transport"})
+# Candidate confirmation, publication-only repair, and scheduler repair still
+# need dedicated no-paid paths. Vicious Radars has an explicit free probe;
+# transport retries remain a separate, paid-accounted path.
+SAFE_EXECUTABLE_ACTIONS = frozenset({"retry_transport", "probe_upstream"})
+_DEFAULT_WORKER_ACTIONS = frozenset({"retry_transport"})
 
 _OUTCOME_PRIORITY = {
     "timed_out": 5,
@@ -133,6 +134,7 @@ async def run_once(
     now: datetime | None = None,
     owner: str,
     mode: WorkerMode | None = None,
+    actions: frozenset[str] | None = None,
     eligible_source_ids: frozenset[str] | None = None,
     lease_seconds: int = 5 * 60,
 ) -> WorkerSummary:
@@ -144,11 +146,14 @@ async def run_once(
     if moment.tzinfo is None:
         raise ValueError("now must be timezone-aware")
     moment = moment.astimezone(UTC)
+    selected_actions = _DEFAULT_WORKER_ACTIONS if actions is None else actions
+    if not selected_actions <= SAFE_EXECUTABLE_ACTIONS:
+        raise ValueError("actions contains an unsupported worker action")
     claim = store.claim_due(
         owner=owner,
         now=moment,
         lease_seconds=lease_seconds,
-        actions=SAFE_EXECUTABLE_ACTIONS,
+        actions=selected_actions,
         eligible_source_ids=eligible_source_ids,
     )
     if claim is None:
@@ -213,25 +218,41 @@ def main() -> int:
             HttpParserControlClient,
             execute_parser_control_recovery,
         )
+        from .convergence_probes import execute_upstream_probe
 
-        client = HttpParserControlClient(
-            base_url=args.base_url,
-            token=os.environ.get("HS_ORCHESTRATOR_API_KEY", ""),
-        )
-
-        async def execute(claim: ConvergenceClaim) -> RecoveryExecution:
-            return await execute_parser_control_recovery(claim, client=client)
-
+        store = ConvergenceStore(args.path)
+        owner = f"convergence-worker-{os.getpid()}"
         summary = asyncio.run(
             run_once(
-                store=ConvergenceStore(args.path),
-                executor=execute,
-                owner=f"convergence-worker-{os.getpid()}",
+                store=store,
+                executor=execute_upstream_probe,
+                owner=owner,
                 mode="active",
-                eligible_source_ids=eligible_transport_source_ids(),
-                lease_seconds=25 * 60,
+                actions=frozenset({"probe_upstream"}),
+                eligible_source_ids=frozenset({"vicious_syndicate_radars"}),
+                lease_seconds=60,
             )
         )
+        if not summary.claimed:
+            client = HttpParserControlClient(
+                base_url=args.base_url,
+                token=os.environ.get("HS_ORCHESTRATOR_API_KEY", ""),
+            )
+
+            async def execute(claim: ConvergenceClaim) -> RecoveryExecution:
+                return await execute_parser_control_recovery(claim, client=client)
+
+            summary = asyncio.run(
+                run_once(
+                    store=store,
+                    executor=execute,
+                    owner=owner,
+                    mode="active",
+                    actions=frozenset({"retry_transport"}),
+                    eligible_source_ids=eligible_transport_source_ids(),
+                    lease_seconds=25 * 60,
+                )
+            )
     print(json.dumps(asdict(summary), ensure_ascii=False, sort_keys=True))
     return 0
 
