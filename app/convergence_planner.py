@@ -153,6 +153,9 @@ def plan_once(
     if moment_value.tzinfo is None:
         raise ValueError("now must be timezone-aware")
     moment = moment_value.astimezone(UTC)
+    from .reliability_telemetry import ensure_reliability_schema
+
+    ensure_reliability_schema(path=path)
     store = ConvergenceStore(path)
     store.initialize()
     cursor = store.planner_cursor()

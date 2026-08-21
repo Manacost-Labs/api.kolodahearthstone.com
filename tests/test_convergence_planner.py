@@ -78,6 +78,59 @@ def test_shadow_planner_creates_idempotent_chains_only_for_nonfresh_primary(
     assert source == ("hsguru_meta_standard_legend",)
 
 
+def test_shadow_planner_migrates_legacy_reliability_schema_before_querying(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "parser-telemetry.sqlite3"
+    now = datetime(2026, 8, 20, 12, 0, tzinfo=UTC)
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE source_attempts (
+                attempt_id TEXT PRIMARY KEY,
+                run_id TEXT NOT NULL,
+                source_id TEXT NOT NULL,
+                finished_at REAL NOT NULL,
+                outcome TEXT NOT NULL,
+                terminal_state TEXT NOT NULL,
+                recorded_at REAL NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            "INSERT INTO source_attempts VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                "legacy-provisional",
+                "legacy-run",
+                "hsguru_meta_standard_legend",
+                (now - timedelta(minutes=10)).timestamp(),
+                "provisional",
+                "ok",
+                (now - timedelta(minutes=10)).timestamp(),
+            ),
+        )
+
+    summary = plan_once(path=path, now=now, mode="shadow")
+
+    assert summary.scanned_terminal_events == 1
+    assert summary.planned_chains == 1
+    with sqlite3.connect(path) as connection:
+        columns = {
+            str(row[1])
+            for row in connection.execute("PRAGMA table_info(source_attempts)")
+        }
+        chain = connection.execute(
+            "SELECT action, state FROM convergence_chains"
+        ).fetchone()
+    assert {
+        "attempt_purpose",
+        "refresh_window_id",
+        "reason_code",
+        "independently_ineligible_reason",
+    }.issubset(columns)
+    assert chain == ("retry_candidate", "waiting")
+
+
 def test_shadow_planner_turns_verified_upstream_gap_into_unpaid_probe(
     tmp_path: Path,
 ) -> None:

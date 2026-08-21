@@ -960,6 +960,17 @@ def _connect(path: Path) -> sqlite3.Connection:
     return connection
 
 
+def ensure_reliability_schema(*, path: Path | None = None) -> None:
+    """Create or migrate the shared telemetry schema before direct readers run."""
+
+    connection = _connect(path or telemetry_db_path())
+    try:
+        if not _schema_is_current(connection):
+            _ensure_schema(connection)
+    finally:
+        connection.close()
+
+
 def _schema_is_current(connection: sqlite3.Connection) -> bool:
     """Check the read contract without taking a SQLite write lock."""
 
