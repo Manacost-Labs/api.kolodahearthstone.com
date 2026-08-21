@@ -68,12 +68,12 @@ from .parsesunix_transport import (
     ParsesUnixIntegrationError,
     ParsesUnixTransportRejected,
     TransportEvidence,
+    validate_acquired_response,
 )
 from .parsesunix_transport import (
     fetch as fetch_with_parsesunix,
 )
 from .parsesunix_transport import fetch_direct as fetch_direct_with_parsesunix
-from .parsesunix_transport import validate_acquired_response
 from .post_patch_policy import (
     EARLY_SOURCE_IDS,
     POST_PATCH_BASELINE_LABEL,
@@ -90,6 +90,7 @@ from .publish_gate import (
     validate_candidate_for_publish,
     validate_existing_publication_for_serving,
 )
+from .refresh_context import is_direct_only_candidate_confirmation
 from .refresh_log import (
     activate_source_trace,
     complete_source_trace,
@@ -490,7 +491,7 @@ async def _review_candidate_with_ai(
 ) -> tuple[dict[str, Any] | None, bool, str | None]:
     """Run the optional passive reviewer without making parsing depend on it."""
 
-    if not ai_review_enabled():
+    if is_direct_only_candidate_confirmation() or not ai_review_enabled():
         return None, False, None
     selected_sources = ai_review_source_ids()
     if not selected_sources or (
@@ -625,7 +626,11 @@ async def _diagnose_candidate_with_ai(
 ) -> dict[str, Any] | None:
     """Diagnose a rejected candidate without changing its terminal outcome."""
 
-    if not ai_review_enabled() or not ai_review_diagnose_failures_enabled():
+    if (
+        is_direct_only_candidate_confirmation()
+        or not ai_review_enabled()
+        or not ai_review_diagnose_failures_enabled()
+    ):
         return None
     if _defer_if_refresh:
 
@@ -1209,6 +1214,14 @@ def _save_failure_status(
 
 
 async def send_telegram_alert(source_id: str, state: str, detail: str, url: str) -> None:
+    if is_direct_only_candidate_confirmation():
+        log_action(
+            "alert.skipped",
+            source_id=source_id,
+            detail="Direct-only candidate confirmation suppresses notifications",
+            extra={"state": state},
+        )
+        return
     from .config import telegram_bot_token, telegram_chat_id
 
     token = telegram_bot_token()
@@ -2277,6 +2290,8 @@ async def _try_firecrawl_html(
     reason: str,
 ) -> dict[str, Any] | None:
     global _firecrawl_fallback_attempts
+    if is_direct_only_candidate_confirmation():
+        return None
     is_primary = reason == "primary"
     if source.id not in (firecrawl_primary_source_ids() | firecrawl_fallback_source_ids()):
         return None
@@ -3789,7 +3804,10 @@ async def fetch_source(
         return await _fetch_source_with_captured_policy(
             client,
             source,
-            retry_on_auth_failure=retry_on_auth_failure,
+            retry_on_auth_failure=(
+                retry_on_auth_failure
+                and not is_direct_only_candidate_confirmation()
+            ),
         )
 
 
@@ -4330,15 +4348,24 @@ async def _refresh_sources_unlocked(
     )
 
     try:
+        direct_confirmation = is_direct_only_candidate_confirmation()
         proxy_info = await ensure_refresh_preflight(
             full_refresh=full_refresh,
-            needs_proxy=selection_needs_proxy_preflight(
-                selected,
-                configured_backends=backends_lower_preview,
+            needs_proxy=(
+                False
+                if direct_confirmation
+                else selection_needs_proxy_preflight(
+                    selected,
+                    configured_backends=backends_lower_preview,
+                )
             ),
-            needs_flaresolverr=selection_needs_flaresolverr_preflight(
-                selected,
-                configured_backends=backends_lower_preview,
+            needs_flaresolverr=(
+                False
+                if direct_confirmation
+                else selection_needs_flaresolverr_preflight(
+                    selected,
+                    configured_backends=backends_lower_preview,
+                )
             ),
         )
     except Exception as exc:
@@ -4622,7 +4649,10 @@ async def _refresh_sources_unlocked(
                     )
             except Exception as exc:
                 logger.warning("Stale source alerts failed: %s", exc)
-        await _flush_deferred_ai_jobs(run_id, terminal_results)
+        if is_direct_only_candidate_confirmation():
+            _deferred_ai_jobs.set(None)
+        else:
+            await _flush_deferred_ai_jobs(run_id, terminal_results)
     return results
 
 

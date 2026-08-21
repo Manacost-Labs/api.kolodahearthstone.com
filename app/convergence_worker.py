@@ -21,7 +21,9 @@ RecoveryExecutor = Callable[[ConvergenceClaim], Awaitable["RecoveryExecution"]]
 # Candidate confirmation, publication-only repair, and scheduler repair still
 # need dedicated no-paid paths. Vicious Radars has an explicit free probe;
 # transport retries remain a separate, paid-accounted path.
-SAFE_EXECUTABLE_ACTIONS = frozenset({"retry_transport", "probe_upstream"})
+SAFE_EXECUTABLE_ACTIONS = frozenset(
+    {"retry_candidate", "retry_transport", "probe_upstream"}
+)
 _DEFAULT_WORKER_ACTIONS = frozenset({"retry_transport"})
 
 _OUTCOME_PRIORITY = {
@@ -77,6 +79,14 @@ def eligible_transport_source_ids() -> frozenset[str]:
         for source_id in configured
         if parsesunix_mode_for_source(source_id) == "parsesunix"
     )
+
+
+def eligible_direct_candidate_source_ids() -> frozenset[str]:
+    """Return the exact HSReplay early-data cohort with a free direct path."""
+
+    from .convergence_candidate import DIRECT_CANDIDATE_SOURCE_IDS
+
+    return DIRECT_CANDIDATE_SOURCE_IDS
 
 
 def _source_id(result: Mapping[str, object]) -> str:
@@ -214,6 +224,7 @@ def main() -> int:
         # network client, or secret is touched until active mode is explicit.
         summary = WorkerSummary(mode="off", claimed=False)
     else:
+        from .convergence_candidate import execute_direct_candidate_confirmation
         from .convergence_executor import (
             HttpParserControlClient,
             execute_parser_control_recovery,
@@ -225,14 +236,26 @@ def main() -> int:
         summary = asyncio.run(
             run_once(
                 store=store,
-                executor=execute_upstream_probe,
+                executor=execute_direct_candidate_confirmation,
                 owner=owner,
                 mode="active",
-                actions=frozenset({"probe_upstream"}),
-                eligible_source_ids=frozenset({"vicious_syndicate_radars"}),
-                lease_seconds=60,
+                actions=frozenset({"retry_candidate"}),
+                eligible_source_ids=eligible_direct_candidate_source_ids(),
+                lease_seconds=10 * 60,
             )
         )
+        if not summary.claimed:
+            summary = asyncio.run(
+                run_once(
+                    store=store,
+                    executor=execute_upstream_probe,
+                    owner=owner,
+                    mode="active",
+                    actions=frozenset({"probe_upstream"}),
+                    eligible_source_ids=frozenset({"vicious_syndicate_radars"}),
+                    lease_seconds=60,
+                )
+            )
         if not summary.claimed:
             client = HttpParserControlClient(
                 base_url=args.base_url,

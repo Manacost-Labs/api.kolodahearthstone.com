@@ -21,6 +21,7 @@ from app.hsreplay_card_periods import (
     fetch_hsreplay_card_period_json,
 )
 from app.hsreplay_cards_api import fetch_hsreplay_ranked_cards
+from app.refresh_context import direct_only_candidate_confirmation
 from app.source_contracts import get_contract
 from app.source_tiers import SourceTier, tier_for
 from app.sources import SOURCE_BY_ID, Source
@@ -329,6 +330,28 @@ def test_ranked_cards_uses_proxy_fallback_after_direct_failure(
         "drop_reasons": {"explained": {}, "unexplained": {}},
         "scope": "analytics_card_list",
     }
+
+
+def test_candidate_confirmation_never_uses_paid_card_period_fallback() -> None:
+    from app import hsreplay_card_periods, hsreplay_client
+
+    source = SOURCE_BY_ID["hsreplay_cards_legend_patch"]
+
+    async def direct_failure(*_args: object, **_kwargs: object) -> dict:
+        raise RuntimeError("direct origin unavailable")
+
+    with (
+        direct_only_candidate_confirmation(),
+        patch.object(hsreplay_client, "fetch_hsreplay_json", side_effect=direct_failure),
+        patch.object(
+            hsreplay_card_periods,
+            "fetch_hsreplay_card_period_json",
+        ) as paid_fallback,
+        pytest.raises(RuntimeError, match="direct origin unavailable"),
+    ):
+        asyncio.run(fetch_hsreplay_ranked_cards(source))
+
+    paid_fallback.assert_not_called()
 
 
 def test_dynamic_card_period_uses_final_source_id_and_json_bright_acceptance() -> None:

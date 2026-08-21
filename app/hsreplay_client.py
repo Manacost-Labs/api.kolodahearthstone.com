@@ -32,7 +32,11 @@ from .hsreplay_auth import hsreplay_cookies_for_fetch
 from .parsesunix_contracts import hsreplay_json_contract_for_source
 from .parsesunix_transport import validate_acquired_response
 from .proxy_errors import ProxyPaymentRequiredError, proxy_tunnel_error
-from .refresh_context import get_cached_hsreplay_json, set_cached_hsreplay_json
+from .refresh_context import (
+    get_cached_hsreplay_json,
+    is_direct_only_candidate_confirmation,
+    set_cached_hsreplay_json,
+)
 from .refresh_log import log_action
 from .scrape_do_backend import ScrapeDoContentError, ScrapeDoRequestError, scrape_url
 from .scrapers.http_resilience import (
@@ -182,7 +186,13 @@ def _log_proxy_circuit_skip_once(
 def _json_transport_label(channel: str, *, proxy_backed: bool) -> str:
     if proxy_backed:
         return "residential_httpx"
-    if channel in {"curl_cffi", "direct", "flaresolverr", "jina"}:
+    if channel in {
+        "curl_cffi",
+        "direct",
+        "direct_unproxied",
+        "flaresolverr",
+        "jina",
+    }:
         return f"proxyless_{channel}"
     return channel
 
@@ -451,6 +461,65 @@ async def download_text(url: str, source_id: str | None = None) -> str:
             source_id=source_id,
         )
         raise
+
+
+async def _download_text_direct_unproxied(url: str, *, source_id: str) -> str:
+    """Fetch an exact HSReplay endpoint without any configured/environment proxy."""
+
+    _assert_exact_hsreplay_https_url(url)
+    headers = build_fetch_headers(
+        url,
+        accept="application/json,text/plain,*/*",
+        extra={"User-Agent": user_agent()},
+    )
+    cookie_header = _hsreplay_cookie_header()
+    if cookie_header:
+        headers["Cookie"] = cookie_header
+        headers.setdefault("Referer", "https://hsreplay.net/")
+
+    attempts = max(1, min(api_json_attempts_per_channel(), 3))
+    timeout = httpx.Timeout(request_timeout_seconds())
+    last_error: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        started = time.monotonic()
+        log_action(
+            "http.request.begin",
+            source_id=source_id,
+            url=url,
+            attempt=attempt,
+            extra={"via": "direct_unproxied"},
+        )
+        try:
+            async with httpx.AsyncClient(
+                timeout=timeout,
+                follow_redirects=False,
+                trust_env=False,
+            ) as client:
+                response = await client.get(url, headers=headers)
+            if response.is_redirect:
+                raise RuntimeError("Direct HSReplay redirects are forbidden")
+            response.raise_for_status()
+            if is_session_blocked(response.status_code, response.text):
+                raise RuntimeError("Direct HSReplay response is blocked")
+            _record_pending_target_headers(source_id, url, response.headers)
+            log_action(
+                "http.request.ok",
+                source_id=source_id,
+                url=url,
+                http_status=response.status_code,
+                bytes_out=len(response.content),
+                duration_ms=(time.monotonic() - started) * 1000,
+                attempt=attempt,
+                backend="direct_unproxied",
+            )
+            return response.text
+        except Exception as exc:
+            last_error = exc
+            if attempt >= attempts:
+                raise
+            await asyncio.sleep(api_json_retry_delay_seconds())
+    assert last_error is not None
+    raise last_error
 
 
 def _fetch_text_via_curl_cffi_sync(url: str, source_id: str | None) -> str:
@@ -752,7 +821,7 @@ def _channel_uses_residential_proxy(
     fetch_url: str,
     source_id: str,
 ) -> bool:
-    if label == "scrape_do":
+    if label in {"direct_unproxied", "scrape_do"}:
         return False
     if label == "flaresolverr":
         from .scrapers.proxy import proxy_dict_for_flaresolverr
@@ -809,6 +878,11 @@ async def _fetch_body_for_channel(
     *,
     source_id: str,
 ) -> str:
+    if label == "direct_unproxied":
+        return await _download_text_direct_unproxied(
+            fetch_url,
+            source_id=source_id,
+        )
     if label == "flaresolverr":
         return await fetch_text_via_flaresolverr(fetch_url, source_id=source_id)
     if label == "curl_cffi":
@@ -968,7 +1042,11 @@ async def _fetch_hsreplay_json_serialized(
         return cached
 
     errors: list[str] = []
-    channels = _channel_urls(api_url, source_id=source_id)
+    channels = (
+        [("direct_unproxied", api_url)]
+        if is_direct_only_candidate_confirmation()
+        else _channel_urls(api_url, source_id=source_id)
+    )
     first_proxy_error: ProxyPaymentRequiredError | None = None
     independent_channel_attempted = False
 
@@ -1126,6 +1204,8 @@ async def fetch_hsreplay_json(
     """Fetch and single-flight one HSReplay JSON snapshot per refresh cache key."""
 
     key = cache_key or api_url
+    if is_direct_only_candidate_confirmation():
+        key = f"direct-only:{key}"
     async with _json_key_gate(key):
         return await _fetch_hsreplay_json_serialized(
             api_url,

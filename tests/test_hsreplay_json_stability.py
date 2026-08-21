@@ -6,7 +6,7 @@ import logging
 import sys
 from types import ModuleType, SimpleNamespace
 from typing import Self
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
@@ -14,6 +14,7 @@ import pytest
 from app.hsreplay_client import (
     HsReplayScrapeDoBudgetError,
     _channel_urls,
+    _download_text_direct_unproxied,
     _fetch_text_via_curl_cffi_sync,
     _fetch_text_via_scrape_do,
     consume_hsreplay_json_transport_backend,
@@ -25,6 +26,7 @@ from app.hsreplay_client import (
     reset_hsreplay_refresh_state,
 )
 from app.proxy_errors import ProxyPaymentRequiredError, proxy_tunnel_error
+from app.refresh_context import direct_only_candidate_confirmation
 from app.scrape_do_backend import (
     ScrapeDoContentError,
     ScrapeDoRequestError,
@@ -111,6 +113,73 @@ def test_hsreplay_json_accepts_drf_browsable_api_response() -> None:
         consume_hsreplay_json_transport_backend("drf-test")
         == "proxyless_flaresolverr"
     )
+
+
+def test_candidate_confirmation_uses_only_strict_unproxied_channel() -> None:
+    calls: list[tuple[str, str]] = []
+
+    async def fetch(label: str, url: str, *, source_id: str) -> str:
+        assert source_id == "candidate-test"
+        calls.append((label, url))
+        return '{"data": [{"id": 1}]}'
+
+    with (
+        direct_only_candidate_confirmation(),
+        patch(
+            "app.hsreplay_client._channel_urls",
+            side_effect=AssertionError("configured channels must not be consulted"),
+        ),
+        patch("app.hsreplay_client._fetch_body_for_channel", side_effect=fetch),
+        patch("app.hsreplay_client.get_cached_hsreplay_json", return_value=None),
+        patch("app.hsreplay_client.set_cached_hsreplay_json") as set_cache,
+    ):
+        result = asyncio.run(
+            fetch_hsreplay_json(
+                "https://hsreplay.net/api/test",
+                source_id="candidate-test",
+                cache_key="candidate-snapshot",
+            )
+        )
+
+    assert result == {"data": [{"id": 1}]}
+    assert calls == [
+        ("direct_unproxied", "https://hsreplay.net/api/test"),
+    ]
+    assert set_cache.call_args.args[0] == "direct-only:candidate-snapshot"
+    assert (
+        consume_hsreplay_json_transport_backend("candidate-test")
+        == "proxyless_direct_unproxied"
+    )
+
+
+def test_strict_direct_transport_ignores_environment_proxy_and_redirects() -> None:
+    url = "https://hsreplay.net/api/test"
+    request = httpx.Request("GET", url)
+    response = httpx.Response(
+        200,
+        request=request,
+        headers={"etag": '"candidate"'},
+        json={"data": [{"id": 1}]},
+    )
+    client = AsyncMock()
+    client.get.return_value = response
+    context = MagicMock()
+    context.__aenter__ = AsyncMock(return_value=client)
+    context.__aexit__ = AsyncMock(return_value=None)
+
+    with (
+        patch("app.hsreplay_client.httpx.AsyncClient", return_value=context) as factory,
+        patch("app.hsreplay_client.hsreplay_cookies_for_fetch", return_value=[]),
+        patch("app.hsreplay_client.api_json_attempts_per_channel", return_value=1),
+    ):
+        body = asyncio.run(
+            _download_text_direct_unproxied(url, source_id="candidate-test")
+        )
+
+    assert json.loads(body) == {"data": [{"id": 1}]}
+    assert factory.call_args.kwargs["trust_env"] is False
+    assert factory.call_args.kwargs["follow_redirects"] is False
+    client.get.assert_awaited_once()
 
 
 def test_trinket_slice_rejects_decoy_json_before_accepting_valid_channel() -> None:

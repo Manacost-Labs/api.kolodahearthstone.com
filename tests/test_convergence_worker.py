@@ -8,6 +8,7 @@ from app.convergence_policy import decide_recovery
 from app.convergence_store import ConvergenceClaim, ConvergenceStore
 from app.convergence_worker import (
     RecoveryExecution,
+    eligible_direct_candidate_source_ids,
     eligible_transport_source_ids,
     run_once,
 )
@@ -75,6 +76,16 @@ def test_eligible_transport_sources_require_explicit_active_parsesunix_rollout(
     assert eligible_transport_source_ids() == frozenset(
         {"hsguru_meta_standard_legend"}
     )
+
+
+def test_direct_candidate_worker_uses_only_bounded_hsreplay_allowlist() -> None:
+    source_ids = eligible_direct_candidate_source_ids()
+
+    assert len(source_ids) == 19
+    assert "hsreplay_cards_legend_patch" in source_ids
+    assert "hsreplay_battlegrounds_trinkets_lesser" in source_ids
+    assert "hsreplay_cards_legend_1d" not in source_ids
+    assert all(source_id.startswith("hsreplay_") for source_id in source_ids)
 
 
 def test_worker_defaults_off_without_claiming_or_executing(tmp_path: Path) -> None:

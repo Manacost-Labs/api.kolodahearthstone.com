@@ -251,10 +251,21 @@ Data в этом rollout не участвует. `disable` является б�
 ledger, но worker по умолчанию выключен (`HS_CONVERGENCE_WORKER_MODE=off`). При
 явном значении `active` он берёт не более одной просроченной transport-цепочки
 за запуск и только для source ID, уже переведённых в
-`HS_PARSESUNIX_ACTIVE_SOURCE_IDS`. Отдельное исключение — бесплатный direct-only
-probe известных официальных URL Vicious Radars: он проверяет номер выпуска без
-браузера, proxy и provider fallback. `provisional`, scheduler и publication
-repair этим worker пока не исполняются.
+`HS_PARSESUNIX_ACTIVE_SOURCE_IDS`. Перед transport-очередью worker обслуживает
+два бесплатных пути:
+
+- повторно собирает 8 карточных HSReplay-срезов `CURRENT_PATCH` и 11 trinket-
+  срезов после минимального 30-минутного окна подтверждения; запрос идёт только
+  прямо на точный HTTPS-host `hsreplay.net`, с `trust_env=false`, без редиректов,
+  residential proxy, Scrape.do, Firecrawl, provider fallback, AI и уведомлений;
+- проверяет известные официальные URL Vicious Radars и номер выпуска без
+  браузера, proxy и provider fallback.
+
+Повторная HSReplay-выборка проходит обычные contract, completeness, regression
+и publication gates. Первый маленький post-patch-срез остаётся `provisional`:
+fresh появляется только после второго независимого валидного снимка. Ошибка
+direct-origin не засчитывается как успех и не подменяется LKG. Scheduler и
+publication repair этим worker пока не исполняются.
 
 Каждый recovery-run имеет стабильный idempotency key, сохраняет исходный
 schedule occurrence и обязан вернуть точные `paidRequests` и

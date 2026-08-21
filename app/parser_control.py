@@ -25,8 +25,8 @@ from .parser_control_registry import (
     SOURCE_TO_SECTION,
     source_label,
 )
-from .sources import SOURCE_BY_ID
 from .source_state import SourceState
+from .sources import SOURCE_BY_ID
 
 CONTROL_FILENAME = "parser-control.json"
 CONTROL_LOCK_FILENAME = "parser-control.lock"
@@ -1723,6 +1723,12 @@ def _run_result_summary(result: dict[str, Any]) -> dict[str, Any]:
             summary["paidCostMicrousd"] = paid_cost_microusd
         summary["paidUsageExact"] = exact
     return summary
+
+
+def summarize_parser_result(result: dict[str, Any]) -> dict[str, Any]:
+    """Return the public terminal classification for one raw parser result."""
+
+    return _run_result_summary(result)
 
 
 def _run_summary_outcome(result: Mapping[str, object]) -> str:

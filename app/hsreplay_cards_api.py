@@ -372,6 +372,10 @@ async def fetch_hsreplay_ranked_cards(source: Source, *, locale: str = "ruRU") -
         )
         backend = "hsreplay_cards_api"
     except Exception as direct_error:
+        from .refresh_context import is_direct_only_candidate_confirmation
+
+        if is_direct_only_candidate_confirmation():
+            raise
         from .hsreplay_card_periods import fetch_hsreplay_card_period_json
 
         fallback = await fetch_hsreplay_card_period_json(

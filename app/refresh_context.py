@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any
@@ -20,6 +22,26 @@ class _ParsesUnixPaidRequestBudget:
 _parsesunix_paid_request_budget: ContextVar[_ParsesUnixPaidRequestBudget | None] = (
     ContextVar("parsesunix_paid_request_budget", default=None)
 )
+
+_direct_only_candidate_confirmation: ContextVar[bool] = ContextVar(
+    "direct_only_candidate_confirmation",
+    default=False,
+)
+
+
+@contextmanager
+def direct_only_candidate_confirmation() -> Iterator[None]:
+    """Restrict one recovery run to the free, unproxied HSReplay origin."""
+
+    token = _direct_only_candidate_confirmation.set(True)
+    try:
+        yield
+    finally:
+        _direct_only_candidate_confirmation.reset(token)
+
+
+def is_direct_only_candidate_confirmation() -> bool:
+    return _direct_only_candidate_confirmation.get()
 
 
 def begin_refresh_run() -> None:
