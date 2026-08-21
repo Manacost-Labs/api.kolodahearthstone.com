@@ -228,6 +228,53 @@ class ParserControlApiTest(unittest.TestCase):
             ],
         )
 
+    def test_orchestrator_exposes_only_bounded_exact_paid_usage(self) -> None:
+        with TemporaryDirectory() as directory, patch.dict(
+            os.environ,
+            {
+                "HS_API_DATA_DIR": directory,
+                "HS_ORCHESTRATOR_API_KEY": ORCHESTRATOR_TOKEN,
+            },
+            clear=False,
+        ):
+            store = ParserControlStore(Path(directory))
+            run, _ = store.enqueue_run(
+                source_ids=["hsguru_meta_standard_legend"],
+                requested_by="convergence-controller",
+                reason="recover transport",
+                request_id="convergence:chain-paid:attempt-1",
+                attempt_purpose="recovery",
+                origin_occurrence_id="schedule:20260820T100000Z",
+                recovery_chain_id="chain-paid",
+            )
+            store.finish_run(
+                run["id"],
+                status="succeeded",
+                results=[
+                    {
+                        "sourceId": "hsguru_meta_standard_legend",
+                        "state": "ok",
+                        "terminalOutcome": "fresh_published",
+                        "reasonCode": "none",
+                        "independentlyIneligibleReason": "",
+                        "paidRequests": 1,
+                        "paidCostMicrousd": 290,
+                        "paidUsageExact": True,
+                    }
+                ],
+            )
+            with patch("app.parser_control._STORE", store), TestClient(app) as client:
+                response = client.get(
+                    f"/admin/orchestrator/parser-runs/{run['id']}",
+                    headers={"X-Orchestrator-Key": ORCHESTRATOR_TOKEN},
+                )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        result = response.json()["run"]["results"][0]
+        self.assertEqual(result["paidRequests"], 1)
+        self.assertEqual(result["paidCostMicrousd"], 290)
+        self.assertTrue(result["paidUsageExact"])
+
     def test_orchestrator_accepts_only_a_fully_correlated_recovery_run(self) -> None:
         with TemporaryDirectory() as directory, patch.dict(
             os.environ,

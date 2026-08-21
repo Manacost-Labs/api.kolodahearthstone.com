@@ -1209,6 +1209,24 @@ def _orchestrator_run_view(run: dict[str, Any]) -> dict[str, Any]:
                 ),
             }
         )
+        paid_requests = raw.get("paidRequests")
+        paid_cost_microusd = raw.get("paidCostMicrousd")
+        paid_usage_exact = raw.get("paidUsageExact")
+        if (
+            isinstance(paid_requests, int)
+            and not isinstance(paid_requests, bool)
+            and 0 <= paid_requests <= 1_000_000
+        ):
+            results[-1]["paidRequests"] = paid_requests
+        if isinstance(paid_usage_exact, bool):
+            results[-1]["paidUsageExact"] = paid_usage_exact
+        if (
+            paid_usage_exact is True
+            and isinstance(paid_cost_microusd, int)
+            and not isinstance(paid_cost_microusd, bool)
+            and 0 <= paid_cost_microusd <= 1_000_000_000_000
+        ):
+            results[-1]["paidCostMicrousd"] = paid_cost_microusd
 
     status = run.get("status")
     if status not in {"queued", "running", "succeeded", "partial", "failed"}:

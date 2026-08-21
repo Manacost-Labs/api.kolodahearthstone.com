@@ -198,3 +198,33 @@ test("successful response with truncated JSON is retried", async () => {
   assert.equal(run.status, "succeeded");
   assert.equal(calls, 2);
 });
+
+test("run status accepts bounded exact paid usage", async () => {
+  const envelope = runEnvelope("succeeded");
+  const [result] = envelope.results as Array<Record<string, unknown>>;
+  assert.ok(result);
+  result.paidRequests = 1;
+  result.paidCostMicrousd = 290;
+  result.paidUsageExact = true;
+  globalThis.fetch = (async () => Response.json({ run: envelope })) as typeof fetch;
+
+  const run = await getParserRun("0123456789abcdef0123456789abcdef");
+
+  assert.equal(run.results[0]?.paidRequests, 1);
+  assert.equal(run.results[0]?.paidCostMicrousd, 290);
+  assert.equal(run.results[0]?.paidUsageExact, true);
+});
+
+test("run status rejects exact paid usage without an exact cost", async () => {
+  const envelope = runEnvelope("succeeded");
+  const [result] = envelope.results as Array<Record<string, unknown>>;
+  assert.ok(result);
+  result.paidRequests = 1;
+  result.paidUsageExact = true;
+  globalThis.fetch = (async () => Response.json({ run: envelope })) as typeof fetch;
+
+  await assert.rejects(
+    getParserRun("0123456789abcdef0123456789abcdef"),
+    /invalid run response/
+  );
+});

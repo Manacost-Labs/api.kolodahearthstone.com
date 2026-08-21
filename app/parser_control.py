@@ -1678,6 +1678,7 @@ def _run_result_summary(result: dict[str, Any]) -> dict[str, Any]:
         classify_failure_reason,
         classify_independently_ineligible_reason,
         classify_terminal_status,
+        parsesunix_paid_usage,
     )
 
     source_id = str(result.get("source_id") or result.get("sourceId") or "")
@@ -1713,6 +1714,14 @@ def _run_result_summary(result: dict[str, Any]) -> dict[str, Any]:
     rows_total = _result_rows_total(result)
     if rows_total is not None:
         summary["rowsTotal"] = rows_total
+    paid_usage = parsesunix_paid_usage(result)
+    if paid_usage is not None:
+        paid_requests, paid_cost_microusd, exact = paid_usage
+        if paid_requests is not None:
+            summary["paidRequests"] = paid_requests
+        if paid_cost_microusd is not None:
+            summary["paidCostMicrousd"] = paid_cost_microusd
+        summary["paidUsageExact"] = exact
     return summary
 
 

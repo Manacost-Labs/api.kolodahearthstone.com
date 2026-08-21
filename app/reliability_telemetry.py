@@ -534,6 +534,29 @@ def _parsesunix_terminal_fields(
     )
 
 
+def parsesunix_paid_usage(
+    status: Mapping[str, object],
+) -> tuple[int | None, int | None, bool] | None:
+    """Return bounded provider usage only when ParsesUnix evidence was observed.
+
+    Cost is exact only when the transport explicitly marks it exact and the
+    decimal amount converts losslessly to micro-US dollars. Unknown cost must
+    remain unknown instead of being silently reported as zero.
+    """
+
+    fields = _parsesunix_terminal_fields(status)
+    mode = fields[0]
+    if mode == "none":
+        return None
+    paid_requests = fields[-2]
+    paid_cost_microusd = fields[-1]
+    return (
+        paid_requests,
+        paid_cost_microusd,
+        paid_requests is not None and paid_cost_microusd is not None,
+    )
+
+
 def _bounded_optional_bool(value: object) -> int | None:
     return int(value) if isinstance(value, bool) else None
 

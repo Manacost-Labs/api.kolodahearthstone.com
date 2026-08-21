@@ -48,6 +48,76 @@ class ParserControlRegistryTest(unittest.TestCase):
 
 
 class ParserControlStoreTest(unittest.TestCase):
+    def test_worker_persists_exact_parsesunix_paid_usage(self) -> None:
+        with TemporaryDirectory() as directory:
+            store = ParserControlStore(Path(directory))
+            run, _ = store.enqueue_run(
+                source_ids=["hsguru_meta_standard_legend"],
+                requested_by="convergence-controller",
+                reason="recover transport",
+                attempt_purpose="recovery",
+                origin_occurrence_id="schedule:20260820T100000Z",
+                recovery_chain_id="chain-paid-usage",
+            )
+
+            async def executor(_source_ids: list[str]) -> list[dict[str, object]]:
+                return [
+                    {
+                        "source_id": "hsguru_meta_standard_legend",
+                        "state": "ok",
+                        "parsesunix_transport": {
+                            "verdict": "OK",
+                            "paid_requests": 1,
+                            "paid_cost_usd": "0.000290",
+                            "cost_certainty": "exact",
+                        },
+                    }
+                ]
+
+            self.assertTrue(ParserRunWorker(store, executor=executor).process_next())
+            persisted = store.get_run(run["id"])
+            self.assertIsNotNone(persisted)
+            assert persisted is not None
+            result = persisted["results"][0]
+            self.assertEqual(result["paidRequests"], 1)
+            self.assertEqual(result["paidCostMicrousd"], 290)
+            self.assertTrue(result["paidUsageExact"])
+
+    def test_worker_never_reports_unknown_paid_cost_as_zero(self) -> None:
+        with TemporaryDirectory() as directory:
+            store = ParserControlStore(Path(directory))
+            run, _ = store.enqueue_run(
+                source_ids=["hsguru_meta_standard_legend"],
+                requested_by="convergence-controller",
+                reason="recover transport",
+                attempt_purpose="recovery",
+                origin_occurrence_id="schedule:20260820T100000Z",
+                recovery_chain_id="chain-unknown-cost",
+            )
+
+            async def executor(_source_ids: list[str]) -> list[dict[str, object]]:
+                return [
+                    {
+                        "source_id": "hsguru_meta_standard_legend",
+                        "state": "ok",
+                        "parsesunix_transport": {
+                            "verdict": "OK",
+                            "paid_requests": 1,
+                            "paid_cost_usd": "0.000290",
+                            "cost_certainty": "unknown",
+                        },
+                    }
+                ]
+
+            self.assertTrue(ParserRunWorker(store, executor=executor).process_next())
+            persisted = store.get_run(run["id"])
+            self.assertIsNotNone(persisted)
+            assert persisted is not None
+            result = persisted["results"][0]
+            self.assertEqual(result["paidRequests"], 1)
+            self.assertNotIn("paidCostMicrousd", result)
+            self.assertFalse(result["paidUsageExact"])
+
     def test_recovery_run_requires_stable_correlation_and_deduplicates_it(self) -> None:
         with TemporaryDirectory() as directory:
             store = ParserControlStore(Path(directory))

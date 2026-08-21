@@ -25,6 +25,9 @@ export interface ParserRun {
       | "skipped";
     reasonCode: string;
     upstreamPending: boolean;
+    paidRequests?: number;
+    paidCostMicrousd?: number;
+    paidUsageExact?: boolean;
   }>;
 }
 
@@ -250,9 +253,24 @@ function isParserResult(value: unknown): value is ParserRun["results"][number] {
     reasons.has(result.reasonCode) &&
     typeof result.upstreamPending === "boolean" &&
     (!result.upstreamPending || result.outcome === "skipped") &&
+    isPaidUsage(result) &&
     (!(["fresh_published", "provisional"] as string[]).includes(result.outcome) ||
       result.reasonCode === "none")
   );
+}
+
+function isPaidUsage(result: Partial<ParserRun["results"][number]>): boolean {
+  const observed =
+    result.paidRequests !== undefined ||
+    result.paidCostMicrousd !== undefined ||
+    result.paidUsageExact !== undefined;
+  if (!observed) return true;
+  if (typeof result.paidUsageExact !== "boolean") return false;
+  if (result.paidRequests !== undefined && !isCount(result.paidRequests)) return false;
+  if (result.paidUsageExact) {
+    return isCount(result.paidRequests) && isCount(result.paidCostMicrousd);
+  }
+  return result.paidCostMicrousd === undefined;
 }
 
 export async function enqueueParserRun(
