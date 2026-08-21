@@ -475,11 +475,18 @@ class ConvergenceStore:
         owner: str,
         now: datetime,
         lease_seconds: int = 5 * 60,
+        actions: frozenset[str] | None = None,
     ) -> ConvergenceClaim | None:
         lease_owner = _identifier(owner, field="owner")
         moment = _as_utc(now, field="now")
         if not 30 <= lease_seconds <= 60 * 60:
             raise ValueError("lease_seconds must be between 30 and 3600")
+        selected_actions = tuple(
+            sorted(
+                _bounded_label(action, field="action")
+                for action in (actions or ())
+            )
+        )
         now_epoch = moment.timestamp()
         lease_until_epoch = now_epoch + lease_seconds
 
@@ -531,8 +538,17 @@ class ConvergenceStore:
                 """,
                 (now_epoch, now_epoch),
             )
+            action_filter = ""
+            action_parameters: tuple[object, ...] = ()
+            if actions is not None:
+                if not selected_actions:
+                    connection.commit()
+                    return None
+                placeholders = ", ".join("?" for _action in selected_actions)
+                action_filter = f"AND action IN ({placeholders})"
+                action_parameters = tuple(selected_actions)
             row = connection.execute(
-                """
+                f"""
                 SELECT chain_id, attempt_index, action
                 FROM convergence_chains
                 WHERE state IN ('waiting', 'upstream_pending')
@@ -540,10 +556,11 @@ class ConvergenceStore:
                   AND next_attempt_at <= ?
                   AND deadline_at > ?
                   AND (lease_until IS NULL OR lease_until <= ?)
+                  {action_filter}
                 ORDER BY next_attempt_at, created_at, chain_id
                 LIMIT 1
                 """,
-                (now_epoch, now_epoch, now_epoch),
+                (now_epoch, now_epoch, now_epoch, *action_parameters),
             ).fetchone()
             if row is None:
                 connection.commit()
