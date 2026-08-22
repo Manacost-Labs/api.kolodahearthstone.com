@@ -50,6 +50,21 @@ _LIMITERS: dict[int, threading.BoundedSemaphore] = {}
 _PAID_LOCK = threading.Lock()
 _RECOVERED_BUDGET_PATHS: set[Path] = set()
 
+_FAILURE_REASON_BY_VERDICT = {
+    Verdict.DEAD_URL.value: "upstream_4xx",
+    Verdict.ORIGIN_DOWN.value: "transport",
+    Verdict.RATE_LIMITED.value: "rate_limited",
+    Verdict.AUTH_REQUIRED.value: "authentication",
+    Verdict.ACCESS_DENIED.value: "access_blocked",
+    Verdict.BLOCKED.value: "access_blocked",
+    Verdict.SOFT_BLOCK.value: "access_blocked",
+    Verdict.CSR_REQUIRED.value: "access_blocked",
+    Verdict.THIN_CONTENT.value: "contract",
+    Verdict.PROVIDER_ERROR.value: "transport",
+    Verdict.PARSE_FAIL.value: "contract",
+    Verdict.NOT_MODIFIED.value: "unavailable",
+}
+
 
 @dataclass(frozen=True)
 class TransportEvidence:
@@ -72,6 +87,8 @@ class TransportEvidence:
     paid_requests: int = 0
     paid_cost_usd: str = "0"
     cost_certainty: str = "exact"
+    paid_fallback_decision: str = "not_evaluated"
+    paid_budget_state: str | None = None
 
     @property
     def transport_validated(self) -> bool:
@@ -80,6 +97,12 @@ class TransportEvidence:
     @property
     def paid_escalation_allowed(self) -> bool:
         return self.verdict in {verdict.value for verdict in PAID_ESCALATION_VERDICTS}
+
+    @property
+    def failure_reason_code(self) -> str:
+        if self.transport_validated:
+            return "none"
+        return _FAILURE_REASON_BY_VERDICT.get(self.verdict, "unknown")
 
     def telemetry(self) -> dict[str, object]:
         """Return bounded, secret-free evidence without response bodies or URL queries."""
@@ -101,8 +124,11 @@ class TransportEvidence:
             "paid_requests": self.paid_requests,
             "paid_cost_usd": self.paid_cost_usd,
             "cost_certainty": self.cost_certainty,
+            "paid_fallback_decision": self.paid_fallback_decision,
+            "paid_budget_state": self.paid_budget_state,
             "transport_validated": self.transport_validated,
             "paid_escalation_allowed": self.paid_escalation_allowed,
+            "failure_reason_code": self.failure_reason_code,
             "publication_validated": None,
         }
 
@@ -146,6 +172,8 @@ def _evidence_from_validated(
     paid_requests: int = 0,
     paid_cost_usd: str = "0",
     cost_certainty: str = "exact",
+    paid_fallback_decision: str = "not_evaluated",
+    paid_budget_state: str | None = None,
 ) -> TransportEvidence:
     response = validated.response
     triage = validated.triage
@@ -167,6 +195,8 @@ def _evidence_from_validated(
         paid_requests=paid_requests,
         paid_cost_usd=paid_cost_usd,
         cost_certainty=cost_certainty,
+        paid_fallback_decision=paid_fallback_decision,
+        paid_budget_state=paid_budget_state,
     )
 
 
@@ -295,6 +325,7 @@ def _paid_evidence(
             paid_requests=1,
             paid_cost_usd=paid_cost_usd,
             cost_certainty=certainty,
+            paid_fallback_decision="attempted",
         )
 
     validated = validate_response(
@@ -318,7 +349,32 @@ def _paid_evidence(
         paid_requests=1,
         paid_cost_usd=paid_cost_usd,
         cost_certainty=certainty,
+        paid_fallback_decision="attempted",
     )
+
+
+def _budget_fallback_decision(state: object) -> str:
+    value = str(state)
+    if value == "UNKNOWN_SPEND":
+        return "budget_unknown"
+    if value == "OVERSPENT":
+        return "budget_overspent"
+    if value == "EXHAUSTED":
+        return "daily_limit"
+    return "budget_blocked"
+
+
+def _refused_attempt_decision(attempt: PaidAttempt) -> str:
+    reason = attempt.reason.casefold()
+    if "budget state" in reason or "budget refused" in reason:
+        return "budget_hold_refused"
+    if "confidence bound" in reason:
+        return "router_no_strategy"
+    if "circuit" in reason or "breaker" in reason:
+        return "breaker_open"
+    if "not configured" in reason:
+        return "provider_disabled"
+    return "provider_refused"
 
 
 def _fetch_paid_sync(
@@ -327,14 +383,16 @@ def _fetch_paid_sync(
     contract: ResponseContract,
 ) -> TransportEvidence:
     if direct.verdict not in {verdict.value for verdict in PAID_ESCALATION_VERDICTS}:
-        return direct
-    if "scrape.do" not in parsesunix_allowed_providers() or not scrape_do_token():
-        return direct
+        return replace(direct, paid_fallback_decision="verdict_ineligible")
+    if "scrape.do" not in parsesunix_allowed_providers():
+        return replace(direct, paid_fallback_decision="provider_disabled")
+    if not scrape_do_token():
+        return replace(direct, paid_fallback_decision="provider_credentials_missing")
 
     daily_limit = parsesunix_scrape_do_daily_credit_limit()
     request_limit = parsesunix_scrape_do_max_requests_per_refresh()
     if daily_limit <= Decimal(0) or request_limit <= 0:
-        return direct
+        return replace(direct, paid_fallback_decision="budget_disabled")
 
     with _PAID_LOCK:
         state_dir = parsesunix_state_dir()
@@ -366,10 +424,25 @@ def _fetch_paid_sync(
             url_class=url_class,
             verdict=verdict,
         )
-        if not decision.chosen or not budget.state().allows_paid_work:
-            return direct
+        budget_state = budget.state()
+        if not budget_state.allows_paid_work:
+            return replace(
+                direct,
+                paid_fallback_decision=_budget_fallback_decision(budget_state),
+                paid_budget_state=str(budget_state),
+            )
+        if not decision.chosen:
+            return replace(
+                direct,
+                paid_fallback_decision="router_no_strategy",
+                paid_budget_state=str(budget_state),
+            )
         if not reserve_parsesunix_paid_request(request_limit):
-            return direct
+            return replace(
+                direct,
+                paid_fallback_decision="refresh_limit",
+                paid_budget_state=str(budget_state),
+            )
         attempt = MultiProviderEscalator(
             router,
             budget=budget,
@@ -382,7 +455,17 @@ def _fetch_paid_sync(
             url_class=url_class,
             rules=contract.content_rules(),
         )
-    return _paid_evidence(direct, attempt, contract) if attempt.attempted else direct
+        final_budget_state = budget.state()
+    if attempt.attempted:
+        return replace(
+            _paid_evidence(direct, attempt, contract),
+            paid_budget_state=str(final_budget_state),
+        )
+    return replace(
+        direct,
+        paid_fallback_decision=_refused_attempt_decision(attempt),
+        paid_budget_state=str(final_budget_state),
+    )
 
 
 async def fetch(
@@ -395,5 +478,5 @@ async def fetch(
 
     direct = await fetch_direct(url, contract, headers=headers)
     if not direct.paid_escalation_allowed:
-        return direct
+        return replace(direct, paid_fallback_decision="verdict_ineligible")
     return await asyncio.to_thread(_fetch_paid_sync, url, direct, contract)

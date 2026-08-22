@@ -261,6 +261,32 @@ def test_parsesunix_never_reenters_the_legacy_paid_chain() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("verdict", "reason_code"),
+    [
+        ("BLOCKED", "access_blocked"),
+        ("SOFT_BLOCK", "access_blocked"),
+        ("ACCESS_DENIED", "access_blocked"),
+        ("RATE_LIMITED", "rate_limited"),
+        ("AUTH_REQUIRED", "authentication"),
+        ("ORIGIN_DOWN", "transport"),
+        ("PARSE_FAIL", "contract"),
+    ],
+)
+def test_parsesunix_rejections_keep_bounded_failure_reason(
+    verdict: str,
+    reason_code: str,
+) -> None:
+    status: dict[str, object] = {}
+
+    fetcher._attach_failure_class(
+        status,
+        ParsesUnixTransportRejected(_evidence("rejected", verdict=verdict)),
+    )
+
+    assert status["failure_reason_code"] == reason_code
+
+
 def test_shadow_mode_compares_candidate_but_returns_legacy_body(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

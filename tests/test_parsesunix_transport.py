@@ -115,6 +115,7 @@ def test_direct_transport_returns_validated_secret_free_evidence(monkeypatch) ->
     assert evidence.transport_validated is True
     assert evidence.verdict == "OK"
     assert evidence.paid_requests == 0
+    assert evidence.paid_fallback_decision == "not_evaluated"
     telemetry = evidence.telemetry()
     assert telemetry["final_host"] == "example.com"
     assert telemetry["publication_validated"] is None
@@ -161,6 +162,8 @@ def test_truncated_response_is_never_transport_validated(monkeypatch) -> None:
     assert evidence.transport_validated is False
     assert evidence.verdict == "PARSE_FAIL"
     assert evidence.paid_escalation_allowed is False
+    assert evidence.paid_fallback_decision == "not_evaluated"
+    assert evidence.failure_reason_code == "contract"
     assert "truncated" in evidence.reason
 
 
@@ -185,6 +188,7 @@ def test_transport_error_is_sanitized(monkeypatch) -> None:
     assert evidence.transport_validated is False
     assert evidence.verdict == "ORIGIN_DOWN"
     assert evidence.paid_escalation_allowed is False
+    assert evidence.failure_reason_code == "transport"
     assert "secret" not in evidence.reason
     assert "secret" not in repr(evidence.telemetry())
 
@@ -213,6 +217,8 @@ def test_budgeted_scrape_do_runs_only_after_deterministic_block(
     assert evidence.paid_requests == 1
     assert evidence.paid_cost_usd == "0.000290"
     assert evidence.cost_certainty == "exact"
+    assert evidence.paid_fallback_decision == "attempted"
+    assert evidence.paid_budget_state == "OK"
     assert evidence.body == FakeScrapeDoProvider.body.decode()
 
 
@@ -239,6 +245,7 @@ def test_paid_provider_is_not_called_for_origin_outage(monkeypatch, tmp_path) ->
     assert evidence.backend == "parsesunix_direct"
     assert evidence.paid_requests == 0
     assert evidence.verdict == "ORIGIN_DOWN"
+    assert evidence.paid_fallback_decision == "verdict_ineligible"
 
 
 def test_paid_provider_requires_nonzero_limits_and_refresh_context(
@@ -254,6 +261,7 @@ def test_paid_provider_requires_nonzero_limits_and_refresh_context(
     )
     assert FakeScrapeDoProvider.calls == 0
     assert evidence.backend == "parsesunix_direct"
+    assert evidence.paid_fallback_decision == "refresh_limit"
 
     monkeypatch.setenv("HS_PARSESUNIX_SCRAPE_DO_DAILY_CREDIT_LIMIT", "0")
     begin_refresh_run()
@@ -265,6 +273,7 @@ def test_paid_provider_requires_nonzero_limits_and_refresh_context(
         end_refresh_run()
     assert FakeScrapeDoProvider.calls == 0
     assert evidence.paid_requests == 0
+    assert evidence.paid_fallback_decision == "budget_disabled"
 
 
 def test_paid_request_cap_is_atomic_per_refresh(monkeypatch, tmp_path) -> None:
@@ -285,6 +294,7 @@ def test_paid_request_cap_is_atomic_per_refresh(monkeypatch, tmp_path) -> None:
 
     assert first.paid_requests == 1
     assert second.paid_requests == 0
+    assert second.paid_fallback_decision == "refresh_limit"
     assert FakeScrapeDoProvider.calls == 1
 
 
@@ -315,7 +325,41 @@ def test_unknown_provider_spend_is_never_reported_as_zero(
     assert evidence.paid_requests == 1
     assert evidence.paid_cost_usd == ""
     assert evidence.cost_certainty == "unknown"
+    assert evidence.paid_fallback_decision == "attempted"
+    assert evidence.paid_budget_state == "UNKNOWN_SPEND"
     assert evidence.telemetry()["cost_certainty"] == "unknown"
+
+
+def test_unknown_spend_blocks_next_paid_attempt_with_exact_reason(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    _configure_paid_canary(monkeypatch, tmp_path, requests=2)
+    FakeTransport.response = _soft_block_response()
+    FakeScrapeDoProvider.error = ProviderError(
+        kind=ProviderErrorKind.TIMEOUT,
+        message="provider timed out",
+        provider="scrape.do",
+        retryable=True,
+    )
+    monkeypatch.setattr(parsesunix_transport, "UrllibTransport", FakeTransport)
+
+    begin_refresh_run()
+    try:
+        first = asyncio.run(
+            parsesunix_transport.fetch("https://example.com/one", HTML_CONTRACT)
+        )
+        second = asyncio.run(
+            parsesunix_transport.fetch("https://example.com/two", HTML_CONTRACT)
+        )
+    finally:
+        end_refresh_run()
+
+    assert first.paid_fallback_decision == "attempted"
+    assert second.paid_requests == 0
+    assert second.paid_fallback_decision == "budget_unknown"
+    assert second.paid_budget_state == "UNKNOWN_SPEND"
+    assert FakeScrapeDoProvider.calls == 1
 
 
 def test_existing_transport_json_is_checked_by_the_same_contract() -> None:

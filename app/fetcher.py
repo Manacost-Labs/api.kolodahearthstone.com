@@ -934,6 +934,8 @@ def _attach_failure_class(
     if isinstance(exc, ProxyPaymentRequiredError):
         status["failure_class"] = f"proxy_{exc.status_code}"
         status["proxy_status"] = exc.status_code
+    elif isinstance(exc, ParsesUnixTransportRejected):
+        status["failure_reason_code"] = exc.evidence.failure_reason_code
     return status
 
 
@@ -3375,12 +3377,23 @@ async def _fetch_source_with_active_lifecycle(
                 reason=f"browser_exception:{type(exc).__name__}",
             )
         else:
+            paid_decision = (
+                parsesunix_observation.get("paid_fallback_decision")
+                if isinstance(parsesunix_observation, dict)
+                else "integration_failure"
+            )
             log_action(
                 "parsesunix.paid_fallback.skipped",
                 source_id=source.id,
                 level="warn",
-                detail="ParsesUnix verdict or integration failure does not authorize paid escalation",
-                extra=parsesunix_observation,
+                detail=(
+                    "Legacy paid chain remains disabled after the bounded "
+                    f"ParsesUnix decision: {paid_decision}"
+                ),
+                extra={
+                    **(parsesunix_observation or {}),
+                    "legacy_paid_chain_reentry": False,
+                },
             )
         if firecrawl_status is not None:
             _attach_parsesunix_observation(
