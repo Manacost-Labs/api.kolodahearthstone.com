@@ -103,6 +103,7 @@ from .refresh_log import (
 from .resource_locks import ResourceLocked, ResourceLockSet
 from .scrapers.browser_pool import PatchrightPool
 from .scrapers.flaresolverr import (
+    fetch_via_flaresolverr,
     set_active_flaresolverr_session,
     set_flaresolverr_source,
 )
@@ -159,6 +160,15 @@ class _GenericHtmlFetch:
     page_snapshot: Any | None
     parsesunix_mode: str
     parsesunix_observation: dict[str, object] | None = None
+
+
+_PARSESUNIX_FREE_BROWSER_PRIMARY_SOURCE_IDS = frozenset(
+    {
+        "hsguru_matchups_legend",
+        "hsguru_matchups_wild_legend",
+        "hsguru_matchups_diamond_4to1",
+    }
+)
 
 
 _deferred_ai_jobs: ContextVar[list[_DeferredAIJob] | None] = ContextVar(
@@ -1462,6 +1472,65 @@ def _firecrawl_primary_enabled(source_id: str, parsesunix_mode: str) -> bool:
     )
 
 
+async def _try_parsesunix_free_browser_primary(
+    source: Source,
+) -> _GenericHtmlFetch | None:
+    """Try a proven local browser route before any paid-capable transport."""
+
+    if source.id not in _PARSESUNIX_FREE_BROWSER_PRIMARY_SOURCE_IDS:
+        return None
+    try:
+        result = await fetch_via_flaresolverr(source)
+        evidence = validate_acquired_response(
+            source.fetch_url,
+            result.html,
+            page_response_contract(source),
+            status=result.http_status,
+            headers={"content-type": "text/html"},
+            final_url=result.final_url,
+            backend=result.backend,
+        )
+    except Exception as exc:  # noqa: BLE001 - free browser is a fallback boundary
+        log_action(
+            "parsesunix.free_browser.fail",
+            source_id=source.id,
+            backend="flaresolverr",
+            error_type=type(exc).__name__,
+            detail=str(exc)[:500],
+            level="warn",
+            extra={"paid_requests": 0, "free_browser_primary": True},
+        )
+        return None
+
+    observation = evidence.telemetry()
+    observation.update(
+        {
+            "mode": "parsesunix",
+            "free_browser_primary": True,
+            "publication_validated": None,
+        }
+    )
+    log_action(
+        "parsesunix.free_browser.observe",
+        source_id=source.id,
+        backend=evidence.backend,
+        http_status=evidence.http_status,
+        level="info" if evidence.transport_validated else "warn",
+        extra=observation,
+    )
+    if not evidence.transport_validated:
+        return None
+    return _GenericHtmlFetch(
+        body=evidence.body,
+        http_status=evidence.http_status or 0,
+        final_url=evidence.final_url,
+        backend=evidence.backend,
+        page_snapshot=result.snapshot,
+        parsesunix_mode="parsesunix",
+        parsesunix_observation=observation,
+    )
+
+
 async def _fetch_generic_html(
     client: httpx.AsyncClient | None,
     source: Source,
@@ -1481,6 +1550,9 @@ async def _fetch_generic_html(
 
     try:
         if mode == "parsesunix":
+            free_browser = await _try_parsesunix_free_browser_primary(source)
+            if free_browser is not None:
+                return free_browser
             try:
                 evidence = await fetch_with_parsesunix(
                     source.fetch_url,

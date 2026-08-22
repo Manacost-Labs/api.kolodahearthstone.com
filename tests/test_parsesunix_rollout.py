@@ -150,6 +150,92 @@ def test_active_mode_rejects_soft_block_without_legacy_publication(
     legacy.assert_not_awaited()
 
 
+def test_active_hsguru_uses_validated_free_browser_before_paid_transport(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = SOURCE_BY_ID["hsguru_matchups_legend"]
+    body = (
+        "<html><body><main>"
+        + "<article>matchup table with validated content</article>" * 600
+        + "</main></body></html>"
+    )
+    free_browser = AsyncMock(
+        return_value=SimpleNamespace(
+            html=body,
+            http_status=200,
+            final_url=source.fetch_url,
+            backend="flaresolverr",
+            snapshot=None,
+        )
+    )
+    paid_transport = AsyncMock(
+        side_effect=AssertionError("paid-capable transport must stay unused")
+    )
+    monkeypatch.setattr(
+        fetcher,
+        "parsesunix_mode_for_source",
+        lambda _source_id: "parsesunix",
+    )
+    monkeypatch.setattr(fetcher, "fetch_via_flaresolverr", free_browser)
+    monkeypatch.setattr(fetcher, "fetch_with_parsesunix", paid_transport)
+    monkeypatch.setattr(fetcher, "log_action", lambda *_args, **_kwargs: None)
+
+    result = asyncio.run(
+        fetcher._fetch_generic_html(
+            None,
+            source,
+            preferred_backend="legacy_browser",
+        )
+    )
+
+    assert result.body == body
+    assert result.backend == "flaresolverr"
+    assert result.parsesunix_mode == "parsesunix"
+    assert result.parsesunix_observation["transport_validated"] is True
+    assert result.parsesunix_observation["free_browser_primary"] is True
+    assert result.parsesunix_observation["paid_requests"] == 0
+    free_browser.assert_awaited_once_with(source)
+    paid_transport.assert_not_awaited()
+
+
+def test_active_hsguru_rejects_invalid_free_browser_then_uses_parsesunix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = SOURCE_BY_ID["hsguru_matchups_legend"]
+    valid_body = "<html><body>matchup" + "x" * 30_000 + "</body></html>"
+    free_browser = AsyncMock(
+        return_value=SimpleNamespace(
+            html="<html><title>Just a moment...</title></html>",
+            http_status=200,
+            final_url=source.fetch_url,
+            backend="flaresolverr",
+            snapshot=None,
+        )
+    )
+    parsesunix = AsyncMock(return_value=_evidence(valid_body))
+    monkeypatch.setattr(
+        fetcher,
+        "parsesunix_mode_for_source",
+        lambda _source_id: "parsesunix",
+    )
+    monkeypatch.setattr(fetcher, "fetch_via_flaresolverr", free_browser)
+    monkeypatch.setattr(fetcher, "fetch_with_parsesunix", parsesunix)
+    monkeypatch.setattr(fetcher, "log_action", lambda *_args, **_kwargs: None)
+
+    result = asyncio.run(
+        fetcher._fetch_generic_html(
+            None,
+            source,
+            preferred_backend="legacy_browser",
+        )
+    )
+
+    assert result.body == valid_body
+    assert result.backend == "parsesunix_direct"
+    free_browser.assert_awaited_once_with(source)
+    parsesunix.assert_awaited_once()
+
+
 def test_invalid_rollout_configuration_fails_before_any_transport(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
