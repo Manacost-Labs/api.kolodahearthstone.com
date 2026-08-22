@@ -387,3 +387,27 @@ def test_existing_transport_rejects_html_under_json_contract() -> None:
 
     assert evidence.transport_validated is False
     assert evidence.verdict == "PARSE_FAIL"
+
+
+def test_rendered_hsguru_page_with_cloudflare_runtime_marker_is_valid() -> None:
+    from app.parsesunix_contracts import page_response_contract
+    from app.sources import SOURCE_BY_ID
+
+    source = SOURCE_BY_ID["hsguru_matchups_legend"]
+    body = (
+        "<html><body><main>"
+        + "<article>matchup table with validated content</article>" * 600
+        + '<script>window.cf_chl_opt={};const widget="cf-chl-widget-container";</script>'
+        + "</main></body></html>"
+    )
+
+    evidence = parsesunix_transport.validate_acquired_response(
+        source.fetch_url,
+        body,
+        page_response_contract(source),
+        headers={"Content-Type": "text/html"},
+        backend="flaresolverr",
+    )
+
+    assert evidence.transport_validated is True
+    assert evidence.verdict == "OK"

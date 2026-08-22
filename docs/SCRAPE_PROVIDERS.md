@@ -164,7 +164,7 @@ docker exec hs-data-api python -m app.cli brightdata-init-usage --billed-request
 
 ### Безопасное включение ParsesUnix
 
-Интеграция закреплена на неизменяемом релизе `ParsesUnix v0.10.0` с проверкой
+Интеграция закреплена на неизменяемом релизе `ParsesUnix v0.10.1` с проверкой
 SHA-256. По умолчанию она полностью выключена. Режим выбирается отдельно для
 каждого source ID:
 
