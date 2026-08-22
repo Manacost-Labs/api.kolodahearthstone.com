@@ -72,6 +72,8 @@
 - [GAME_CHANGE_AUDIT.md](GAME_CHANGE_AUDIT.md) — ежедневный аудит изменений игры.
 - [PARSER_IMPROVEMENT_PLAN.md](PARSER_IMPROVEMENT_PLAN.md) — исторический план
   развития парсеров; актуальное поведение проверяйте по коду и runbooks.
+- [FRESH_99_IMPLEMENTATION_PLAN.md](FRESH_99_IMPLEMENTATION_PLAN.md) — текущий
+  поэтапный план достижения честных 99% fresh-only и verified completeness.
 - [STABILITY_ROADMAP.md](STABILITY_ROADMAP.md) — накопленный backlog
   стабилизации, а не описание уже гарантированного production‑поведения.
 
