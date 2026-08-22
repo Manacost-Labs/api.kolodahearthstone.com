@@ -219,6 +219,19 @@ def test_server_readiness_requires_safe_active_convergence_configuration() -> No
     assert "HS_CONVERGENCE_API_BASE_URL" in readiness
 
 
+def test_convergence_configuration_script_never_prints_or_removes_secret() -> None:
+    script = (ROOT / "scripts" / "configure-convergence-worker.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert "openssl rand -hex 32" in script
+    assert "chmod 0600" in script
+    assert "HS_CONVERGENCE_WORKER_MODE" in script
+    assert "upsert HS_ORCHESTRATOR_API_KEY" in script
+    assert "echo \"${orchestrator_key_value}" not in script
+    assert "HS_ORCHESTRATOR_API_KEY=" not in script
+
+
 def test_docker_bg_hero_details_accepts_degraded_exit_code() -> None:
     service_text = (
         ROOT / "systemd" / "hs-data-api-docker-refresh-bg-hero-details.service"

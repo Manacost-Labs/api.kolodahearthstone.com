@@ -281,6 +281,20 @@ schedule occurrence и обязан вернуть точные `paidRequests` �
 выводит значение ключа. `scripts/server-readiness.sh` считает active-режим без
 такого ключа неготовым к deployment.
 
+Штатное включение и безопасный откат выполняются без вывода ключа:
+
+```bash
+sudo scripts/configure-convergence-worker.sh active /srv/hs-data-api/.env.docker
+sudo docker compose -f /srv/hs-data-api/docker-compose.yml up -d api
+
+# Быстрый откат автоматических recovery-запусков:
+sudo scripts/configure-convergence-worker.sh disable /srv/hs-data-api/.env.docker
+```
+
+Команда сохраняет уже существующий безопасный ключ или генерирует отдельный
+64-символьный ключ, устанавливает права `0600` и не меняет provider allowlist,
+лимиты Scrape.do или политику Bright Data.
+
 Минимальный безопасный шаблон до canary:
 
 ```env
