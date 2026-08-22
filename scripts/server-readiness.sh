@@ -62,6 +62,15 @@ env_configured() {
   if [[ "${HS_FETCH_REQUIRE_PROXY:-false}" == "true" ]]; then
     [[ "${HS_FETCH_PROXY_URL:-}" != "" && "${HS_FETCH_PROXY_URL:-}" != *"USER:PASS"* ]] || return 1
   fi
+  if [[ "${HS_CONVERGENCE_WORKER_MODE:-off}" == "active" ]]; then
+    local orchestrator_key="${HS_ORCHESTRATOR_API_KEY:-}"
+    [[ "${#orchestrator_key}" -ge 32 ]] || return 1
+    [[ "${orchestrator_key}" != "${HS_API_KEY}" ]] || return 1
+    case "${HS_CONVERGENCE_API_BASE_URL:-}" in
+      http://api:* | http://localhost:* | http://127.0.0.1:* | https://*) ;;
+      *) return 1 ;;
+    esac
+  fi
 }
 
 python_imports() {

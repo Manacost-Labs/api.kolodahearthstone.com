@@ -208,6 +208,17 @@ def test_convergence_worker_is_installed_but_remains_off_by_default() -> None:
     assert "Persistent=true" in timer
 
 
+def test_server_readiness_requires_safe_active_convergence_configuration() -> None:
+    readiness = (ROOT / "scripts" / "server-readiness.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert '"${HS_CONVERGENCE_WORKER_MODE:-off}" == "active"' in readiness
+    assert '"${#orchestrator_key}" -ge 32' in readiness
+    assert '"${orchestrator_key}" != "${HS_API_KEY}"' in readiness
+    assert "HS_CONVERGENCE_API_BASE_URL" in readiness
+
+
 def test_docker_bg_hero_details_accepts_degraded_exit_code() -> None:
     service_text = (
         ROOT / "systemd" / "hs-data-api-docker-refresh-bg-hero-details.service"

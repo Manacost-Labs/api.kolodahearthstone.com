@@ -274,6 +274,13 @@ schedule occurrence и обязан вернуть точные `paidRequests` �
 только после active-canary и проверки отдельного funnel ParsesUnix в
 `/v1/system/parsing-reliability`.
 
+При active-режиме `HS_ORCHESTRATOR_API_KEY` обязателен, должен содержать не
+менее 32 символов и не должен совпадать с `HS_API_KEY`. Worker проверяет
+конфигурацию только перед реально due transport-цепочкой: ошибка возвращается
+как bounded `configuration_blocked`, не захватывает recovery attempt и не
+выводит значение ключа. `scripts/server-readiness.sh` считает active-режим без
+такого ключа неготовым к deployment.
+
 Минимальный безопасный шаблон до canary:
 
 ```env
