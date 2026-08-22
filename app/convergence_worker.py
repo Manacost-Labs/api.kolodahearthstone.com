@@ -54,11 +54,23 @@ class WorkerSummary:
     outcome: str | None = None
     reason_code: str | None = None
     final_state: str | None = None
+    configuration_issue: str | None = None
 
 
 def worker_mode() -> WorkerMode:
     value = os.environ.get("HS_CONVERGENCE_WORKER_MODE", "off").strip().lower()
     return cast(WorkerMode, value) if value in {"off", "active"} else "off"
+
+
+def _configuration_issue(error: ValueError) -> str:
+    message = str(error)
+    if "control token" in message:
+        return "parser_control_token_invalid"
+    if "control base URL" in message:
+        return "parser_control_base_url_invalid"
+    if "ACTIVE_SOURCE_IDS" in message:
+        return "parsesunix_active_allowlist_invalid"
+    return "recovery_configuration_invalid"
 
 
 def eligible_transport_source_ids() -> frozenset[str]:
@@ -257,25 +269,50 @@ def main() -> int:
                 )
             )
         if not summary.claimed:
-            client = HttpParserControlClient(
-                base_url=args.base_url,
-                token=os.environ.get("HS_ORCHESTRATOR_API_KEY", ""),
-            )
-
-            async def execute(claim: ConvergenceClaim) -> RecoveryExecution:
-                return await execute_parser_control_recovery(claim, client=client)
-
-            summary = asyncio.run(
-                run_once(
-                    store=store,
-                    executor=execute,
-                    owner=owner,
-                    mode="active",
+            try:
+                transport_source_ids = eligible_transport_source_ids()
+                transport_due = store.has_due(
+                    now=datetime.now(UTC),
                     actions=frozenset({"retry_transport"}),
-                    eligible_source_ids=eligible_transport_source_ids(),
-                    lease_seconds=25 * 60,
+                    eligible_source_ids=transport_source_ids,
                 )
-            )
+                client = (
+                    HttpParserControlClient(
+                        base_url=args.base_url,
+                        token=os.environ.get("HS_ORCHESTRATOR_API_KEY", ""),
+                    )
+                    if transport_due
+                    else None
+                )
+            except ValueError as exc:
+                summary = WorkerSummary(
+                    mode="active",
+                    claimed=False,
+                    outcome="configuration_blocked",
+                    reason_code="preflight",
+                    final_state="configuration_blocked",
+                    configuration_issue=_configuration_issue(exc),
+                )
+            else:
+                if client is not None:
+
+                    async def execute(claim: ConvergenceClaim) -> RecoveryExecution:
+                        return await execute_parser_control_recovery(
+                            claim,
+                            client=client,
+                        )
+
+                    summary = asyncio.run(
+                        run_once(
+                            store=store,
+                            executor=execute,
+                            owner=owner,
+                            mode="active",
+                            actions=frozenset({"retry_transport"}),
+                            eligible_source_ids=transport_source_ids,
+                            lease_seconds=25 * 60,
+                        )
+                    )
     print(json.dumps(asdict(summary), ensure_ascii=False, sort_keys=True))
     return 0
 

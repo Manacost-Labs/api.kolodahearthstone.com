@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -10,6 +12,7 @@ from app.convergence_worker import (
     RecoveryExecution,
     eligible_direct_candidate_source_ids,
     eligible_transport_source_ids,
+    main,
     run_once,
 )
 
@@ -337,3 +340,70 @@ def test_worker_fails_closed_when_executor_returns_incomplete_source_set(
     assert restored is not None
     assert restored.state == "waiting"
     assert restored.action == "retry_local"
+
+
+def test_active_cli_ignores_missing_control_token_when_transport_is_not_due(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    path = tmp_path / "parser-telemetry.sqlite3"
+    monkeypatch.delenv("HS_ORCHESTRATOR_API_KEY", raising=False)
+    monkeypatch.setenv("HS_PARSESUNIX_ENABLED", "true")
+    monkeypatch.setenv(
+        "HS_PARSESUNIX_ACTIVE_SOURCE_IDS",
+        "hsguru_meta_standard_legend",
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["convergence-worker", "--mode", "active", "--path", str(path)],
+    )
+
+    assert main() == 0
+
+    summary = json.loads(capsys.readouterr().out)
+    assert summary["claimed"] is False
+    assert summary["configuration_issue"] is None
+
+
+def test_active_cli_reports_invalid_control_token_without_claiming_due_chain(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    path = tmp_path / "parser-telemetry.sqlite3"
+    observed = datetime.now(UTC) - timedelta(minutes=10)
+    chain = ConvergenceStore(path).create_or_get_chain(
+        cohort_id="hsguru-meta-slices",
+        source_ids=["hsguru_meta_standard_legend"],
+        origin_occurrence_id="refresh-all:missing-token-test",
+        decision=decide_recovery(outcome="failed", reason_code="transport"),
+        outcome="failed",
+        reason_code="transport",
+        observed_at=observed,
+        deadline_at=observed + timedelta(hours=4),
+    )
+    monkeypatch.delenv("HS_ORCHESTRATOR_API_KEY", raising=False)
+    monkeypatch.setenv("HS_PARSESUNIX_ENABLED", "true")
+    monkeypatch.setenv(
+        "HS_PARSESUNIX_ACTIVE_SOURCE_IDS",
+        "hsguru_meta_standard_legend",
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["convergence-worker", "--mode", "active", "--path", str(path)],
+    )
+
+    assert main() == 0
+
+    summary = json.loads(capsys.readouterr().out)
+    restored = ConvergenceStore(path).get_chain(chain.chain_id)
+    assert summary["claimed"] is False
+    assert summary["outcome"] == "configuration_blocked"
+    assert summary["reason_code"] == "preflight"
+    assert summary["configuration_issue"] == "parser_control_token_invalid"
+    assert restored is not None
+    assert restored.state == "waiting"
+    assert restored.attempt_index == 0

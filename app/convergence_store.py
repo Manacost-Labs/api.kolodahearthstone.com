@@ -703,6 +703,93 @@ class ConvergenceStore:
             lease_until=_from_epoch(lease_until_epoch),
         )
 
+    def has_due(
+        self,
+        *,
+        now: datetime,
+        actions: frozenset[str] | None = None,
+        eligible_source_ids: frozenset[str] | None = None,
+    ) -> bool:
+        """Check whether a matching claim exists without consuming an attempt."""
+
+        moment = _as_utc(now, field="now")
+        selected_actions = tuple(
+            sorted(
+                _bounded_label(action, field="action")
+                for action in (actions or ())
+            )
+        )
+        selected_source_ids = tuple(
+            sorted(
+                _identifier(source_id, field="eligible_source_id")
+                for source_id in (eligible_source_ids or ())
+            )
+        )
+        if actions is not None and not selected_actions:
+            return False
+        if eligible_source_ids is not None and not selected_source_ids:
+            return False
+
+        action_filter = ""
+        action_parameters: tuple[object, ...] = ()
+        if actions is not None:
+            placeholders = ", ".join("?" for _action in selected_actions)
+            action_filter = f"AND action IN ({placeholders})"
+            action_parameters = tuple(selected_actions)
+
+        eligibility_filter = ""
+        eligibility_parameters: tuple[object, ...] = ()
+        if eligible_source_ids is not None:
+            placeholders = ", ".join("?" for _source in selected_source_ids)
+            eligibility_filter = f"""
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM convergence_chain_sources AS selected_sources
+                  WHERE selected_sources.chain_id = convergence_chains.chain_id
+                    AND selected_sources.source_id NOT IN ({placeholders})
+              )
+            """
+            eligibility_parameters = tuple(selected_source_ids)
+
+        now_epoch = moment.timestamp()
+        connection = self._connect()
+        try:
+            _ensure_schema(connection)
+            row = connection.execute(
+                f"""
+                SELECT 1
+                FROM convergence_chains
+                WHERE deadline_at > ?
+                  AND (
+                    (
+                      state IN ('waiting', 'upstream_pending')
+                      AND next_attempt_at IS NOT NULL
+                      AND next_attempt_at <= ?
+                      AND (lease_until IS NULL OR lease_until <= ?)
+                    )
+                    OR (
+                      state = 'running'
+                      AND lease_until IS NOT NULL
+                      AND lease_until <= ?
+                    )
+                  )
+                  {action_filter}
+                  {eligibility_filter}
+                LIMIT 1
+                """,
+                (
+                    now_epoch,
+                    now_epoch,
+                    now_epoch,
+                    now_epoch,
+                    *action_parameters,
+                    *eligibility_parameters,
+                ),
+            ).fetchone()
+            return row is not None
+        finally:
+            connection.close()
+
     def finish_attempt(
         self,
         *,
