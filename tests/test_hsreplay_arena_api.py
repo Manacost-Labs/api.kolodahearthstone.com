@@ -238,7 +238,7 @@ class HsreplayArenaApiTest(unittest.TestCase):
             ARENA_CARD_STATS_API_URL,
             (
                 "https://hsreplay.net/api/v1/arena/card_stats/"
-                "?ArenaTimestampRangeFilter=CURRENT_META_PERIOD_UNDERGROUND&format=json"
+                "?ArenaTimestampRangeFilter=LAST_4_DAYS&format=json"
             ),
         )
 
