@@ -235,12 +235,17 @@ CONTRACTS: dict[str, SourceContract] = {
     "hsreplay_battlegrounds_heroes": SourceContract(
         source_id="hsreplay_battlegrounds_heroes",
         structured_type="bg_heroes",
+        preferred_channels=HSREPLAY_JSON_CHANNELS,
         allow_browser_fallback=False,
         min_rows=30,
         critical_fields=("hero", "pick_rate", "avg_placement", "tier", "placement_distribution"),
         min_field_fill_rate=0.70,
         regression_drop_ratio=0.35,
         fallback_policy="preserve_previous_good",
+        recommendation=(
+            "Primary: HSReplay current-patch heroes JSON through the bounded "
+            "provider route. Fallback: authenticated rendered tier-list page."
+        ),
     ),
     "hsreplay_battlegrounds_minions": SourceContract(
         source_id="hsreplay_battlegrounds_minions",

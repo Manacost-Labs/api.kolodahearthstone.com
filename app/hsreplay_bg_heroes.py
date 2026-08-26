@@ -12,7 +12,7 @@ from bs4 import BeautifulSoup
 from .cards_index import _load_raw_cards, cards_by_dbfid
 from .config import flaresolverr_url, request_timeout_seconds
 from .hsreplay_auth import hsreplay_cookies_for_fetch
-from .hsreplay_client import fetch_text_via_flaresolverr
+from .hsreplay_client import fetch_hsreplay_json, fetch_text_via_flaresolverr
 from .sources import Source
 
 logger = logging.getLogger(__name__)
@@ -31,6 +31,11 @@ _AUTH_MARKERS = (
     "подпис",
 )
 _HERO_STATS_API = (
+    "https://hsreplay.net/api/v1/battlegrounds/heroes/"
+    "?BattlegroundsMMRPercentile=TOP_50_PERCENT&"
+    "BattlegroundsTimeRange=CURRENT_BATTLEGROUNDS_PATCH&format=json"
+)
+_HERO_STATS_ROLLING_API = (
     "https://hsreplay.net/api/v1/battlegrounds/heroes/"
     "?BattlegroundsMMRPercentile=TOP_50_PERCENT&BattlegroundsTimeRange=LAST_7_DAYS"
 )
@@ -301,6 +306,46 @@ def parse_hsreplay_bg_heroes_html(html: str) -> list[dict[str, Any]]:
 
 
 async def fetch_hsreplay_battlegrounds_heroes(source: Source) -> dict[str, Any]:
+    # The JSON endpoint contains the complete hero index and all contract
+    # fields.  Prefer it over the rendered premium page: after HSReplay UI
+    # changes the page can be empty even while the source data is healthy.
+    try:
+        stats_payload = await fetch_hsreplay_json(
+            _HERO_STATS_API,
+            source_id=source.id,
+            cache_key="bg:heroes:TOP_50_PERCENT:CURRENT_BATTLEGROUNDS_PATCH",
+        )
+        stats_by_dbf = parse_hsreplay_bg_hero_stats_text(
+            json.dumps(stats_payload, ensure_ascii=False)
+        )
+        if len(stats_by_dbf) < 30:
+            raise RuntimeError(
+                f"HSReplay Battlegrounds heroes API returned only {len(stats_by_dbf)} rows"
+            )
+        heroes = build_heroes_from_stats(stats_by_dbf)
+        return {
+            "type": "bg_heroes",
+            "heroes": heroes,
+            "blocked": False,
+            "source": {
+                "backend": "hsreplay_json_api",
+                "status": 200,
+                "url": _HERO_STATS_API,
+                "page_rows": 0,
+                "api_rows": len(stats_by_dbf),
+                "reconciled_rows_added": len(heroes),
+            },
+            "filters": {
+                "mmr_percentile": "TOP_50_PERCENT",
+                "time_range": "CURRENT_BATTLEGROUNDS_PATCH",
+            },
+        }
+    except Exception as exc:
+        logger.warning(
+            "HSReplay BG heroes JSON path failed; trying rendered-page fallback (%s)",
+            type(exc).__name__,
+        )
+
     cookies = hsreplay_cookies_for_fetch()
     if not any(cookie.get("name") == "sessionid" for cookie in cookies):
         raise RuntimeError("HSReplay auth storage does not contain sessionid")
@@ -328,7 +373,7 @@ async def fetch_hsreplay_battlegrounds_heroes(source: Source) -> dict[str, Any]:
     reconciled_rows_added = 0
     try:
         stats_text = await fetch_text_via_flaresolverr(
-            _HERO_STATS_API,
+            _HERO_STATS_ROLLING_API,
             source_id=source.id,
         )
         stats_by_dbf = parse_hsreplay_bg_hero_stats_text(stats_text)

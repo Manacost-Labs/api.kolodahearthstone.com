@@ -8,7 +8,10 @@ from web_scraper.fetchers import RawResponse
 
 from app.parsesunix_contracts import (
     SPECIALIZED_API_SOURCE_IDS,
+    STRICT_HSREPLAY_HERO_SOURCE_IDS,
+    STRICT_HSREPLAY_JSON_SOURCE_IDS,
     STRICT_HSREPLAY_TRINKET_SOURCE_IDS,
+    hsreplay_json_contract_for_source,
     hsreplay_json_response_contract,
     page_response_contract,
     specialized_api_response_contract,
@@ -86,6 +89,51 @@ def test_strict_hsreplay_rollout_starts_with_all_eleven_trinket_sources() -> Non
         (*LEGACY_DEFAULT_TRINKET_SOURCE_IDS, *TRINKET_SLICE_SOURCE_IDS)
     )
     assert len(STRICT_HSREPLAY_TRINKET_SOURCE_IDS) == 11
+
+
+def test_strict_hsreplay_rollout_validates_hero_index_wire_shape() -> None:
+    assert STRICT_HSREPLAY_HERO_SOURCE_IDS == frozenset(
+        {
+            "hsreplay_battlegrounds_heroes",
+            "hsreplay_battlegrounds_hero_details",
+        }
+    )
+    assert STRICT_HSREPLAY_JSON_SOURCE_IDS == (
+        STRICT_HSREPLAY_TRINKET_SOURCE_IDS | STRICT_HSREPLAY_HERO_SOURCE_IDS
+    )
+    url = (
+        "https://hsreplay.net/api/v1/battlegrounds/heroes/"
+        "?BattlegroundsTimeRange=CURRENT_BATTLEGROUNDS_PATCH"
+    )
+    contract = hsreplay_json_contract_for_source(
+        "hsreplay_battlegrounds_heroes",
+        url,
+    )
+    assert contract is not None
+    body = json.dumps(
+        {
+            "data": [
+                {
+                    "hero_dbf_id": 123,
+                    "pick_rate": 1.5,
+                    "avg_final_placement": 4.2,
+                    "final_placement_distribution": [12.5] * 8,
+                    "tier_v2": "A",
+                }
+            ]
+        }
+    ).ljust(120)
+    accepted = validate_response(
+        _response(body, content_type="application/json"),
+        contract,
+    )
+    rejected = validate_response(
+        _response(json.dumps({"data": []}).ljust(120), content_type="application/json"),
+        contract,
+    )
+
+    assert accepted.transport_validated is True
+    assert rejected.transport_validated is False
 
 
 def test_specialized_api_contract_registry_covers_all_eighty_one_sources() -> None:

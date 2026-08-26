@@ -24,6 +24,7 @@ from app.fetcher import (
 )
 from app.hsreplay_arena_api import normalize_arena_card_row
 from app.hsreplay_bg_heroes import (
+    fetch_hsreplay_battlegrounds_heroes,
     merge_hero_stats,
     parse_hsreplay_bg_hero_stats_text,
     parse_hsreplay_bg_heroes_html,
@@ -63,6 +64,46 @@ from app.vicious_syndicate import (
 
 
 class RefreshStabilityTest(unittest.TestCase):
+    def test_hsreplay_bg_heroes_prefers_current_patch_json(self) -> None:
+        rows = [
+            {
+                "hero_dbf_id": 100_000 + index,
+                "pick_rate": 1.0 + index / 10,
+                "avg_final_placement": 3.0 + index / 100,
+                "final_placement_distribution": [12.5] * 8,
+                "tier_v2": ("S", "A", "B")[index % 3],
+                "best_composition": index,
+            }
+            for index in range(30)
+        ]
+        source = Source(
+            id="hsreplay_battlegrounds_heroes",
+            site="hsreplay",
+            category="battlegrounds",
+            url="https://hsreplay.net/battlegrounds/heroes/",
+        )
+
+        with (
+            patch(
+                "app.hsreplay_bg_heroes.fetch_hsreplay_json",
+                new=AsyncMock(return_value={"data": rows}),
+            ) as fetch_json,
+            patch(
+                "app.hsreplay_bg_heroes.hsreplay_cookies_for_fetch",
+                side_effect=AssertionError("rendered-page fallback must not run"),
+            ),
+        ):
+            result = asyncio.run(fetch_hsreplay_battlegrounds_heroes(source))
+
+        self.assertEqual(len(result["heroes"]), 30)
+        self.assertEqual(result["source"]["backend"], "hsreplay_json_api")
+        self.assertEqual(
+            result["filters"]["time_range"],
+            "CURRENT_BATTLEGROUNDS_PATCH",
+        )
+        self.assertTrue(all(row["placement_distribution"] for row in result["heroes"]))
+        self.assertIn("CURRENT_BATTLEGROUNDS_PATCH", fetch_json.call_args.args[0])
+
     def test_refresh_outcome_counts_do_not_report_lkg_as_live_success(self) -> None:
         counts = _refresh_outcome_counts(
             [

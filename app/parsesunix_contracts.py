@@ -27,6 +27,15 @@ from .trinket_slices import (
 STRICT_HSREPLAY_TRINKET_SOURCE_IDS = frozenset(
     (*LEGACY_DEFAULT_TRINKET_SOURCE_IDS, *TRINKET_SLICE_SOURCE_IDS)
 )
+STRICT_HSREPLAY_HERO_SOURCE_IDS = frozenset(
+    {
+        "hsreplay_battlegrounds_heroes",
+        "hsreplay_battlegrounds_hero_details",
+    }
+)
+STRICT_HSREPLAY_JSON_SOURCE_IDS = frozenset(
+    STRICT_HSREPLAY_TRINKET_SOURCE_IDS | STRICT_HSREPLAY_HERO_SOURCE_IDS
+)
 SPECIALIZED_API_SOURCE_IDS = frozenset(
     LIGHT_API_IDS
     | MEDIUM_API_IDS
@@ -77,6 +86,20 @@ def hsreplay_json_response_contract(url: str) -> ResponseContract:
             ),
             min_body_bytes=100,
         )
+    if path in {
+        "/api/v1/battlegrounds/heroes/",
+        "/api/v1/battlegrounds/duos/heroes/",
+    }:
+        return ResponseContract.json(
+            required_json_paths=(
+                "data.0.hero_dbf_id",
+                "data.0.pick_rate",
+                "data.0.avg_final_placement",
+                "data.0.final_placement_distribution",
+                "data.0.tier_v2",
+            ),
+            min_body_bytes=100,
+        )
     if path.startswith(("/analytics/query/", "/api/v1/analytics/query/")):
         return ResponseContract.json(
             required_json_paths=("series.data",),
@@ -101,7 +124,7 @@ def hsreplay_json_contract_for_source(
 ) -> ResponseContract | None:
     """Return the first bounded HSReplay API rollout slice, or no contract yet."""
 
-    if source_id not in STRICT_HSREPLAY_TRINKET_SOURCE_IDS:
+    if source_id not in STRICT_HSREPLAY_JSON_SOURCE_IDS:
         return None
     return hsreplay_json_response_contract(url)
 
