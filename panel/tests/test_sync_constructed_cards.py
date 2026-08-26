@@ -42,7 +42,11 @@ class HearthstoneJsonFormatFallbackTest(unittest.TestCase):
 
     def test_current_event_card_is_used_only_while_blizzard_omits_it(self):
         fallback = sync.hsj_format_fallback_cards(
-            "standard", self.ru, self.en, blizzard_dbfs=set()
+            "standard",
+            self.ru,
+            self.en,
+            blizzard_dbfs=set(),
+            today=date(2026, 8, 25),
         )
 
         self.assertEqual([card["id"] for card in fallback], ["JAIL_EVENT_100"])
@@ -91,7 +95,11 @@ class HearthstoneJsonFormatFallbackTest(unittest.TestCase):
         }
 
         fallback = sync.hsj_format_fallback_cards(
-            "standard", self.ru, self.en, blizzard_dbfs=set()
+            "standard",
+            self.ru,
+            self.en,
+            blizzard_dbfs=set(),
+            today=date(2026, 8, 25),
         )
 
         self.assertEqual([card["id"] for card in fallback], ["JAIL_EVENT_100"])
