@@ -31,7 +31,7 @@ Sites: `firestone` (8), `heartharena` (1), `hearthstone-decks` (1), `hsguru` (15
 | `hsguru_meta_wild_legend` | hsguru | meta | scrape | global | HSGuru meta, format=1, legend (min_games=100 for full table SSR). |
 | `hsguru_meta_wild_top_5k` | hsguru | meta | scrape | global | HSGuru meta, format=1, min_games=100, top 5k. |
 | `hsguru_meta_wild_top_legend` | hsguru | meta | scrape | global | HSGuru meta, format=1, min_games=100, top legend. |
-| `hsguru_meta_matrix` | hsguru | meta_matrix | pipeline | 36 | Unified Standard/Wild HSGuru matrix refreshed every twelve hours through Firecrawl: nine ranks (including ALL, Top-500 and Top-100), five rolling periods, Any Player, six locally derived min-games filters, plus the current-patch 50-game archetype catalog with cached HSGuru builds and history. |
+| `hsguru_meta_matrix` | hsguru | meta_matrix | pipeline | 36 | Unified Standard/Wild HSGuru matrix refreshed every twelve hours: nine ranks (including ALL, Top-500 and Top-100), four rolling periods, the latest patch, named release windows (violet_hold, most_wanted), Any Player, and six locally derived min-games filters. It also publishes the current 50-game archetype catalog with cached HSGuru builds and history. |
 | `hsguru_streamer_decks_legend_1000` | hsguru | streamer_decks | scrape | global | Streamer decks filtered to top 1000 legend, last 60 minutes, excluding Violet Hold, limit 100. |
 | `hsreplay_arena` | hsreplay | arena | scrape | global | HSReplay Arena overview. |
 | `hsreplay_arena_cards_advanced` | hsreplay | arena | scrape | global | HSReplay Arena cards. Fragment is client-side. |

@@ -107,6 +107,35 @@ class HsGuruDecksImprovementsTest(unittest.TestCase):
             finally:
                 hsguru_decks._matrix_period_memory = None
 
+    def test_deck_period_accepts_named_release_from_current_meta_matrix(self) -> None:
+        from app import hsguru_decks
+
+        matrix = {
+            "data": {
+                "structured": {
+                    "current_catalog": {"criteria": {"period": "most_wanted"}}
+                }
+            }
+        }
+        with (
+            patch.object(
+                hsguru_decks, "hsguru_current_patch_period", return_value=None
+            ),
+            patch.object(
+                hsguru_decks,
+                "load_resolved_public_dataset",
+                return_value=matrix,
+            ),
+        ):
+            hsguru_decks._matrix_period_memory = None
+            try:
+                self.assertEqual(
+                    hsguru_decks._current_deck_period(),
+                    "most_wanted",
+                )
+            finally:
+                hsguru_decks._matrix_period_memory = None
+
     def test_catalog_uses_local_solver_after_scrape_do_rotation_failure(self) -> None:
         from app import hsguru_decks
 

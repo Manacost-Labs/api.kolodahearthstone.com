@@ -57,13 +57,18 @@ ROLLING_PERIODS = (
     "past_2_weeks",
 )
 DEFAULT_PATCH_PERIOD = "patch_36.2.0"
-NAMED_PERIODS = ("violet_hold",)
+NAMED_PERIODS = ("violet_hold", "most_wanted")
+# Named windows are not ordinary patch identifiers. When HSGuru advertises one
+# of these release windows, it is a more precise current-catalog boundary than
+# the preceding patch_* window (for example, the 36.4 class-set release is
+# exposed as ``most_wanted`` while the newest patch link remains 36.2.2).
+CURRENT_NAMED_PERIODS = ("most_wanted",)
 PERIODS = (*ROLLING_PERIODS, DEFAULT_PATCH_PERIOD, *NAMED_PERIODS)
 COINS = ("any_player",)
 MIN_GAMES = (100, 250, 500, 1000, 2500, 5000)
 CURRENT_MIN_GAMES = 50
-# Scrape.do can legitimately need more than an hour for the full 108-slice
-# matrix. The checkpoint still bounds retries and lets an interrupted run
+# Scrape.do can legitimately need more than an hour for the full matrix. The
+# checkpoint still bounds retries and lets an interrupted run
 # resume, while this deadline avoids turning a healthy slow run into an LKG.
 DEFAULT_RUN_DEADLINE_SECONDS = 90 * 60
 CHECKPOINT_SCHEMA_VERSION = 1
@@ -296,6 +301,23 @@ def patch_periods_from_html(page_html: str) -> tuple[str, ...]:
             if re.fullmatch(r"patch_\d+(?:\.\d+){1,3}", value):
                 periods.add(value)
     return tuple(sorted(periods, key=_patch_version_key))
+
+
+def named_periods_from_html(page_html: str) -> tuple[str, ...]:
+    """Return only release windows explicitly supported by this parser.
+
+    HSGuru exposes other short-lived event periods in the same menu. Keeping a
+    bounded allowlist prevents one upstream navigation change from multiplying
+    the paid matrix request count unexpectedly.
+    """
+    advertised: set[str] = set()
+    soup = BeautifulSoup(page_html, "lxml")
+    for link in soup.find_all("a", href=True):
+        values = (
+            parse_qs(urlparse(str(link.get("href") or "")).query).get("period") or []
+        )
+        advertised.update(value for value in values if value in NAMED_PERIODS)
+    return tuple(period for period in NAMED_PERIODS if period in advertised)
 
 
 def iter_slice_specs(periods: tuple[str, ...] = PERIODS) -> tuple[SliceSpec, ...]:
@@ -867,13 +889,24 @@ async def _discover_hsguru_patch_period(
             "error": f"{type(exc).__name__}: {str(exc)[:300]}",
         }
     discovered = patch_periods_from_html(result.html)
-    period = discovered[-1] if discovered else fallback
+    discovered_named = named_periods_from_html(result.html)
+    selected_patch = discovered[-1] if discovered else fallback
+    period = next(
+        (
+            candidate
+            for candidate in reversed(CURRENT_NAMED_PERIODS)
+            if candidate in discovered_named
+        ),
+        selected_patch,
+    )
     return period, {
         "kind": "patch_discovery",
         "backend": result.backend,
         "request_credits": result.request_credits,
         "source_url": url,
         "periods_found": list(discovered),
+        "named_periods_found": list(discovered_named),
+        "selected_patch_period": selected_patch,
         "selected_period": period,
     }
 
@@ -1253,7 +1286,16 @@ async def _refresh_hsguru_meta_matrix_unlocked(
                 "error": f"{type(exc).__name__}: {str(exc)[:300]}",
             }
         )
-    periods = matrix_periods(current_period)
+    matrix_patch_period = str(
+        (patch_discovery_acquisition or {}).get("selected_patch_period") or ""
+    )
+    if not re.fullmatch(r"patch_\d+(?:\.\d+){1,3}", matrix_patch_period):
+        matrix_patch_period = (
+            current_period
+            if re.fullmatch(r"patch_\d+(?:\.\d+){1,3}", current_period)
+            else resolve_current_patch_period(cached_dataset)
+        )
+    periods = matrix_periods(matrix_patch_period)
     specs = iter_slice_specs(periods)
     checkpoint = _load_refresh_checkpoint(
         specs=specs,

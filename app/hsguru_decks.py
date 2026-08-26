@@ -175,7 +175,7 @@ def _current_deck_period() -> str:
     if configured and re.fullmatch(r"patch_\d+(?:\.\d+){1,3}", configured):
         return configured
     _, period, _ = _current_matrix_metadata()
-    if re.fullmatch(r"patch_\d+(?:\.\d+){1,3}", period):
+    if re.fullmatch(r"(?:patch_\d+(?:\.\d+){1,3}|[a-z][a-z0-9_]{0,31})", period):
         return period
     return "past_30_days"
 
