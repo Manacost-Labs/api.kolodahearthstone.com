@@ -47,6 +47,37 @@ def test_latest_official_patches_reads_json_ld() -> None:
     assert patches[0]["official_summary"] == "The new expansion patch."
 
 
+def test_latest_official_patches_prefers_current_sticky_feed_over_stale_json_ld() -> None:
+    sticky = [
+        {
+            "title": "36.4 Patch Notes",
+            "defaultUrl": "https://playhearthstone.com/en-us/blog/24293283",
+            "publish": 1787590500000,
+            "updated_at": "2026-08-24T18:03:01.810Z",
+            "summary": "The new Class Sets and Arena season.",
+        }
+    ]
+    sticky_script = (
+        '<script type="text/javascript">var stickyBlogList = '
+        f"{json.dumps(sticky)};</script>"
+    )
+    page = OFFICIAL_HTML.replace(
+        '<script type="application/ld+json">',
+        f'{sticky_script}<script type="application/ld+json">',
+        1,
+    )
+
+    with patch("scripts.seed_hs_manacost_patches.fetch_text", return_value=page):
+        patches = latest_official_patches(None)
+
+    assert [item["version"] for item in patches] == ["36.4", "36.0", "35.6.2"]
+    assert patches[0]["official_url"] == (
+        "https://playhearthstone.com/en-us/blog/24293283"
+    )
+    assert patches[0]["official_published_at"] == "2026-08-24T16:55:00+00:00"
+    assert patches[0]["official_summary"] == "The new Class Sets and Arena season."
+
+
 def test_combined_catalog_puts_official_new_patch_before_lagging_wiki() -> None:
     with (
         patch(

@@ -50,6 +50,9 @@ FETCH_RETRY_DELAYS_SECONDS = (1.0, 3.0)
 RETRYABLE_HTTP_STATUSES = frozenset({408, 425, 429, 500, 502, 503, 504})
 PARTIAL_EXIT_CODE = 10
 ALLOWED_HS_MANACOST_HOSTS = frozenset({"hs-manacost.ru", "www.hs-manacost.ru"})
+ALLOWED_OFFICIAL_NEWS_HOSTS = frozenset(
+    {"hearthstone.blizzard.com", "playhearthstone.com"}
+)
 MAX_CONSECUTIVE_DETAIL_FAILURES = 3
 MAX_RUN_SECONDS = 30 * 60
 
@@ -217,41 +220,79 @@ def latest_wiki_versions(limit: int | None) -> list[str]:
 
 def latest_official_patches(limit: int | None) -> list[dict[str, str]]:
     page = fetch_text(OFFICIAL_NEWS_URL)
+    entities: list[dict] = []
+
+    # Blizzard's JSON-LD list can lag behind the visible news feed.  The same
+    # server-rendered page exposes its current sticky articles as JSON; on the
+    # 36.4 release day this was the only machine-readable entry containing the
+    # new patch notes.
+    marker = "var stickyBlogList = "
+    marker_at = page.find(marker)
+    if marker_at >= 0:
+        try:
+            sticky, _ = json.JSONDecoder().raw_decode(
+                page[marker_at + len(marker) :].lstrip()
+            )
+        except (json.JSONDecodeError, TypeError):
+            sticky = []
+        if isinstance(sticky, list):
+            entities.extend(item for item in sticky[:50] if isinstance(item, dict))
+
     scripts = re.findall(
         r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
         page,
         flags=re.IGNORECASE | re.DOTALL,
     )
-    patches: list[dict[str, str]] = []
-    seen: set[str] = set()
     for raw_script in scripts:
         try:
             payload = json.loads(html.unescape(raw_script))
         except (json.JSONDecodeError, TypeError):
             continue
-        entities = ((payload.get("mainEntity") or {}).get("itemListElement") or [])
-        for entity in entities:
-            headline = str(entity.get("headline") or "").strip()
-            match = re.fullmatch(r"([0-9]+(?:\.[0-9]+){1,3}) Patch Notes", headline)
-            if not match or match.group(1) in seen:
-                continue
-            version = match.group(1)
-            seen.add(version)
-            patches.append(
-                {
-                    "version": version,
-                    "official_title": headline,
-                    "official_url": str(entity.get("url") or ""),
-                    "official_published_at": str(entity.get("datePublished") or ""),
-                    "official_modified_at": str(entity.get("dateModified") or ""),
-                    "official_summary": str(entity.get("description") or "").strip(),
-                }
+        json_ld_entities = ((payload.get("mainEntity") or {}).get("itemListElement") or [])
+        if isinstance(json_ld_entities, list):
+            entities.extend(
+                item for item in json_ld_entities if isinstance(item, dict)
             )
-            if limit is not None and len(patches) >= limit:
-                return patches
+
+    patches: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for entity in entities:
+        headline = str(entity.get("headline") or entity.get("title") or "").strip()
+        match = re.fullmatch(r"([0-9]+(?:\.[0-9]+){1,3}) Patch Notes", headline)
+        if not match or match.group(1) in seen:
+            continue
+        version = match.group(1)
+        official_url = str(entity.get("url") or entity.get("defaultUrl") or "")
+        if official_url and not _is_allowed_https_url(
+            official_url, ALLOWED_OFFICIAL_NEWS_HOSTS
+        ):
+            official_url = ""
+        published_at = str(entity.get("datePublished") or "")
+        publish_ms = entity.get("publish")
+        if not published_at and isinstance(publish_ms, (int, float)):
+            published_at = datetime.fromtimestamp(publish_ms / 1000, UTC).isoformat()
+        seen.add(version)
+        patches.append(
+            {
+                "version": version,
+                "official_title": headline,
+                "official_url": official_url,
+                "official_published_at": published_at,
+                "official_modified_at": str(
+                    entity.get("dateModified") or entity.get("updated_at") or ""
+                ),
+                "official_summary": str(
+                    entity.get("description") or entity.get("summary") or ""
+                ).strip(),
+            }
+        )
     if not patches:
         raise RuntimeError("Official Hearthstone news returned no patch notes")
-    return patches
+    patches.sort(
+        key=lambda item: tuple(int(part) for part in item["version"].split(".")),
+        reverse=True,
+    )
+    return patches if limit is None else patches[:limit]
 
 
 def combined_patch_catalog(limit: int | None) -> list[dict[str, str]]:

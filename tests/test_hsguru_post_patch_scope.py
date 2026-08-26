@@ -32,14 +32,33 @@ def test_cached_hsguru_catalog_wins_when_news_patch_catalog_lags() -> None:
     assert period == "patch_36.2.2"
 
 
+def test_new_official_patch_wins_over_the_previous_cached_hsguru_period() -> None:
+    from app.hsguru_meta_matrix import resolve_current_patch_period
+
+    with (
+        patch("app.hsguru_meta_matrix.hsguru_current_patch_period", return_value=None),
+        patch(
+            "scripts.seed_hs_manacost_patches.current_patch_version",
+            return_value="36.4",
+        ),
+    ):
+        period = resolve_current_patch_period(_matrix_dataset("patch_36.2.2"))
+
+    assert period == "patch_36.4"
+
+
 def test_hsguru_post_patch_scope_preserves_filters_and_adds_current_period() -> None:
     from app.hsguru_post_patch import source_for_current_patch
 
     source = SOURCE_BY_ID["hsguru_matchups_wild_legend"]
-    scoped = source_for_current_patch(
-        source,
-        cached_matrix=_matrix_dataset("patch_36.2.2"),
-    )
+    with patch(
+        "scripts.seed_hs_manacost_patches.current_patch_version",
+        return_value="36.2.2",
+    ):
+        scoped = source_for_current_patch(
+            source,
+            cached_matrix=_matrix_dataset("patch_36.2.2"),
+        )
 
     query = parse_qs(urlsplit(scoped.url).query)
     assert scoped.id == source.id
@@ -63,6 +82,10 @@ def test_fetch_source_scopes_hsguru_to_current_patch_during_early_mode() -> None
         patch(
             "app.hsguru_post_patch.load_dataset",
             return_value=_matrix_dataset("patch_36.2.2"),
+        ),
+        patch(
+            "scripts.seed_hs_manacost_patches.current_patch_version",
+            return_value="36.2.2",
         ),
         patch(
             "app.fetcher._fetch_source_with_captured_policy",
