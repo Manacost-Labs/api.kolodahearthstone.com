@@ -117,15 +117,13 @@ def test_hsreplay_json_accepts_drf_browsable_api_response() -> None:
 
 def test_hsreplay_json_validates_decoded_drf_hero_payload() -> None:
     body = """
-    <html><body><pre class="prettyprint">{
-      <span class="str">"data"</span>: [{
+    <html><body><pre class="prettyprint">[{
         <span class="str">"hero_dbf_id"</span>: 42,
         <span class="str">"pick_rate"</span>: 1.5,
         <span class="str">"avg_final_placement"</span>: 4.2,
         <span class="str">"final_placement_distribution"</span>: [12.5, 12.5],
         <span class="str">"tier_v2"</span>: "A"
-      }]
-    }</pre></body></html>
+      }]</pre></body></html>
     """
     url = (
         "https://hsreplay.net/api/v1/battlegrounds/heroes/"

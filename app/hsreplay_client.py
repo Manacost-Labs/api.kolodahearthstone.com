@@ -1080,6 +1080,11 @@ async def _fetch_hsreplay_json_serialized(
                 fetch_url,
             )
             payload = extract_json_payload(body)
+            normalized_payload = (
+                _payload_to_dict(payload)
+                if isinstance(payload, (dict, list))
+                else None
+            )
             response_contract = hsreplay_json_contract_for_source(source_id, api_url)
             if response_contract is not None:
                 # Browser-backed transports can return Django REST Framework's
@@ -1089,7 +1094,13 @@ async def _fetch_hsreplay_json_serialized(
                 contract_body = body
                 contract_headers = target_headers
                 if payload is not None:
-                    contract_body = json.dumps(payload, ensure_ascii=False)
+                    contract_payload = payload
+                    if isinstance(payload, list) and any(
+                        path.startswith("data.")
+                        for path in response_contract.required_json_paths
+                    ):
+                        contract_payload = normalized_payload
+                    contract_body = json.dumps(contract_payload, ensure_ascii=False)
                     contract_headers = {
                         **target_headers,
                         "content-type": "application/json",
@@ -1122,8 +1133,8 @@ async def _fetch_hsreplay_json_serialized(
                         },
                     )
                     continue
-            if isinstance(payload, (dict, list)):
-                result = _payload_to_dict(payload)
+            if normalized_payload is not None:
+                result = normalized_payload
                 _record_json_transport(
                     cache_key=key,
                     source_id=source_id,
