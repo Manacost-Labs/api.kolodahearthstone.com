@@ -122,6 +122,14 @@ def hsguru_meta(
             ),
             "",
         )
+    current_period = str(
+        ((structured.get("current_catalog") or {}).get("criteria") or {}).get(
+            "period"
+        )
+        or ""
+    )
+    if current_period not in allowed_periods:
+        current_period = discovered_patch
     response_meta = ApiMeta(
         source_id=SOURCE_ID,
         fetched_at=fetched_at,
@@ -131,6 +139,7 @@ def hsguru_meta(
     response_meta.update(
         {
             "available_periods": allowed_periods,
+            "current_period": current_period or None,
             "current_patch_period": discovered_patch or None,
         }
     )

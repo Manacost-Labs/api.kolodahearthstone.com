@@ -95,7 +95,7 @@ GraphQL pagination возвращает `items` и `pageInfo`. Максимал�
 
 | Метод | Path | Query parameters | Назначение |
 | --- | --- | --- | --- |
-| GET | `/v1/hsguru/meta` | `format`, `rank`, `period`, `coin`, `min_games` | Meta Standard/Wild |
+| GET | `/v1/hsguru/meta` | `format`, `rank`, `period`, `coin`, `min_games` | Meta Standard/Wild; `meta.current_period` указывает активное patch/named-окно |
 | GET | `/v1/hsguru/archetypes` | `format`, `q`, `min_games`, `has_decks`, `sort`, `order`, `limit`, `offset` | Текущий каталог архетипов |
 | GET | `/v1/hsguru/archetypes/history` | `archetype` (required), `format` (required), `limit` | История архетипа |
 | GET | `/v1/hsguru/archetypes/analysis` | `archetype` (required), `format` (required) | Полный анализ архетипа |

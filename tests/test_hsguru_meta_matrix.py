@@ -2121,6 +2121,7 @@ def test_v1_hsguru_meta_accepts_extended_periods(period: str) -> None:
                         "most_wanted",
                     ]
                 },
+                "current_catalog": {"criteria": {"period": "most_wanted"}},
                 "patch_discovery": {"selected_period": "patch_36.0.3"},
                 "slices": [
                     {
@@ -2154,6 +2155,7 @@ def test_v1_hsguru_meta_accepts_extended_periods(period: str) -> None:
         "most_wanted",
     ]
     assert body["meta"]["current_patch_period"] == "patch_36.0.3"
+    assert body["meta"]["current_period"] == "most_wanted"
 
 
 def test_v1_hsguru_meta_rejects_period_outside_published_dimensions() -> None:
