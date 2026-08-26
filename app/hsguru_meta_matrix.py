@@ -855,10 +855,24 @@ def resolve_current_patch_period(cached_dataset: dict[str, Any] | None = None) -
     )
 
 
+def resolve_current_hsguru_period(cached_dataset: dict[str, Any] | None = None) -> str:
+    """Resolve the active HSGuru window, including supported named releases."""
+
+    previous = (
+        (((cached_dataset or {}).get("data") or {}).get("structured") or {})
+        .get("current_catalog", {})
+        .get("criteria", {})
+        .get("period")
+    )
+    if isinstance(previous, str) and previous in CURRENT_NAMED_PERIODS:
+        return previous
+    return resolve_current_patch_period(cached_dataset)
+
+
 async def _discover_hsguru_patch_period(
     cached_dataset: dict[str, Any] | None,
 ) -> tuple[str, dict[str, Any] | None]:
-    fallback = await asyncio.to_thread(resolve_current_patch_period, cached_dataset)
+    fallback = await asyncio.to_thread(resolve_current_hsguru_period, cached_dataset)
     url = f"{HSGURU_META_URL}?" + urlencode(
         {
             "format": _FORMAT_QUERY["standard"],

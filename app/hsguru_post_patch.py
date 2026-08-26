@@ -4,7 +4,7 @@ from dataclasses import replace
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from .hsguru_meta_matrix import resolve_current_patch_period
+from .hsguru_meta_matrix import resolve_current_hsguru_period
 from .post_patch_policy import policy_for
 from .sources import Source
 from .storage import load_dataset
@@ -25,7 +25,7 @@ def source_for_current_patch(
 
     if not _supports_current_patch_scope(source):
         return source
-    period = resolve_current_patch_period(cached_matrix)
+    period = resolve_current_hsguru_period(cached_matrix)
     parsed = urlsplit(source.url)
     query = dict(parse_qsl(parsed.query, keep_blank_values=True))
     if source.category == "meta":

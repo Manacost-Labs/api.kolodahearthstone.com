@@ -47,6 +47,18 @@ def test_new_official_patch_wins_over_the_previous_cached_hsguru_period() -> Non
     assert period == "patch_36.4"
 
 
+def test_supported_named_release_wins_over_an_unpublished_patch_period() -> None:
+    from app.hsguru_meta_matrix import resolve_current_hsguru_period
+
+    with patch(
+        "scripts.seed_hs_manacost_patches.current_patch_version",
+        return_value="36.4",
+    ):
+        period = resolve_current_hsguru_period(_matrix_dataset("most_wanted"))
+
+    assert period == "most_wanted"
+
+
 def test_hsguru_post_patch_scope_preserves_filters_and_adds_current_period() -> None:
     from app.hsguru_post_patch import source_for_current_patch
 
