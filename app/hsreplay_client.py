@@ -1079,13 +1079,26 @@ async def _fetch_hsreplay_json_serialized(
                 source_id,
                 fetch_url,
             )
+            payload = extract_json_payload(body)
             response_contract = hsreplay_json_contract_for_source(source_id, api_url)
             if response_contract is not None:
+                # Browser-backed transports can return Django REST Framework's
+                # browsable HTML with the lossless JSON inside <pre>. Validate
+                # the deterministically decoded payload against the same
+                # source contract instead of rejecting healthy data as HTML.
+                contract_body = body
+                contract_headers = target_headers
+                if payload is not None:
+                    contract_body = json.dumps(payload, ensure_ascii=False)
+                    contract_headers = {
+                        **target_headers,
+                        "content-type": "application/json",
+                    }
                 evidence = validate_acquired_response(
                     api_url,
-                    body,
+                    contract_body,
                     response_contract,
-                    headers=target_headers,
+                    headers=contract_headers,
                     final_url=api_url,
                     backend=f"hsreplay_{label}",
                 )
@@ -1109,7 +1122,6 @@ async def _fetch_hsreplay_json_serialized(
                         },
                     )
                     continue
-            payload = extract_json_payload(body)
             if isinstance(payload, (dict, list)):
                 result = _payload_to_dict(payload)
                 _record_json_transport(
