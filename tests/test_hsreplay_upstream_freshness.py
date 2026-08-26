@@ -127,7 +127,7 @@ def test_arena_missing_headers_and_wrong_filters_are_unknown() -> None:
     wrong_filter = build_hsreplay_arena_upstream_freshness(
         {
             "metadata": {"meta_period_id": 16},
-            "selected_params": ["ArenaTimestampRangeFilter.LAST_14_DAYS"],
+            "selected_params": ["ArenaTimestampRangeFilter.LAST_4_DAYS"],
         },
         response_headers={
             "Last-Modified": NOW.strftime("%a, %d %b %Y %H:%M:%S GMT")

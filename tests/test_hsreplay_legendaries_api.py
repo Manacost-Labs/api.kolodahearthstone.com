@@ -77,7 +77,7 @@ class LegendaryGroupsByClassTests(unittest.TestCase):
             "metadata": {"meta_period_id": 16},
             "selected_params": [
                 "ArenaGameTypeFilter.BGT_UNDERGROUND_ARENA",
-                "ArenaTimestampRangeFilter.LAST_4_DAYS",
+                "ArenaTimestampRangeFilter.CURRENT_META_PERIOD_UNDERGROUND",
             ],
             "data": self._full_bucket_data(),
         }

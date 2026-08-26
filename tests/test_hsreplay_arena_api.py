@@ -238,7 +238,7 @@ class HsreplayArenaApiTest(unittest.TestCase):
             ARENA_CARD_STATS_API_URL,
             (
                 "https://hsreplay.net/api/v1/arena/card_stats/"
-                "?ArenaTimestampRangeFilter=LAST_4_DAYS&format=json"
+                "?ArenaTimestampRangeFilter=CURRENT_META_PERIOD_UNDERGROUND&format=json"
             ),
         )
 
@@ -247,7 +247,7 @@ class HsreplayArenaApiTest(unittest.TestCase):
             "metadata": {"meta_period_id": 16},
             "selected_params": [
                 "ArenaGameTypeFilter.BGT_UNDERGROUND_ARENA",
-                "ArenaTimestampRangeFilter.LAST_4_DAYS",
+                "ArenaTimestampRangeFilter.CURRENT_META_PERIOD_UNDERGROUND",
             ],
             "data": {"ALL": [self._valid_card_row()]},
         }
