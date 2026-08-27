@@ -456,9 +456,9 @@ SOURCES: tuple[Source, ...] = (
         site="hsreplay",
         category="battlegrounds",
         description=(
-            "Validated HSReplay Battlegrounds compositions screenshot refreshed daily; "
-            "only a decoded image with a supported MIME type and valid dimensions is "
-            "published as a fresh capture."
+            "Validated HSReplay Battlegrounds compositions screenshot checked every six "
+            "hours and recaptured once the current asset is at least 23 hours old; only "
+            "a decoded image with a supported MIME type and valid dimensions is published."
         ),
         stale_hours=36,
         kind="pipeline",

@@ -617,7 +617,11 @@ curl -s "https://api.kolodahearthstone.com/api/patches/35.6.2?include_content=fa
 `capture-bg-compositions-screenshot` делает Firecrawl screenshot страницы
 `https://hsreplay.net/battlegrounds/compositions/`, сохраняет файл локально в
 `data/firecrawl/screenshots/hsreplay_battlegrounds_compositions/` и обновляет
-`latest.json`. Плановый systemd timer запускается ежедневно.
+`latest.json`. Плановый systemd timer запускает stale-only проверку каждые
+шесть часов в `04:10`, `10:10`, `16:10` и `22:10 Europe/Warsaw`; повторный
+захват выполняется, когда текущему изображению исполнилось не менее 23 часов.
+Schedule inventory и durable ledger описывают те же четыре запуска и
+проверяются на точное соответствие versioned timer-файлу.
 
 ```bash
 curl -s "https://api.kolodahearthstone.com/api/bg/compositions/screenshot/latest" | jq .
