@@ -337,6 +337,29 @@ def _dedupe_additional(
 
 _REACT_CONTEXT_TIER = {1: "S", 2: "A", 3: "B", 4: "C", 5: "D"}
 _REACT_CONTEXT_DIFFICULTY = {1: "Easy", 2: "Medium", 3: "Hard"}
+_HTML_TIER_MARKERS = frozenset(_REACT_CONTEXT_TIER.values())
+
+
+def _listing_tier_for_anchor(anchor: Any) -> str | None:
+    """Return the tier column containing a rendered HSReplay comp link.
+
+    FlareSolverr returns the server-rendered React tree rather than the
+    ``react_context`` payload.  In that tree a tier marker (``s``/``a``/...
+    ) is a sibling of the group of comp rows, so it is not part of the comp
+    anchor's own text.  Walk only direct children of the small ancestor
+    containers to avoid mistaking arbitrary one-letter labels in the card
+    details for a tier marker.
+    """
+    parent = getattr(anchor, "parent", None)
+    for _ in range(8):
+        if parent is None:
+            break
+        for child in parent.find_all(recursive=False):
+            marker = " ".join(child.get_text(" ", strip=True).split()).upper()
+            if marker in _HTML_TIER_MARKERS:
+                return marker
+        parent = getattr(parent, "parent", None)
+    return None
 
 
 def _comps_from_react_context(soup: Any) -> list[dict[str, Any]]:
@@ -425,12 +448,30 @@ def _comps_from_react_context(soup: Any) -> list[dict[str, Any]]:
 def _comps_from_html(html: str) -> list[dict[str, Any]]:
     from bs4 import BeautifulSoup
 
-    from .hsreplay_extract import extract_bg_comps, extract_bg_comps_from_links
+    from .hsreplay_extract import (
+        COMP_HREF_RE,
+        extract_bg_comps,
+        extract_bg_comps_from_links,
+    )
 
     soup = BeautifulSoup(html, "html.parser")
     embedded = _comps_from_react_context(soup)
     if len(embedded) >= 3:
         return embedded
+
+    # The rendered fallback still exposes the authoritative tier column.  Map
+    # it by composition id before the generic link extractor strips the table
+    # layout and silently drops the tier metadata.
+    rendered_tiers: dict[int, str] = {}
+    for anchor in soup.find_all("a", href=COMP_HREF_RE):
+        if not anchor.get_text(" ", strip=True):
+            continue
+        match = COMP_HREF_RE.search(str(anchor.get("href") or ""))
+        if match is None:
+            continue
+        tier = _listing_tier_for_anchor(anchor)
+        if tier:
+            rendered_tiers.setdefault(int(match.group(1)), tier)
 
     raw = extract_bg_comps(soup)
     if len(raw) < 3:
@@ -452,6 +493,7 @@ def _comps_from_html(html: str) -> list[dict[str, Any]]:
                 "slug": slug,
                 "name": item.get("name") or _title_from_slug(slug),
                 "title": item.get("name") or _title_from_slug(slug),
+                "tier": rendered_tiers.get(comp_id),
                 "description": item.get("description") or "",
                 "main_cards": [],
                 "additional_cards": [],
