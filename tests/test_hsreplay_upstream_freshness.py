@@ -183,6 +183,42 @@ def test_arena_accepts_current_normal_arena_filter_pair() -> None:
     )
 
 
+def test_arena_accepts_exact_bounded_underground_profile() -> None:
+    selected_params = [
+        "ArenaGameTypeFilter.BGT_UNDERGROUND_ARENA",
+        "ArenaTimestampRangeFilter.LAST_4_DAYS",
+    ]
+    evidence = build_hsreplay_arena_upstream_freshness(
+        {"metadata": {"meta_period_id": 17}, "selected_params": selected_params},
+        response_headers={
+            "Last-Modified": (NOW - timedelta(hours=1)).strftime(
+                "%a, %d %b %Y %H:%M:%S GMT"
+            )
+        },
+        now=NOW,
+    )
+
+    assert evidence["status"] == "fresh"
+    assert evidence["filters_match"] is True
+    assert evidence["selected_params"] == selected_params
+
+    for invalid in (
+        selected_params * 2,
+        selected_params + ["ArenaTimestampRangeFilter.CURRENT_META_PERIOD"],
+    ):
+        rejected = build_hsreplay_arena_upstream_freshness(
+            {"metadata": {"meta_period_id": 17}, "selected_params": invalid},
+            response_headers={
+                "Last-Modified": NOW.strftime("%a, %d %b %Y %H:%M:%S GMT")
+            },
+            now=NOW,
+        )
+        assert (rejected["status"], rejected["reason"]) == (
+            "unknown",
+            "unexpected_selected_params",
+        )
+
+
 def test_arena_stale_future_malformed_headers_and_invalid_meta_fail_closed() -> None:
     payload = {
         "metadata": {"meta_period_id": 16},

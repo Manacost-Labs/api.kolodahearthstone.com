@@ -30,12 +30,11 @@ CLASSES_STATS_API_URL = "https://hsreplay.net/api/v1/arena/classes_stats/"
 
 ARENA_CARDS_PAGE_URL = "https://hsreplay.net/arena/cards/#view=advanced"
 # HSReplay exposes card tiers via card_stats (cards/ often 404 behind CF).
-# The request still accepts LAST_4_DAYS after patch 36.4, while the response
-# identifies the effective slice as CURRENT_META_PERIOD_UNDERGROUND.  Keep the
-# transport parameter separate from the stricter response freshness contract.
+# Pin both dimensions so the request and response freshness profile are coherent.
 ARENA_CARD_STATS_API_URL = (
     "https://hsreplay.net/api/v1/arena/card_stats/"
-    "?ArenaTimestampRangeFilter=LAST_4_DAYS&format=json"
+    "?ArenaGameTypeFilter=BGT_UNDERGROUND_ARENA"
+    "&ArenaTimestampRangeFilter=LAST_4_DAYS&format=json"
 )
 
 REGION_NAMES = {

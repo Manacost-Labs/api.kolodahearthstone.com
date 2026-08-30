@@ -233,12 +233,15 @@ class HsreplayArenaApiTest(unittest.TestCase):
             "primary_class and selected_class must both be ALL", report["warnings"]
         )
 
-    def test_arena_cards_endpoint_forces_json_for_the_recent_sample(self) -> None:
+    def test_arena_cards_endpoint_requests_the_exact_bounded_underground_profile(
+        self,
+    ) -> None:
         self.assertEqual(
             ARENA_CARD_STATS_API_URL,
             (
                 "https://hsreplay.net/api/v1/arena/card_stats/"
-                "?ArenaTimestampRangeFilter=LAST_4_DAYS&format=json"
+                "?ArenaGameTypeFilter=BGT_UNDERGROUND_ARENA"
+                "&ArenaTimestampRangeFilter=LAST_4_DAYS&format=json"
             ),
         )
 

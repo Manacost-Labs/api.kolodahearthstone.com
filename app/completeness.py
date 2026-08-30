@@ -22,6 +22,12 @@ HSREPLAY_ARENA_ACCEPTED_PARAM_SETS = frozenset(
                 "ArenaTimestampRangeFilter.CURRENT_META_PERIOD",
             }
         ),
+        frozenset(
+            {
+                "ArenaGameTypeFilter.BGT_UNDERGROUND_ARENA",
+                "ArenaTimestampRangeFilter.LAST_4_DAYS",
+            }
+        ),
     }
 )
 _SAFE_HSREPLAY_TARGET_HEADERS = frozenset(
