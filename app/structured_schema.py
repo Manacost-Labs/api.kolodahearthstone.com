@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 from .completeness import (
     ARENA_LEGENDARY_EXPECTED_BUCKETS,
     COMPLETENESS_SCHEMA_VERSION,
-    HSREPLAY_ARENA_ACCEPTED_PARAM_SETS,
+    hsreplay_arena_params_match,
 )
 from .source_contracts import uses_completeness_schema
 
@@ -239,8 +239,7 @@ def _validate_hsreplay_upstream_freshness(
             )
             _require(
                 freshness.get("filters_match") is True
-                and len(selected_params) == 2
-                and frozenset(selected_params) in HSREPLAY_ARENA_ACCEPTED_PARAM_SETS,
+                and hsreplay_arena_params_match(selected_params),
                 "structured.upstream_freshness.selected_params must match Arena filters",
             )
     else:

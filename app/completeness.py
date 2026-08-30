@@ -24,6 +24,23 @@ HSREPLAY_ARENA_ACCEPTED_PARAM_SETS = frozenset(
         ),
     }
 )
+
+
+def hsreplay_arena_params_match(selected_params: object) -> bool:
+    """Return whether selected params are one exact coherent Arena profile."""
+
+    if not isinstance(selected_params, (list, tuple)) or len(selected_params) != 2:
+        return False
+    if not all(
+        isinstance(value, str) and 0 < len(value) <= 128
+        for value in selected_params
+    ):
+        return False
+    selected_set = frozenset(selected_params)
+    return (
+        len(selected_set) == 2
+        and selected_set in HSREPLAY_ARENA_ACCEPTED_PARAM_SETS
+    )
 _SAFE_HSREPLAY_TARGET_HEADERS = frozenset(
     {
         "date",
@@ -235,21 +252,8 @@ def build_hsreplay_arena_upstream_freshness(
     result["evidence"].append("meta_period_id")
 
     selected = payload.get("selected_params")
-    selected_values = (
-        tuple(selected)
-        if isinstance(selected, (list, tuple))
-        and all(
-            isinstance(value, str) and 0 < len(value) <= 128
-            for value in selected
-        )
-        else ()
-    )
-    selected_set = frozenset(selected_values)
-    filters_match = (
-        len(selected_values) == 2
-        and len(selected_set) == 2
-        and selected_set in HSREPLAY_ARENA_ACCEPTED_PARAM_SETS
-    )
+    selected_values = tuple(selected) if hsreplay_arena_params_match(selected) else ()
+    filters_match = bool(selected_values)
     result["filters_match"] = filters_match
     if not filters_match:
         result["reason"] = "unexpected_selected_params"

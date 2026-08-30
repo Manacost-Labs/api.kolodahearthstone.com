@@ -183,6 +183,29 @@ def test_arena_accepts_current_normal_arena_filter_pair() -> None:
     )
 
 
+def test_arena_rejects_duplicate_extra_and_non_string_selected_params() -> None:
+    normal = "ArenaGameTypeFilter.BGT_NORMAL_ARENA"
+    current = "ArenaTimestampRangeFilter.CURRENT_META_PERIOD"
+    invalid_profiles = (
+        [normal, normal],
+        [normal, current, "ArenaLocaleFilter.enUS"],
+        [normal, {"value": current}],
+    )
+
+    for selected_params in invalid_profiles:
+        evidence = build_hsreplay_arena_upstream_freshness(
+            {"metadata": {"meta_period_id": 17}, "selected_params": selected_params},
+            response_headers={
+                "Last-Modified": NOW.strftime("%a, %d %b %Y %H:%M:%S GMT")
+            },
+            now=NOW,
+        )
+        assert (evidence["status"], evidence["reason"]) == (
+            "unknown",
+            "unexpected_selected_params",
+        )
+
+
 def test_arena_stale_future_malformed_headers_and_invalid_meta_fail_closed() -> None:
     payload = {
         "metadata": {"meta_period_id": 16},
