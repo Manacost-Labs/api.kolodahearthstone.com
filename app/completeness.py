@@ -13,6 +13,17 @@ HSREPLAY_ARENA_EXPECTED_PARAMS = (
     "ArenaGameTypeFilter.BGT_UNDERGROUND_ARENA",
     "ArenaTimestampRangeFilter.CURRENT_META_PERIOD_UNDERGROUND",
 )
+HSREPLAY_ARENA_ACCEPTED_PARAM_SETS = frozenset(
+    {
+        frozenset(HSREPLAY_ARENA_EXPECTED_PARAMS),
+        frozenset(
+            {
+                "ArenaGameTypeFilter.BGT_NORMAL_ARENA",
+                "ArenaTimestampRangeFilter.CURRENT_META_PERIOD",
+            }
+        ),
+    }
+)
 _SAFE_HSREPLAY_TARGET_HEADERS = frozenset(
     {
         "date",
@@ -233,15 +244,17 @@ def build_hsreplay_arena_upstream_freshness(
         )
         else ()
     )
+    selected_set = frozenset(selected_values)
     filters_match = (
-        len(selected_values) == len(HSREPLAY_ARENA_EXPECTED_PARAMS)
-        and frozenset(selected_values) == frozenset(HSREPLAY_ARENA_EXPECTED_PARAMS)
+        len(selected_values) == 2
+        and len(selected_set) == 2
+        and selected_set in HSREPLAY_ARENA_ACCEPTED_PARAM_SETS
     )
     result["filters_match"] = filters_match
     if not filters_match:
         result["reason"] = "unexpected_selected_params"
         return result
-    result["selected_params"] = list(HSREPLAY_ARENA_EXPECTED_PARAMS)
+    result["selected_params"] = list(selected_values)
     result["evidence"].append("selected_params")
 
     headers = result["response_headers"]
