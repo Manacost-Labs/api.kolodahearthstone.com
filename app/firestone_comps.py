@@ -527,4 +527,10 @@ async def fetch_firestone_arena(source: Source) -> dict[str, Any]:
         "total_cards": len(processed_cards),
         "last_update_date": cards_data.get("lastUpdated"),
         "total_data_points": cards_data.get("dataPoints") or len(processed_cards),
+        # Keep enough upstream lineage for the regression gate to distinguish a
+        # complete post-patch card-pool shrink from an adapter truncation.
+        "upstream_stats_count": len(card_stats_list),
+        "upstream_context": cards_data.get("context"),
+        "arena_mode": mode,
+        "legendary_only": is_legendary_only,
     }
