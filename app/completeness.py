@@ -22,8 +22,6 @@ HSREPLAY_ARENA_ACCEPTED_PARAM_SETS = frozenset(
                 "ArenaTimestampRangeFilter.CURRENT_META_PERIOD",
             }
         ),
-        # The canonical card_stats request asks for this bounded window only.
-        frozenset({"ArenaTimestampRangeFilter.LAST_4_DAYS"}),
     }
 )
 _SAFE_HSREPLAY_TARGET_HEADERS = frozenset(
@@ -248,7 +246,8 @@ def build_hsreplay_arena_upstream_freshness(
     )
     selected_set = frozenset(selected_values)
     filters_match = (
-        len(selected_values) == len(selected_set)
+        len(selected_values) == 2
+        and len(selected_set) == 2
         and selected_set in HSREPLAY_ARENA_ACCEPTED_PARAM_SETS
     )
     result["filters_match"] = filters_match
