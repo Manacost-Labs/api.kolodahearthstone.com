@@ -39,6 +39,3 @@
 - Made a successful Battlegrounds hero-details JSON refresh update the
   compatible hero index too, removing its dependency on a separate premium
   HTML session for freshness.
-- Restored HSReplay Battlegrounds strategy tiers when FlareSolverr returns the
-  rendered HTML tree without the `react_context` bootstrap; tier markers are
-  now carried from their listing groups into the structured rows.
