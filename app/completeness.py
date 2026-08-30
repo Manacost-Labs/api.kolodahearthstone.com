@@ -22,14 +22,6 @@ HSREPLAY_ARENA_ACCEPTED_PARAM_SETS = frozenset(
                 "ArenaTimestampRangeFilter.CURRENT_META_PERIOD",
             }
         ),
-        # The canonical card_stats request uses LAST_4_DAYS and HSReplay can
-        # echo that bounded window when the active game type is normal Arena.
-        frozenset(
-            {
-                "ArenaGameTypeFilter.BGT_NORMAL_ARENA",
-                "ArenaTimestampRangeFilter.LAST_4_DAYS",
-            }
-        ),
     }
 )
 _SAFE_HSREPLAY_TARGET_HEADERS = frozenset(
