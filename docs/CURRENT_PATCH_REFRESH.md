@@ -110,10 +110,6 @@ empty even while that JSON contains the current guides. Parse only entries
 where `comp_hidden` is false, resolve `comp_core_cards` DBF IDs through the
 current HearthstoneJSON index, and retain `comp_last_updated` for diagnostics.
 Never publish hidden historical guides merely to preserve the old row count.
-When FlareSolverr returns the rendered HTML fallback instead, carry the
-authoritative `s`/`a`/`b`/`c`/`d` marker from each listing group into its comp
-rows; do not leave the tier blank and rely on a consumer's default (which
-renders every strategy as D).
 The HSReplay contract permits an 85% contraction because removing hidden
 retired guides reduced the live catalog from 27 rows to eight on patch 36.2;
 the five-row minimum continues to reject incomplete responses.

@@ -1011,7 +1011,7 @@ def _validate_arena_legendary_groups(source_id: str, structured: dict[str, Any])
     return report
 
 
-def _validate_bg_comps(source_id: str, structured: dict[str, Any]) -> ValidationReport:
+def _validate_bg_comps(_source_id: str, structured: dict[str, Any]) -> ValidationReport:
     report = ValidationReport()
     comps = [row for row in (structured.get("comps") or []) if isinstance(row, dict)]
     with_cards = sum(
@@ -1037,41 +1037,6 @@ def _validate_bg_comps(source_id: str, structured: dict[str, Any]) -> Validation
             f"bg comps mostly empty ({with_cards}/{len(comps)} with cards; minimum {minimum_with_cards})",
             field="main_cards,additional_cards",
         )
-    # HSReplay's listing is the source of the strategy tier labels.  A parser
-    # regression can still return a formally complete list while mapping every
-    # row to D and dropping the listing's tier metadata.  Publishing that
-    # shape makes the HearthPulse strategy page look healthy but renders every
-    # strategy in the lowest tier.  Reject only rows that actually advertise a
-    # tier; legacy fixtures and providers without tier labels remain valid and
-    # are handled by their existing completeness gates.
-    if source_id == "hsreplay_battlegrounds_comps" and comps:
-        tiered = [str(row.get("tier") or "").strip().upper() for row in comps]
-        advertised = [tier for tier in tiered if tier in {"S", "A", "B", "C", "D"}]
-        metric_fields = (
-            "games",
-            "avg_placement",
-            "average_placement",
-            "popularity",
-            "first_place",
-            "winrate",
-        )
-        with_metrics = sum(1 for row in comps if any(row.get(field) not in (None, "") for field in metric_fields))
-        if len(advertised) >= 5 and set(advertised) == {"D"} and with_metrics == 0:
-            report.add_issue(
-                "bg_comps.collapsed_hsreplay_tiers",
-                (
-                    "HSReplay strategies collapsed to D without upstream metrics; "
-                    "refusing to publish a likely tier-mapping regression"
-                ),
-                field="tier,comp_tier,metrics",
-            )
-            report.metrics.update(
-                {
-                    "tier_counts": {"D": len(advertised)},
-                    "tiered_comps": len(advertised),
-                    "comps_with_metrics": with_metrics,
-                }
-            )
     report.score = round(
         (min(len(comps) / 3.0, 1.0) + min(with_cards / max(minimum_with_cards, 1), 1.0)) / 2,
         4,

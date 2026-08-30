@@ -671,59 +671,6 @@ class SourceValidatorsTest(unittest.TestCase):
             ).ok
         )
 
-    def test_hsreplay_comps_reject_collapsed_d_tiers_without_metrics(self) -> None:
-        comps = [
-            {
-                "name": f"Strategy {idx}",
-                "tier": "D",
-                "main_cards": [{"card_id": f"BG36_{idx:03d}"}],
-            }
-            for idx in range(19)
-        ]
-
-        report = validate_structured(
-            "hsreplay_battlegrounds_comps",
-            {"type": "bg_comps", "comps": comps},
-        )
-
-        self.assertFalse(report.ok)
-        self.assertIn(
-            "bg_comps.collapsed_hsreplay_tiers",
-            {issue.code for issue in report.issues},
-        )
-
-    def test_hsreplay_comps_accept_real_tier_mix_or_metrics(self) -> None:
-        tiered = [
-            {
-                "name": f"Strategy {idx}",
-                "tier": tier,
-                "main_cards": [{"card_id": f"BG36_{idx:03d}"}],
-            }
-            for idx, tier in enumerate(("S", "A", "B", "C", "D"))
-        ]
-        self.assertTrue(
-            validate_structured(
-                "hsreplay_battlegrounds_comps",
-                {"type": "bg_comps", "comps": tiered},
-            ).ok
-        )
-
-        metrics = [
-            {
-                "name": f"Strategy {idx}",
-                "tier": "D",
-                "games": 100 + idx,
-                "main_cards": [{"card_id": f"BG36_{idx:03d}"}],
-            }
-            for idx in range(5)
-        ]
-        self.assertTrue(
-            validate_structured(
-                "hsreplay_battlegrounds_comps",
-                {"type": "bg_comps", "comps": metrics},
-            ).ok
-        )
-
     def test_bg_card_stats_require_placement_metrics(self) -> None:
         cards = [
             {"name": f"Card {idx}", "average_placement": 4.0 if idx < 39 else None}

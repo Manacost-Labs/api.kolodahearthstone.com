@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any
 
 from .config import dataset_regression_drop_ratio
@@ -174,77 +173,6 @@ def estimate_filled_metric_count(source: Source, data: dict[str, Any]) -> int:
     return estimate_metric_count(source, data)
 
 
-def _parse_timestamp(value: Any) -> datetime | None:
-    if not isinstance(value, str) or not value.strip():
-        return None
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    return parsed if parsed.tzinfo is not None else None
-
-
-def _verified_firestone_arena_pool_reset(
-    source: Source,
-    *,
-    previous_structured: dict[str, Any],
-    new_structured: dict[str, Any],
-    new_count: int,
-    new_filled: int,
-) -> dict[str, Any] | None:
-    """Recognise a complete upstream card-pool shrink without weakening generic gates."""
-    if source.site != "firestone" or not source.id.startswith("firestone_arena_"):
-        return None
-    if (
-        previous_structured.get("type") != "arena_card_tiers"
-        or new_structured.get("type") != "arena_card_tiers"
-    ):
-        return None
-
-    previous_cards = previous_structured.get("cards") or []
-    new_cards = new_structured.get("cards") or []
-    previous_ids = {
-        str(card.get("card_id") or card.get("id"))
-        for card in previous_cards
-        if isinstance(card, dict) and (card.get("card_id") or card.get("id"))
-    }
-    new_ids = {
-        str(card.get("card_id") or card.get("id"))
-        for card in new_cards
-        if isinstance(card, dict) and (card.get("card_id") or card.get("id"))
-    }
-    if not previous_ids or not new_ids or len(new_ids) >= len(previous_ids):
-        return None
-    if len(previous_ids) != len(previous_cards) or len(new_ids) != len(new_cards):
-        return None
-    if not new_ids.issubset(previous_ids):
-        return None
-
-    upstream_count = new_structured.get("upstream_stats_count")
-    if not isinstance(upstream_count, int) or isinstance(upstream_count, bool):
-        return None
-    if upstream_count < new_count or new_count < max(40, int(upstream_count * 0.80)):
-        return None
-    if new_filled < int(new_count * 0.80):
-        return None
-
-    previous_updated = _parse_timestamp(previous_structured.get("last_update_date"))
-    new_updated = _parse_timestamp(new_structured.get("last_update_date"))
-    if previous_updated is None or new_updated is None or new_updated <= previous_updated:
-        return None
-
-    return {
-        "upstream_card_pool_reset": True,
-        "upstream_card_pool_reset_reason": "new complete card population is a strict subset of the newer upstream snapshot",
-        "previous_card_ids": len(previous_ids),
-        "new_card_ids": len(new_ids),
-        "upstream_stats_count": upstream_count,
-        "upstream_population_coverage": round(new_count / upstream_count, 4),
-        "previous_upstream_updated": previous_updated.isoformat(),
-        "new_upstream_updated": new_updated.isoformat(),
-    }
-
-
 def check_dataset_regression(
     source: Source,
     *,
@@ -289,16 +217,6 @@ def check_dataset_regression(
     new_structured = (
         new_data.get("structured") or new_data.get("hsreplay_extracted") or {}
     )
-    pool_reset = _verified_firestone_arena_pool_reset(
-        source,
-        previous_structured=previous_structured,
-        new_structured=new_structured,
-        new_count=new_count,
-        new_filled=new_filled,
-    )
-    if pool_reset is not None:
-        extra.update(pool_reset)
-        return False, None, extra
     if (
         previous_structured.get("type") == "firestone_standard"
         and new_structured.get("type") == "firestone_standard"

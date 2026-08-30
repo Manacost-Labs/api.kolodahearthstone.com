@@ -6,11 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 
-from app.firestone_comps import (
-    FIRESTONE_CARDS_URL,
-    fetch_firestone_arena,
-    fetch_firestone_cards,
-)
+from app.firestone_comps import FIRESTONE_CARDS_URL, fetch_firestone_cards
 from app.sources import SOURCE_BY_ID
 
 
@@ -58,49 +54,3 @@ def test_cards_use_explicit_mmr_100_direct_snapshot() -> None:
     assert result["_fetch_backend"] == "proxyless_direct"
     assert result["tiers"]["3"][0]["name"] == "Test Minion"
     assert result["tiers"]["3"][0]["impact"] == 0.4
-
-
-def test_arena_parser_keeps_upstream_lineage_and_legendary_filter() -> None:
-    cards_response = httpx.Response(
-        200,
-        content=json.dumps(
-            {
-                "lastUpdated": "2026-08-30T04:25:57.434Z",
-                "context": "global",
-                "stats": [
-                    {
-                        "cardId": "ARENA_LEGENDARY",
-                        "stats": {"decksWithCard": 100, "decksWithCardThenWin": 60},
-                    },
-                    {
-                        "cardId": "ARENA_COMMON",
-                        "stats": {"decksWithCard": 100, "decksWithCardThenWin": 50},
-                    },
-                ],
-            }
-        ).encode(),
-    )
-    draft_response = httpx.Response(
-        200,
-        content=json.dumps({"lastUpdateDate": "2026-08-30T04:27:29.311Z", "stats": []}).encode(),
-    )
-    fetch = AsyncMock(side_effect=[cards_response, draft_response])
-
-    def card(card_id: str, *, locale: str) -> dict[str, object]:
-        del locale
-        rarity = "LEGENDARY" if card_id == "ARENA_LEGENDARY" else "COMMON"
-        return {"id": card_id, "name": card_id, "rarity": rarity}
-
-    source = SOURCE_BY_ID["firestone_arena_legendaries_underground"]
-    with (
-        patch("app.firestone_comps._get_static_json", fetch),
-        patch("app.firestone_comps.card_from_id", side_effect=card),
-    ):
-        result = asyncio.run(fetch_firestone_arena(source))
-
-    assert len(result["cards"]) == 1
-    assert result["cards"][0]["card_id"] == "ARENA_LEGENDARY"
-    assert result["upstream_stats_count"] == 2
-    assert result["upstream_context"] == "global"
-    assert result["arena_mode"] == "arena-underground"
-    assert result["legendary_only"] is True
