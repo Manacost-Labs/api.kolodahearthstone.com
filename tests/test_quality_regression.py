@@ -63,6 +63,77 @@ class DatasetRegressionTest(unittest.TestCase):
         self.assertFalse(reg)
 
     @patch("app.dataset_regression.dataset_regression_drop_ratio", return_value=0.30)
+    def test_firestone_arena_accepts_verified_upstream_card_pool_reset(
+        self, _ratio: object
+    ) -> None:
+        source = SOURCE_BY_ID["firestone_arena_cards_underground"]
+        previous_cards = [
+            {"card_id": f"CARD_{index}", "tier": "C", "win_rate": 50.0}
+            for index in range(1788)
+        ]
+        current_cards = [
+            {"card_id": f"CARD_{index}", "tier": "C", "win_rate": 50.0}
+            for index in range(926)
+        ]
+        previous = {
+            "structured": {
+                "type": "arena_card_tiers",
+                "cards": previous_cards,
+                "last_update_date": "2026-08-28T15:26:18.700Z",
+            }
+        }
+        current = {
+            "structured": {
+                "type": "arena_card_tiers",
+                "cards": current_cards,
+                "last_update_date": "2026-08-30T04:25:57.434Z",
+                "upstream_stats_count": 1017,
+            }
+        }
+
+        regression, message, extra = check_dataset_regression(
+            source, previous_data=previous, new_data=current
+        )
+
+        self.assertFalse(regression, message)
+        self.assertTrue(extra["upstream_card_pool_reset"])
+        self.assertEqual(extra["rows_before"], 1788)
+        self.assertEqual(extra["rows_after"], 926)
+
+    @patch("app.dataset_regression.dataset_regression_drop_ratio", return_value=0.30)
+    def test_firestone_arena_rejects_unexplained_card_pool_drop(
+        self, _ratio: object
+    ) -> None:
+        source = SOURCE_BY_ID["firestone_arena_cards_underground"]
+        previous = {
+            "structured": {
+                "type": "arena_card_tiers",
+                "cards": [
+                    {"card_id": f"CARD_{index}", "tier": "C", "win_rate": 50.0}
+                    for index in range(100)
+                ],
+                "last_update_date": "2026-08-28T15:26:18.700Z",
+            }
+        }
+        current = {
+            "structured": {
+                "type": "arena_card_tiers",
+                "cards": [
+                    {"card_id": f"CARD_{index}", "tier": "C", "win_rate": 50.0}
+                    for index in range(50)
+                ],
+                "last_update_date": "2026-08-30T04:25:57.434Z",
+            }
+        }
+
+        regression, message, _extra = check_dataset_regression(
+            source, previous_data=previous, new_data=current
+        )
+
+        self.assertTrue(regression)
+        self.assertIn("metric count dropped", message or "")
+
+    @patch("app.dataset_regression.dataset_regression_drop_ratio", return_value=0.30)
     def test_streamer_rolling_hour_accepts_complete_three_row_window(
         self,
         _ratio: object,
