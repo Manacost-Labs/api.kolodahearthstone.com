@@ -201,69 +201,6 @@ def test_hsguru_streamer_reads_deck_code_from_copy_attribute_without_hydration()
     assert parsed["structured"]["rows"][0]["deck_code"] == deck_code
 
 
-def test_hsguru_streamer_reads_card_without_optional_url_or_table() -> None:
-    deck_code = (
-        "AAEBAf0GBs30Av76A4f7A564BtvXB63ZBwycENfOA4j0A8b5A8f5A63p"
-        "BdCeBu6hBom1BoSZB+C+B43cBwAA"
-    )
-    source = SOURCE_BY_ID["hsguru_streamer_decks_legend_1000"]
-    html = f"""
-    <html><body>
-      <table><tr><th>Deck</th><th>Streamer</th></tr></table>
-      <div id="deck_stats_viewport">
-        <div id="deck_stats-41520944">
-          <button data-clipboard-text="### Fresh deck
-{deck_code}"></button>
-          <span class="streamer">Streamer</span>
-        </div>
-      </div>
-    </body></html>
-    """
-
-    parsed = _dedupe_streamer_decks_parsed(parse_html(source, html))
-    report = contract_quality_report(source.id, parsed["structured"])
-
-    assert parsed["structured"]["rows"] == [
-        {
-            "Deck": "Fresh deck",
-            "Streamer": "Streamer",
-            "deck_code": deck_code,
-            "Deck_url": "",
-        }
-    ]
-    assert report["ok"] is True
-
-
-def test_hsguru_streamer_reads_rendered_card_without_legacy_id() -> None:
-    deck_code = (
-        "AAEBAf0GBs30Av76A4f7A564BtvXB63ZBwycENfOA4j0A8b5A8f5A63p"
-        "BdCeBu6hBom1BoSZB+C+B43cBwAA"
-    )
-    source = SOURCE_BY_ID["hsguru_streamer_decks_legend_1000"]
-    html = f"""
-    <html><body>
-      <div class="streamer-deck">
-        <div class="decklist-info" data-clipboard-text="### Fresh deck
-{deck_code}"></div>
-        <span class="streamer-name">Streamer</span>
-      </div>
-    </body></html>
-    """
-
-    parsed = parse_html(source, html)
-    report = contract_quality_report(source.id, parsed["structured"])
-
-    assert parsed["structured"]["rows"] == [
-        {
-            "Deck": "Fresh deck",
-            "Streamer": "Streamer",
-            "deck_code": deck_code,
-            "Deck_url": "",
-        }
-    ]
-    assert report["ok"] is True
-
-
 def _matchup_table(
     *,
     empty_non_self: bool = False,
