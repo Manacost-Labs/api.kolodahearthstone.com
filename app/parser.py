@@ -38,6 +38,7 @@ def _extract_tables(
     soup: BeautifulSoup,
     *,
     base_url: str = "",
+    infer_streamer_header: bool = False,
 ) -> list[dict[str, Any]]:
     tables: list[dict[str, Any]] = []
     for index, table in enumerate(soup.find_all("table")):
@@ -72,6 +73,8 @@ def _extract_tables(
         if not rows:
             continue
         headers = rows[0] if table.find("th") else []
+        if not headers and infer_streamer_header and _is_streamer_header_row(rows[0]):
+            headers = rows[0]
         data_rows = rows[1:] if headers else rows
         data_links = row_links[1:] if headers else row_links
         data_deck_codes = row_deck_codes[1:] if headers else row_deck_codes
@@ -107,6 +110,14 @@ def _extract_tables(
             }
         )
     return tables
+
+
+def _is_streamer_header_row(row: list[str]) -> bool:
+    normalized = {
+        re.sub(r"[^a-z]+", " ", value.casefold()).strip()
+        for value in row
+    }
+    return {"deck", "streamer"}.issubset(normalized)
 
 
 def _extract_json_scripts(soup: BeautifulSoup) -> list[dict[str, Any]]:
@@ -207,7 +218,11 @@ def parse_html(source: Source, html: str, snapshot: dict[str, Any] | None = None
             text_lines = snap_lines
     deck_codes = sorted(set(DECK_CODE_RE.findall(html)))
     json_scripts = _extract_json_scripts(soup)
-    tables = _extract_tables(soup, base_url=source.fetch_url)
+    tables = _extract_tables(
+        soup,
+        base_url=source.fetch_url,
+        infer_streamer_header=source.id == "hsguru_streamer_decks_legend_1000",
+    )
     if snapshot and snapshot.get("tables"):
         snap_tables = _tables_from_snapshot(snapshot)
         if sum(len(t.get("rows") or []) for t in snap_tables) > sum(
