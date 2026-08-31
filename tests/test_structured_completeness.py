@@ -86,6 +86,38 @@ def test_hsguru_streamer_emits_reconciled_completeness_evidence() -> None:
     assert report["retrieval_complete"] is True
 
 
+def test_hsguru_streamer_skips_empty_placeholder_table() -> None:
+    deck_code = (
+        "AAEBAf0GBs30Av76A4f7A564BtvXB63ZBwycENfOA4j0A8b5A8f5A63p"
+        "BdCeBu6hBom1BoSZB+C+B43cBwAA"
+    )
+    source = SOURCE_BY_ID["hsguru_streamer_decks_legend_1000"]
+    html = f"""
+    <html><body>
+      <table>
+        <tr><th>Deck</th><th>Streamer</th></tr>
+      </table>
+      <table>
+        <tr><th>Deck</th><th>Streamer</th></tr>
+        <tr>
+          <td><a href="/deck/41520944">Fresh deck</a>
+            <button data-clipboard-text="{deck_code}"></button>
+          </td>
+          <td>Streamer</td>
+        </tr>
+      </table>
+    </body></html>
+    """
+
+    parsed = parse_html(source, html)
+    parsed = _dedupe_streamer_decks_parsed(parsed)
+    report = contract_quality_report(source.id, parsed["structured"])
+
+    assert parsed["structured"]["rows"][0]["Deck"] == "Fresh deck"
+    assert parsed["structured"]["rows"][0]["deck_code"] == deck_code
+    assert report["ok"] is True
+
+
 def test_hsguru_streamer_rejects_non_object_table_rows() -> None:
     source = SOURCE_BY_ID["hsguru_streamer_decks_legend_1000"]
     structured = build_structured(
