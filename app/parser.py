@@ -45,6 +45,7 @@ def _extract_tables(
         rows: list[list[str]] = []
         row_links: list[list[str | None]] = []
         row_deck_codes: list[str | None] = []
+        row_deck_positions: list[int | None] = []
         row_labels: list[list[str | None]] = []
         for tr in table.find_all("tr"):
             cell_nodes = tr.find_all(["th", "td"])
@@ -88,6 +89,16 @@ def _extract_tables(
                         None,
                     )
                 )
+                row_deck_positions.append(
+                    next(
+                        (
+                            position
+                            for position, cell in enumerate(cell_nodes)
+                            if _deck_code_from_cell(cell)
+                        ),
+                        None,
+                    )
+                )
         if not rows:
             continue
         has_header_row = bool(table.find("th"))
@@ -108,6 +119,26 @@ def _extract_tables(
             )
             if labeled_headers:
                 headers = [str(label) for label in labeled_headers]
+        if not headers and infer_streamer_header:
+            deck_positions = {
+                position
+                for position in row_deck_positions
+                if position is not None
+            }
+            if (
+                len(deck_positions) == 1
+                and all(len(row) == 2 for row in rows)
+                and all(
+                    row[1 - next(iter(deck_positions))].strip()
+                    for row in rows
+                )
+            ):
+                deck_position = next(iter(deck_positions))
+                headers = (
+                    ["Deck", "Streamer"]
+                    if deck_position == 0
+                    else ["Streamer", "Deck"]
+                )
         data_rows = rows[1:] if has_header_row else rows
         data_links = row_links[1:] if has_header_row else row_links
         data_deck_codes = row_deck_codes[1:] if has_header_row else row_deck_codes

@@ -143,6 +143,37 @@ def test_hsguru_streamer_reads_data_label_columns_without_header_row() -> None:
     assert report["ok"] is True
 
 
+def test_hsguru_streamer_reads_unlabelled_two_cell_table() -> None:
+    deck_code = (
+        "AAEBAf0GBs30Av76A4f7A564BtvXB63ZBwycENfOA4j0A8b5A8f5A63p"
+        "BdCeBu6hBom1BoSZB+C+B43cBwAA"
+    )
+    source = SOURCE_BY_ID["hsguru_streamer_decks_legend_1000"]
+    html = f"""
+    <html><body><table>
+      <tr>
+        <td><a href="/deck/41520944">Fresh deck</a>
+          <button data-clipboard-text="{deck_code}"></button>
+        </td>
+        <td>Streamer</td>
+      </tr>
+    </table></body></html>
+    """
+
+    parsed = parse_html(source, html)
+    report = contract_quality_report(source.id, parsed["structured"])
+
+    assert parsed["structured"]["rows"] == [
+        {
+            "Deck": "Fresh deck",
+            "Streamer": "Streamer",
+            "deck_code": deck_code,
+            "Deck_url": "https://www.hsguru.com/deck/41520944",
+        }
+    ]
+    assert report["ok"] is True
+
+
 def test_hsguru_streamer_reads_card_markup_without_a_table() -> None:
     deck_code = (
         "AAEBAf0GBs30Av76A4f7A564BtvXB63ZBwycENfOA4j0A8b5A8f5A63p"
