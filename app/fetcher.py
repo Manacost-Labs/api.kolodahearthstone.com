@@ -2029,12 +2029,11 @@ def _dataset_from_structured(
 def _dedupe_streamer_decks_parsed(parsed: dict[str, Any]) -> dict[str, Any]:
     from .completeness import row_retrieval_evidence
     from .deck_decode import first_deck_code_from_text
-    from .structured import streamer_decks_table
 
     tables = parsed.get("tables") or []
-    table = streamer_decks_table(tables)
-    if table is None:
+    if not tables:
         return parsed
+    table = tables[0]
     headers = table.get("headers") or []
     objects = table.get("objects") or []
     if not isinstance(objects, list):
@@ -2134,13 +2133,11 @@ async def _enrich_streamer_deck_codes_with_parsesunix(
     """Hydrate missing streamer deckstrings from free, validated detail pages."""
 
     from .deck_decode import first_deck_code_from_text
-    from .structured import streamer_decks_table
 
     tables = parsed.get("tables") or []
-    table = streamer_decks_table(tables)
-    if table is None:
+    if not tables or not isinstance(tables[0], dict):
         return parsed
-    objects = table.get("objects") or []
+    objects = tables[0].get("objects") or []
     if not isinstance(objects, list):
         return parsed
 
