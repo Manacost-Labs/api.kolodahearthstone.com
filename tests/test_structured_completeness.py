@@ -86,6 +86,43 @@ def test_hsguru_streamer_emits_reconciled_completeness_evidence() -> None:
     assert report["retrieval_complete"] is True
 
 
+def test_hsguru_streamer_selects_data_table_before_code_hydration() -> None:
+    deck_code = (
+        "AAEBAf0GBs30Av76A4f7A564BtvXB63ZBwycENfOA4j0A8b5A8f5A63p"
+        "BdCeBu6hBom1BoSZB+C+B43cBwAA"
+    )
+    source = SOURCE_BY_ID["hsguru_streamer_decks_legend_1000"]
+    html = """
+    <html><head><title>Streamer decks</title></head><body>
+      <table><tr><th>Filters</th></tr></table>
+      <table>
+        <tr><td>Deck</td><td>Streamer</td></tr>
+        <tr><td><a href="/deck/41520944">Fresh deck</a></td><td>Streamer</td></tr>
+      </table>
+    </body></html>
+    """
+    parsed = parse_html(source, html)
+
+    with patch(
+        "app.fetcher.fetch_direct_with_parsesunix",
+        new=AsyncMock(
+            return_value=SimpleNamespace(
+                transport_validated=True,
+                body=f"<html><body>{deck_code}</body></html>",
+            )
+        ),
+    ) as fetch_detail:
+        enriched = asyncio.run(
+            _enrich_streamer_deck_codes_with_parsesunix(parsed)
+        )
+
+    row = enriched["structured"]["rows"][0]
+    assert row["Deck"] == "Fresh deck"
+    assert row["Streamer"] == "Streamer"
+    assert row["deck_code"] == deck_code
+    fetch_detail.assert_awaited_once()
+
+
 def test_hsguru_streamer_rejects_non_object_table_rows() -> None:
     source = SOURCE_BY_ID["hsguru_streamer_decks_legend_1000"]
     structured = build_structured(
