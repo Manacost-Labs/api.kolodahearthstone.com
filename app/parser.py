@@ -45,11 +45,29 @@ def _extract_tables(
         rows: list[list[str]] = []
         row_links: list[list[str | None]] = []
         row_deck_codes: list[str | None] = []
+        row_labels: list[list[str | None]] = []
         for tr in table.find_all("tr"):
             cell_nodes = tr.find_all(["th", "td"])
             cells = [_clean_text(cell.get_text(" ")) for cell in cell_nodes]
             if any(cells):
                 rows.append(cells)
+                row_labels.append(
+                    [
+                        next(
+                            (
+                                _clean_text(str(cell.get(attribute)))
+                                for attribute in (
+                                    "data-label",
+                                    "data-title",
+                                    "data-field",
+                                )
+                                if cell.get(attribute)
+                            ),
+                            None,
+                        )
+                        for cell in cell_nodes
+                    ]
+                )
                 row_links.append(
                     [
                         (
@@ -72,12 +90,27 @@ def _extract_tables(
                 )
         if not rows:
             continue
-        headers = rows[0] if table.find("th") else []
+        has_header_row = bool(table.find("th"))
+        headers = rows[0] if has_header_row else []
         if not headers and infer_streamer_header and _is_streamer_header_row(rows[0]):
             headers = rows[0]
-        data_rows = rows[1:] if headers else rows
-        data_links = row_links[1:] if headers else row_links
-        data_deck_codes = row_deck_codes[1:] if headers else row_deck_codes
+            has_header_row = True
+        if not headers and infer_streamer_header:
+            labeled_headers = next(
+                (
+                    labels
+                    for labels in row_labels
+                    if len(labels) == len(rows[0])
+                    and all(label for label in labels)
+                    and _is_streamer_header_row([str(label) for label in labels])
+                ),
+                [],
+            )
+            if labeled_headers:
+                headers = [str(label) for label in labeled_headers]
+        data_rows = rows[1:] if has_header_row else rows
+        data_links = row_links[1:] if has_header_row else row_links
+        data_deck_codes = row_deck_codes[1:] if has_header_row else row_deck_codes
         objects = []
         if headers:
             for row_index, row in enumerate(data_rows):

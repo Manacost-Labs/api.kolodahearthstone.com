@@ -118,6 +118,31 @@ def test_hsguru_streamer_skips_empty_placeholder_table() -> None:
     assert report["ok"] is True
 
 
+def test_hsguru_streamer_reads_data_label_columns_without_header_row() -> None:
+    deck_code = (
+        "AAEBAf0GBs30Av76A4f7A564BtvXB63ZBwycENfOA4j0A8b5A8f5A63p"
+        "BdCeBu6hBom1BoSZB+C+B43cBwAA"
+    )
+    source = SOURCE_BY_ID["hsguru_streamer_decks_legend_1000"]
+    html = f"""
+    <html><body><table>
+      <tr>
+        <td data-label="Deck"><a href="/deck/41520944">Fresh deck</a>
+          <button data-clipboard-text="{deck_code}"></button>
+        </td>
+        <td data-label="Streamer">Streamer</td>
+      </tr>
+    </table></body></html>
+    """
+
+    parsed = parse_html(source, html)
+    report = contract_quality_report(source.id, parsed["structured"])
+
+    assert parsed["structured"]["rows"][0]["Deck"] == "Fresh deck"
+    assert parsed["structured"]["rows"][0]["deck_code"] == deck_code
+    assert report["ok"] is True
+
+
 def test_hsguru_streamer_rejects_non_object_table_rows() -> None:
     source = SOURCE_BY_ID["hsguru_streamer_decks_legend_1000"]
     structured = build_structured(
