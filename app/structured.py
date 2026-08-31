@@ -729,6 +729,33 @@ def parse_arena_matrix(tables: list[dict[str, Any]], lines: list[str]) -> list[d
     return pairs[:60]
 
 
+def streamer_decks_table(tables: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Select the populated streamer table over auxiliary HSGuru tables."""
+    empty_match: dict[str, Any] | None = None
+    for table in tables:
+        if not isinstance(table, dict):
+            continue
+        headers = {
+            str(header).strip().casefold()
+            for header in (table.get("headers") or [])
+        }
+        objects = table.get("objects") or []
+        has_streamer_fields = any(
+            isinstance(row, dict)
+            and {"deck", "streamer"}.issubset(
+                {str(key).strip().casefold() for key in row}
+            )
+            for row in objects
+        )
+        if {"deck", "streamer"}.issubset(headers) or has_streamer_fields:
+            if objects:
+                return table
+            empty_match = empty_match or table
+    if empty_match is not None:
+        return empty_match
+    return tables[0] if tables and isinstance(tables[0], dict) else None
+
+
 def build_structured(source: Source, data: dict[str, Any]) -> dict[str, Any]:
     extracted = data.get("hsreplay_extracted") or {}
     if extracted.get("type"):
@@ -756,7 +783,8 @@ def build_structured(source: Source, data: dict[str, Any]) -> dict[str, Any]:
                 ),
             }
         if source.category == "streamer_decks":
-            raw_rows = tables[0].get("objects") if tables else []
+            table = streamer_decks_table(tables)
+            raw_rows = table.get("objects") if table else []
             if not isinstance(raw_rows, list):
                 raw_rows = []
             rows = [row for row in raw_rows if isinstance(row, dict)]
