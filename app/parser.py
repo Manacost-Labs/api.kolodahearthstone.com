@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 from typing import Any
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
@@ -38,36 +38,17 @@ def _extract_tables(
     soup: BeautifulSoup,
     *,
     base_url: str = "",
-    infer_streamer_header: bool = False,
 ) -> list[dict[str, Any]]:
     tables: list[dict[str, Any]] = []
     for index, table in enumerate(soup.find_all("table")):
         rows: list[list[str]] = []
         row_links: list[list[str | None]] = []
         row_deck_codes: list[str | None] = []
-        row_labels: list[list[str | None]] = []
         for tr in table.find_all("tr"):
             cell_nodes = tr.find_all(["th", "td"])
             cells = [_clean_text(cell.get_text(" ")) for cell in cell_nodes]
             if any(cells):
                 rows.append(cells)
-                row_labels.append(
-                    [
-                        next(
-                            (
-                                _clean_text(str(cell.get(attribute)))
-                                for attribute in (
-                                    "data-label",
-                                    "data-title",
-                                    "data-field",
-                                )
-                                if cell.get(attribute)
-                            ),
-                            None,
-                        )
-                        for cell in cell_nodes
-                    ]
-                )
                 row_links.append(
                     [
                         (
@@ -90,27 +71,10 @@ def _extract_tables(
                 )
         if not rows:
             continue
-        has_header_row = bool(table.find("th"))
-        headers = rows[0] if has_header_row else []
-        if not headers and infer_streamer_header and _is_streamer_header_row(rows[0]):
-            headers = rows[0]
-            has_header_row = True
-        if not headers and infer_streamer_header:
-            labeled_headers = next(
-                (
-                    labels
-                    for labels in row_labels
-                    if len(labels) == len(rows[0])
-                    and all(label for label in labels)
-                    and _is_streamer_header_row([str(label) for label in labels])
-                ),
-                [],
-            )
-            if labeled_headers:
-                headers = [str(label) for label in labeled_headers]
-        data_rows = rows[1:] if has_header_row else rows
-        data_links = row_links[1:] if has_header_row else row_links
-        data_deck_codes = row_deck_codes[1:] if has_header_row else row_deck_codes
+        headers = rows[0] if table.find("th") else []
+        data_rows = rows[1:] if headers else rows
+        data_links = row_links[1:] if headers else row_links
+        data_deck_codes = row_deck_codes[1:] if headers else row_deck_codes
         objects = []
         if headers:
             for row_index, row in enumerate(data_rows):
@@ -143,212 +107,6 @@ def _extract_tables(
             }
         )
     return tables
-
-
-def _is_streamer_header_row(row: list[str]) -> bool:
-    normalized = {
-        re.sub(r"[^a-z]+", " ", value.casefold()).strip()
-        for value in row
-    }
-    return {"deck", "streamer"}.issubset(normalized)
-
-
-_HSGURU_CARD_RE = re.compile(r"^/deck/[A-Za-z0-9_-]+/?$")
-_HSGURU_STREAMER_LINE_RE = re.compile(
-    r"^#?\s*(?:streamer|streamed\s+by|creator|player)\s*:?\s*(.+?)\s*$",
-    flags=re.IGNORECASE,
-)
-_HSGURU_STREAMER_LABELS = frozenset(
-    {"streamer", "streamed by", "creator", "player"}
-)
-
-
-def _hsguru_deck_url(value: object, base_url: str) -> str | None:
-    """Return only a same-site HSGuru deck detail URL."""
-    raw = str(value or "").strip()
-    if not raw:
-        return None
-    candidate = urljoin(base_url, raw)
-    try:
-        parsed = urlsplit(candidate)
-        port = parsed.port
-    except ValueError:
-        return None
-    if (
-        parsed.scheme != "https"
-        or parsed.hostname not in {"hsguru.com", "www.hsguru.com"}
-        or parsed.username is not None
-        or parsed.password is not None
-        or port not in {None, 443}
-        or not _HSGURU_CARD_RE.fullmatch(parsed.path)
-    ):
-        return None
-    return parsed._replace(query="", fragment="").geturl()
-
-
-def _hsguru_streamer_from_text(text: str) -> str | None:
-    for line in text.splitlines():
-        cleaned = _clean_text(line)
-        match = _HSGURU_STREAMER_LINE_RE.match(cleaned)
-        if match and match.group(1):
-            return match.group(1)
-    return None
-
-
-def _hsguru_streamer_from_card(card: Any, text: str) -> str | None:
-    streamer = _hsguru_streamer_from_text(text)
-    if streamer:
-        return streamer
-
-    for node in card.find_all(["dt", "th", "span", "div", "label"]):
-        label = _clean_text(node.get_text(" ")).rstrip(":").casefold()
-        if label not in _HSGURU_STREAMER_LABELS:
-            continue
-        for attribute in (
-            "data-streamer",
-            "data-streamer-name",
-            "data-creator",
-            "data-player",
-        ):
-            value = _clean_text(str(node.get(attribute) or ""))
-            if value:
-                return value
-        classes = {
-            str(class_name).casefold()
-            for class_name in (node.get("class") or [])
-        }
-        if classes.intersection(
-            {
-                "streamer",
-                "streamer-name",
-                "streamer_name",
-                "creator",
-                "player",
-            }
-        ):
-            value = _clean_text(node.get_text(" "))
-            if value:
-                return value
-        sibling = node.find_next_sibling()
-        if sibling:
-            value = _clean_text(sibling.get_text(" "))
-            if value:
-                return value
-    return None
-
-
-def _extract_hsguru_streamer_cards(
-    soup: BeautifulSoup,
-    *,
-    base_url: str,
-) -> list[dict[str, Any]]:
-    """Parse HSGuru's card layout when the filtered page has no data table."""
-    rows: list[dict[str, Any]] = []
-    seen: set[tuple[str, str]] = set()
-    for card in soup.select('[id^="deck_stats-"]'):
-        copy_button = card.select_one("button[data-clipboard-text]")
-        clipboard_text = (
-            str(copy_button.get("data-clipboard-text") or "")
-            if copy_button
-            else ""
-        )
-        card_text = card.get_text("\n", strip=True)
-        deck_code = _deck_code_from_cell(card) or first_deck_code_from_text(
-            f"{clipboard_text}\n{card_text}"
-        )
-        if not deck_code:
-            continue
-
-        deck_url = next(
-            (
-                detail_url
-                for anchor in card.find_all("a", href=True)
-                if (detail_url := _hsguru_deck_url(anchor.get("href"), base_url))
-            ),
-            None,
-        )
-        if not deck_url:
-            deck_url = next(
-                (
-                    detail_url
-                    for raw_url in re.findall(
-                        r"https?://(?:www\.)?hsguru\.com/deck/[A-Za-z0-9_-]+/?",
-                        clipboard_text,
-                    )
-                    if (detail_url := _hsguru_deck_url(raw_url, base_url))
-                ),
-                None,
-            )
-        if not deck_url:
-            continue
-
-        title_match = re.search(
-            r"^###\s+(.+?)\s*$", clipboard_text, flags=re.MULTILINE
-        )
-        title = _clean_text(title_match.group(1)) if title_match else ""
-        if not title:
-            heading = card.find(["h1", "h2", "h3", "h4", "h5", "h6"])
-            title = _clean_text(heading.get_text(" ")) if heading else ""
-        if not title:
-            deck_anchor = next(
-                (
-                    anchor
-                    for anchor in card.find_all("a", href=True)
-                    if _hsguru_deck_url(anchor.get("href"), base_url)
-                ),
-                None,
-            )
-            title = _clean_text(deck_anchor.get_text(" ")) if deck_anchor else ""
-        if not title or first_deck_code_from_text(title):
-            continue
-
-        streamer = _hsguru_streamer_from_card(
-            card,
-            f"{clipboard_text}\n{card_text}",
-        )
-        if not streamer:
-            streamer = next(
-                (
-                    _clean_text(str(node.get(attribute)))
-                    for node in [card, *card.find_all(True)]
-                    for attribute in (
-                        "data-streamer",
-                        "data-streamer-name",
-                        "data-creator",
-                        "data-player",
-                    )
-                    if node.get(attribute)
-                    and _clean_text(str(node.get(attribute)))
-                ),
-                None,
-            )
-        if not streamer:
-            streamer_node = card.select_one(
-                ".streamer, .streamer-name, .streamer_name, "
-                ".creator, .player, [data-streamer], [data-streamer-name], "
-                "[data-creator], [data-player]"
-            )
-            streamer = (
-                _clean_text(streamer_node.get_text(" "))
-                if streamer_node
-                else None
-            )
-        if not streamer:
-            continue
-
-        key = (deck_url, deck_code)
-        if key in seen:
-            continue
-        seen.add(key)
-        rows.append(
-            {
-                "Deck": title,
-                "Streamer": streamer,
-                "deck_code": deck_code,
-                "Deck_url": deck_url,
-            }
-        )
-    return rows
 
 
 def _extract_json_scripts(soup: BeautifulSoup) -> list[dict[str, Any]]:
@@ -449,35 +207,13 @@ def parse_html(source: Source, html: str, snapshot: dict[str, Any] | None = None
             text_lines = snap_lines
     deck_codes = sorted(set(DECK_CODE_RE.findall(html)))
     json_scripts = _extract_json_scripts(soup)
-    tables = _extract_tables(
-        soup,
-        base_url=source.fetch_url,
-        infer_streamer_header=source.id == "hsguru_streamer_decks_legend_1000",
-    )
+    tables = _extract_tables(soup, base_url=source.fetch_url)
     if snapshot and snapshot.get("tables"):
         snap_tables = _tables_from_snapshot(snapshot)
         if sum(len(t.get("rows") or []) for t in snap_tables) > sum(
             len(t.get("rows") or []) for t in tables
         ):
             tables = snap_tables
-    if source.id == "hsguru_streamer_decks_legend_1000":
-        streamer_rows = _extract_hsguru_streamer_cards(
-            soup,
-            base_url=source.fetch_url,
-        )
-        if streamer_rows:
-            streamer_headers = ["Deck", "Streamer", "deck_code", "Deck_url"]
-            tables.append(
-                {
-                    "index": len(tables),
-                    "headers": streamer_headers,
-                    "rows": [
-                        [row.get(header, "") for header in streamer_headers]
-                        for row in streamer_rows
-                    ],
-                    "objects": streamer_rows,
-                }
-            )
     if snapshot and snapshot.get("card_rows"):
         objects = []
         stat_headers = [
