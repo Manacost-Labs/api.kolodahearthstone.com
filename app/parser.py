@@ -231,7 +231,7 @@ def _hsguru_streamer_from_card(card: Any, text: str) -> str | None:
     if streamer:
         return streamer
 
-    for node in card.find_all(["dt", "th", "span", "div", "label"]):
+    for node in card.find_all(["dt", "th", "label"]):
         label = _clean_text(node.get_text(" ")).rstrip(":").casefold()
         if label not in _HSGURU_STREAMER_LABELS:
             continue
