@@ -6,7 +6,6 @@ from typing import Any
 
 from .cards_index import cards_by_id, resolve_card_name
 from .completeness import COMPLETENESS_SCHEMA_VERSION, row_retrieval_evidence
-from .deck_decode import first_deck_code_from_text
 from .parsing_normalize import is_percent, looks_like_name
 from .sources import Source
 
@@ -730,54 +729,6 @@ def parse_arena_matrix(tables: list[dict[str, Any]], lines: list[str]) -> list[d
     return pairs[:60]
 
 
-def streamer_decks_table(tables: list[dict[str, Any]]) -> dict[str, Any] | None:
-    """Select the most complete populated streamer table over placeholders."""
-    empty_match: dict[str, Any] | None = None
-    populated_matches: list[dict[str, Any]] = []
-    complete_matches: list[tuple[int, int, dict[str, Any]]] = []
-    for table in tables:
-        if not isinstance(table, dict):
-            continue
-        headers = {
-            str(header).strip().casefold()
-            for header in (table.get("headers") or [])
-        }
-        objects = table.get("objects") or []
-        has_streamer_fields = any(
-            isinstance(row, dict)
-            and {"deck", "streamer"}.issubset(
-                {str(key).strip().casefold() for key in row}
-            )
-            for row in objects
-        )
-        if {"deck", "streamer"}.issubset(headers) or has_streamer_fields:
-            if objects:
-                populated_matches.append(table)
-                complete_rows = sum(
-                    1
-                    for row in objects
-                    if isinstance(row, dict)
-                    and str(row.get("Deck") or row.get("deck") or "").strip()
-                    and str(row.get("Streamer") or row.get("streamer") or "").strip()
-                    and (
-                        str(row.get("deck_code") or "").strip()
-                        or first_deck_code_from_text(
-                            str(row.get("Deck") or row.get("deck") or "")
-                        )
-                    )
-                )
-                complete_matches.append((complete_rows, len(objects), table))
-            else:
-                empty_match = empty_match or table
-    if complete_matches:
-        return max(complete_matches, key=lambda candidate: candidate[:2])[2]
-    if populated_matches:
-        return populated_matches[0]
-    if empty_match is not None:
-        return empty_match
-    return tables[0] if tables and isinstance(tables[0], dict) else None
-
-
 def build_structured(source: Source, data: dict[str, Any]) -> dict[str, Any]:
     extracted = data.get("hsreplay_extracted") or {}
     if extracted.get("type"):
@@ -805,8 +756,7 @@ def build_structured(source: Source, data: dict[str, Any]) -> dict[str, Any]:
                 ),
             }
         if source.category == "streamer_decks":
-            table = streamer_decks_table(tables)
-            raw_rows = table.get("objects") if table else []
+            raw_rows = tables[0].get("objects") if tables else []
             if not isinstance(raw_rows, list):
                 raw_rows = []
             rows = [row for row in raw_rows if isinstance(row, dict)]
