@@ -204,6 +204,31 @@ def _hsguru_streamer_from_card(card: Any, text: str) -> str | None:
         label = _clean_text(node.get_text(" ")).rstrip(":").casefold()
         if label not in _HSGURU_STREAMER_LABELS:
             continue
+        for attribute in (
+            "data-streamer",
+            "data-streamer-name",
+            "data-creator",
+            "data-player",
+        ):
+            value = _clean_text(str(node.get(attribute) or ""))
+            if value:
+                return value
+        classes = {
+            str(class_name).casefold()
+            for class_name in (node.get("class") or [])
+        }
+        if classes.intersection(
+            {
+                "streamer",
+                "streamer-name",
+                "streamer_name",
+                "creator",
+                "player",
+            }
+        ):
+            value = _clean_text(node.get_text(" "))
+            if value:
+                return value
         sibling = node.find_next_sibling()
         if sibling:
             value = _clean_text(sibling.get_text(" "))
