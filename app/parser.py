@@ -146,6 +146,14 @@ def _extract_tables(
     return tables
 
 
+def _is_streamer_header_row(row: list[str]) -> bool:
+    normalized = {
+        re.sub(r"[^a-z]+", " ", value.casefold()).strip()
+        for value in row
+    }
+    return {"deck", "streamer"}.issubset(normalized)
+
+
 def _extract_json_scripts(soup: BeautifulSoup) -> list[dict[str, Any]]:
     payloads: list[dict[str, Any]] = []
     for script in soup.find_all("script"):
