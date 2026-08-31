@@ -143,6 +143,40 @@ def test_hsguru_streamer_reads_data_label_columns_without_header_row() -> None:
     assert report["ok"] is True
 
 
+def test_hsguru_streamer_reads_card_markup_without_a_table() -> None:
+    deck_code = (
+        "AAEBAf0GBs30Av76A4f7A564BtvXB63ZBwycENfOA4j0A8b5A8f5A63p"
+        "BdCeBu6hBom1BoSZB+C+B43cBwAA"
+    )
+    source = SOURCE_BY_ID["hsguru_streamer_decks_legend_1000"]
+    html = f"""
+    <html><body><div id="deck_stats_viewport">
+      <div id="deck_stats-41520944">
+        <button data-clipboard-text="### Fresh deck
+# Format: Standard
+{deck_code}
+# You can view this deck at https://www.hsguru.com/deck/41520944
+        "></button>
+        <div class="streamer">Streamer</div>
+        <div>First Streamed: today</div>
+      </div>
+    </div></body></html>
+    """
+
+    parsed = parse_html(source, html)
+    report = contract_quality_report(source.id, parsed["structured"])
+
+    assert parsed["structured"]["rows"] == [
+        {
+            "Deck": "Fresh deck",
+            "Streamer": "Streamer",
+            "deck_code": deck_code,
+            "Deck_url": "https://www.hsguru.com/deck/41520944",
+        }
+    ]
+    assert report["ok"] is True
+
+
 def test_hsguru_streamer_rejects_non_object_table_rows() -> None:
     source = SOURCE_BY_ID["hsguru_streamer_decks_legend_1000"]
     structured = build_structured(
