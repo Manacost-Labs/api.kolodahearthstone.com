@@ -113,6 +113,14 @@ for _legacy_trinket_source_id in (
     EXPLAINED_ROW_DROP_REASONS[_legacy_trinket_source_id] = frozenset(
         {"unselected_trinket_tier"}
     )
+HSREPLAY_META_FRESHNESS_GATED_SOURCE_IDS = frozenset(
+    {
+        "hsreplay_meta_archetypes_legend_eu_1d",
+        "hsreplay_meta_top_1000_legend_1d_firecrawl",
+        "hsreplay_meta_legend_1d_firecrawl",
+        "hsreplay_meta_diamond_4to1_1d_firecrawl",
+    }
+)
 HSREPLAY_FRESHNESS_GATED_SOURCE_IDS = frozenset(
     {
         "hsreplay_battlegrounds_minions",
@@ -120,7 +128,7 @@ HSREPLAY_FRESHNESS_GATED_SOURCE_IDS = frozenset(
         "hsreplay_arena_cards_advanced",
         "hsreplay_arena_legendaries",
     }
-)
+) | HSREPLAY_META_FRESHNESS_GATED_SOURCE_IDS
 HSREPLAY_UNVERIFIED_PUBLISH_REASONS = frozenset(
     {"missing_last_modified", "transport_evidence_unavailable"}
 )
@@ -1423,14 +1431,24 @@ def contract_quality_report(
                 )
         if source_id in HSREPLAY_FRESHNESS_GATED_SOURCE_IDS:
             freshness = structured.get("upstream_freshness")
-            if isinstance(freshness, dict):
+            if (
+                not isinstance(freshness, dict)
+                and source_id in HSREPLAY_META_FRESHNESS_GATED_SOURCE_IDS
+            ):
+                report["ok"] = False
+                report["retrieval_complete"] = False
+                report["warnings"].append(
+                    "upstream freshness evidence is missing"
+                )
+            elif isinstance(freshness, dict):
                 freshness_status = freshness.get("status")
                 freshness_reason = freshness.get("reason")
                 freshness_failure: str | None = None
                 if freshness_status == "stale":
                     freshness_failure = "upstream snapshot is known stale"
                 elif freshness_status == "unknown" and (
-                    freshness_reason not in HSREPLAY_UNVERIFIED_PUBLISH_REASONS
+                    source_id in HSREPLAY_META_FRESHNESS_GATED_SOURCE_IDS
+                    or freshness_reason not in HSREPLAY_UNVERIFIED_PUBLISH_REASONS
                 ):
                     freshness_failure = (
                         "upstream freshness evidence is invalid: "

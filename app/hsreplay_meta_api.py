@@ -3,9 +3,13 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import parse_qs
 
-from .completeness import COMPLETENESS_SCHEMA_VERSION, row_retrieval_evidence
+from .completeness import (
+    COMPLETENESS_SCHEMA_VERSION,
+    build_hsreplay_meta_upstream_freshness,
+    row_retrieval_evidence,
+)
 from .firecrawl_backend import scrape_source
-from .hsreplay_client import fetch_hsreplay_json
+from .hsreplay_client import fetch_hsreplay_json, get_hsreplay_json_target_headers
 from .sources import Source
 
 HSREPLAY_ANALYTICS_BASE = "https://hsreplay.net/analytics/query"
@@ -196,10 +200,15 @@ async def fetch_hsreplay_meta_archetypes(source: Source) -> dict[str, Any]:
         }
     except Exception as exc:
         firecrawl_page = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:180]}"}
+    cache_key = f"meta-archetypes:{source.fragment or source.id}"
     payload = await fetch_hsreplay_json(
         api_url,
         source_id=source.id,
-        cache_key=f"meta-archetypes:{source.fragment or source.id}",
+        cache_key=cache_key,
+    )
+    upstream_freshness = build_hsreplay_meta_upstream_freshness(
+        payload,
+        response_headers=get_hsreplay_json_target_headers(cache_key),
     )
     archetype_names = await _archetype_name_map(source.id)
     classes = normalize_meta_archetypes(payload, archetype_names)
@@ -208,6 +217,8 @@ async def fetch_hsreplay_meta_archetypes(source: Source) -> dict[str, Any]:
         "type": "hsreplay_meta_archetypes",
         "classes": classes,
         "completeness_schema_version": COMPLETENESS_SCHEMA_VERSION,
+        "population_completeness": "unverifiable",
+        "upstream_freshness": upstream_freshness,
         "row_retrieval": _meta_archetype_row_evidence(
             payload,
             normalized_rows=total_archetypes,

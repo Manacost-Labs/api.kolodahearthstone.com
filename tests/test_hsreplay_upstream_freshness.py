@@ -8,12 +8,12 @@ from app.completeness import (
     HSREPLAY_ARENA_EXPECTED_PARAMS,
     build_hsreplay_arena_upstream_freshness,
     build_hsreplay_bg_upstream_freshness,
+    build_hsreplay_meta_upstream_freshness,
     build_hsreplay_transport_evidence_unavailable,
 )
 from app.scrapers.quality import quality_metrics
 from app.sources import SOURCE_BY_ID
 from app.structured_schema import StructuredSchemaError, validate_structured_schema
-
 
 NOW = datetime(2026, 8, 14, 2, 20, tzinfo=UTC)
 
@@ -80,6 +80,22 @@ def test_bg_malformed_future_and_stale_body_as_of_fail_closed() -> None:
         "stale",
         "upstream_snapshot_too_old",
     )
+
+
+def test_meta_body_as_of_uses_the_daily_snapshot_freshness_contract() -> None:
+    fresh = build_hsreplay_meta_upstream_freshness(
+        {"as_of": (NOW - timedelta(hours=35)).isoformat()},
+        now=NOW,
+    )
+    stale = build_hsreplay_meta_upstream_freshness(
+        {"as_of": (NOW - timedelta(hours=37)).isoformat()},
+        now=NOW,
+    )
+
+    assert fresh["status"] == "fresh"
+    assert fresh["body_as_of"] == (NOW - timedelta(hours=35)).isoformat()
+    assert stale["status"] == "stale"
+    assert stale["reason"] == "upstream_snapshot_too_old"
 
 
 def test_arena_requires_exact_filters_meta_period_and_last_modified() -> None:

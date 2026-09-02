@@ -99,10 +99,10 @@ Sites: `firestone` (8), `heartharena` (1), `hearthstone-decks` (1), `hsguru` (15
 | `hsreplay_cards_wild_platinum_7d` | hsreplay | ranked | scrape | global | HSReplay Wild cards, Platinum, last 7 days. |
 | `hsreplay_cards_wild_platinum_patch` | hsreplay | ranked | scrape | global | HSReplay Wild cards, Platinum, current patch. |
 | `hsreplay_decks_trending` | hsreplay | ranked | scrape | global | HSReplay trending decks. |
-| `hsreplay_meta_archetypes_legend_eu_1d` | hsreplay | ranked | scrape | global | HSReplay meta archetypes grouped by class, Legend EU, last 1 day. |
-| `hsreplay_meta_diamond_4to1_1d_firecrawl` | hsreplay | ranked | scrape | global | HSReplay meta archetypes, Diamond 4-1, last 1 day, Firecrawl page scrape + analytics. |
-| `hsreplay_meta_legend_1d_firecrawl` | hsreplay | ranked | scrape | global | HSReplay meta archetypes, Legend, last 1 day, Firecrawl page scrape + analytics. |
-| `hsreplay_meta_top_1000_legend_1d_firecrawl` | hsreplay | ranked | scrape | global | HSReplay meta archetypes, Top 1000 Legend, last 1 day, Firecrawl page scrape + analytics. |
+| `hsreplay_meta_archetypes_legend_eu_1d` | hsreplay | ranked | scrape | 36 | HSReplay meta archetypes grouped by class, Legend EU, last 1 day. |
+| `hsreplay_meta_diamond_4to1_1d_firecrawl` | hsreplay | ranked | scrape | 36 | HSReplay meta archetypes, Diamond 4-1, last 1 day, Firecrawl page scrape + analytics. |
+| `hsreplay_meta_legend_1d_firecrawl` | hsreplay | ranked | scrape | 36 | HSReplay meta archetypes, Legend, last 1 day, Firecrawl page scrape + analytics. |
+| `hsreplay_meta_top_1000_legend_1d_firecrawl` | hsreplay | ranked | scrape | 36 | HSReplay meta archetypes, Top 1000 Legend, last 1 day, Firecrawl page scrape + analytics. |
 | `metastats_matchups` | metastats | matchups | scrape | global | MetaStats archetype matchups. |
 | `metastats_decks` | metastats | ranked | scrape | global | MetaStats archetypes and decks for all classes. |
 | `vicious_syndicate_radars` | vicious-syndicate | matchups | scrape | global | Vicious Syndicate Data Reaper's Radars (network graph of cards). |

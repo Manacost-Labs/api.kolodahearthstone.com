@@ -127,6 +127,39 @@ class HealthEndpointTest(unittest.TestCase):
         self.assertEqual(payload["cached_after_failure_count"], 1)
         self.assertEqual(payload["stale_sources"], ["src1"])
 
+    def test_ops_health_reports_hsreplay_meta_fresh_only_failure(self) -> None:
+        source = SOURCE_BY_ID["hsreplay_meta_archetypes_legend_eu_1d"]
+        dataset = {
+            "data": {
+                "structured": {
+                    "upstream_freshness": {
+                        "status": "stale",
+                        "reason": "upstream_snapshot_too_old",
+                        "age_seconds": 200000,
+                        "body_as_of": "2026-08-12T00:00:00+00:00",
+                    }
+                }
+            }
+        }
+        semantic_ok = {"ok": True, "score": 1.0, "issues": [], "metrics": {}}
+
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.object(main, "SOURCES", [source]),
+            patch.object(main, "load_status", return_value={"state": "ok"}),
+            patch.object(main, "load_dataset", return_value=dataset),
+            patch.object(main, "root_dir", return_value=Path(tmp)),
+            patch.object(main, "_semantic_dataset_quality", return_value=semantic_ok),
+            patch("app.stale_monitor.find_stale_sources", return_value=[]),
+        ):
+            payload = main.build_health_diagnostics()
+
+        self.assertFalse(payload["freshness_ok"])
+        self.assertEqual(
+            payload["fresh_only_failed_sources"],
+            [source.id],
+        )
+
     def test_ops_health_detects_semantically_invalid_cached_dataset(self) -> None:
         source = type("SourceStub", (), {"id": "vicious_syndicate_live_beta"})()
         status = {"source_id": source.id, "state": "ok", "fetched_at": "2026-07-12T00:00:00Z"}

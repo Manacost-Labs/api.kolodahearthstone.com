@@ -149,7 +149,13 @@ admin/ops endpoints и правила авторизации находятся 
 Путь: `data.structured.classes[]`. Каждая группа содержит `class`, `games` и
 `archetypes[]`; у архетипа доступны название, winrate, popularity, games и
 идентификаторы. `filters` фиксирует rank/time/region/game type, `as_of` — дату
-данных.
+данных. Эти четыре ежедневных среза публикуются только при
+`data.structured.upstream_freshness.status = "fresh"`; статус рассчитывается по
+`as_of` и допускает не более 36 часов. В `/v1/sources` и `/v1/datasets` для них
+доступны `upstream_freshness` (без сырых HTTP-заголовков) и
+`fresh_only_eligible`. Если доказательство отсутствует или срез устарел,
+новая публикация блокируется, а `GET /datasets/{source_id}` отвечает `503`,
+вместо выдачи старого LKG как актуального.
 
 ### База архетипов HSReplay
 

@@ -216,7 +216,13 @@ curl -s "https://api.kolodahearthstone.com/sources?site=hsreplay" | jq .
         "backend": "hsreplay_meta_api"
       },
       "has_dataset": true,
-      "dataset_fetched_at": "2026-06-07T21:31:29.446191+00:00"
+      "dataset_fetched_at": "2026-06-07T21:31:29.446191+00:00",
+      "upstream_freshness": {
+        "status": "fresh",
+        "age_seconds": 3600,
+        "body_as_of": "2026-06-07T20:31:29.446191+00:00"
+      },
+      "fresh_only_eligible": true
     }
   ]
 }
@@ -260,7 +266,17 @@ curl -s "https://api.kolodahearthstone.com/sources?site=hsreplay" | jq .
 }
 ```
 
-Если live refresh упал, но старый cache рабочий, endpoint может продолжать отдавать старый dataset. В status тогда появляются `serving_cached_dataset`, `effective_state=ok_cached`, `last_refresh_state`, `last_refresh_error`, `cached_dataset_age_hours`. Это не ломает публичный `/health`, но видно в `/ops/health`, `/ops/summary` и `python -m app.cli freshness-check`.
+Если live refresh упал, но старый cache рабочий, endpoint обычно может продолжать
+отдавать старый dataset. В status тогда появляются `serving_cached_dataset`,
+`effective_state=ok_cached`, `last_refresh_state`, `last_refresh_error`,
+`cached_dataset_age_hours`. Это не ломает публичный `/health`, но видно в
+`/ops/health`, `/ops/summary` и `python -m app.cli freshness-check`. Исключение —
+четыре HSReplay daily meta-среза: `hsreplay_meta_archetypes_legend_eu_1d`,
+`hsreplay_meta_top_1000_legend_1d_firecrawl`, `hsreplay_meta_legend_1d_firecrawl`
+и `hsreplay_meta_diamond_4to1_1d_firecrawl`. Для них старый или непроверенный
+LKG не считается fresh-only: при отсутствии
+`data.structured.upstream_freshness.status="fresh"` dataset endpoint возвращает
+`503` с причиной, а не маскирует проблему успешным HTTP 200.
 
 Для источников, которые временно не публикуют полноценные upstream-данные,
 structured/status diagnostics содержат `upstream_state`. Например,

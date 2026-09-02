@@ -23,6 +23,7 @@ from .post_patch_policy import (
 from .quality_thresholds import threshold_for
 from .source_contracts import (
     HSREPLAY_FRESHNESS_GATED_SOURCE_IDS,
+    HSREPLAY_META_FRESHNESS_GATED_SOURCE_IDS,
     HSREPLAY_UNVERIFIED_PUBLISH_REASONS,
     field_availability_status,
     is_decodable_deck_code,
@@ -93,6 +94,8 @@ def _validate_hsreplay_publication_freshness(
     report: ValidationReport,
     source_id: str,
     structured: dict[str, Any],
+    *,
+    require_evidence: bool = False,
 ) -> None:
     if (
         source_id not in HSREPLAY_FRESHNESS_GATED_SOURCE_IDS
@@ -101,7 +104,13 @@ def _validate_hsreplay_publication_freshness(
         return
     freshness = structured.get("upstream_freshness")
     if not isinstance(freshness, dict):
-        return  # The structured schema owns missing/malformed evidence.
+        if require_evidence:
+            report.add_issue(
+                "hsreplay_upstream.missing_evidence",
+                "HSReplay upstream freshness evidence is required",
+                field="upstream_freshness",
+            )
+        return  # The structured schema owns malformed evidence; missing is policy-specific.
     status = freshness.get("status")
     reason = freshness.get("reason")
     if status == "stale":
@@ -110,7 +119,10 @@ def _validate_hsreplay_publication_freshness(
             "HSReplay upstream snapshot is known stale",
             field="upstream_freshness",
         )
-    elif status == "unknown" and reason not in HSREPLAY_UNVERIFIED_PUBLISH_REASONS:
+    elif status == "unknown" and (
+        source_id in HSREPLAY_META_FRESHNESS_GATED_SOURCE_IDS
+        or reason not in HSREPLAY_UNVERIFIED_PUBLISH_REASONS
+    ):
         report.add_issue(
             "hsreplay_upstream.invalid_evidence",
             f"HSReplay freshness evidence failed closed ({reason or 'unknown_reason'})",
@@ -2047,6 +2059,12 @@ def _validate_hsreplay_meta_archetypes(
             f"meta archetypes missing metrics ({with_metrics}/{len(archetypes)}; minimum 20)",
             field="winrate,popularity,games",
         )
+    _validate_hsreplay_publication_freshness(
+        report,
+        _source_id,
+        structured,
+        require_evidence=_source_id in HSREPLAY_META_FRESHNESS_GATED_SOURCE_IDS,
+    )
     report.score = round(
         (
             min(len(classes) / 8.0, 1.0)
