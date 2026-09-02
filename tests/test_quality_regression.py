@@ -485,6 +485,53 @@ class DatasetRegressionTest(unittest.TestCase):
         self.assertEqual(extra["drop_ratio"], 0.30)
 
     @patch("app.dataset_regression.dataset_regression_drop_ratio", return_value=0.30)
+    def test_hsreplay_meta_daily_accepts_complete_half_size_snapshot(
+        self, _ratio: object
+    ) -> None:
+        # Daily rank slices can halve while remaining complete after a patch
+        # settles. The source-specific 50% allowance must apply to all four
+        # freshness-gated HSReplay meta feeds, while the absolute min_rows and
+        # field-completeness checks still run in their normal validation path.
+        previous_rows = [
+            {"winrate": "52%", "popularity": "1%", "games": 100}
+            for _ in range(58)
+        ]
+        current_rows = [
+            {"winrate": "52%", "popularity": "1%", "games": 100}
+            for _ in range(29)
+        ]
+        previous = {
+            "structured": {
+                "type": "hsreplay_meta_archetypes",
+                "classes": [{"name": "All", "archetypes": previous_rows}],
+            }
+        }
+        current = {
+            "structured": {
+                "type": "hsreplay_meta_archetypes",
+                "classes": [{"name": "All", "archetypes": current_rows}],
+            }
+        }
+
+        for source_id in (
+            "hsreplay_meta_archetypes_legend_eu_1d",
+            "hsreplay_meta_top_1000_legend_1d_firecrawl",
+            "hsreplay_meta_legend_1d_firecrawl",
+            "hsreplay_meta_diamond_4to1_1d_firecrawl",
+        ):
+            with self.subTest(source_id=source_id):
+                regression, message, extra = check_dataset_regression(
+                    SOURCE_BY_ID[source_id],
+                    previous_data=previous,
+                    new_data=current,
+                )
+
+                self.assertFalse(regression, message)
+                self.assertEqual(extra["rows_before"], 58)
+                self.assertEqual(extra["rows_after"], 29)
+                self.assertEqual(extra["drop_ratio"], 0.50)
+
+    @patch("app.dataset_regression.dataset_regression_drop_ratio", return_value=0.30)
     def test_hsguru_legend_accepts_verified_early_patch_pool(self, _ratio: object) -> None:
         source = SOURCE_BY_ID["hsguru_meta_wild_legend"]
         previous = {

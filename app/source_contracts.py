@@ -309,7 +309,11 @@ CONTRACTS: dict[str, SourceContract] = {
         min_rows=20,
         critical_fields=("winrate", "popularity", "games"),
         min_field_fill_rate=0.80,
-        regression_drop_ratio=0.35,
+        # HSReplay can publish a complete daily rank slice at half the
+        # previous population while the patch settles. Keep the hard
+        # min_rows/field-completeness checks, but do not retain stale data for
+        # an otherwise fresh snapshot at exactly 50% of the prior rows.
+        regression_drop_ratio=0.50,
         fallback_policy="api_only",
     ),
     "hsreplay_meta_top_1000_legend_1d_firecrawl": SourceContract(
@@ -318,7 +322,7 @@ CONTRACTS: dict[str, SourceContract] = {
         min_rows=20,
         critical_fields=("winrate", "popularity", "games"),
         min_field_fill_rate=0.80,
-        regression_drop_ratio=0.45,
+        regression_drop_ratio=0.50,
         volatility="daily",
         fallback_policy="api_only",
     ),
@@ -328,7 +332,7 @@ CONTRACTS: dict[str, SourceContract] = {
         min_rows=20,
         critical_fields=("winrate", "popularity", "games"),
         min_field_fill_rate=0.80,
-        regression_drop_ratio=0.45,
+        regression_drop_ratio=0.50,
         volatility="daily",
         fallback_policy="api_only",
     ),
@@ -338,7 +342,7 @@ CONTRACTS: dict[str, SourceContract] = {
         min_rows=20,
         critical_fields=("winrate", "popularity", "games"),
         min_field_fill_rate=0.80,
-        regression_drop_ratio=0.45,
+        regression_drop_ratio=0.50,
         volatility="daily",
         fallback_policy="api_only",
     ),
