@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Updated the Trigger.dev control-plane lockfile to patched `fast-uri` and
+  `qs` releases after new upstream advisories began failing the CI audit.
 - Added fail-closed freshness evidence for the four HSReplay daily meta
   datasets. Their public endpoints now require a verified `as_of` snapshot no
   older than 36 hours and return `503` instead of serving an unverified LKG;
