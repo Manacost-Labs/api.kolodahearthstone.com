@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -91,7 +92,8 @@ def test_admin_can_issue_list_introspect_and_revoke_a_token(
         }
 
         usage_response = client.get(
-            f"/admin/api-tokens/{issued['id']}/usage?month=2026-08",
+            f"/admin/api-tokens/{issued['id']}/usage"
+            f"?month={datetime.now(UTC):%Y-%m}",
             headers=bootstrap,
         )
         assert usage_response.status_code == 200

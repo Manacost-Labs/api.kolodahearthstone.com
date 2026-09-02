@@ -23,10 +23,16 @@ FAILURE_THRESHOLD = 3
 COOLDOWN_SECONDS = 300
 
 
-def _initialize(*, monthly_limit: int, billed_requests: int = 0) -> None:
+def _initialize(
+    *,
+    monthly_limit: int,
+    billed_requests: int = 0,
+    now: datetime | None = None,
+) -> None:
     initialize_usage_state(
         monthly_limit=monthly_limit,
         billed_requests=billed_requests,
+        now=now,
     )
 
 
@@ -47,7 +53,7 @@ def test_budget_reservation_and_completion_are_persisted(tmp_path: Path) -> None
     now = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
 
     with patch("app.brightdata_state.usage_path", return_value=path):
-        _initialize(monthly_limit=1)
+        _initialize(monthly_limit=1, now=now)
         reservation = reserve_request(
             monthly_limit=1,
             circuit_failure_threshold=FAILURE_THRESHOLD,
@@ -87,7 +93,7 @@ def test_circuit_opens_after_consecutive_provider_failures(tmp_path: Path) -> No
     now = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
 
     with patch("app.brightdata_state.usage_path", return_value=path):
-        _initialize(monthly_limit=10)
+        _initialize(monthly_limit=10, now=now)
         for _ in range(2):
             reservation = reserve_request(
                 monthly_limit=10,
