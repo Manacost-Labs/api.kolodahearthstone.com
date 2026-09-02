@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import unittest
 from unittest.mock import patch
 
@@ -101,6 +102,180 @@ class DatasetRegressionTest(unittest.TestCase):
         self.assertEqual(extra["rows_after"], 926)
 
     @patch("app.dataset_regression.dataset_regression_drop_ratio", return_value=0.30)
+    def test_firestone_legendary_arena_accepts_verified_rotated_pool(
+        self, _ratio: object
+    ) -> None:
+        source = SOURCE_BY_ID["firestone_arena_legendaries_underground"]
+        previous_cards = [
+            {"card_id": f"CARD_{index}", "tier": "C", "win_rate": 50.0}
+            for index in range(238)
+        ]
+        retained_cards = [
+            {
+                "card_id": f"CARD_{index}",
+                "tier": "C",
+                "win_rate": 50.0,
+                "rarity": "LEGENDARY",
+            }
+            for index in range(120)
+        ]
+        replacement_cards = [
+            {
+                "card_id": f"NEW_CARD_{index}",
+                "tier": "C",
+                "win_rate": 50.0,
+                "rarity": "LEGENDARY",
+            }
+            for index in range(20)
+        ]
+        previous = {
+            "structured": {
+                "type": "arena_card_tiers",
+                "cards": previous_cards,
+                "last_update_date": "2026-08-28T15:26:18.700Z",
+            }
+        }
+        current = {
+            "structured": {
+                "type": "arena_card_tiers",
+                "cards": retained_cards + replacement_cards,
+                "last_update_date": "2026-09-02T04:26:52.029Z",
+                "upstream_stats_count": 1027,
+                "upstream_scope_stats_count": 141,
+                "upstream_context": "global",
+                "arena_mode": "arena-underground",
+                "legendary_only": True,
+            }
+        }
+
+        regression, message, extra = check_dataset_regression(
+            source, previous_data=previous, new_data=current
+        )
+
+        self.assertFalse(regression, message)
+        self.assertTrue(extra["upstream_card_pool_reset"])
+        self.assertEqual(extra["rows_before"], 238)
+        self.assertEqual(extra["rows_after"], 140)
+        self.assertEqual(extra["upstream_population_count"], 141)
+        self.assertEqual(extra["upstream_population_coverage"], 0.9929)
+
+    @patch("app.dataset_regression.dataset_regression_drop_ratio", return_value=0.30)
+    def test_firestone_legendary_pool_reset_rejects_incomplete_filtered_population(
+        self, _ratio: object
+    ) -> None:
+        source = SOURCE_BY_ID["firestone_arena_legendaries_underground"]
+        previous = {
+            "structured": {
+                "type": "arena_card_tiers",
+                "cards": [
+                    {"card_id": f"OLD_{index}", "tier": "C", "win_rate": 50.0}
+                    for index in range(100)
+                ],
+                "last_update_date": "2026-08-28T15:26:18.700Z",
+            }
+        }
+        current = {
+            "structured": {
+                "type": "arena_card_tiers",
+                "cards": [
+                    {
+                        "card_id": f"NEW_{index}",
+                        "tier": "C",
+                        "win_rate": 50.0,
+                        "rarity": "LEGENDARY",
+                    }
+                    for index in range(45)
+                ],
+                "last_update_date": "2026-09-02T04:26:52.029Z",
+                "upstream_stats_count": 1027,
+                "upstream_scope_stats_count": 100,
+                "upstream_context": "global",
+                "arena_mode": "arena-underground",
+                "legendary_only": True,
+            }
+        }
+
+        regression, message, _extra = check_dataset_regression(
+            source, previous_data=previous, new_data=current
+        )
+
+        self.assertTrue(regression)
+        self.assertIn("metric count dropped", message or "")
+
+    @patch("app.dataset_regression.dataset_regression_drop_ratio", return_value=0.30)
+    def test_firestone_legendary_pool_reset_rejects_invalid_scope_lineage(
+        self, _ratio: object
+    ) -> None:
+        source = SOURCE_BY_ID["firestone_arena_legendaries_underground"]
+        previous = {
+            "structured": {
+                "type": "arena_card_tiers",
+                "cards": [
+                    {"card_id": f"OLD_{index}", "tier": "C", "win_rate": 50.0}
+                    for index in range(100)
+                ],
+                "last_update_date": "2026-08-28T15:26:18.700Z",
+            }
+        }
+        valid_structured = {
+            "type": "arena_card_tiers",
+            "cards": [
+                {
+                    "card_id": f"NEW_{index}",
+                    "tier": "C",
+                    "win_rate": 50.0,
+                    "rarity": "LEGENDARY",
+                }
+                for index in range(40)
+            ],
+            "last_update_date": "2026-09-02T04:26:52.029Z",
+            "upstream_stats_count": 1027,
+            "upstream_scope_stats_count": 40,
+            "upstream_context": "global",
+            "arena_mode": "arena-underground",
+            "legendary_only": True,
+        }
+
+        invalid_variants = {
+            "missing scoped count": lambda data: data.pop(
+                "upstream_scope_stats_count"
+            ),
+            "boolean scoped count": lambda data: data.update(
+                upstream_scope_stats_count=True
+            ),
+            "scope below output": lambda data: data.update(
+                upstream_scope_stats_count=39
+            ),
+            "scope above all stats": lambda data: data.update(
+                upstream_scope_stats_count=1028
+            ),
+            "wrong arena mode": lambda data: data.update(arena_mode="arena"),
+            "wrong upstream context": lambda data: data.update(
+                upstream_context="regional"
+            ),
+            "filter not asserted": lambda data: data.update(legendary_only=False),
+            "non-legendary output": lambda data: data["cards"][0].update(
+                rarity="EPIC"
+            ),
+            "stale timestamp": lambda data: data.update(
+                last_update_date="2026-08-28T15:26:18.700Z"
+            ),
+        }
+
+        for case, mutate in invalid_variants.items():
+            with self.subTest(case=case):
+                structured = copy.deepcopy(valid_structured)
+                mutate(structured)
+                regression, message, _extra = check_dataset_regression(
+                    source,
+                    previous_data=previous,
+                    new_data={"structured": structured},
+                )
+
+                self.assertTrue(regression)
+                self.assertIn("metric count dropped", message or "")
+
+    @patch("app.dataset_regression.dataset_regression_drop_ratio", return_value=0.30)
     def test_firestone_arena_rejects_unexplained_card_pool_drop(
         self, _ratio: object
     ) -> None:
@@ -119,7 +294,7 @@ class DatasetRegressionTest(unittest.TestCase):
             "structured": {
                 "type": "arena_card_tiers",
                 "cards": [
-                    {"card_id": f"CARD_{index}", "tier": "C", "win_rate": 50.0}
+                    {"card_id": f"NEW_{index}", "tier": "C", "win_rate": 50.0}
                     for index in range(50)
                 ],
                 "last_update_date": "2026-08-30T04:25:57.434Z",

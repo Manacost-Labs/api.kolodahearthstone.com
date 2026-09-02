@@ -76,6 +76,10 @@ def test_arena_parser_keeps_upstream_lineage_and_legendary_filter() -> None:
                         "cardId": "ARENA_COMMON",
                         "stats": {"decksWithCard": 100, "decksWithCardThenWin": 50},
                     },
+                    {
+                        "cardId": "ARENA_LOW_SAMPLE_LEGENDARY",
+                        "stats": {"decksWithCard": 1, "decksWithCardThenWin": 1},
+                    },
                 ],
             }
         ).encode(),
@@ -88,7 +92,7 @@ def test_arena_parser_keeps_upstream_lineage_and_legendary_filter() -> None:
 
     def card(card_id: str, *, locale: str) -> dict[str, object]:
         del locale
-        rarity = "LEGENDARY" if card_id == "ARENA_LEGENDARY" else "COMMON"
+        rarity = "COMMON" if card_id == "ARENA_COMMON" else "LEGENDARY"
         return {"id": card_id, "name": card_id, "rarity": rarity}
 
     source = SOURCE_BY_ID["firestone_arena_legendaries_underground"]
@@ -100,7 +104,8 @@ def test_arena_parser_keeps_upstream_lineage_and_legendary_filter() -> None:
 
     assert len(result["cards"]) == 1
     assert result["cards"][0]["card_id"] == "ARENA_LEGENDARY"
-    assert result["upstream_stats_count"] == 2
+    assert result["upstream_stats_count"] == 3
+    assert result["upstream_scope_stats_count"] == 2
     assert result["upstream_context"] == "global"
     assert result["arena_mode"] == "arena-underground"
     assert result["legendary_only"] is True

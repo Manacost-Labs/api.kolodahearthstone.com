@@ -7,6 +7,9 @@
   older than 36 hours and return `503` instead of serving an unverified LKG;
   source diagnostics expose bounded `upstream_freshness` and
   `fresh_only_eligible` fields.
+- Made Firestone legendary Arena pool rotations verifiable against the
+  rarity-scoped upstream population, while retaining strict regression gates
+  for truncated snapshots and every non-legendary Arena dataset.
 - Added the authenticated database web panel, its sync jobs, tests, Nginx
   configuration and atomic release deployment to the canonical API repository.
 - Added the PostgreSQL data platform, statistics normalizers, migrations and

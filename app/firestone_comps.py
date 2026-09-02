@@ -419,6 +419,7 @@ async def fetch_firestone_arena(source: Source) -> dict[str, Any]:
     
     card_stats_list = cards_data.get("stats") or []
     processed_cards = []
+    upstream_scope_stats_count = 0
     
     for stat in card_stats_list:
         card_id = stat.get("cardId")
@@ -431,6 +432,10 @@ async def fetch_firestone_arena(source: Source) -> dict[str, Any]:
         # Apply legendary-only filter
         if is_legendary_only and rarity != "LEGENDARY":
             continue
+
+        # Count the exact upstream population targeted by this source before
+        # the local minimum-sample filter removes statistically weak rows.
+        upstream_scope_stats_count += 1
                 
         stats = stat.get("stats") or {}
         
@@ -530,6 +535,7 @@ async def fetch_firestone_arena(source: Source) -> dict[str, Any]:
         # Keep enough upstream lineage for the regression gate to distinguish a
         # complete post-patch card-pool shrink from an adapter truncation.
         "upstream_stats_count": len(card_stats_list),
+        "upstream_scope_stats_count": upstream_scope_stats_count,
         "upstream_context": cards_data.get("context"),
         "arena_mode": mode,
         "legendary_only": is_legendary_only,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from math import ceil
 from typing import Any
 
 from .config import dataset_regression_drop_ratio
@@ -217,15 +218,46 @@ def _verified_firestone_arena_pool_reset(
         return None
     if len(previous_ids) != len(previous_cards) or len(new_ids) != len(new_cards):
         return None
-    if not new_ids.issubset(previous_ids):
-        return None
 
     upstream_count = new_structured.get("upstream_stats_count")
     if not isinstance(upstream_count, int) or isinstance(upstream_count, bool):
         return None
-    if upstream_count < new_count or new_count < max(40, int(upstream_count * 0.80)):
+
+    legendary_modes = {
+        "firestone_arena_legendaries_normal": "arena",
+        "firestone_arena_legendaries_underground": "arena-underground",
+    }
+    expected_mode = legendary_modes.get(source.id)
+    if expected_mode is None:
+        if not new_ids.issubset(previous_ids):
+            return None
+        upstream_population_count = upstream_count
+        reset_reason = (
+            "new complete card population is a strict subset of the newer "
+            "upstream snapshot"
+        )
+    else:
+        upstream_scope_count = new_structured.get("upstream_scope_stats_count")
+        if (
+            new_structured.get("legendary_only") is not True
+            or new_structured.get("arena_mode") != expected_mode
+            or new_structured.get("upstream_context") != "global"
+            or not isinstance(upstream_scope_count, int)
+            or isinstance(upstream_scope_count, bool)
+            or not all(card.get("rarity") == "LEGENDARY" for card in new_cards)
+        ):
+            return None
+        if not new_count <= upstream_scope_count <= upstream_count:
+            return None
+        upstream_population_count = upstream_scope_count
+        reset_reason = (
+            "new complete legendary population covers the rotated scope in "
+            "the newer upstream snapshot"
+        )
+
+    if new_count < max(40, ceil(upstream_population_count * 0.80)):
         return None
-    if new_filled < int(new_count * 0.80):
+    if new_filled < ceil(new_count * 0.80):
         return None
 
     previous_updated = _parse_timestamp(previous_structured.get("last_update_date"))
@@ -235,11 +267,14 @@ def _verified_firestone_arena_pool_reset(
 
     return {
         "upstream_card_pool_reset": True,
-        "upstream_card_pool_reset_reason": "new complete card population is a strict subset of the newer upstream snapshot",
+        "upstream_card_pool_reset_reason": reset_reason,
         "previous_card_ids": len(previous_ids),
         "new_card_ids": len(new_ids),
         "upstream_stats_count": upstream_count,
-        "upstream_population_coverage": round(new_count / upstream_count, 4),
+        "upstream_population_count": upstream_population_count,
+        "upstream_population_coverage": round(
+            new_count / upstream_population_count, 4
+        ),
         "previous_upstream_updated": previous_updated.isoformat(),
         "new_upstream_updated": new_updated.isoformat(),
     }
