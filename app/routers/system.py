@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, Query, Response
@@ -8,6 +9,10 @@ from pydantic import BaseModel, ConfigDict, Field
 from ..convergence_store import ConvergenceStore
 from ..parser_control import load_resolved_public_dataset
 from ..reliability_telemetry import build_reliability_report
+from ..source_contracts import (
+    HSREPLAY_FRESHNESS_GATED_SOURCE_IDS,
+    HSREPLAY_META_FRESHNESS_GATED_SOURCE_IDS,
+)
 from ..sources import SOURCES
 from ..storage import load_status
 from .models import ApiMeta, Envelope, freshest_timestamp, timestamp_is_stale
@@ -25,6 +30,8 @@ class SourceSummary(BaseModel):
     url: str
     has_dataset: bool
     dataset_fetched_at: str | None = None
+    upstream_freshness: dict[str, Any] | None = None
+    fresh_only_eligible: bool | None = None
 
 
 class DatasetSummary(BaseModel):
@@ -34,6 +41,69 @@ class DatasetSummary(BaseModel):
     has_dataset: bool
     fetched_at: str | None = None
     state: str | None = None
+    upstream_freshness: dict[str, Any] | None = None
+    fresh_only_eligible: bool | None = None
+
+
+def _public_upstream_freshness(
+    source_id: str,
+    dataset: dict[str, Any] | None,
+) -> tuple[dict[str, Any] | None, bool | None]:
+    """Expose bounded freshness evidence for sources with a fresh-only gate."""
+
+    if source_id not in HSREPLAY_FRESHNESS_GATED_SOURCE_IDS:
+        return None, None
+    data = (dataset or {}).get("data") if isinstance(dataset, dict) else None
+    structured = data.get("structured") if isinstance(data, dict) else None
+    freshness = (
+        structured.get("upstream_freshness")
+        if isinstance(structured, dict)
+        else None
+    )
+    if not isinstance(freshness, dict):
+        return {"status": "unknown", "reason": "missing_evidence"}, False
+    status = freshness.get("status")
+    if status not in {"fresh", "stale", "unknown"}:
+        return {"status": "unknown", "reason": "invalid_status"}, False
+    reason = freshness.get("reason")
+    if reason not in (None, "") and (
+        not isinstance(reason, str) or not 0 < len(reason) <= 128
+    ):
+        return {"status": "unknown", "reason": "invalid_evidence"}, False
+    if status == "fresh" and reason not in (None, ""):
+        return {"status": "unknown", "reason": "invalid_evidence"}, False
+    age = freshness.get("age_seconds")
+    if status in {"fresh", "stale"} and (
+        isinstance(age, bool)
+        or not isinstance(age, int)
+        or age < 0
+        or age > 365 * 24 * 60 * 60
+    ):
+        return {"status": "unknown", "reason": "invalid_age"}, False
+    body_as_of = freshness.get("body_as_of")
+    if source_id in HSREPLAY_META_FRESHNESS_GATED_SOURCE_IDS and status in {
+        "fresh",
+        "stale",
+    } and (
+        not isinstance(body_as_of, str)
+        or len(body_as_of) > 64
+        or _parse_iso_timestamp(body_as_of) is None
+    ):
+        return {"status": "unknown", "reason": "invalid_body_as_of"}, False
+    public = {
+        key: freshness.get(key)
+        for key in ("status", "reason", "age_seconds", "body_as_of")
+        if freshness.get(key) is not None
+    }
+    return public, status == "fresh"
+
+
+def _parse_iso_timestamp(value: str) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else None
 
 
 class ReliabilityCounts(BaseModel):
@@ -420,6 +490,10 @@ def sources(
     rows: list[dict[str, Any]] = []
     for source in selected:
         dataset = load_resolved_public_dataset(source.id)
+        upstream_freshness, fresh_only_eligible = _public_upstream_freshness(
+            source.id,
+            dataset,
+        )
         rows.append(
             {
                 "id": source.id,
@@ -428,6 +502,8 @@ def sources(
                 "url": source.url,
                 "has_dataset": dataset is not None,
                 "dataset_fetched_at": dataset.get("fetched_at") if dataset else None,
+                "upstream_freshness": upstream_freshness,
+                "fresh_only_eligible": fresh_only_eligible,
             }
         )
     fetched_at = freshest_timestamp(rows, "dataset_fetched_at")
@@ -453,12 +529,18 @@ def datasets() -> Envelope[list[DatasetSummary]]:
     for source in SOURCES:
         dataset = load_resolved_public_dataset(source.id)
         status = load_status(source.id) or {}
+        upstream_freshness, fresh_only_eligible = _public_upstream_freshness(
+            source.id,
+            dataset,
+        )
         rows.append(
             {
                 "source_id": source.id,
                 "has_dataset": dataset is not None,
                 "fetched_at": dataset.get("fetched_at") if dataset else None,
                 "state": status.get("state"),
+                "upstream_freshness": upstream_freshness,
+                "fresh_only_eligible": fresh_only_eligible,
             }
         )
     fetched_at = freshest_timestamp(rows, "fetched_at")

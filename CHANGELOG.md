@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Added fail-closed freshness evidence for the four HSReplay daily meta
+  datasets. Their public endpoints now require a verified `as_of` snapshot no
+  older than 36 hours and return `503` instead of serving an unverified LKG;
+  source diagnostics expose bounded `upstream_freshness` and
+  `fresh_only_eligible` fields.
 - Added the authenticated database web panel, its sync jobs, tests, Nginx
   configuration and atomic release deployment to the canonical API repository.
 - Added the PostgreSQL data platform, statistics normalizers, migrations and

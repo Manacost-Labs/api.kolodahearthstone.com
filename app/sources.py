@@ -246,6 +246,7 @@ SOURCES: tuple[Source, ...] = (
         "hsreplay",
         "ranked",
         description="HSReplay meta archetypes grouped by class, Legend EU, last 1 day.",
+        stale_hours=36,
     ),
     Source(
         "hsreplay_meta_top_1000_legend_1d_firecrawl",
@@ -253,6 +254,7 @@ SOURCES: tuple[Source, ...] = (
         "hsreplay",
         "ranked",
         description="HSReplay meta archetypes, Top 1000 Legend, last 1 day, Firecrawl page scrape + analytics.",
+        stale_hours=36,
     ),
     Source(
         "hsreplay_meta_legend_1d_firecrawl",
@@ -260,6 +262,7 @@ SOURCES: tuple[Source, ...] = (
         "hsreplay",
         "ranked",
         description="HSReplay meta archetypes, Legend, last 1 day, Firecrawl page scrape + analytics.",
+        stale_hours=36,
     ),
     Source(
         "hsreplay_meta_diamond_4to1_1d_firecrawl",
@@ -267,6 +270,7 @@ SOURCES: tuple[Source, ...] = (
         "hsreplay",
         "ranked",
         description="HSReplay meta archetypes, Diamond 4-1, last 1 day, Firecrawl page scrape + analytics.",
+        stale_hours=36,
     ),
     Source(
         "hsreplay_arena_class_pages_firecrawl",

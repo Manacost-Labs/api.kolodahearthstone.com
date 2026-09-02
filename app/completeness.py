@@ -7,6 +7,10 @@ from typing import Any
 
 COMPLETENESS_SCHEMA_VERSION = 1
 HSREPLAY_BG_MAX_UPSTREAM_AGE_SECONDS = 36 * 60 * 60
+# The four HSReplay meta slices are daily snapshots.  A 36-hour allowance
+# covers one missed daily provider refresh while still preventing an old LKG
+# from being presented as current data.
+HSREPLAY_META_MAX_UPSTREAM_AGE_SECONDS = 36 * 60 * 60
 HSREPLAY_ARENA_MAX_UPSTREAM_AGE_SECONDS = 6 * 60 * 60
 HSREPLAY_MAX_FUTURE_SKEW_SECONDS = 5 * 60
 HSREPLAY_ARENA_EXPECTED_PARAMS = (
@@ -159,13 +163,14 @@ def _bounded_timestamp_age(
     return max(0, int(age)), None
 
 
-def build_hsreplay_bg_upstream_freshness(
+def _build_hsreplay_body_as_of_freshness(
     payload: Mapping[str, object],
     *,
     response_headers: Mapping[str, object] | None = None,
     now: datetime | None = None,
+    max_age_seconds: int,
 ) -> dict[str, Any]:
-    """Prove BG snapshot age from HSReplay's body-level ``as_of`` marker."""
+    """Prove a body-level HSReplay snapshot age from its ``as_of`` marker."""
 
     observed = (now or datetime.now(UTC)).astimezone(UTC)
     result = _freshness_base(now=observed, response_headers=response_headers)
@@ -211,11 +216,47 @@ def build_hsreplay_bg_upstream_freshness(
         source_age = max(source_age or 0, cache_age)
 
     result["age_seconds"] = source_age
-    if source_age is not None and source_age > HSREPLAY_BG_MAX_UPSTREAM_AGE_SECONDS:
+    if source_age is not None and source_age > max_age_seconds:
         result.update(status="stale", reason="upstream_snapshot_too_old")
     else:
         result.update(status="fresh", reason=None)
     return result
+
+
+def build_hsreplay_bg_upstream_freshness(
+    payload: Mapping[str, object],
+    *,
+    response_headers: Mapping[str, object] | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Prove BG snapshot age from HSReplay's body-level ``as_of`` marker."""
+
+    return _build_hsreplay_body_as_of_freshness(
+        payload,
+        response_headers=response_headers,
+        now=now,
+        max_age_seconds=HSREPLAY_BG_MAX_UPSTREAM_AGE_SECONDS,
+    )
+
+
+def build_hsreplay_meta_upstream_freshness(
+    payload: Mapping[str, object],
+    *,
+    response_headers: Mapping[str, object] | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Prove freshness for daily HSReplay meta snapshots.
+
+    HSReplay exposes the timestamp of the analytics snapshot in ``as_of``;
+    fetch time alone is not evidence that the underlying data is current.
+    """
+
+    return _build_hsreplay_body_as_of_freshness(
+        payload,
+        response_headers=response_headers,
+        now=now,
+        max_age_seconds=HSREPLAY_META_MAX_UPSTREAM_AGE_SECONDS,
+    )
 
 
 def build_hsreplay_arena_upstream_freshness(

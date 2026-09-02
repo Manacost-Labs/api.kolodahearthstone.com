@@ -51,6 +51,7 @@ from .routers.constructed import router as constructed_v1_router
 from .routers.hsguru_meta import router as hsguru_meta_v1_router
 from .routers.system import canonical_router as canonical_system_v1_router
 from .routers.system import router as system_v1_router
+from .source_contracts import HSREPLAY_META_FRESHNESS_GATED_SOURCE_IDS
 from .source_state import SourceState
 from .sources import SOURCE_BY_ID, SOURCES
 from .storage import load_dataset, load_status, root_dir, save_dataset, save_status
@@ -75,6 +76,83 @@ _PUBLICATION_UNAVAILABLE_HEADERS = {
     "Retry-After": "60",
     "Cache-Control": "no-store",
 }
+
+
+def _parse_iso_timestamp(value: str) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else None
+
+
+def _freshness_summary(
+    source_id: str,
+    dataset: dict[str, Any],
+) -> tuple[dict[str, Any] | None, bool | None]:
+    """Return bounded freshness evidence and fresh-only eligibility."""
+
+    if source_id not in HSREPLAY_META_FRESHNESS_GATED_SOURCE_IDS:
+        return None, None
+    data = dataset.get("data") if isinstance(dataset, dict) else None
+    structured = data.get("structured") if isinstance(data, dict) else None
+    freshness = (
+        structured.get("upstream_freshness")
+        if isinstance(structured, dict)
+        else None
+    )
+    if not isinstance(freshness, dict):
+        return {"status": "unknown", "reason": "missing_evidence"}, False
+    status = freshness.get("status")
+    if status not in {"fresh", "stale", "unknown"}:
+        return {"status": "unknown", "reason": "invalid_status"}, False
+    reason = freshness.get("reason")
+    if reason not in (None, "") and (
+        not isinstance(reason, str) or not 0 < len(reason) <= 128
+    ):
+        return {"status": "unknown", "reason": "invalid_evidence"}, False
+    if status == "fresh" and reason not in (None, ""):
+        return {"status": "unknown", "reason": "invalid_evidence"}, False
+    age = freshness.get("age_seconds")
+    if status in {"fresh", "stale"} and (
+        isinstance(age, bool)
+        or not isinstance(age, int)
+        or age < 0
+        or age > 365 * 24 * 60 * 60
+    ):
+        return {"status": "unknown", "reason": "invalid_age"}, False
+    body_as_of = freshness.get("body_as_of")
+    if status in {"fresh", "stale"} and (
+        not isinstance(body_as_of, str)
+        or len(body_as_of) > 64
+        or _parse_iso_timestamp(body_as_of) is None
+    ):
+        return {"status": "unknown", "reason": "invalid_body_as_of"}, False
+    summary = {
+        key: freshness.get(key)
+        for key in ("status", "reason", "age_seconds", "body_as_of")
+        if freshness.get(key) is not None
+    }
+    return summary, status == "fresh"
+
+
+def _fresh_only_publication_reason(
+    source_id: str,
+    dataset: dict[str, Any],
+) -> str | None:
+    """Return a serving error when a fresh-only HSReplay snapshot is not fresh."""
+
+    _summary, eligible = _freshness_summary(source_id, dataset)
+    if eligible is True:
+        return None
+    if source_id not in HSREPLAY_META_FRESHNESS_GATED_SOURCE_IDS:
+        return None
+    status = (_summary or {}).get("status")
+    reason = (_summary or {}).get("reason")
+    if status == "unknown" and reason == "missing_evidence":
+        return "upstream freshness evidence is missing"
+    return f"upstream snapshot is not fresh ({reason or status or 'unknown'})"
+
 
 app = FastAPI(
     title="Hearthstone Data API",
@@ -529,7 +607,11 @@ def source_payload(source_id: str) -> dict:
     source = SOURCE_BY_ID[source_id]
     status = load_status(source_id)
     dataset = load_resolved_public_dataset(source_id)
-    return {
+    upstream_freshness, fresh_only_eligible = _freshness_summary(
+        source_id,
+        dataset or {},
+    )
+    payload = {
         "id": source.id,
         "site": source.site,
         "category": source.category,
@@ -542,6 +624,10 @@ def source_payload(source_id: str) -> dict:
         "dataset_fetched_at": dataset.get("fetched_at") if dataset else None,
         "semantic_quality": _semantic_dataset_quality(source_id, dataset),
     }
+    if upstream_freshness is not None:
+        payload["upstream_freshness"] = upstream_freshness
+        payload["fresh_only_eligible"] = fresh_only_eligible
+    return payload
 
 
 def _semantic_dataset_quality(
@@ -785,6 +871,7 @@ def health() -> dict:
 def build_health_diagnostics() -> dict:
     from .parser_control import resolve_public_dataset
     from .post_patch_policy import EARLY_SOURCE_IDS
+    from .source_contracts import HSREPLAY_META_FRESHNESS_GATED_SOURCE_IDS
 
     statuses: list[dict[str, Any] | None] = []
     status_errors: list[Exception | None] = []
@@ -805,6 +892,7 @@ def build_health_diagnostics() -> dict:
     publication_failures: list[dict[str, Any]] = []
     publication_stale_sources: list[str] = []
     publication_stale_details: list[dict[str, Any]] = []
+    fresh_only_failed_sources: list[str] = []
     operationally_disabled_sources: list[str] = []
     for source, status, status_error in zip(
         SOURCES, statuses, status_errors, strict=True
@@ -897,6 +985,13 @@ def build_health_diagnostics() -> dict:
                     "metrics": semantic_quality["metrics"],
                 }
             )
+        if source.id in HSREPLAY_META_FRESHNESS_GATED_SOURCE_IDS:
+            _freshness, fresh_only_eligible = _freshness_summary(
+                source.id,
+                served_dataset or {},
+            )
+            if fresh_only_eligible is not True:
+                fresh_only_failed_sources.append(source.id)
 
     from .stale_monitor import find_stale_sources
 
@@ -921,6 +1016,7 @@ def build_health_diagnostics() -> dict:
         not stale_ids
         and not cached_sources
         and not publication_stale_sources
+        and not fresh_only_failed_sources
         and not freshness_monitor_errors
     )
     return {
@@ -939,6 +1035,7 @@ def build_health_diagnostics() -> dict:
         "publication_failures": publication_failures,
         "publication_stale_sources": publication_stale_sources,
         "publication_stale_details": publication_stale_details,
+        "fresh_only_failed_sources": fresh_only_failed_sources,
         "cached_sources": cached_sources,
         "cached_after_failure_sources": cached_after_failure_sources,
         "stale_sources": stale_ids,
@@ -1055,6 +1152,17 @@ def get_dataset(source_id: str, response: Response) -> dict:
                 "source_id": source_id,
                 "publication_mode": "stable",
             },
+        )
+    freshness_reason = _fresh_only_publication_reason(source_id, published)
+    if freshness_reason is not None:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": "Fresh-only dataset is temporarily unavailable",
+                "source_id": source_id,
+                "reason": freshness_reason,
+            },
+            headers=_PUBLICATION_UNAVAILABLE_HEADERS,
         )
     return public_dataset_payload(source_id, published)
 

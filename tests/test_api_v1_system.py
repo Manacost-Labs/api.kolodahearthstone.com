@@ -37,6 +37,37 @@ def test_v1_sources_returns_registry_envelope() -> None:
     )
 
 
+def test_v1_sources_exposes_bounded_fresh_only_evidence_for_hsreplay_meta() -> None:
+    source_id = "hsreplay_meta_archetypes_legend_eu_1d"
+    freshness = {
+        "status": "fresh",
+        "reason": None,
+        "age_seconds": 3600,
+        "body_as_of": "2026-09-02T12:00:00+00:00",
+        "response_headers": {"etag": "must-not-be-public"},
+    }
+
+    def dataset(candidate: str) -> dict[str, object] | None:
+        if candidate != source_id:
+            return None
+        return {
+            "fetched_at": "2026-09-02T13:00:00+00:00",
+            "data": {"structured": {"upstream_freshness": freshness}},
+        }
+
+    with patch("app.routers.system.load_resolved_public_dataset", side_effect=dataset):
+        response = client.get("/v1/sources?site=hsreplay&category=ranked")
+
+    assert response.status_code == 200
+    row = next(item for item in response.json()["data"] if item["id"] == source_id)
+    assert row["fresh_only_eligible"] is True
+    assert row["upstream_freshness"] == {
+        "status": "fresh",
+        "age_seconds": 3600,
+        "body_as_of": "2026-09-02T12:00:00+00:00",
+    }
+
+
 def test_v1_system_paths_do_not_replace_legacy_paths() -> None:
     paths = set(client.get("/openapi.json").json()["paths"])
     for legacy, system_path, canonical in (

@@ -739,6 +739,7 @@ def _validate_hsreplay_meta_archetypes(data: dict[str, Any]) -> None:
             _require(archetype.get("winrate"), f"classes[{class_idx}].archetypes[{arch_idx}] missing winrate")
             _require(archetype.get("popularity"), f"classes[{class_idx}].archetypes[{arch_idx}] missing popularity")
             _require(archetype.get("games") is not None, f"classes[{class_idx}].archetypes[{arch_idx}] missing games")
+    _validate_hsreplay_upstream_freshness(data, arena=False)
 
 
 def _validate_hearthstone_decks(data: dict[str, Any]) -> None:

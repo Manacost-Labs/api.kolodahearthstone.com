@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 from app.hsreplay_meta_api import fetch_hsreplay_meta_archetypes
@@ -39,7 +40,10 @@ def _fetch(payload: dict[str, object]) -> dict[str, object]:
 
 def test_hsreplay_meta_proves_row_and_identity_completeness() -> None:
     structured = _fetch(
-        {"series": {"data": {"DRUID": [_row(index) for index in range(20)]}}}
+        {
+            "as_of": datetime.now(UTC).isoformat(),
+            "series": {"data": {"DRUID": [_row(index) for index in range(20)]}},
+        }
     )
     report = contract_quality_report(
         "hsreplay_meta_archetypes_legend_eu_1d",
@@ -47,6 +51,8 @@ def test_hsreplay_meta_proves_row_and_identity_completeness() -> None:
     )
 
     assert structured["completeness_schema_version"] == 1
+    assert structured["population_completeness"] == "unverifiable"
+    assert structured["upstream_freshness"]["status"] == "fresh"
     assert structured["row_retrieval"] == {
         "raw_rows": 20,
         "eligible_rows": 20,
@@ -64,7 +70,12 @@ def test_hsreplay_meta_proves_row_and_identity_completeness() -> None:
 def test_hsreplay_meta_fails_closed_on_malformed_upstream_row() -> None:
     rows: list[object] = [_row(index) for index in range(20)]
     rows.append("broken")
-    structured = _fetch({"series": {"data": {"DRUID": rows}}})
+    structured = _fetch(
+        {
+            "as_of": datetime.now(UTC).isoformat(),
+            "series": {"data": {"DRUID": rows}},
+        }
+    )
     report = contract_quality_report(
         "hsreplay_meta_archetypes_legend_eu_1d",
         structured,
@@ -77,3 +88,51 @@ def test_hsreplay_meta_fails_closed_on_malformed_upstream_row() -> None:
     }
     assert report["retrieval_complete"] is False
     assert "row_retrieval has unexplained dropped rows" in report["warnings"]
+
+
+def test_hsreplay_meta_contract_rejects_missing_or_stale_upstream_snapshot() -> None:
+    base = {
+        "series": {"data": {"DRUID": [_row(index) for index in range(20)]}},
+    }
+    missing = _fetch(base)
+    stale = _fetch(
+        {
+            **base,
+            "as_of": "2026-08-12T00:00:00+00:00",
+        }
+    )
+
+    assert missing["upstream_freshness"]["status"] == "unknown"
+    assert stale["upstream_freshness"]["status"] == "stale"
+    assert not contract_quality_report(
+        "hsreplay_meta_archetypes_legend_eu_1d", missing
+    )["ok"]
+    assert not contract_quality_report(
+        "hsreplay_meta_archetypes_legend_eu_1d", stale
+    )["ok"]
+
+
+def test_hsreplay_meta_contract_rejects_unverified_transport_fallback() -> None:
+    structured = _fetch(
+        {
+            "as_of": datetime.now(UTC).isoformat(),
+            "series": {"data": {"DRUID": [_row(index) for index in range(20)]}},
+        }
+    )
+    freshness = structured["upstream_freshness"]
+    assert isinstance(freshness, dict)
+    structured["upstream_freshness"] = {
+        **freshness,
+        "status": "unknown",
+        "reason": "transport_evidence_unavailable",
+        "age_seconds": None,
+    }
+
+    report = contract_quality_report(
+        "hsreplay_meta_archetypes_legend_eu_1d", structured
+    )
+
+    assert not report["ok"]
+    assert any(
+        "freshness evidence is invalid" in warning for warning in report["warnings"]
+    )
