@@ -183,7 +183,7 @@ def looks_like_vicious_deck_library(html: str) -> bool:
 
 def parse_radar_js(html: str) -> dict[str, Any]:
     """
-    Extract nodes (var n = ...) and edges (var e = ...) from the inline setup function of index.html.
+    Extract nodes and edges from the inline setup function of index.html.
     """
     nodes = {}
     edges = []
@@ -191,7 +191,11 @@ def parse_radar_js(html: str) -> dict[str, Any]:
     script_match = re.search(r"function\s+setup\s*\(canvas\)\s*\{(.*?)\}\s*</script>", html, re.DOTALL | re.IGNORECASE)
     script_content = script_match.group(1) if script_match else html
 
-    node_match = re.search(r"var\s+n\s*=\s*(\{.*?\});", script_content, re.DOTALL)
+    node_match = re.search(
+        r"(?:var|let|const)\s+n\s*=\s*(\{.*?\});",
+        script_content,
+        re.DOTALL,
+    )
     if node_match:
         node_str = node_match.group(1).strip()
         node_entries = re.findall(r'"([^"]+)":\s*(\{.*?\})', node_str, re.DOTALL)
@@ -207,7 +211,11 @@ def parse_radar_js(html: str) -> dict[str, Any]:
                     props[k] = val_m.group(1)
             nodes[name] = props
 
-    edge_match = re.search(r"var\s+e\s*=\s*(\[.*?\]);", script_content, re.DOTALL)
+    edge_match = re.search(
+        r"(?:var|let|const)\s+e\s*=\s*(\[.*?\]);",
+        script_content,
+        re.DOTALL,
+    )
     if edge_match:
         edge_str = edge_match.group(1).strip()
         edge_entries = re.findall(r'\[\s*"([^"]+)"\s*,\s*"([^"]+)"\s*,\s*(\{.*?\})\s*\]', edge_str, re.DOTALL)
