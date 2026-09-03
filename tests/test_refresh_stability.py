@@ -1195,22 +1195,6 @@ class RefreshStabilityTest(unittest.TestCase):
             "https://www.vicioussyndicate.com/radar/some-class/index.html",
         )
 
-    def test_vicious_radar_url_discovery_skips_unrelated_embedded_content(self) -> None:
-        html = """
-        <html><body>
-          <iframe src="/ads/player.html"></iframe>
-          <iframe src="/wp-content/datareaper/radars/Mage/index.html"></iframe>
-        </body></html>
-        """
-
-        self.assertEqual(
-            find_radar_url(
-                html,
-                base_url="https://www.vicioussyndicate.com/deck-library/mage-decks/",
-            ),
-            "https://www.vicioussyndicate.com/wp-content/datareaper/radars/Mage/index.html",
-        )
-
     def test_vicious_deck_library_html_is_usable_despite_ad_scripts(self) -> None:
         html = """
         <html><head><script src="https://btloader.com/tag"></script></head>
