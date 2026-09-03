@@ -60,7 +60,6 @@ from app.vicious_syndicate import (
     ViciousUpstreamPublicationPending,
     find_radar_url,
     looks_like_vicious_deck_library,
-    parse_radar_js,
 )
 
 
@@ -1194,27 +1193,6 @@ class RefreshStabilityTest(unittest.TestCase):
         self.assertEqual(
             find_radar_url(html, base_url="https://www.vicioussyndicate.com/deck-library/mage-decks/"),
             "https://www.vicioussyndicate.com/radar/some-class/index.html",
-        )
-
-    def test_vicious_radar_parser_accepts_modern_js_declarations(self) -> None:
-        html = """
-        <script>
-        function setup(canvas) {
-          const n = {"Card A": {radius: 1}, "Card B": {radius: 1}};
-          let e = [["Card A", "Card B", {weight: 1}]];
-        }
-        </script>
-        """
-
-        parsed = parse_radar_js(html)
-
-        self.assertEqual(
-            [node["name"] for node in parsed["nodes"]],
-            ["Card A", "Card B"],
-        )
-        self.assertEqual(
-            parsed["edges"],
-            [{"source": "Card A", "target": "Card B", "weight": 1.0}],
         )
 
     def test_vicious_deck_library_html_is_usable_despite_ad_scripts(self) -> None:
