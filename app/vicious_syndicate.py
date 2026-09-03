@@ -142,14 +142,22 @@ class ViciousPublicationProbe:
 def parse_latest_report_metadata(html: str) -> dict[str, str]:
     soup = BeautifulSoup(html, "lxml")
     reports: list[dict[str, str | int]] = []
-    for article in soup.select("article"):
-        link = article.find("a", href=re.compile(r"/vs-data-reaper-report-(\d+)/?"))
-        if not link:
-            continue
-        match = re.search(r"/vs-data-reaper-report-(\d+)/?", str(link.get("href") or ""))
+    report_link_pattern = re.compile(r"/vs-data-reaper-report-(\d+)(?:/|$)")
+    for link in soup.find_all("a", href=True):
+        href = str(link.get("href") or "")
+        match = report_link_pattern.search(href)
         if not match:
             continue
-        date_node = article.select_one(".entry-meta-date")
+
+        # The newest report may be rendered in a featured container rather
+        # than an <article>. Keep date lookup scoped to this report's parent
+        # so unrelated page dates cannot be attached to it.
+        report_container = link.find_parent("article") or link.parent
+        date_node = (
+            report_container.select_one(".entry-meta-date")
+            if report_container is not None
+            else None
+        )
         published_at = ""
         if date_node:
             try:
@@ -162,7 +170,7 @@ def parse_latest_report_metadata(html: str) -> dict[str, str]:
         reports.append(
             {
                 "latest_report_issue": issue,
-                "latest_report_url": normalize_radar_url(str(link.get("href") or "")),
+                "latest_report_url": normalize_radar_url(href),
                 "latest_report_published_at": published_at,
             }
         )
