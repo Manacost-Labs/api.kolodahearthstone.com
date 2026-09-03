@@ -142,19 +142,14 @@ class ViciousPublicationProbe:
 def parse_latest_report_metadata(html: str) -> dict[str, str]:
     soup = BeautifulSoup(html, "lxml")
     reports: list[dict[str, str | int]] = []
-    report_link_pattern = re.compile(r"/vs-data-reaper-report-(\d+)(?:/|$)")
-    for link in soup.find_all("a", href=True):
-        href = str(link.get("href") or "")
-        match = report_link_pattern.search(href)
+    for article in soup.select("article"):
+        link = article.find("a", href=re.compile(r"/vs-data-reaper-report-(\d+)/?"))
+        if not link:
+            continue
+        match = re.search(r"/vs-data-reaper-report-(\d+)/?", str(link.get("href") or ""))
         if not match:
             continue
-
-        report_container = link.find_parent("article") or link.parent
-        date_node = (
-            report_container.select_one(".entry-meta-date")
-            if report_container is not None
-            else None
-        )
+        date_node = article.select_one(".entry-meta-date")
         published_at = ""
         if date_node:
             try:
@@ -167,7 +162,7 @@ def parse_latest_report_metadata(html: str) -> dict[str, str]:
         reports.append(
             {
                 "latest_report_issue": issue,
-                "latest_report_url": normalize_radar_url(href),
+                "latest_report_url": normalize_radar_url(str(link.get("href") or "")),
                 "latest_report_published_at": published_at,
             }
         )
@@ -188,7 +183,7 @@ def looks_like_vicious_deck_library(html: str) -> bool:
 
 def parse_radar_js(html: str) -> dict[str, Any]:
     """
-    Extract nodes and edges from the inline setup function of index.html.
+    Extract nodes (var n = ...) and edges (var e = ...) from the inline setup function of index.html.
     """
     nodes = {}
     edges = []
@@ -196,11 +191,7 @@ def parse_radar_js(html: str) -> dict[str, Any]:
     script_match = re.search(r"function\s+setup\s*\(canvas\)\s*\{(.*?)\}\s*</script>", html, re.DOTALL | re.IGNORECASE)
     script_content = script_match.group(1) if script_match else html
 
-    node_match = re.search(
-        r"(?:var|let|const)\s+n\s*=\s*(\{.*?\});",
-        script_content,
-        re.DOTALL,
-    )
+    node_match = re.search(r"var\s+n\s*=\s*(\{.*?\});", script_content, re.DOTALL)
     if node_match:
         node_str = node_match.group(1).strip()
         node_entries = re.findall(r'"([^"]+)":\s*(\{.*?\})', node_str, re.DOTALL)
@@ -216,11 +207,7 @@ def parse_radar_js(html: str) -> dict[str, Any]:
                     props[k] = val_m.group(1)
             nodes[name] = props
 
-    edge_match = re.search(
-        r"(?:var|let|const)\s+e\s*=\s*(\[.*?\]);",
-        script_content,
-        re.DOTALL,
-    )
+    edge_match = re.search(r"var\s+e\s*=\s*(\[.*?\]);", script_content, re.DOTALL)
     if edge_match:
         edge_str = edge_match.group(1).strip()
         edge_entries = re.findall(r'\[\s*"([^"]+)"\s*,\s*"([^"]+)"\s*,\s*(\{.*?\})\s*\]', edge_str, re.DOTALL)
