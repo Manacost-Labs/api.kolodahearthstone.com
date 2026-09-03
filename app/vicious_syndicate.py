@@ -253,11 +253,13 @@ def radar_upstream_state(issue: str, latest_report_issue: str) -> str:
 
 def find_radar_url(html: str, *, base_url: str) -> str | None:
     soup = BeautifulSoup(html, "lxml")
-    embedded = soup.find(["object", "embed", "iframe"])
-    if embedded:
+    for embedded in soup.find_all(["object", "embed", "iframe"]):
         path = embedded.get("data") or embedded.get("src")
-        if path:
-            return normalize_radar_url(path)
+        if not path:
+            continue
+        lowered = str(path).lower()
+        if "radar" in lowered or lowered.endswith("index.html"):
+            return normalize_radar_url(str(path))
 
     candidates: list[str] = []
     for tag in soup.find_all(["a", "script", "iframe", "object", "embed"], href=True):
