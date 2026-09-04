@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 
 from web_scraper import ResponseContract
 
+from .post_patch_policy import effective_contract_min_html_bytes
 from .source_contracts import get_contract
 from .source_tiers import (
     API_FIRST_SOURCE_IDS,
@@ -48,7 +49,11 @@ def page_response_contract(source: Source) -> ResponseContract:
     """Return the fail-closed HTML contract for a registered page source."""
 
     source_contract = get_contract(source.id)
-    minimum = source_contract.min_html_bytes if source_contract else 2_000
+    minimum = effective_contract_min_html_bytes(
+        source.id,
+        source_contract.min_html_bytes if source_contract else 2_000,
+        source_contract.early_min_html_bytes if source_contract else None,
+    )
     canary_by_family = {
         ("hsguru", "meta"): "/archetype/",
         ("hsguru", "matchups"): "matchup",

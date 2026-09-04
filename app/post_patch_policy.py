@@ -256,6 +256,17 @@ def active_post_patch_refresh_source_ids(
     return candidates
 
 
+def effective_contract_min_html_bytes(
+    source_id: str,
+    default: int,
+    early: int | None,
+) -> int:
+    """Use the refresh's captured policy for both page acquisition paths."""
+    if early is not None and policy_for(source_id) is not None:
+        return early
+    return default
+
+
 def effective_contract_min_rows(
     source_id: str,
     default: int,

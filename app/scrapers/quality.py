@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from ..post_patch_policy import effective_contract_min_html_bytes
 from ..quality_thresholds import threshold_for
 from ..refresh_log import log_action
 from ..source_contracts import (
@@ -38,12 +39,11 @@ def looks_like_real_page(html: str, source: Source) -> bool:
     if is_cloudflare_challenge(html):
         return False
     contract = get_contract(source.id)
-    min_html_bytes = contract.min_html_bytes if contract else 2_000
-    if contract and contract.early_min_html_bytes is not None:
-        from ..post_patch_policy import policy_for
-
-        if policy_for(source.id) is not None:
-            min_html_bytes = contract.early_min_html_bytes
+    min_html_bytes = effective_contract_min_html_bytes(
+        source.id,
+        contract.min_html_bytes if contract else 2_000,
+        contract.early_min_html_bytes if contract else None,
+    )
     if len(html.encode("utf-8")) < min_html_bytes:
         return False
     if source.site == "hsreplay":
