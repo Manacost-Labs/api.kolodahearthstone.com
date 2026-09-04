@@ -51,6 +51,27 @@ Verification:
   test that mistook bare Cloudflare markers for a real challenge. No broad
   marker blacklist was added to ParsesUnix.
 
+## Delivered: T05 per-row matchup validation
+
+Every HSGuru matchup now requires finite winrate in `[0, 100]`, two valid distinct
+archetype names, and a unique pair. Non-object rows are reported rather than
+silently discarded. Early mode cannot weaken these rules. Malformed raw cells
+are retained as evidence instead of being converted to apparent percentages.
+Explained upstream-empty/self cells retain the existing omission accounting.
+
+- Commits: `e52ffc3` (T04), `4c1e5d2` (T05).
+- T05 RED: 37 failures / 20 passes. Final focused GREEN: 197 tests plus 8 subtests,
+  including mixed valid/invalid HTML through the parser and publication validator.
+- Integrated final `make check`: 1834 Python tests and 213 subtests passed;
+  panel (44 Python/40 JavaScript tests and PHP/shell checks), platform, docs,
+  TypeScript SDK, and Actionlint passed. Local C# remains unverified, as above.
+- Eleven pre-existing Ruff findings in `app/structured.py` are unchanged; the
+  updated validator and new tests pass Ruff. No broad formatting cleanup was made.
+- T03 verification: clean orchestrator installation, TypeScript check, 10 tests,
+  and dependency audit all passed with no reported vulnerabilities. The fixed
+  versions were inherited from `216135c`, not authored by this implementation.
+- Independent Luna review found no remaining required T05 findings.
+
 ## Remaining plan checkpoints
 
 T00 inventory/provenance is partial until all readers and build metadata are
@@ -59,8 +80,9 @@ as an intentionally failing batch.
 
 | Tasks | Scope | Status |
 | --- | --- | --- |
-| T02–T03 | Deterministic time boundaries and dependency verification | Existing fixes; acceptance review pending |
-| T05 | Per-row HSGuru matchup validity | In progress |
+| T02 | Deterministic time boundaries | Existing fixes; expanded boundary acceptance pending |
+| T03 | Dependency verification | Completed against inherited fixes |
+| T05 | Per-row HSGuru matchup validity | Delivered and verified |
 | T06–T10 | Context, source JSON shapes, upstream freshness, all 99 contracts | Pending |
 | T11–T18 | Extraction, drift, required fields, quorum, acceptance, pagination, XPath | In progress in ParsesUnix |
 | T19–T23 | Truthful telemetry, coordinated budget, deadlines, quality feedback/retries | Pending |
