@@ -6,7 +6,7 @@ from typing import Any
 
 from .cards_index import cards_by_id, resolve_card_name
 from .completeness import COMPLETENESS_SCHEMA_VERSION, row_retrieval_evidence
-from .parsing_normalize import is_percent, looks_like_name
+from .parsing_normalize import is_percent, looks_like_name, normalize_percent_text
 from .sources import Source
 
 INT_RE = re.compile(r"^\d+$")
@@ -232,7 +232,9 @@ def _parse_hsguru_matchups_with_evidence(
                 {
                     "archetype": row_arch,
                     "vs": col,
-                    "winrate": val if "%" in str(val) else f"{val}%",
+                    # Keep malformed evidence intact so the semantic gate can
+                    # reject it; adding '%' must not manufacture a metric.
+                    "winrate": normalize_percent_text(str(val)) or val,
                 }
             )
     return pairs, row_retrieval_evidence(

@@ -1132,6 +1132,14 @@ class SourceValidatorsTest(unittest.TestCase):
             {issue.code for issue in report.issues},
         )
         matchups[0]["winrate"] = "50%"
+        self.assertFalse(
+            validate_structured(
+                "hsguru_matchups_legend",
+                {"type": "matchups", "matchups": matchups},
+            ).ok
+        )
+        for row in matchups:
+            row["winrate"] = "50%"
         self.assertTrue(
             validate_structured(
                 "hsguru_matchups_legend",
