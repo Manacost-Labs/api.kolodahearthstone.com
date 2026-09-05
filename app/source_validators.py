@@ -2222,7 +2222,7 @@ def _validate_hsguru_matchups(
     # Early publication relaxes sample size, never the validity of a metric.
     valid_matchups: set[tuple[str, str]] = set()
     seen_pairs: set[tuple[str, str]] = set()
-    invalid_metrics = invalid_identities = duplicate_pairs = self_pairs = 0
+    invalid_metrics = invalid_identities = duplicate_pairs = self_pairs = mirror_rows = 0
     for row in matchups:
         archetype, opponent = row.get("archetype"), row.get("vs")
         valid_identity = all(
@@ -2235,10 +2235,15 @@ def _validate_hsguru_matchups(
             invalid_identities += 1
             continue
         pair = (archetype.strip().casefold(), opponent.strip().casefold())
-        if pair[0] == pair[1]:
-            self_pairs += 1
-        elif pair in seen_pairs:
+        if pair in seen_pairs:
             duplicate_pairs += 1
+        elif pair[0] == pair[1]:
+            # HSGuru can include an explicit 50% matrix diagonal. Preserve it,
+            # but it cannot establish a competitive sample or lower its score.
+            if valid_metric and _parse_arena_percent(row.get("winrate")) == 50.0:
+                mirror_rows += 1
+            else:
+                self_pairs += 1
         elif valid_metric:
             valid_matchups.add(pair)
         seen_pairs.add(pair)
@@ -2246,7 +2251,7 @@ def _validate_hsguru_matchups(
         ("invalid_winrate", invalid_metrics, "finite winrate in [0, 100] required"),
         ("invalid_identity", invalid_identities, "nonempty archetype names required"),
         ("duplicate_pair", duplicate_pairs, "duplicate matchup pair"),
-        ("self_matchup", self_pairs, "self-matchup is not a competitive matchup"),
+        ("self_matchup", self_pairs, "a matrix diagonal must have exactly 50% winrate"),
     ):
         report.metrics[code] = count
         if count:
@@ -2257,6 +2262,13 @@ def _validate_hsguru_matchups(
             )
     complete_rows = len(valid_matchups)
     report.metrics["complete_rows"] = complete_rows
+    report.metrics["mirror_rows"] = mirror_rows
+    if complete_rows < 3:
+        report.add_issue(
+            "hsguru_matchups.too_few_competitive_rows",
+            f"HSGuru matchups need three unique competitive pairs ({complete_rows} < 3)",
+            field="archetype,vs,winrate",
+        )
     if policy_for(source_id) is not None:
         report.metrics["complete_early_rows"] = complete_rows
         if complete_rows < 3:
@@ -2270,7 +2282,7 @@ def _validate_hsguru_matchups(
                 field="archetype,vs,winrate",
             )
     report.score = round(
-        min(complete_rows / 3.0, 1.0) * complete_rows / max(len(rows), 1),
+        min(complete_rows / 3.0, 1.0) * complete_rows / max(len(rows) - mirror_rows, 1),
         4,
     )
     return report

@@ -144,3 +144,59 @@ def test_upstream_empty_and_self_cells_keep_explained_omissions(mode) -> None:
     parsed = parse_html(source, html + "</table></html>")
     ok, reason = validate_parsed_data(source, parsed, emit_telemetry=False)
     assert ok, reason
+
+
+@pytest.mark.parametrize("value", [50, 50.0, "50.0%", "50,0%"])
+def test_valid_mirror_rows_preserve_data_and_competitive_score(mode, value) -> None:
+    rows = _rows() + [{"archetype": "Mirror", "vs": " mirror ", "winrate": value}]
+    report = validate_structured(
+        "hsguru_matchups_legend", {"type": "matchups", "matchups": rows}
+    )
+    assert report.ok, report.reason
+    assert report.score == 1.0
+    assert report.metrics["complete_rows"] == 3
+    assert report.metrics["mirror_rows"] == 1
+    assert len(rows) == 4
+    assert rows[-1]["winrate"] == value
+
+
+def test_mirror_rows_do_not_establish_minimum_competitive_sample(mode) -> None:
+    rows = [{"archetype": f"Deck {i}", "vs": f"Deck {i}", "winrate": "50%"} for i in range(3)]
+    report = validate_structured(
+        "hsguru_matchups_legend", {"type": "matchups", "matchups": rows}
+    )
+    assert not report.ok
+    assert "hsguru_matchups.too_few_competitive_rows" in {i.code for i in report.issues}
+    assert report.metrics["complete_rows"] == 0
+    assert report.metrics["mirror_rows"] == 3
+
+
+def test_duplicate_mirror_pair_is_rejected(mode) -> None:
+    mirror = {"archetype": "Mirror", "vs": "Mirror", "winrate": "50%"}
+    report = validate_structured(
+        "hsguru_matchups_legend", {"type": "matchups", "matchups": _rows() + [mirror, dict(mirror)]}
+    )
+    assert not report.ok
+    assert "hsguru_matchups.duplicate_pair" in {i.code for i in report.issues}
+
+
+@pytest.mark.parametrize("value", [51, "999%", True, False, float("nan"), float("inf"), None])
+def test_mirror_exception_never_hides_invalid_metrics(mode, value) -> None:
+    report = validate_structured(
+        "hsguru_matchups_legend",
+        {"type": "matchups", "matchups": _rows() + [{"archetype": "Mirror", "vs": "Mirror", "winrate": value}]},
+    )
+    assert not report.ok
+
+
+def test_nonempty_html_diagonal_is_preserved_and_validated(mode) -> None:
+    source = SOURCE_BY_ID["hsguru_matchups_legend"]
+    html = "<html><title>HSGuru matchups</title><table><tr><th>Class</th><th>Archetype</th><th>Other Deck</th><th>Deck 0</th></tr>"
+    html += "".join(
+        f"<tr><td>Mage</td><td>Deck {i}</td><td>50%</td><td>{'50.0%' if i == 0 else ''}</td></tr>"
+        for i in range(3)
+    )
+    parsed = parse_html(source, html + "</table></html>")
+    assert len(parsed["structured"]["matchups"]) == 4
+    ok, reason = validate_parsed_data(source, parsed, emit_telemetry=False)
+    assert ok, reason

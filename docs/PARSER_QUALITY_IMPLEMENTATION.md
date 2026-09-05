@@ -30,6 +30,21 @@ platform, documentation and SDK gates. Separate SDK packaging and browser/core
 matrix coverage remain in their relevant workflows. This release is not full
 closure of the remaining plan below.
 
+### Rollout regression: explicit matchup diagonals
+
+The first production check detected a T05 compatibility regression and the
+runtime and host source were restored to the previous verified version. Existing
+HSGuru matrices contain explicit 50% mirror rows: 25, 34 and 21 respectively in
+the Legend, Wild Legend and Diamond 4–1 snapshots examined. No data was repaired
+or fetched to conceal this failure.
+
+The corrected validator preserves valid 50% diagonals and reports `mirror_rows`,
+but excludes them from the minimum three competitive pairs and the competitive
+quality-score denominator. Duplicate pairs, invalid metrics and non-50% diagonal
+values still fail. Regression tests exercise both publication modes, real HTML
+normalization and retained rows; release verification also checks the three
+existing structured snapshots read-only before another production attempt.
+
 ## Baseline and ownership
 
 - API candidate starts from GitHub `216135c`, not the stale local `3721278`.
