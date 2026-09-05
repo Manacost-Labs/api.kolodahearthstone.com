@@ -3,7 +3,32 @@
 This is the delivery ledger for the parser/ParsesUnix quality plan approved on
 2026-09-04. A merged source change is not evidence of a production deployment or
 of the long-term freshness SLO. Paid refreshes, production repairs, and release
-checkpoints still require their planned authorization.
+checkpoints require explicit authorization. The user has now authorized `main`
+integration and production rollout of the verified bounded quality patch.
+No additional paid collection or production data repair is included.
+
+## Integrated engine patch 0.10.2
+
+The API dependency pins the reproducibly built ParsesUnix 0.10.2 wheel and
+SHA-256 `3ea80ec34a77d8c2d674c3add4918e5a78477aa6323c8042c832d89d803055ed`.
+It includes T11–T16: JSON/staging/schema fixes, per-class required fields,
+critical-conflict publication guards and real record/identity acceptance checks.
+Quorum-only legacy profiles remain supported. The embedded API transport does
+not instantiate the standalone engine DatasetStore, so its additive staging
+columns do not trigger a production dataset migration here.
+
+The [engine release runbook](https://github.com/Manacost-Labs/ParsesUnix/blob/main/docs/operations/parser-quality-release.md)
+defines the artifact, contracts, exact-image rollout and rollback. Production
+uses the smoke-tested immutable image ID, not a subsequent rebuild. The old
+actual running image is retained; host source, runtime image and dependency
+version are checked separately. No schedules, active source cohort or spending
+limits are expanded. Deployment and CI outcomes are recorded with the release,
+not inferred from this dependency declaration.
+
+CI now invokes the same `make check` as local verification, including panel,
+platform, documentation and SDK gates. Separate SDK packaging and browser/core
+matrix coverage remain in their relevant workflows. This release is not full
+closure of the remaining plan below.
 
 ## Baseline and ownership
 
@@ -88,8 +113,8 @@ as an intentionally failing batch.
 | T19–T23 | Truthful telemetry, coordinated budget, deadlines, quality feedback/retries | Pending |
 | T24–T27 | Versioned publication, durable indexes, consistent reads, shadow sync | Pending |
 | T28–T29 | Operator panel and targeted dataset recovery | Pending |
-| T30–T31 | Reproducible engine release, integration pin, SDK/docs contract | Pending |
-| T32–T33 | Offline/shadow comparison and staged production release | Pending; release authorization required |
+| T30–T31 | Reproducible engine release, integration pin, SDK/docs contract | Bounded 0.10.2 patch prepared; full-plan dependencies still pending |
+| T32–T33 | Offline/shadow comparison and staged production release | Bounded patch authorized; full all-source shadow and long-term observation remain pending |
 
 ## Verification policy
 
