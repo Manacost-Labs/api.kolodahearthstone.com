@@ -1,7 +1,7 @@
 PYTHON := .venv/bin/python
 AI_QUALITY_BIN := /home/debian/server/tools/ai-quality/bin
 
-.PHONY: setup check test panel-check platform-check provider-check docs-check sdk-check lint-report security benchmark-smoke
+.PHONY: setup check test hsguru-replay panel-check platform-check provider-check docs-check sdk-check lint-report security benchmark-smoke
 
 API_BENCHMARK_BASE_URL ?= http://127.0.0.1:8000
 
@@ -19,13 +19,16 @@ check:
 	$(MAKE) sdk-check
 	actionlint
 
+hsguru-replay:
+	$(PYTHON) -m pytest -q tests/test_hsguru_replay.py tests/test_hsguru_evidence.py
+
 test:
 	@test -x $(PYTHON) || { printf 'Run make setup first.\n' >&2; exit 1; }
 	$(PYTHON) -m pytest -q
 
 panel-check:
 	$(PYTHON) -m unittest discover -s panel/tests -p 'test_*.py'
-	@for test_file in panel/tests/*_test.php; do php "$$test_file"; done
+	@set -e; for test_file in panel/tests/*_test.php; do php "$$test_file"; done
 	node --test panel/tests/*.test.js
 	panel/tests/test_sync_locking.sh
 	panel/tests/runtime_layout_test.sh

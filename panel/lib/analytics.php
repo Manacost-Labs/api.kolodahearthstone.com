@@ -1585,7 +1585,7 @@ function analytics_normalize(string $module, array $definition, array $fetch): a
                 $ageLabel = 'Актуально · ' . $age['label'];
                 $ageTone = $age['tone'] === 'good' ? 'good' : 'neutral';
             }
-            $rows[] = [
+            $row = [
                 'source' => $source['source_id'] ?? '',
                 'site' => $source['site'] ?? '',
                 'category' => $source['category'] ?? '',
@@ -1597,6 +1597,48 @@ function analytics_normalize(string $module, array $definition, array $fetch): a
                 'dataset' => !empty($source['has_dataset']) ? 'Опубликован' : 'Нет набора',
                 'cache' => $cached ? 'Последний успешный набор' : 'Актуальный набор',
             ];
+            $row['upstream_age'] = '—';
+            $row['coverage'] = '—';
+            if (($source['site'] ?? '') === 'hsguru') {
+                $evidence = is_array($source['data_evidence'] ?? null) ? $source['data_evidence'] : [];
+                $collection = is_array($evidence['collection'] ?? null) ? $evidence['collection'] : [];
+                $coverage = is_array($evidence['coverage'] ?? null) ? $evidence['coverage'] : [];
+                $row['fetched_at'] = is_string($collection['fetched_at'] ?? null) ? $collection['fetched_at'] : null;
+                $collectionAge = analytics_source_age_label($row['fetched_at']);
+                $row['age'] = !$operationallyEnabled ? 'Отключён политикой'
+                    : ($collectionAge['seconds'] === null ? 'Время получения неизвестно'
+                        : (($isStale ? 'Давно получено · ' : 'Получено · ') . $collectionAge['label']));
+                $row['age_tone'] = $operationallyEnabled && $isStale ? 'warning' : 'neutral';
+                // A successful fetch is not evidence of HSGuru's data age.
+                $row['upstream_age'] = 'Не подтверждена';
+                $row['coverage'] = match ($coverage['status'] ?? 'unknown') {
+                    'partial' => 'Частичные компоненты',
+                    'reported' => 'Есть сведения о компонентах',
+                    default => 'Не измерена',
+                };
+                $row['evidence_note'] = 'Время получения относится к нашему сбору. Возраст данных у HSGuru и полнота всего каталога не подтверждены. Даты компонентов также относятся к нашему сбору.';
+                $row['components'] = is_array($evidence['components'] ?? null) ? $evidence['components'] : [];
+                $componentStateLabels = [
+                    'complete' => 'получены', 'sparse_valid' => 'малая выборка',
+                    'cached' => 'из кэша', 'error' => 'ошибка', 'source_no_data' => 'нет данных у источника',
+                    'upstream_card_tallies_missing' => 'нет счётчиков карт', 'missing' => 'отсутствуют', 'unknown' => 'неизвестно',
+                ];
+                foreach ($row['components'] as &$component) {
+                    if (!is_array($component)) continue;
+                    $component['name'] = match ($component['name'] ?? '') {
+                        'matchups' => 'Матчапы', 'card_stats' => 'Статистика карт', default => 'Компонент',
+                    };
+                    $stateSummary = [];
+                    foreach ($componentStateLabels as $key => $label) {
+                        $count = $component['state_counts'][$key] ?? null;
+                        if (is_int($count) && $count >= 0) $stateSummary[] = $label . ': ' . $count;
+                    }
+                    $component['state_summary'] = implode(' · ', $stateSummary);
+                }
+                unset($component);
+                $row['cache'] = $cached ? 'Последний успешный набор' : 'Опубликованный набор';
+            }
+            $rows[] = $row;
         }
         usort($rows, static function (array $left, array $right): int {
             $leftOk = strtolower((string)($left['state'] ?? '')) === 'ok';
@@ -1624,7 +1666,9 @@ function analytics_normalize(string $module, array $definition, array $fetch): a
             analytics_column('description', 'Что загружается'),
             analytics_column('state', 'Состояние', 'status'),
             analytics_column('fetched_at', 'Обновлено', 'date'),
-            analytics_column('age', 'Свежесть', 'status'),
+            analytics_column('age', 'Давность сбора', 'status'),
+            analytics_column('upstream_age', 'Свежесть у источника'),
+            analytics_column('coverage', 'Компоненты сбора'),
         ], $rows);
     }
 

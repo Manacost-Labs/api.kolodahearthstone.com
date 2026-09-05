@@ -40,6 +40,7 @@ from .fetcher import refresh_sources
 from .graphql_api import canonical_graphql_router, graphql_router
 from .graphql_api.governance import GraphQLGovernanceMiddleware
 from .graphql_api.repository import close_graphql_repository
+from .hsguru_evidence import hsguru_data_evidence
 from .http_observability import RequestObservabilityMiddleware, generic_server_error
 from .public_cache import PublicCacheMiddleware
 from .redis_cache import close_tiered_cache
@@ -624,6 +625,8 @@ def source_payload(source_id: str) -> dict:
         "dataset_fetched_at": dataset.get("fetched_at") if dataset else None,
         "semantic_quality": _semantic_dataset_quality(source_id, dataset),
     }
+    if source.site == "hsguru":
+        payload["data_evidence"] = hsguru_data_evidence(dataset)
     if upstream_freshness is not None:
         payload["upstream_freshness"] = upstream_freshness
         payload["fresh_only_eligible"] = fresh_only_eligible

@@ -1,0 +1,16 @@
+{
+  "fetched_at": "2026-01-02T10:00:00Z",
+  "data": {
+    "structured": {
+      "type": "hsguru_archetype_analysis",
+      "upstream_freshness": {"status": "fresh", "body_as_of": "2026-01-02T10:00:00Z"},
+      "archetypes": [
+        {"components": {
+          "matchups": {"state": "complete", "checked_at": "2026-01-02T09:00:00Z", "updated_at": "2026-01-02T09:00:00Z"},
+          "card_stats": {"state": "cached", "checked_at": "2026-01-02T09:00:00Z", "updated_at": "2025-12-01T00:00:00Z", "error": "private-error"}
+        }},
+        {"matchups_state": "complete", "matchups_checked_at": "2026-01-02T09:00:00Z", "matchups_updated_at": "2026-01-02T09:00:00Z"}
+      ]
+    }
+  }
+}

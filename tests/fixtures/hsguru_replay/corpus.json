@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "provenance": "synthetic_regression_examples_not_live_captures",
+  "cases": [
+    {"id": "valid-mirror-and-percent-boundaries", "fixture": "mirror.html", "accepted": true, "records": 4, "issue_codes": []},
+    {"id": "invalid-metric-among-valid-rows", "fixture": "bad_cell.html", "accepted": false, "records": 5, "issue_codes": ["hsguru_matchups.invalid_winrate"]}
+  ]
+}

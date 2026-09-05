@@ -6,6 +6,7 @@ from .deck_decode import (
     decode_all_codes_in_text,
     first_deck_code_from_text,
 )
+from .hsguru_evidence import hsguru_data_evidence
 from .source_state import SourceState
 from .sources import SOURCE_BY_ID, SOURCES, Source
 from .storage import load_dataset, load_status
@@ -108,6 +109,11 @@ def build_demo_view(source_id: str) -> dict[str, Any]:
             "ok": False,
             "status": status,
             "message": "Нет кэшированного датасета",
+            **(
+                {"data_evidence": hsguru_data_evidence(None)}
+                if source.site == "hsguru"
+                else {}
+            ),
         }
 
     if source_id != STANDARD_CARDS_SOURCE_ID:
@@ -123,6 +129,11 @@ def build_demo_view(source_id: str) -> dict[str, Any]:
                 "ok": False,
                 "status": status,
                 "message": "Стабильный датасет ещё не доступен",
+                **(
+                    {"data_evidence": hsguru_data_evidence(None)}
+                    if source.site == "hsguru"
+                    else {}
+                ),
             }
 
     data = dataset.get("data") or {}
@@ -149,6 +160,8 @@ def build_demo_view(source_id: str) -> dict[str, Any]:
         "status": status,
         "view": view,
     }
+    if source.site == "hsguru":
+        result["data_evidence"] = hsguru_data_evidence(dataset)
     if publication_read is not None:
         from .parser_control import dataset_publication_mode
 
@@ -206,6 +219,8 @@ def build_overview() -> dict[str, Any]:
                 "serving_cached_dataset": bool(status.get("serving_cached_dataset")),
             }
         )
+        if source.site == "hsguru":
+            items[-1]["data_evidence"] = hsguru_data_evidence(dataset)
     operational = [item for item in items if item["operationally_enabled"]]
     ok = sum(1 for item in operational if item["state"] == SourceState.OK)
     return {
