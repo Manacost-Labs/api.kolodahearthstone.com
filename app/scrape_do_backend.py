@@ -8,6 +8,7 @@ import urllib.request
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
+from .browser_acquisition import BrowserPlan
 from .config import scrape_do_timeout_seconds, scrape_do_token
 
 SCRAPE_DO_URL = "https://api.scrape.do/"
@@ -72,6 +73,7 @@ class ScrapeDoScrape:
     super_proxy: bool
     screenshot: str | None = None
     target_headers: dict[str, str] = field(default_factory=dict)
+    actions_completed: int = 0
 
     @property
     def content_length(self) -> int:
@@ -153,7 +155,12 @@ def scrape_url_sync(
     retry_timeout_ms: int | None = None,
     screenshot: bool = False,
     full_screenshot: bool = False,
+    browser_plan: BrowserPlan | None = None,
 ) -> ScrapeDoScrape:
+    if browser_plan is not None and (
+        not isinstance(browser_plan, BrowserPlan) or not render
+    ):
+        raise ValueError("browser_plan requires a validated plan and render=True")
     token = scrape_do_token()
     if not token:
         raise RuntimeError("Scrape.do token is not configured")
@@ -175,6 +182,14 @@ def scrape_url_sync(
     if screenshot:
         params["returnJSON"] = "true"
         params["fullScreenShot" if full_screenshot else "screenShot"] = "true"
+    if browser_plan is not None:
+        if browser_plan.wait_selector is not None:
+            params["waitSelector"] = browser_plan.wait_selector
+        if browser_plan.actions:
+            params["returnJSON"] = "true"
+            params["playWithBrowser"] = json.dumps(
+                [action.provider_value() for action in browser_plan.actions]
+            )
     endpoint = f"{SCRAPE_DO_URL}?{urllib.parse.urlencode(params)}"
     request_headers = (
         dict(headers or {})
@@ -269,12 +284,13 @@ def scrape_url_sync(
 
     image: str | None = None
     html = body
-    if screenshot:
+    actions_completed = 0
+    if screenshot or (browser_plan is not None and browser_plan.actions):
         try:
             payload = json.loads(body)
         except json.JSONDecodeError as exc:
             raise content_error(
-                "Scrape.do screenshot response is not valid JSON"
+                "Scrape.do structured response is not valid JSON"
             ) from exc
         shots = payload.get("screenShots") if isinstance(payload, dict) else None
         if isinstance(shots, list) and shots and isinstance(shots[0], dict):
@@ -282,13 +298,34 @@ def scrape_url_sync(
             image = str(value) if value else None
         content = payload.get("content") if isinstance(payload, dict) else None
         html = str(content) if isinstance(content, str) else ""
-        if not image:
+        if screenshot and not image:
             raise content_error(
                 "Scrape.do screenshot response did not include an image",
                 parsed_html=html,
             )
+        if browser_plan is not None and browser_plan.actions:
+            results = (
+                payload.get("actionResults") if isinstance(payload, dict) else None
+            )
+            if (
+                not isinstance(results, list)
+                or len(results) != len(browser_plan.actions)
+                or any(
+                    not isinstance(item, dict) or item.get("success") is not True
+                    for item in results
+                )
+            ):
+                raise content_error(
+                    "Scrape.do browser action results failed validation",
+                    parsed_html=html,
+                )
+            actions_completed = len(results)
     if not html.strip() and not image:
         raise content_error("Scrape.do returned an empty body")
+    if browser_plan is not None and not browser_plan.ready(html):
+        raise content_error(
+            "Scrape.do browser readiness selector is missing", parsed_html=html
+        )
     return ScrapeDoScrape(
         html=html,
         status_code=status_code,
@@ -301,6 +338,7 @@ def scrape_url_sync(
         super_proxy=super_proxy,
         screenshot=image,
         target_headers=target_headers,
+        actions_completed=actions_completed,
     )
 
 
@@ -316,6 +354,7 @@ async def scrape_url(
     retry_timeout_ms: int | None = None,
     screenshot: bool = False,
     full_screenshot: bool = False,
+    browser_plan: BrowserPlan | None = None,
 ) -> ScrapeDoScrape:
     return await asyncio.to_thread(
         scrape_url_sync,
@@ -329,4 +368,5 @@ async def scrape_url(
         retry_timeout_ms=retry_timeout_ms,
         screenshot=screenshot,
         full_screenshot=full_screenshot,
+        **({"browser_plan": browser_plan} if browser_plan is not None else {}),
     )

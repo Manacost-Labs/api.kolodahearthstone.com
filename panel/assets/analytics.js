@@ -39,8 +39,9 @@
     const knownModules = new Set(moduleButtons.map((button) => button.dataset.analyticsModule));
     knownModules.add('card');
 
-    const searchableModules = new Set(['archetypes', 'hsguru_archetypes', 'constructed_cards', 'arena_cards', 'decks', 'bg_heroes', 'bg_minions']);
+    const searchableModules = new Set(['acquisition', 'archetypes', 'hsguru_archetypes', 'constructed_cards', 'arena_cards', 'decks', 'bg_heroes', 'bg_minions']);
     const searchLabels = {
+        acquisition: 'Источник, сайт или описание',
         archetypes: 'Архетип или класс',
         hsguru_archetypes: 'Архетип HSGuru',
         constructed_cards: 'Карта Standard / Wild',
@@ -91,7 +92,7 @@
         }
         if (status) status.textContent = 'Загрузка статистики…';
         if (title) title.textContent = 'Загрузка…';
-        if (description) description.textContent = 'Получаем актуальный набор из локального API.';
+        if (description) description.textContent = activeModule === 'acquisition' ? 'Читаем последний отчёт покрытия. Сбор данных не запускается.' : 'Получаем актуальный набор из локального API.';
         if (summary) {
             summary.replaceChildren(...Array.from({length: 4}, () => {
                 const item = document.createElement('span');
@@ -114,6 +115,8 @@
 
     const statusTone = (value) => {
         const normalized = String(value || '').toLocaleLowerCase('ru-RU');
+        if (normalized === 'полный снимок') return 'good';
+        if (normalized === 'частичный снимок' || normalized === 'снимок старше суток') return 'warning';
         if (['ok', 'matched', 'актуальный набор', 's', 'есть'].includes(normalized)) return 'good';
         if (normalized === 'нет') return 'neutral';
         if (normalized.includes('cached') || normalized.includes('stale') || normalized.includes('последний') || normalized.includes('устар')) return 'warning';
@@ -948,6 +951,15 @@
     };
 
     const detailLabels = {
+        snapshot_id: 'Снимок', patch_id: 'Патч', scope_id: 'Идентификатор среза', observed_at: 'Наблюдение · UTC',
+        listing: 'Найдено / ожидается', found: 'Найдено объектов', expected_count: 'Ожидается объектов',
+        detail_progress: 'Подробности получены / найдено', unresolved_details: 'Незавершённые подробности',
+        listing_complete: 'Конец списка подтверждён', view_confirmed: 'Фильтры подтверждены',
+        detail_states: 'Очередь на момент наблюдения', succeeded: 'Получено', absent: 'Подтверждено отсутствие',
+        failed: 'Попытки завершились ошибкой', retry: 'Ожидает повтора', running: 'Было в работе',
+        pending: 'Ожидало запуска', not_requested: 'Ещё не запрошено',
+        credits_spent: 'Известные / оценённые credits', unknown_cost_attempts: 'Попытки с неизвестной стоимостью',
+        query: 'Параметры страницы', fragment: 'Раздел страницы', state_code: 'Код состояния',
         archetype: 'Архетип', hero: 'Герой', minion: 'Существо', name: 'Название', name_ru: 'Название RU', title: 'Название',
         class: 'Класс', class_name: 'Класс', cardClass: 'Класс', format: 'Формат', format_id: 'ID формата', period: 'Период', rank: 'Рейтинг',
         games: 'Игры', games_with_minion: 'Игры с существом', games_without_minion: 'Игры без существа',
@@ -1211,7 +1223,7 @@
             const warning = document.createElement('div');
             warning.className = 'analytics-message is-warning';
             warning.setAttribute('role', 'status');
-            warning.textContent = `Часть источников недоступна: ${warnings.join(' ')}`;
+            warning.textContent = `${activeModule === 'acquisition' ? '' : 'Часть источников недоступна: '}${warnings.join(' ')}`;
             fragment.append(warning);
         }
 
@@ -1288,7 +1300,7 @@
     const renderMeta = (payload) => {
         if (!meta) return;
         const parts = [];
-        if (payload.meta?.updated_at) parts.push(`срез ${formatCell(payload.meta.updated_at, 'date').textContent}`);
+        if (payload.meta?.updated_at) parts.push(`${activeModule === 'acquisition' ? 'отчёт сформирован' : 'срез'} ${formatCell(payload.meta.updated_at, 'date').textContent}`);
         if (payload.meta?.source_id) parts.push(`источник: ${payload.meta.source_id}`);
         if (payload.meta?.stale) parts.push('данные помечены как устаревшие');
         if (payload.meta?.stale_cache) parts.push('показан резервный кэш');
@@ -1351,11 +1363,13 @@
         arenaSourceControl?.toggleAttribute('hidden', activeModule !== 'arena_cards');
         cardRankControl?.toggleAttribute('hidden', activeModule !== 'constructed_cards');
         cardPeriodControl?.toggleAttribute('hidden', activeModule !== 'constructed_cards');
+        dashboard.querySelector('[data-analytics-coverage-control]')?.toggleAttribute('hidden', activeModule !== 'acquisition');
     };
 
     const requestUrl = (module) => {
         const request = new URL(endpoint, window.location.origin);
         request.searchParams.set('module', module);
+        if (module === 'acquisition') request.searchParams.set('coverage_state', dashboard.querySelector('[data-analytics-coverage]')?.value || 'all');
         const query = searchInput?.value.trim() || '';
         if (searchableModules.has(module) && query) request.searchParams.set('q', query);
         if (module === 'card') request.searchParams.set('card_name', cardInput?.value.trim() || query);
@@ -1390,6 +1404,8 @@
     const updateUrlState = (module) => {
         const next = new URL(window.location.href);
         next.searchParams.set('stats', module);
+        if (module === 'acquisition') next.searchParams.set('stats_coverage', dashboard.querySelector('[data-analytics-coverage]')?.value || 'all');
+        else next.searchParams.delete('stats_coverage');
         const query = module === 'card' ? cardInput?.value.trim() : searchInput?.value.trim();
         if (query) next.searchParams.set('stats_q', query);
         else next.searchParams.delete('stats_q');
@@ -1430,7 +1446,7 @@
         requestController = new AbortController();
 
         try {
-            let payload = !force ? cache.get(cacheKey) : null;
+            let payload = !force && module !== 'acquisition' ? cache.get(cacheKey) : null;
             if (!payload) {
                 const response = await fetch(request, {
                     headers: {'Accept': 'application/json'},

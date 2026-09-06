@@ -157,6 +157,7 @@ def _parse_wordpress_posts(
     format_name: str,
     category_id: int,
     limit: int = _LIST_PAGE_LIMIT,
+    minimum_codes: int = _MIN_WORDPRESS_CODES_PER_FORMAT,
 ) -> list[dict[str, Any]]:
     """Validate and normalize one WordPress REST format feed."""
 
@@ -297,7 +298,7 @@ def _parse_wordpress_posts(
             rows[-1]["deck_code_error"] = "missing from wordpress content"
 
     codes_found = sum(1 for row in rows if row.get("deck_code"))
-    if codes_found < _MIN_WORDPRESS_CODES_PER_FORMAT:
+    if codes_found < minimum_codes:
         raise RuntimeError(
             f"Hearthstone-Decks {format_name} WordPress deck-code coverage incomplete "
             f"({codes_found}/{limit})"

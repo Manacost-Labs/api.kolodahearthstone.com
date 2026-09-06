@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 $statisticsModules = [
     'overview' => 'Обзор',
+    'acquisition' => 'Покрытие источников',
     'meta' => 'Мета',
     'hsguru_archetypes' => 'HSGuru архетипы',
     'constructed_cards' => 'Standard / Wild карты',
@@ -22,6 +23,8 @@ $statisticsQuery = trim((string)($_GET['stats_q'] ?? ''));
 $statisticsFormat = trim((string)($_GET['stats_format'] ?? 'standard'));
 $statisticsRank = trim((string)($_GET['stats_rank'] ?? 'legend'));
 $statisticsPeriod = trim((string)($_GET['stats_period'] ?? 'past_day'));
+$coverageStates = ['all' => 'Все состояния', 'partial' => 'Частичные снимки', 'unknown' => 'Не проверено', 'complete_for_view' => 'Полные снимки', 'stale' => 'Старше суток'];
+$coverageState = is_string($_GET['stats_coverage'] ?? null) && isset($coverageStates[$_GET['stats_coverage']]) ? $_GET['stats_coverage'] : 'all';
 ?>
 <section
     class="panel analytics-hub"
@@ -60,6 +63,14 @@ $statisticsPeriod = trim((string)($_GET['stats_period'] ?? 'past_day'));
                 autocomplete="off"
                 data-analytics-search
             >
+        </label>
+        <label data-analytics-coverage-control<?= $statisticsModule !== 'acquisition' ? ' hidden' : '' ?>>
+            <span>Состояние покрытия</span>
+            <select data-analytics-coverage>
+                <?php foreach ($coverageStates as $value => $label): ?>
+                    <option value="<?= h($value) ?>"<?= $coverageState === $value ? ' selected' : '' ?>><?= h($label) ?></option>
+                <?php endforeach; ?>
+            </select>
         </label>
         <label data-analytics-format-control<?= $statisticsModule !== 'meta' ? ' hidden' : '' ?>>
             <span>Формат</span>

@@ -648,10 +648,10 @@ async def _enrich_comp_cards(
     sem: asyncio.Semaphore,
 ) -> dict[str, Any]:
     if comp.get("main_cards") or comp.get("additional_cards"):
-        return comp
+        return {**comp, "detail_status": "listing_cards"}
     url = _abs_hsreplay_url(comp.get("url") or comp.get("_detail_url") or "")
     if not url:
-        return comp
+        return {**comp, "detail_status": "missing_url"}
     async with sem:
         detail = await parse_hsreplay_comp_detail(url, source_id=source_id)
     main_cards = _group_cards(detail.get("main_cards") or [])
@@ -664,7 +664,7 @@ async def _enrich_comp_cards(
         comp["additional_cards"] = additional_cards or comp.get("additional_cards") or []
         comp["addon_cards"] = comp["additional_cards"]
         comp["minions"] = [c.get("name") for c in comp["main_cards"] + comp["additional_cards"] if c.get("name")]
-    return comp
+    return {**comp, "detail_status": "fetched" if main_cards or additional_cards else "empty"}
 
 
 async def _firecrawl_detail(url: str, *, source_id: str) -> dict[str, Any]:
@@ -680,6 +680,8 @@ async def fetch_battlegrounds_comps_firecrawl(
     source_id: str = "hsreplay_battlegrounds_comps",
     detail_limit: int = 40,
 ) -> dict[str, Any]:
+    if type(detail_limit) is not int or detail_limit < 0:
+        raise ValueError("detail_limit must be a non-negative integer")
     source = Source(source_id, HSREPLAY_COMPS_URL, "hsreplay", "battlegrounds", description="HSReplay Battlegrounds comps.")
     scraped = await scrape_source(source)
     comps = parse_hsreplay_markdown(scraped.markdown, detail_limit=detail_limit)
@@ -689,13 +691,13 @@ async def fetch_battlegrounds_comps_firecrawl(
     async def enrich(comp: dict[str, Any]) -> dict[str, Any]:
         url = _abs_hsreplay_url(comp.get("url") or "")
         if not url:
-            return comp
+            return {**comp, "detail_status": "missing_url"}
         async with sem:
             try:
                 detail = await _firecrawl_detail(url, source_id=source_id)
             except Exception as exc:
                 errors.append(f"{url}: {type(exc).__name__}: {str(exc)[:160]}")
-                return comp
+                return {**comp, "detail_status": "failed"}
         listing_tier = _tier_letter(comp.get("tier"))
         merged = {**comp, **{k: v for k, v in detail.items() if v not in (None, "", [])}}
         detail_tier = _tier_letter(detail.get("tier"))
@@ -707,9 +709,12 @@ async def fetch_battlegrounds_comps_firecrawl(
         merged["additional_cards"] = merged.get("additional_cards") or []
         merged["addon_cards"] = merged["additional_cards"]
         merged["minions"] = [c.get("name") for c in merged["main_cards"] + merged["additional_cards"] if c.get("name")]
+        merged["detail_status"] = "fetched" if merged["minions"] else "empty"
         return merged
 
-    comps = await asyncio.gather(*[enrich(comp) for comp in comps[:detail_limit]])
+    enriched = await asyncio.gather(*[enrich(comp) for comp in comps[:detail_limit]])
+    unrequested = [{**comp, "detail_status": "not_requested"} for comp in comps[detail_limit:]]
+    comps = [*enriched, *unrequested]
     with_cards = sum(1 for c in comps if c.get("main_cards") or c.get("additional_cards"))
     return {
         "type": "bg_comps",
@@ -722,6 +727,7 @@ async def fetch_battlegrounds_comps_firecrawl(
             "listing_final_url": scraped.final_url,
             "comps_with_cards": with_cards,
             "comps_total": len(comps),
+            "details_not_requested": len(unrequested),
             "errors": errors,
         },
     }
@@ -732,6 +738,8 @@ async def fetch_battlegrounds_comps(
     source_id: str = "hsreplay_battlegrounds_comps",
     detail_limit: int = 40,
 ) -> dict[str, Any]:
+    if type(detail_limit) is not int or detail_limit < 0:
+        raise ValueError("detail_limit must be a non-negative integer")
     backend = "hsreplay_flaresolverr"
     markdown = ""
     errors: list[str] = []
@@ -775,7 +783,7 @@ async def fetch_battlegrounds_comps(
                 "minions": [],
                 "url": h["url"],
             }
-            for h in headers[:detail_limit]
+            for h in headers
         ]
     if not comps:
         return {
@@ -793,10 +801,19 @@ async def fetch_battlegrounds_comps(
         }
 
     sem = asyncio.Semaphore(4)
+
+    async def enrich(comp: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return await _enrich_comp_cards(comp, source_id=source_id, sem=sem)
+        except Exception as exc:  # noqa: BLE001 - preserve other listing rows on detail failure
+            errors.append(f"detail: {type(exc).__name__}")
+            return {**comp, "detail_status": "failed"}
+
     enriched = await asyncio.gather(
-        *[_enrich_comp_cards(c, source_id=source_id, sem=sem) for c in comps[:detail_limit]]
+        *[enrich(c) for c in comps[:detail_limit]]
     )
-    comps = list(enriched)
+    unrequested = [{**comp, "detail_status": "not_requested"} for comp in comps[detail_limit:]]
+    comps = [*enriched, *unrequested]
 
     with_cards = sum(1 for c in comps if c.get("main_cards") or c.get("additional_cards"))
 
@@ -810,6 +827,7 @@ async def fetch_battlegrounds_comps(
             "backend": backend,
             "comps_with_cards": with_cards,
             "comps_total": len(comps),
+            "details_not_requested": len(unrequested),
             "errors": errors,
         },
     }

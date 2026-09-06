@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 const ANALYTICS_RELIABILITY_STALE_CACHE_MAX_AGE_SECONDS = 300;
+require_once __DIR__ . '/acquisition.php';
 
 /**
  * Read-only integration with the local Hearthstone Data API.
@@ -14,6 +15,16 @@ const ANALYTICS_RELIABILITY_STALE_CACHE_MAX_AGE_SECONDS = 300;
 function analytics_module_registry(): array
 {
     return [
+        'acquisition' => [
+            'title' => 'Покрытие источников',
+            'description' => 'Полнота конкретного снимка и очередь подробностей на момент наблюдения. Это не показатель свежести или публикации; обновление страницы не запускает сбор.',
+            'path' => '/demo/overview',
+            'ttl' => 30,
+            'params' => [
+                'q' => ['type' => 'string', 'max' => 120],
+                'coverage_state' => ['type' => 'enum', 'values' => ['all', 'partial', 'unknown', 'complete_for_view', 'stale'], 'default' => 'all'],
+            ],
+        ],
         'overview' => [
             'title' => 'Все источники данных',
             'description' => 'Полный реестр источников: состояние, назначение и время последнего успешного обновления.',
@@ -2266,6 +2277,9 @@ function analytics_module_response(string $module, array $input): array
     }
     $definition = $registry[$module];
     $query = analytics_safe_query($definition, $input);
+    if ($module === 'acquisition') {
+        return analytics_acquisition_normalize($definition, analytics_fetch_json('/demo/overview', [], 30), analytics_acquisition_read(), $query);
+    }
     if (!empty($definition['composite'])) {
         if ($module === 'constructed_cards') {
             return analytics_constructed_cards($definition, $query);

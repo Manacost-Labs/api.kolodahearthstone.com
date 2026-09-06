@@ -23,6 +23,7 @@ from .brightdata_backend import (
     brightdata_configured_for_source,
 )
 from .brightdata_backend import scrape_url_sync as brightdata_scrape_url_sync
+from .browser_acquisition import BrowserPlan
 from .config import (
     firecrawl_hsguru_matchups_timeout_ms,
     firecrawl_max_age_ms,
@@ -434,17 +435,20 @@ def _scrape_via_scrape_do(
     reason: str,
     attempt_observer: ProviderAttemptObserver | None = None,
     failure_observer: ProviderFailureObserver | None = None,
+    browser_plan: BrowserPlan | None = None,
 ) -> FirecrawlScrape:
     if not scrape_do_token():
         raise RuntimeError(reason or "Scrape.do is not configured")
     screenshot, full_screenshot = _screenshot_options(formats)
     profiles = (True,) if source.site == "hsguru" else (False, True)
+    if browser_plan is not None:
+        profiles = profiles[:1]
     errors: list[str] = []
     scraped = None
     attempts = 0
     last_failure: Exception | None = None
     for super_proxy in profiles:
-        for profile_attempt in range(1, 3):
+        for profile_attempt in range(1, 2 if browser_plan is not None else 3):
             attempts += 1
             try:
                 scraped = scrape_url_sync(
@@ -456,6 +460,11 @@ def _scrape_via_scrape_do(
                     timeout_ms=timeout_ms,
                     screenshot=screenshot,
                     full_screenshot=full_screenshot,
+                    **(
+                        {"browser_plan": browser_plan}
+                        if browser_plan is not None
+                        else {}
+                    ),
                 )
                 if is_session_blocked(scraped.status_code, scraped.html):
                     if attempt_observer is not None:
@@ -547,7 +556,7 @@ def _scrape_via_scrape_do(
                     f"attempt {profile_attempt}: {type(exc).__name__}: "
                     f"{str(exc)[:300]}"
                 )
-                if profile_attempt == 1:
+                if profile_attempt == 1 and browser_plan is None:
                     provider_delay = min(
                         60.0,
                         max(0.0, float(exc.retry_after_seconds or 0.0)),
@@ -627,6 +636,7 @@ def _scrape_do_result(
             "scrapeDoCreditsUsed": scraped.request_cost,
             "scrapeDoRemainingCredits": scraped.credits_remaining,
             "scrapeDoAttempts": attempts,
+            "scrapeDoActionsCompleted": scraped.actions_completed,
             "scrapeDoProfileAttempt": profile_attempt,
             "scrapeDoSuperProxy": scraped.super_proxy,
             "providerPolicy": _PROVIDER_POLICY,
@@ -923,10 +933,37 @@ def _scrape_sync(
     accept_result: ProviderResultValidator | None = None,
     attempt_observer: ProviderAttemptObserver | None = None,
     failure_observer: ProviderFailureObserver | None = None,
+    browser_plan: BrowserPlan | None = None,
 ) -> FirecrawlScrape:
     """Fetch through Scrape.do → Firecrawl → Bright Data → Scrapfly."""
     errors: list[str] = []
     skip = frozenset(skip_providers or ())
+
+    # An explicit acquisition plan must not silently degrade to a plain fetch.
+    if browser_plan is not None:
+        if not isinstance(browser_plan, BrowserPlan):
+            raise ValueError("browser_plan must be a validated BrowserPlan")
+        if "scrape_do" in skip or not scrape_do_token():
+            raise RuntimeError("browser_plan requires Scrape.do")
+        return _require_accepted_provider_result(
+            "Scrape.do",
+            _scrape_via_scrape_do(
+                source,
+                formats=formats,
+                headers=headers,
+                wait_ms=wait_ms,
+                timeout_ms=timeout_ms,
+                reason="browser_plan",
+                attempt_observer=attempt_observer,
+                failure_observer=failure_observer,
+                browser_plan=browser_plan,
+            ),
+            source,
+            formats=formats,
+            accept_html=brightdata_accept_html,
+            accept_result=accept_result,
+            attempt_observer=attempt_observer,
+        )
 
     if "scrape_do" not in skip and scrape_do_token():
         try:
@@ -1117,6 +1154,7 @@ async def scrape_source_with_options(
     accept_result: ProviderResultValidator | None = None,
     attempt_observer: ProviderAttemptObserver | None = None,
     failure_observer: ProviderFailureObserver | None = None,
+    browser_plan: BrowserPlan | None = None,
 ) -> FirecrawlScrape:
     return await asyncio.to_thread(
         _scrape_sync,
@@ -1134,4 +1172,5 @@ async def scrape_source_with_options(
         accept_result=accept_result,
         attempt_observer=attempt_observer,
         failure_observer=failure_observer,
+        **({"browser_plan": browser_plan} if browser_plan is not None else {}),
     )
