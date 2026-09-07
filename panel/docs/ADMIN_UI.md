@@ -15,11 +15,11 @@ The import and API contracts are documented in `LIBRARY_FULL_ART.md`.
 
 ## Source map
 
-- `index.php` — queries, server-rendered markup, filter state, and lightweight UI
-  behavior.
+- `index.php` — authenticated dispatch, queries, POST handlers, filter state, and
+  composition of the shared presentation partials.
 - `assets/style.css` — theme tokens, reusable components, catalogue layouts, and
   responsive behavior.
-- `assets/workspace.css` — shared white/blue workspace and the Sources redesign;
+- `assets/workspace.css` — shared white/blue workspace for all authenticated pages;
   loaded after legacy module styles. Uses semantic tokens so saved dark, tavern,
   and arcane themes still work. New visitors start in light mode.
 - `partials/sidebar.php`, `partials/topbar.php`, `lib/panel_shell.php` — common
@@ -31,6 +31,12 @@ The import and API contracts are documented in `LIBRARY_FULL_ART.md`.
 - `partials/catalog-heading.php`, `partials/catalog-controls.php`, and
   `partials/catalog-pagination.php` — shared catalogue presentation; SQL, row
   actions, and CSRF handling stay in their existing server-side paths.
+- `partials/catalog-content.php` + `lib/catalog_view.php` — the actual catalogue
+  tables/galleries and pure presentation helpers, separated from database access
+  so all entity variants can be rendered in isolated browser tests.
+- `partials/media-preview.php` + `assets/media-preview.js` — shared image/video
+  lightbox, hover previews, keyboard focus containment and restoration. The
+  underlying workspace becomes inert while the lightbox is open.
 - `assets/table-controls.js` — catalogue auto-submit and persistent density,
   also loaded by the isolated catalogue/statistics/token fixtures.
 - `partials/analytics-dashboard.php` — statistics navigation, compact filters,
@@ -50,6 +56,18 @@ The import and API contracts are documented in `LIBRARY_FULL_ART.md`.
   Node tests.
 - `partials/parser-control.php` — parser operations workspace, source table,
   recent runs, and the explicit manual-run confirmation dialog.
+- `partials/api-token-manager.php` + `assets/token-controls.js` — token registry,
+  optional issuance form and one-time secret copying. Secrets are never persisted
+  in browser storage; server issuance/revocation and CSRF checks are unchanged.
+- `partials/card-editor.php` — new/edit forms with labelled fieldsets, upload
+  guidance and allowlisted field retention after a rejected save. Existing POST
+  names, checkbox semantics, SQL and file validation are unchanged.
+- `partials/wiki-terms.php` + `assets/editor-controls.js` — translation groups,
+  search/status filters, result counts and a resettable empty state. Editing a
+  row does not change the selected filter; hidden rows remain in the form.
+- `partials/auth-page.php` + `assets/auth.css` — shared login/setup/access-denied
+  and other auth messages. `lib/auth.php` delegates only presentation to this
+  template; GitHub OAuth, sessions, status codes and security headers are intact.
 - `parser-control.php` + `lib/parser_control.php` — narrow authenticated bridge
   for the local parser control API. The browser never receives its admin token.
 - `assets/parser-control-view.js` + `assets/parser-control.js` — tested parser
@@ -65,13 +83,20 @@ The import and API contracts are documented in `LIBRARY_FULL_ART.md`.
 - Catalogue search and section selection are always visible. Native
   “Дополнительные фильтры” disclose the section-specific options; active
   advanced filters start expanded. Pagination preserves the active query.
-- Battlegrounds technical columns start hidden for new preferences, but remain
-  available through the column picker. Existing saved preferences take priority.
+- Technical columns start hidden for new preferences across Battlegrounds,
+  Constructed, hero, timewarped and library tables, but remain available through
+  the column picker. Existing saved preferences take priority.
+- Skins, pets and coins use responsive galleries with normal page scrolling;
+  table-only column/density/scroll controls are not rendered for those sections.
+- The BG navigation item remains active for both minion and spell filters.
 - Pressing `/` focuses the primary catalogue search when focus is not already in
   a form control.
 - On screens up to 760 px the navigation is collapsed behind an accessible menu
   button.
 - Card, golden, and framed previews use the shared `data-preview` lightbox.
+- Lightbox Tab/Shift+Tab containment includes fixed-position controls. Escape
+  closes it and restores the trigger; background search/navigation shortcuts
+  cannot move focus out of the open preview.
 - Golden variants are represented inside their base-card row, but their IDs and
   DBFs are also searchable.
 - Catalogue action columns remain sticky on desktop. On mobile the entire
@@ -145,6 +170,25 @@ The import and API contracts are documented in `LIBRARY_FULL_ART.md`.
   placeholder and are counted in the result metadata.
 - “Новая карта” and “Переводы Wiki” are intentionally absent from navigation;
   catalogue and analytics workflows are the primary interface.
+- Token issuance is collapsed until requested and stays open after a validation
+  error. The configured-key badge describes configuration, not unverified backend
+  connectivity. Revocation still requires explicit confirmation; manager-token
+  self-revocation protection remains server-side.
+
+## Completed presentation coverage
+
+| Workspace | Covered views |
+| --- | --- |
+| Overview and statistics | All 12 registered selectors, applicable filters and entity details |
+| Sources | Summary, source registry, run history, diagnostics and run confirmation |
+| Catalogue tables | All BG, minions, spells, Constructed, heroes, timewarped, anomalies, quests, prizes, rewards, trinkets |
+| Catalogue galleries | Hero skins, pets, coins and nested media |
+| API access | Registry, issuance, one-time secret, revoke, configuration/error/empty states |
+| Editing tools | New card, edit card, Wiki translations |
+| Authentication | Shared login/setup, denied/expired, upstream-error and logout messages |
+
+This describes source implementation, not a production deployment. Public API
+and JSON bridge endpoints are not presentation pages and were not redesigned.
 
 ## Adding a statistics module
 
@@ -193,12 +237,16 @@ partials with fixture data, blocks external requests, and mocks every parser
 operation. It covers 320–1440 px layouts, all shared-shell modules, themes,
 keyboard navigation, URL filters, persistent columns, empty/error/loading states,
 request deadlines, text escaping and single-flight manual-run confirmation.
+There are 34 browser scenarios, with parameterized cases for all 14 catalogue
+filter variants, empty/missing-media states and keyboard preview controls.
 Set `PANEL_SCREENSHOT_DIR` to an existing directory to capture desktop/mobile
-Sources, catalogue, and statistics screenshots. The catalogue fixture exercises
-the real shared filters/pagination with synthetic BG rows; it does not prove
-every catalogue branch's SQL or image rendering. Fixtures do not prove
-production authentication or live
-producer outcomes; those remain release verification steps. Tests are excluded
+Sources, catalogue variants, statistics, tokens, editor, Wiki and auth screenshots.
+The pagination fixture uses synthetic BG rows; `catalog_variants_fixture.php`
+renders every actual production catalogue branch and view helper with synthetic
+records and local test media. PHP warnings fail the variant fixture explicitly.
+Fixtures do not prove production SQL/data, successful real uploads, OAuth,
+live token issuance/revocation or producer outcomes; those remain authorized
+release verification steps. Tests are excluded
 from panel release artifacts by the existing runtime-layout contract.
 
 Before deployment:
