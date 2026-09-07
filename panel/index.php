@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+$panelRequestStarted = microtime(true);
 require __DIR__ . '/lib/auth.php';
 require __DIR__ . '/lib/api_tokens.php';
 require __DIR__ . '/lib/parser_control.php';
@@ -8,8 +9,10 @@ require __DIR__ . '/lib/catalog_view.php';
 require __DIR__ . '/lib/editor_state.php';
 require __DIR__ . '/lib/catalog_read.php';
 require __DIR__ . '/lib/catalog_navigation.php';
+require __DIR__ . '/lib/read_session.php';
 
 $panelUser = panel_require_auth();
+$panelAuthorizedAt = microtime(true);
 
 $config = require __DIR__ . '/config.php';
 
@@ -458,8 +461,15 @@ function query_url(array $overrides = []): string
     return '/' . ($queryString === '' ? '' : '?' . $queryString);
 }
 
-$pdo = db($config);
 $action = $_POST['action'] ?? $_GET['action'] ?? 'list';
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET' && $action === 'list') {
+    // Persist both form tokens and last_seen before releasing the read lock.
+    csrf();
+    $panelLogoutCsrf = panel_logout_csrf_token();
+    panel_finish_read_session();
+}
+$pdo = db($config);
+$panelConnectedAt = microtime(true);
 $message = '';
 $error = '';
 $issuedApiToken = null;
@@ -983,6 +993,7 @@ if (!$showHeroes && !$showHeroSkins && !$showPets && !$showCoins && !$showTimewa
 $page = max(1, (int)($_GET['page'] ?? 1));
 $whereSql = $where ? ' WHERE ' . implode(' AND ', $where) : '';
 
+$panelCatalogStarted = microtime(true);
 $heroes = [];
 $heroSkins = [];
 $pets = [];
@@ -1217,7 +1228,16 @@ if ($action !== 'list') {
 }
 
 // Only fixed, code-owned keys from the read helper become template variables.
+$panelCatalogFinished = microtime(true);
 extract(panel_catalog_counts($pdo, $action, $cardType), EXTR_SKIP);
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET' && $action === 'list') {
+    header(sprintf('Server-Timing: auth;dur=%.1f, connect;dur=%.1f, prepare;dur=%.1f, catalogue;dur=%.1f, counts;dur=%.1f',
+        ($panelAuthorizedAt - $panelRequestStarted) * 1000,
+        ($panelConnectedAt - $panelAuthorizedAt) * 1000,
+        ($panelCatalogStarted - $panelConnectedAt) * 1000,
+        ($panelCatalogFinished - $panelCatalogStarted) * 1000,
+        (microtime(true) - $panelCatalogFinished) * 1000));
+}
 $pageFrom = $filteredTotal === 0 ? 0 : $offset + 1;
 $pageTo = min($offset + ($showHeroSkins ? count($heroSkins) : ($showPets ? count($pets) : ($showCoins ? count($coins) : ($showHeroes ? count($heroes) : ($showTimewarped ? count($timewarpedCards) : ($showConstructed ? count($constructedCards) : ($showLibrary ? count($libraryCards) : count($cards)))))))), $filteredTotal);
 $pageWindowStart = max(1, $page - 2);

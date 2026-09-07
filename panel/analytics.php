@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require __DIR__ . '/lib/auth.php';
 require __DIR__ . '/lib/analytics.php';
+require __DIR__ . '/lib/read_session.php';
 
 panel_require_auth(true);
 
@@ -17,6 +18,8 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'GET') {
     exit;
 }
 
+// Slow upstream reads must not serialize navigation in the same browser session.
+panel_finish_read_session();
 $module = trim((string)($_GET['module'] ?? 'overview'));
 
 try {

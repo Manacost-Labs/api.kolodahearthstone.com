@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require __DIR__ . '/lib/auth.php';
 require __DIR__ . '/lib/parser_control.php';
+require __DIR__ . '/lib/read_session.php';
 
 $panelUser = panel_require_auth(true);
 
@@ -21,6 +22,7 @@ function parser_panel_json(int $status, array $payload): never
 $method = strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET'));
 try {
     if ($method === 'GET') {
+        panel_finish_read_session();
         parser_panel_json(200, ['ok' => true, 'data' => panel_parser_control_request('GET', '/admin/parser-control')]);
     }
     if ($method !== 'POST') {

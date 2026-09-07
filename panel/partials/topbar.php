@@ -14,7 +14,7 @@
         <div class="panel-account" aria-label="Аккаунт администратора">
             <span class="panel-account-name" title="<?= h($panelUser['login']) ?>">GitHub · <?= h($panelUser['login']) ?></span>
             <form action="/auth/logout" method="post">
-                <input type="hidden" name="csrf" value="<?= h(panel_logout_csrf_token()) ?>">
+                <input type="hidden" name="csrf" value="<?= h($panelLogoutCsrf ?? panel_logout_csrf_token()) ?>">
                 <button class="panel-logout" type="submit" aria-label="Выйти из панели">Выйти</button>
             </form>
         </div>
