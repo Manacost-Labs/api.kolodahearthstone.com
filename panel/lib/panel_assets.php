@@ -6,7 +6,7 @@ function panel_script_assets(string $action): array
 {
     $common = ['/assets/workspace.js?v=1', '/assets/panel-ui.js?v=4'];
     $sections = [
-        'list' => ['/assets/table-controls.js?v=4', '/assets/media-preview.js?v=1', '/assets/catalog-reader.js?v=2'],
+        'list' => ['/assets/table-controls.js?v=4', '/assets/media-preview.js?v=1', '/assets/catalog-reader.js?v=3'],
         'analytics' => ['/assets/table-controls.js?v=4', '/assets/parsing-reliability.js?v=10', '/assets/analytics.js?v=16', '/assets/media-preview.js?v=1'],
         'parsers' => ['/assets/parser-control-view.js?v=3', '/assets/parser-control.js?v=4'],
         'api_tokens' => ['/assets/table-controls.js?v=4', '/assets/token-controls.js?v=1'],
