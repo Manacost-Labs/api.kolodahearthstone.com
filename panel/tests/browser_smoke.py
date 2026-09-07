@@ -649,6 +649,15 @@ class PanelBrowserTests(unittest.TestCase):
         expect(form.locator('[name=in_pool]')).not_to_be_checked()
         expect(form.locator('[name=duos_only]')).to_be_checked()
         expect(form.locator('[name=id]')).to_have_value('42')
+        expect(page.locator('h1')).to_have_text('Редактировать карту')
+        # Recovery must use the submitted ID, independent of the original GET mode.
+        page.goto(self.origin + '/tests/form_panel_fixture.php?mode=new')
+        form.locator('[name=name]').fill('Новая карта после ошибки')
+        form.locator('button[type=submit]').click()
+        expect(page.locator('[role=alert]')).to_contain_text('Тестовый отказ')
+        expect(page.locator('h1')).to_have_text('Добавить карту')
+        expect(form.locator('[name=id]')).to_have_value('')
+        expect(form.locator('[name=name]')).to_have_value('Новая карта после ошибки')
 
     def test_wiki_filters_do_not_change_when_editing_rows(self):
         page = self.page
@@ -673,6 +682,10 @@ class PanelBrowserTests(unittest.TestCase):
         page.locator('[data-term-reset]').click()
         expect(page.locator('[data-term-row]:visible')).to_have_count(5)
         expect(page.locator('[data-term-filter]')).to_be_focused()
+        page.get_by_role('button', name='Сохранить переводы').click()
+        expect(page.locator('[role=alert]')).to_contain_text('Тестовый отказ')
+        expect(page.locator('h1')).to_have_text('Переводы Wiki')
+        expect(page.locator('[name="terms[mechanics][1][ru]"]')).to_have_value('Провокация')
 
     def test_forms_responsive_and_empty_wiki(self):
         page = self.page

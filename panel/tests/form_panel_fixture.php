@@ -1,7 +1,9 @@
 <?php
 declare(strict_types=1);
 // Standalone UI only: a submitted form is deliberately rejected, never saved.
-$action = ($_GET['mode'] ?? '') === 'wiki' ? 'wiki_terms' : (($_GET['mode'] ?? '') === 'edit' ? 'edit' : 'new');
+$initialAction = ($_GET['mode'] ?? '') === 'wiki' ? 'wiki_terms' : (($_GET['mode'] ?? '') === 'edit' ? 'edit' : 'new');
+$action = $_POST['action'] ?? $initialAction;
+require __DIR__ . '/../lib/editor_state.php';
 require __DIR__ . '/shell_fixture.php';
 function h($value): string { return htmlspecialchars((string)$value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); }
 function csrf(): string { return 'fixture-csrf'; }
@@ -9,8 +11,10 @@ function query_url(array $overrides = []): string { return '/tests/catalog_panel
 function card_types(): array { return ['minion'=>'Существо', 'spell'=>'Заклинание']; }
 function creature_types(): array { return ['murloc'=>'Мурлок', 'beast'=>'Зверь', 'dragon'=>'Дракон']; }
 function versioned_asset($path, $updated = null): string { return (string)$path; }
-$editCard = $action === 'edit' ? ['id'=>42] : null;
 $error = ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST' ? 'Тестовый отказ сохранения. Запись и файлы не изменены.' : '';
+$editorState = panel_editor_state($action, $_POST, ['id'=>$_GET['id'] ?? 42], $error,
+    static function (int $id): ?array { return $id === 42 ? ['id'=>42] : null; });
+$action = $editorState['action']; $editCard = $editorState['card']; $error = $editorState['error'];
 $form = ['id'=>$editCard ? 42 : '', 'name'=>$editCard ? 'Мурлок-разведчик' : '', 'name_en'=>'Murloc Scout',
     'card_id'=>'BG_FIXTURE_1', 'dbf'=>'10001', 'card_type'=>'minion', 'tavern_tier'=>'1', 'creature_type'=>'murloc',
     'attack'=>'2', 'health'=>'3', 'in_pool'=>true, 'duos_only'=>false, 'notes'=>'',
@@ -22,6 +26,7 @@ $wikiTermGroups = [
     'full_tags'=>[['term_en'=>'Golden', 'term_ru'=>'Золотая']],
 ];
 if (isset($_GET['empty'])) $wikiTermGroups = [];
+$wikiTermGroups = panel_wiki_editor_values($wikiTermGroups, $_POST, $error);
 ?>
 <!doctype html>
 <html lang="ru" data-theme="light"><head>
@@ -35,6 +40,10 @@ if (isset($_GET['empty'])) $wikiTermGroups = [];
     <section class="workspace" id="main-content" tabindex="-1">
         <?php require __DIR__ . '/../partials/topbar.php'; ?>
         <?php if ($error): ?><p class="notice error" role="alert"><?= h($error) ?></p><?php endif; ?>
-        <?php require __DIR__ . ($action === 'wiki_terms' ? '/../partials/wiki-terms.php' : '/../partials/card-editor.php'); ?>
+        <?php if ($action === 'wiki_terms'): ?>
+            <?php require __DIR__ . '/../partials/wiki-terms.php'; ?>
+        <?php elseif (in_array($action, ['new', 'edit'], true)): ?>
+            <?php require __DIR__ . '/../partials/card-editor.php'; ?>
+        <?php endif; ?>
     </section>
 </main><?php require __DIR__ . '/../partials/command-palette.php'; ?></body></html>

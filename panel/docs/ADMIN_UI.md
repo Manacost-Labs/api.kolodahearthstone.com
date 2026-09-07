@@ -62,6 +62,11 @@ The import and API contracts are documented in `LIBRARY_FULL_ART.md`.
 - `partials/card-editor.php` — new/edit forms with labelled fieldsets, upload
   guidance and allowlisted field retention after a rejected save. Existing POST
   names, checkbox semantics, SQL and file validation are unchanged.
+- `lib/editor_state.php` — shared post-dispatch recovery: failed saves reopen
+  the matching editor using the validated POST ID, not a stale GET ID. Already
+  loaded records are reused; missing/malformed IDs never become new-card forms.
+  Rejected Wiki saves also reopen their editor and retain only submitted values
+  matching known translation rows; client-added terms/groups are ignored.
 - `partials/wiki-terms.php` + `assets/editor-controls.js` — translation groups,
   search/status filters, result counts and a resettable empty state. Editing a
   row does not change the selected filter; hidden rows remain in the form.

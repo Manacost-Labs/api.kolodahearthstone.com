@@ -5,6 +5,7 @@ require __DIR__ . '/lib/auth.php';
 require __DIR__ . '/lib/api_tokens.php';
 require __DIR__ . '/lib/parser_control.php';
 require __DIR__ . '/lib/catalog_view.php';
+require __DIR__ . '/lib/editor_state.php';
 
 $panelUser = panel_require_auth();
 
@@ -639,10 +640,11 @@ if ($action === 'api_tokens') {
     $apiTokenIssueNonce = panel_issue_state($_SESSION, 'api_token_issue');
 }
 
-$editCard = null;
-if ($action === 'edit') {
-    $editCard = find_card($pdo, (int)($_GET['id'] ?? 0));
-}
+$editorState = panel_editor_state($action, $_POST, $_GET, $error,
+    static function (int $id) use ($pdo): ?array { return find_card($pdo, $id); }, $current ?? null);
+$action = $editorState['action'];
+$editCard = $editorState['card'];
+$error = $editorState['error'];
 
 $q = trim((string)($_GET['q'] ?? ''));
 $cardType = trim((string)($_GET['card_type'] ?? ''));
@@ -1397,7 +1399,7 @@ $workspaceSection = $showApiTokens
 
     <?php if ($action === 'wiki_terms'): ?>
         <?php
-        $wikiTermGroups = wiki_term_groups($pdo);
+        $wikiTermGroups = panel_wiki_editor_values(wiki_term_groups($pdo), $_POST, $error);
         $wikiTermLabels = wiki_term_type_labels();
         require __DIR__ . '/partials/wiki-terms.php';
         ?>
