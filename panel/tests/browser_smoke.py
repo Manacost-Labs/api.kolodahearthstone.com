@@ -388,6 +388,8 @@ class PanelBrowserTests(unittest.TestCase):
                     expect(page.locator("[data-column-picker]")).to_be_visible()
                     self.assertEqual(page.locator(".cards-table th:not([scope=col])").count(), 0)
                     self.assertGreater(page.locator(".cards-table th[hidden]").count(), 0)
+                    self.assertEqual(page.locator(".cards-table td:not([hidden])").evaluate_all(
+                        "els => els.filter(e => getComputedStyle(e).display !== 'table-cell').map(e => e.className)"), [], section)
                 for width in (1440, 1024, 768, 390, 320):
                     page.set_viewport_size({"width": width, "height": 1100})
                     self.assertFalse(page.evaluate("document.documentElement.scrollWidth > innerWidth"), (section, width))
