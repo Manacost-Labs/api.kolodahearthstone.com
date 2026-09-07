@@ -25,7 +25,7 @@ $catalogLinks = [
         </button>
     </div>
     <nav class="side-nav" id="sidebarNav" aria-label="Разделы панели">
-        <a class="side-link<?= $action === 'analytics' ? ' active' : '' ?>" href="/?action=analytics#statistics"<?= $action === 'analytics' ? ' aria-current="page"' : '' ?>>
+        <a class="side-link<?= $action === 'analytics' ? ' active' : '' ?>" href="/?action=analytics"<?= $action === 'analytics' ? ' aria-current="page"' : '' ?>>
             <?= panel_icon('chart') ?><span>Обзор и статистика</span>
         </a>
         <details class="sidebar-catalog"<?= $catalogActive ? ' open' : '' ?>>

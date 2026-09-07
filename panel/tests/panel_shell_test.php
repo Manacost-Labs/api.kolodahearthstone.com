@@ -20,6 +20,8 @@ foreach (['hero', 'hero_skin', 'pet', 'coin', 'timewarped', 'constructed', 'anom
     check(str_contains($html, 'href="/?card_type=' . $type . '"'), 'Catalogue destination preserved: ' . $type);
 }
 check(str_contains($html, 'href="/?action=api_tokens"'), 'Token manager remains reachable');
+check(str_contains($html, 'href="/?action=analytics"'), 'Overview opens at the page heading');
+check(!str_contains($html, 'analytics#statistics'), 'Overview navigation must not skip the page heading');
 check(str_contains($html, 'action="/auth/logout" method="post"'), 'Logout stays POST');
 check(str_contains($html, 'name="csrf" value="test-csrf"'), 'Logout CSRF remains present');
 check(!str_contains($html, '<img onerror'), 'Login is escaped');

@@ -133,7 +133,7 @@ The import and API contracts are documented in `LIBRARY_FULL_ART.md`.
   normalization; upstream catalog completeness still depends on its baseline or
   reported totals and is not proven for every source. Missing or contradictory
   telemetry renders as “Недостаточно наблюдений”, never as 100%.
-- Statistics tabs load on demand and preserve `stats`, `stats_q`,
+- Statistics sections load on demand and preserve `stats`, `stats_q`,
   `stats_format`, `stats_rank`, and `stats_period` in the URL.
 - Card rows link to `stats=card` using the English card name. The card module
   combines ranked trends with Battlegrounds minion and hero matches.
@@ -152,7 +152,8 @@ The import and API contracts are documented in `LIBRARY_FULL_ART.md`.
    `analytics_module_registry()` in `lib/analytics.php`.
 2. Add a normalization branch that returns `summary`, `columns`, and `rows`.
    Keep source-specific response shapes out of the browser renderer.
-3. Add the navigation button to `partials/analytics-dashboard.php`.
+3. Add the module label to `$statisticsModules` in
+   `partials/analytics-dashboard.php`; it becomes an option in the selector.
 4. If the module needs special filters, expose them with semantic labels and
    wire them in `assets/analytics.js`. Prefer the existing generic table.
 5. Use a bounded `limit`, a short upstream timeout, and a cache TTL appropriate
@@ -193,7 +194,10 @@ operation. It covers 320–1440 px layouts, all shared-shell modules, themes,
 keyboard navigation, URL filters, persistent columns, empty/error/loading states,
 request deadlines, text escaping and single-flight manual-run confirmation.
 Set `PANEL_SCREENSHOT_DIR` to an existing directory to capture desktop/mobile
-Sources screenshots. Fixtures do not prove production authentication or live
+Sources, catalogue, and statistics screenshots. The catalogue fixture exercises
+the real shared filters/pagination with synthetic BG rows; it does not prove
+every catalogue branch's SQL or image rendering. Fixtures do not prove
+production authentication or live
 producer outcomes; those remain release verification steps. Tests are excluded
 from panel release artifacts by the existing runtime-layout contract.
 
@@ -215,7 +219,7 @@ PANEL_ROOT="$PWD" /srv/projects/data/hs-data-platform/tests/admin-ui-contract.sh
 
 Then render the default catalogue and at least one filtered result at desktop,
 tablet, and mobile widths. Verify that the browser console is clean, the menu,
-statistics tabs, scrollable table, detail drawer, and lightbox are
+statistics selector, scrollable table, detail drawer, and lightbox are
 keyboard-accessible. Verify the source registry, a HSGuru archetype with decks,
 a BG minion with combat rounds, and BG hero portrait dimensions. Test an empty
 card-statistics search and a known card such as `Fire Fly`; a golden ID such as
