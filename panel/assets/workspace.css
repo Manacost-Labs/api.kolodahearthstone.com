@@ -434,10 +434,10 @@
 .reader-heading code { color: var(--muted); background: transparent; font-size: 11px; overflow-wrap: anywhere; }
 .reader-content { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: 24px; }
 .reader-gallery, .reader-fields { min-width: 0; }
-.reader-stage { display: grid; place-items: center; height: 260px; padding: 12px; background: var(--panel-soft); border: 1px solid var(--line-soft); border-radius: 10px; overflow: hidden; }
+.reader-stage { display: grid; place-items: center; height: 340px; padding: 12px; background: var(--panel-soft); border: 1px solid var(--line-soft); border-radius: 10px; overflow: hidden; }
 .reader-stage > button { display: grid; place-items: center; width: 100%; height: 100%; padding: 0; border: 0; background: transparent; position: relative; }
-.reader-stage img { display: block; width: 100%; height: 220px; object-fit: contain; filter: none; }
-.reader-stage video, .reader-stage audio { width: 100%; max-height: 235px; }
+.reader-stage img { display: block; width: 100%; height: 300px; object-fit: contain; filter: none; }
+.reader-stage video, .reader-stage audio { width: 100%; max-height: 310px; }
 .reader-expand { margin-top: 4px; color: var(--muted); font-size: 10px; }
 .reader-caption { margin: 10px 0 0; color: var(--label); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; max-height: 50px; overflow: auto; }
 .reader-media-nav { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 8px 0; font-size: 11px; color: var(--muted); }
@@ -462,6 +462,7 @@
 .reader-data .reader-attribute { margin: 10px 0; }
 .reader-data .reader-attribute > b { display: block; color: var(--muted); font-size: 11px; font-weight: 500; }
 .reader-data .reader-attribute > span { display: block; }
+.reader-data .reader-source-title { display: block; margin: 3px 0 10px; color: var(--muted); font-size: 12px; white-space: pre-line; }
 .reader-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 18px; margin: 0 0 18px; }
 .reader-facts > div { min-width: 0; padding-bottom: 10px; border-bottom: 1px solid var(--line-soft); }
 .reader-facts dt { color: var(--muted); font-size: 10px; }
@@ -489,7 +490,11 @@
     .reader-heading h2 { font-size: 21px; }
     .reader-content { grid-template-columns: minmax(0, 1fr); gap: 24px; }
     .reader-gallery { width: 100%; max-width: 420px; justify-self: center; }
-    .reader-stage { height: 270px; }
+    .reader-stage { height: 320px; }
+    .reader-stage img { height: 280px; }
+    .reader-thumbs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .reader-thumbs button { height: 66px; }
+    .reader-thumbs img { height: 56px; }
     .reader-data { max-height: 360px; }
 }
 /* Entity catalogues: readable tables and galleries that use the page scroll. */

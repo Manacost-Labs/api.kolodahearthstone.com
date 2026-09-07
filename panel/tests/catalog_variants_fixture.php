@@ -75,6 +75,14 @@ if (isset($_GET['rich_data'])) {
     $record['patch_changes_json'] = json_encode([['heading'=>'Изменения', 'entries'=>[
         ['date'=>'2026-09-01', 'patch'=>'99.1', 'items'=>['Атака увеличена на 1.']],
     ]]]);
+    if ($showCoins) {
+        $record['generated_by_cards_json'] = json_encode([['card_id'=>'GENERATED_1', 'name_en'=>'Создатель монетки']]);
+        $record['related_cards_json'] = json_encode([['card_id'=>'RELATED_1', 'name_en'=>'Хранитель сокровищ']]);
+    }
+}
+if (isset($_GET['unsafe_data'])) {
+    $record['actor'] = '<img src=x onerror=alert(1)>';
+    $record['wiki_page_url'] = 'javascript:alert(1)';
 }
 $record['hero_skins_json'] = json_encode([['cards'=>[['title'=>'Ледяная Джайна', 'image_url'=>$image, 'card_id'=>'SKIN_FIXTURE']]]]);
 if ($showHeroSkins) $record['name_en'] = 'Ледяная Джайна';

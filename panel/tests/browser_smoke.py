@@ -491,6 +491,12 @@ class PanelBrowserTests(unittest.TestCase):
         page.locator("[data-reader-thumb]").last.click()
         expect(page.locator("[data-reader-stage] img")).to_have_attribute("src", self.origin + "/tests/catalog-art.svg?art=14")
         expect(page.locator("[data-reader-media-next]")).to_be_disabled()
+        page.set_viewport_size({"width": 320, "height": 1100})
+        for thumbnail in page.locator("[data-reader-thumb]").all():
+            box = thumbnail.bounding_box()
+            self.assertGreaterEqual(box["width"], 44)
+            self.assertGreaterEqual(box["height"], 44)
+        page.set_viewport_size({"width": 1440, "height": 1100})
         page.locator("[data-reader-record]").first.focus()
         page.keyboard.press("ArrowDown")
         expect(page.locator("[data-reader-record]").nth(1)).to_be_focused()
@@ -504,6 +510,8 @@ class PanelBrowserTests(unittest.TestCase):
 
     def test_reader_responsive_empty_media_and_bounded_list(self):
         page = self.open_reader("hero")
+        expect(page.locator("[data-reader-media-navigation]")).to_be_hidden()
+        expect(page.locator("[data-reader-thumbs]")).to_be_hidden()
         for width in (1440, 1024, 768, 390, 320):
             page.set_viewport_size({"width": width, "height": 1100})
             self.assertFalse(page.evaluate("document.documentElement.scrollWidth > innerWidth"))
@@ -541,16 +549,31 @@ class PanelBrowserTests(unittest.TestCase):
         expect(page.locator("[data-reader-data]")).to_contain_text("Атака увеличена на 1.")
         page.locator("[data-reader-thumb]").last.click()
         expect(page.locator("[data-reader-stage] audio")).to_be_visible()
+        expect(page.locator("[data-reader-stage] audio")).to_have_attribute("aria-label", "Приветствие: Приветствие компаньона audio")
+        expect(page.locator("[data-reader-caption]")).to_contain_text("Приветствие компаньона")
         self.open_reader("")
         page.locator("[data-reader-field]").select_option(label="Wiki")
         expect(page.locator("[data-reader-data]")).to_contain_text("Тестовый художник")
-        page.locator("[data-reader-field]").select_option(label="Действия")
+        self.assertNotIn("Действия", page.locator("[data-reader-field] option").all_text_contents())
         expect(page.locator(".catalog-reader form, .catalog-reader input[name=csrf]")).to_have_count(0)
+        expect(page.locator('.catalog-reader a[href*="action=edit"]')).to_have_count(0)
         self.assertGreater(page.locator(".cards-table form").count(), 0)
         self.open_reader("hero_skin", "&rich_data=1")
         page.locator("[data-reader-thumb]").get_by_text("Видео", exact=True).click()
         expect(page.locator("[data-reader-stage] video")).to_have_attribute("preload", "none")
         self.assertTrue(page.locator("[data-reader-stage] video").evaluate("e => e.paused"))
+
+    def test_reader_preserves_relationship_titles_and_safe_text(self):
+        page = self.open_reader("coin", "&rich_data=1")
+        page.locator("[data-reader-field]").select_option(label="Создаётся · 1")
+        for value in ("GENERATED_1", "Создатель монетки", "RELATED_1", "Хранитель сокровищ"):
+            expect(page.locator("[data-reader-data]")).to_contain_text(value)
+        expect(page.locator("[data-reader-data] details")).to_have_count(0)
+        self.open_reader("hero_skin", "&unsafe_data=1")
+        page.locator("[data-reader-field]").select_option(label="Характеристики")
+        expect(page.locator("[data-reader-data]")).to_contain_text('<img src=x onerror=alert(1)>')
+        expect(page.locator("[data-reader-data] img, [data-reader-data] [onerror], [data-reader-data] [id]")).to_have_count(0)
+        expect(page.locator('[data-reader-data] a[href^="javascript:"]')).to_have_count(0)
 
     def test_reader_broken_images_and_unavailable_module_fallback(self):
         self.page.route("**/tests/catalog-art.svg*", lambda route: route.abort())

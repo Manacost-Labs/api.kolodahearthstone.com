@@ -56,11 +56,14 @@
             if (href) { copy.href = href; copy.rel = 'noopener noreferrer'; }
         }
         for (const child of node.childNodes) copy.append(copyContent(child, brief));
+        const title = node.getAttribute('title')?.trim();
+        if (!brief && title && title !== text(node)) copy.append(el('span', title, 'reader-source-title'));
         return copy;
     }
     function groupsFor(record) {
         if (record.row.matches('tr')) {
-            return Array.from(record.row.cells, (node, i) => ({label: headers[i] || `Поле ${i + 1}`, node}));
+            return Array.from(record.row.cells, (node, i) => ({label: headers[i] || `Поле ${i + 1}`, node}))
+                .filter(group => !group.node.matches('.row-actions'));
         }
         return Array.from(record.row.querySelector('.skin-card-body')?.children || [], (node, i) => ({
             label: node.matches('.skin-card-head') ? 'Название' : node.matches('.skin-meta-grid') ? 'Характеристики'
@@ -75,12 +78,13 @@
             const src = url(node.dataset.preview || node.getAttribute('src') || node.querySelector('source')?.getAttribute('src') || node.getAttribute('href'));
             if (!src) continue;
             const extension = new URL(src).pathname.split('.').pop().toLowerCase();
-            if (node.matches('a') && !['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'svg', 'webm', 'mp4', 'ogg', 'mp3', 'wav', 'm4a', 'flac'].includes(extension)) continue;
-            const type = node.matches('audio') || ['ogg', 'mp3', 'wav', 'm4a', 'flac'].includes(extension) ? 'audio'
+            const soundLink = node.matches('a') && text(node.closest('.wiki-section')?.querySelector(':scope > b')) === 'Sounds';
+            if (node.matches('a') && !soundLink && !['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'svg', 'webm', 'mp4', 'ogg', 'mp3', 'wav', 'm4a', 'flac'].includes(extension)) continue;
+            const type = node.matches('audio') || soundLink || ['ogg', 'mp3', 'wav', 'm4a', 'flac'].includes(extension) ? 'audio'
                 : node.matches('video') || node.dataset.previewType === 'video' || ['webm', 'mp4'].includes(extension) ? 'video' : 'image';
             if (seen.has(type + src)) continue;
             seen.add(type + src);
-            const label = text(node.closest('figure')?.querySelector('figcaption')) || text(node.closest('li')?.querySelector('span')) || node.getAttribute('alt')
+            const label = text(node.closest('figure')?.querySelector('figcaption')) || text(node.closest('li')) || node.getAttribute('alt')
                 || node.dataset.tooltip?.split('\n')[0] || text(node) || (type === 'audio' ? 'Звук' : 'Изображение');
             media.push({src, type, label, thumb: url(node.matches('img') ? node.getAttribute('src') : node.querySelector('img')?.getAttribute('src'))});
         }
@@ -103,7 +107,7 @@
                 <section class="reader-gallery" aria-label="Изображения и медиа записи">
                     <div class="reader-stage" data-reader-stage></div>
                     <p class="reader-caption" data-reader-caption></p>
-                    <div class="reader-media-nav">
+                    <div class="reader-media-nav" data-reader-media-navigation>
                         <button type="button" data-reader-media-prev aria-label="Предыдущее изображение">←</button>
                         <span data-reader-media-count role="status"></span>
                         <button type="button" data-reader-media-next aria-label="Следующее изображение">→</button>
@@ -227,6 +231,8 @@
         }
         find('caption').textContent = item?.label || '';
         find('media-count').textContent = item ? `${mediaIndex + 1} / ${media.length}` : '0 / 0';
+        find('media-navigation').hidden = media.length <= 1;
+        find('thumbs').hidden = media.length <= 1;
         find('media-prev').disabled = mediaIndex <= 0;
         find('media-next').disabled = mediaIndex >= media.length - 1;
         if (rebuildThumbs) renderThumbs();
