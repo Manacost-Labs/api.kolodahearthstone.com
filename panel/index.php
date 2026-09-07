@@ -6,6 +6,7 @@ require __DIR__ . '/lib/api_tokens.php';
 require __DIR__ . '/lib/parser_control.php';
 require __DIR__ . '/lib/catalog_view.php';
 require __DIR__ . '/lib/editor_state.php';
+require __DIR__ . '/lib/catalog_read.php';
 
 $panelUser = panel_require_auth();
 
@@ -991,7 +992,12 @@ $goldenVariantMap = [];
 $wikiMetaMap = [];
 $constructedWikiMetaMap = [];
 $constructedRelatedCardMap = [];
-if ($showHeroSkins) {
+if ($action !== 'list') {
+    // Other workspaces need navigation totals, not a hidden page of card data.
+    $filteredTotal = 0;
+    $totalPages = 1;
+    $offset = 0;
+} elseif ($showHeroSkins) {
     $countStmt = $pdo->prepare('SELECT COUNT(*) FROM hero_skins' . $whereSql);
     bind_statement_params($countStmt, $params);
     $countStmt->execute();
@@ -1208,43 +1214,8 @@ if ($showHeroSkins) {
     $wikiMetaMap = load_wiki_meta_map($pdo, $cards);
 }
 
-$total = (int)$pdo->query("SELECT COUNT(*) FROM battlegrounds_cards WHERE variant_kind = 'base'")->fetchColumn();
-$goldenVariantTotal = (int)$pdo->query("SELECT COUNT(*) FROM battlegrounds_cards WHERE variant_kind = 'golden'")->fetchColumn();
-$heroTotal = (int)$pdo->query("SELECT COUNT(*) FROM battlegrounds_heroes WHERE status = 'ok'")->fetchColumn();
-$heroSkinsTotal = (int)$pdo->query("SELECT COUNT(*) FROM hero_skins WHERE status IN ('ok', 'partial')")->fetchColumn();
-$heroSkinsAnimatedTotal = (int)$pdo->query("SELECT COUNT(*) FROM hero_skins WHERE status IN ('ok', 'partial') AND animated_image_url IS NOT NULL AND animated_image_url <> ''")->fetchColumn();
-$heroSkinsGalleryTotal = (int)$pdo->query("SELECT COUNT(*) FROM hero_skins WHERE status IN ('ok', 'partial') AND COALESCE(JSON_LENGTH(gallery_json), 0) > 0")->fetchColumn();
-$heroSkinsSoundsTotal = (int)$pdo->query("SELECT COUNT(*) FROM hero_skins WHERE status IN ('ok', 'partial') AND COALESCE(JSON_LENGTH(sounds_json), 0) > 0")->fetchColumn();
-$heroSkinRarityTotals = [];
-foreach ($pdo->query("SELECT COALESCE(rarity_slug, 'unknown') AS rarity_slug, COUNT(*) AS total FROM hero_skins WHERE status IN ('ok', 'partial') GROUP BY COALESCE(rarity_slug, 'unknown')") as $row) {
-    $heroSkinRarityTotals[(string)$row['rarity_slug']] = (int)$row['total'];
-}
-$petsTotal = (int)$pdo->query("SELECT COUNT(*) FROM hearthstone_pets WHERE status IN ('ok', 'partial')")->fetchColumn();
-$petsGalleryTotal = (int)$pdo->query("SELECT COUNT(*) FROM hearthstone_pets WHERE status IN ('ok', 'partial') AND COALESCE(JSON_LENGTH(gallery_json), 0) > 0")->fetchColumn();
-$petsBackgroundTotal = (int)$pdo->query("SELECT COUNT(*) FROM hearthstone_pets WHERE status IN ('ok', 'partial') AND end_screen_background_url IS NOT NULL AND end_screen_background_url <> ''")->fetchColumn();
-$petFamiliesTotal = (int)$pdo->query("SELECT COUNT(DISTINCT pet_id) FROM hearthstone_pets WHERE status IN ('ok', 'partial')")->fetchColumn();
-$coinsTotal = (int)$pdo->query('SELECT COUNT(*) FROM hearthstone_coins')->fetchColumn();
-$coinRelationsRow = $pdo->query('SELECT generated_by_card_ids_json, related_card_ids_json FROM hearthstone_coins ORDER BY cosmetic_sort_order ASC LIMIT 1')->fetch();
-$coinGeneratedByTotal = $coinRelationsRow ? count(json_array($coinRelationsRow['generated_by_card_ids_json'] ?? null)) : 0;
-$coinRelatedTotal = $coinRelationsRow ? count(json_array($coinRelationsRow['related_card_ids_json'] ?? null)) : 0;
-$timewarpedTotal = (int)$pdo->query("SELECT COUNT(*) FROM battlegrounds_timewarped_cards WHERE status = 'ok'")->fetchColumn();
-$constructedTotal = (int)$pdo->query('SELECT COUNT(*) FROM constructed_cards')->fetchColumn();
-$constructedStandardTotal = (int)$pdo->query("SELECT COUNT(*) FROM constructed_format_cards WHERE format_slug = 'standard' AND in_format = 1")->fetchColumn();
-$constructedWildTotal = (int)$pdo->query("SELECT COUNT(*) FROM constructed_format_cards WHERE format_slug = 'wild' AND in_format = 1")->fetchColumn();
-$constructedWikiTotal = (int)$pdo->query("SELECT COUNT(*) FROM constructed_card_wiki_meta WHERE status = 'ok'")->fetchColumn();
-$constructedDiamondTotal = (int)$pdo->query("SELECT COUNT(*) FROM constructed_cards WHERE image_diamond_url IS NOT NULL AND image_diamond_url <> ''")->fetchColumn();
-$constructedAnimatedDiamondTotal = (int)$pdo->query("SELECT COUNT(*) FROM constructed_cards WHERE animated_diamond_url IS NOT NULL AND animated_diamond_url <> ''")->fetchColumn();
-$libraryTotal = (int)$pdo->query('SELECT COUNT(*) FROM battlegrounds_library_cards')->fetchColumn();
-$listingTotal = $showHeroSkins ? $heroSkinsTotal : ($showPets ? $petsTotal : ($showCoins ? $coinsTotal : ($showHeroes ? $heroTotal : ($showTimewarped ? $timewarpedTotal : ($showConstructed ? ($constructedFormat === 'standard' ? $constructedStandardTotal : ($constructedFormat === 'wild' ? $constructedWildTotal : $constructedTotal)) : ($showLibrary ? (int)$pdo->query("SELECT COUNT(*) FROM battlegrounds_library_cards WHERE library = " . $pdo->quote($libraryType))->fetchColumn() : $total))))));
-$inPoolTotal = (int)$pdo->query('SELECT COUNT(*) FROM battlegrounds_cards WHERE in_pool = 1')->fetchColumn();
-$duosOnlyTotal = (int)$pdo->query('SELECT COUNT(*) FROM battlegrounds_cards WHERE duos_only = 1')->fetchColumn();
-$wikiMetaTotal = (int)$pdo->query("SELECT COUNT(*) FROM battlegrounds_card_wiki_meta WHERE status = 'ok'")->fetchColumn();
-$wikiMinionTotal = (int)$pdo->query("SELECT COUNT(*) FROM battlegrounds_cards WHERE card_type = 'minion'")->fetchColumn();
-$heroBuddyTotal = (int)$pdo->query("SELECT COUNT(*) FROM battlegrounds_heroes WHERE status = 'ok' AND buddy_dbf IS NOT NULL")->fetchColumn();
-$heroPowerGalleryTotal = (int)$pdo->query("SELECT COUNT(*) FROM battlegrounds_heroes WHERE status = 'ok' AND COALESCE(JSON_LENGTH(JSON_EXTRACT(hero_power_json, '$.gallery')), 0) > 0")->fetchColumn();
-$buddyGalleryTotal = (int)$pdo->query("SELECT COUNT(*) FROM battlegrounds_heroes WHERE status = 'ok' AND buddy_dbf IS NOT NULL AND COALESCE(JSON_LENGTH(JSON_EXTRACT(buddy_json, '$.gallery')), 0) > 0")->fetchColumn();
-$buddySoundsTotal = (int)$pdo->query("SELECT COUNT(*) FROM battlegrounds_heroes WHERE status = 'ok' AND buddy_dbf IS NOT NULL AND COALESCE(JSON_LENGTH(JSON_EXTRACT(buddy_json, '$.sounds')), 0) > 0")->fetchColumn();
-$heroWikiErrorTotal = (int)$pdo->query("SELECT COUNT(*) FROM battlegrounds_heroes WHERE status = 'ok' AND (JSON_EXTRACT(hero_power_json, '$.wiki_fetch_error') IS NOT NULL OR JSON_EXTRACT(buddy_json, '$.wiki_fetch_error') IS NOT NULL)")->fetchColumn();
+// Only fixed, code-owned keys from the read helper become template variables.
+extract(panel_catalog_counts($pdo, $action, $cardType), EXTR_SKIP);
 $pageFrom = $filteredTotal === 0 ? 0 : $offset + 1;
 $pageTo = min($offset + ($showHeroSkins ? count($heroSkins) : ($showPets ? count($pets) : ($showCoins ? count($coins) : ($showHeroes ? count($heroes) : ($showTimewarped ? count($timewarpedCards) : ($showConstructed ? count($constructedCards) : ($showLibrary ? count($libraryCards) : count($cards)))))))), $filteredTotal);
 $pageWindowStart = max(1, $page - 2);
