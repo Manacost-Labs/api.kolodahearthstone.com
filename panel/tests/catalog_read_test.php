@@ -13,6 +13,9 @@ class CatalogCountStatement extends PDOStatement {
     public function fetchColumn($column = 0) { return '42'; }
     #[ReturnTypeWillChange]
     public function fetch($mode = PDO::FETCH_ASSOC, $orientation = PDO::FETCH_ORI_NEXT, $offset = 0) {
+        if (preg_match_all('/AS ([a-zA-Z]+Total|total)\b/', $this->sql, $matches)) {
+            return array_fill_keys($matches[1], '42');
+        }
         return ['generated_by_card_ids_json'=>'["A","B"]', 'related_card_ids_json'=>'["C"]'];
     }
     #[ReturnTypeWillChange]
@@ -34,8 +37,8 @@ class CatalogCountPDO extends PDO {
     }
 }
 $nav = ['total','heroTotal','heroSkinsTotal','petsTotal','coinsTotal','timewarpedTotal','constructedTotal'];
-$budget = [''=>7, 'minion'=>7, 'spell'=>7, 'hero'=>12, 'hero_skin'=>11, 'pet'=>10,
-    'coin'=>8, 'constructed'=>12, 'timewarped'=>7, 'anomaly'=>7, 'quest'=>7, 'darkmoon_prize'=>7, 'reward'=>7, 'trinket'=>7];
+$budget = [''=>7, 'minion'=>7, 'spell'=>7, 'hero'=>7, 'hero_skin'=>8, 'pet'=>7,
+    'coin'=>8, 'constructed'=>9, 'timewarped'=>7, 'anomaly'=>7, 'quest'=>7, 'darkmoon_prize'=>7, 'reward'=>7, 'trinket'=>7];
 foreach ($budget as $section => $count) {
     $pdo = new CatalogCountPDO();
     $stats = panel_catalog_counts($pdo, 'list', $section);
