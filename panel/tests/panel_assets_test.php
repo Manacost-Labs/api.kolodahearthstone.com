@@ -7,7 +7,7 @@ function check_assets(bool $ok, string $message): void {
 }
 $common = ['workspace', 'panel-ui'];
 $modules = [
-    'list' => ['table-controls', 'media-preview'],
+    'list' => ['table-controls', 'media-preview', 'catalog-reader'],
     'analytics' => ['table-controls', 'parsing-reliability', 'analytics', 'media-preview'],
     'parsers' => ['parser-control-view', 'parser-control'],
     'api_tokens' => ['table-controls', 'token-controls'],
@@ -30,7 +30,7 @@ foreach ($modules as $action => $expected) {
         check_assets((bool)preg_match('~^/assets/[a-z-]+\.js\?v=\d+$~', $asset), 'Versioned local asset');
         $bytes += filesize($file);
     }
-    if ($action === 'list') check_assets($bytes < 26000, 'Catalogue JS raw budget: 26KB');
+    if ($action === 'list') check_assets($bytes < 44000, 'Catalogue plus bounded reader JS raw budget: 44KB');
     echo $action . ': scripts=' . count($assets) . ' bytes=' . $bytes . "\n";
 }
 $source = file_get_contents(__DIR__ . '/../index.php');

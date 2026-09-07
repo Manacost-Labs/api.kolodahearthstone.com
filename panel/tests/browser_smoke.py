@@ -275,6 +275,8 @@ class PanelBrowserTests(unittest.TestCase):
         expect(page.locator("[data-run-confirm]")).to_be_disabled()
 
     def open_catalog(self, query=""):
+        # Legacy table regressions stay explicit; reader defaults have their own coverage.
+        self.context.add_init_script("localStorage.setItem('panel-catalog-view', 'table')")
         self.page.goto(self.origin + "/tests/catalog_panel_fixture.php" + query)
         return self.page
 
@@ -430,20 +432,138 @@ class PanelBrowserTests(unittest.TestCase):
             .filter(r => r.initiatorType === 'script' && new URL(r.name).pathname.startsWith('/assets/'))
             .map(r => ({path: new URL(r.name).pathname, bytes:r.decodedBodySize}))""")
         self.assertEqual({r['path'] for r in resources}, {
-            '/assets/workspace.js', '/assets/panel-ui.js', '/assets/table-controls.js', '/assets/media-preview.js'})
+            '/assets/workspace.js', '/assets/panel-ui.js', '/assets/table-controls.js', '/assets/media-preview.js',
+            '/assets/catalog-reader.js'})
         size = sum(r['bytes'] for r in resources)
         self.assertGreater(size, 0)
-        self.assertLess(size, 26000)
+        self.assertLess(size, 44000)
         print(f'Catalogue browser script budget: {len(resources)} requests, {size} decoded bytes')
 
     catalog_variants = ("", "minion", "spell", "constructed", "hero", "hero_skin", "pet", "coin",
                         "timewarped", "anomaly", "quest", "darkmoon_prize", "reward", "trinket")
 
     def open_catalog_variant(self, section, extra=""):
+        self.context.add_init_script("localStorage.setItem('panel-catalog-view', 'table')")
         response = self.page.goto(self.origin + "/tests/catalog_variants_fixture.php?card_type=" + section + extra)
         self.assertEqual(response.status, 200)
         self.assertNotIn("Fatal error", self.page.content())
         return self.page
+
+    def open_reader(self, section="", extra=""):
+        self.page.goto(self.origin + "/tests/catalog_variants_fixture.php?card_type=" + section + extra)
+        expect(self.page.locator(".catalog-reader")).to_be_visible()
+        return self.page
+
+    def test_reader_all_variants_default_and_complete_fields(self):
+        for section in self.catalog_variants:
+            with self.subTest(section=section):
+                page = self.open_reader(section)
+                expect(page.locator(".cards-table")).to_be_hidden()
+                expect(page.locator("[data-reader-record]")).to_have_count(2)
+                expect(page.locator("[data-reader-title]")).not_to_be_empty()
+                expect(page.locator("[data-reader-stage] img")).to_be_visible()
+                self.assertEqual(page.locator(".catalog-reader details, .catalog-reader form").count(), 0)
+                labels = page.locator("[data-reader-field] option").all_text_contents()
+                for index in range(1, len(labels)):
+                    page.locator("[data-reader-field]").select_option(str(index - 1))
+                    expect(page.locator("[data-reader-data]")).to_be_visible()
+                    self.assertEqual(page.locator("[data-reader-data] details, [data-reader-data] [hidden]").count(), 0)
+                page.locator("[data-reader-next]").click()
+                expect(page.locator("[data-reader-position]")).to_have_text("2 / 2")
+                expect(page.locator("[data-reader-next]")).to_be_disabled()
+
+    def test_reader_gallery_paging_fullscreen_and_keyboard(self):
+        page = self.open_reader("constructed", "&many_media=1")
+        expect(page.locator("[data-reader-media-count]")).to_have_text("1 / 15")
+        expect(page.locator("[data-reader-thumb]")).to_have_count(6)
+        page.locator("[data-reader-media-page-next]").click()
+        expect(page.locator("[data-reader-thumb]").first).to_have_attribute("data-reader-thumb", "6")
+        page.locator("[data-reader-thumb]").last.click()
+        expect(page.locator("[data-reader-stage] img")).to_have_attribute("src", self.origin + "/tests/catalog-art.svg?art=11")
+        trigger = page.locator("[data-reader-stage] [data-preview]")
+        trigger.focus()
+        page.keyboard.press("Enter")
+        expect(page.locator("#fullscreenCard")).to_be_visible()
+        page.keyboard.press("Escape")
+        expect(trigger).to_be_focused()
+        page.locator("[data-reader-media-page-next]").click()
+        expect(page.locator("[data-reader-thumb]")).to_have_count(3)
+        page.locator("[data-reader-thumb]").last.click()
+        expect(page.locator("[data-reader-stage] img")).to_have_attribute("src", self.origin + "/tests/catalog-art.svg?art=14")
+        expect(page.locator("[data-reader-media-next]")).to_be_disabled()
+        page.locator("[data-reader-record]").first.focus()
+        page.keyboard.press("ArrowDown")
+        expect(page.locator("[data-reader-record]").nth(1)).to_be_focused()
+        expect(page.locator("[data-reader-position]")).to_have_text("2 / 2")
+        page.get_by_role("button", name="Таблица", exact=True).click()
+        expect(page.locator(".cards-table")).to_be_visible()
+        page.reload()
+        expect(page.locator(".cards-table")).to_be_visible()
+        page.get_by_role("button", name="Просмотр", exact=True).click()
+        expect(page.locator(".catalog-reader")).to_be_visible()
+
+    def test_reader_responsive_empty_media_and_bounded_list(self):
+        page = self.open_reader("hero")
+        for width in (1440, 1024, 768, 390, 320):
+            page.set_viewport_size({"width": width, "height": 1100})
+            self.assertFalse(page.evaluate("document.documentElement.scrollWidth > innerWidth"))
+            self.assertTrue(page.locator(".catalog-reader").evaluate("e => e.scrollWidth <= e.clientWidth + 1"))
+            if width <= 760:
+                expect(page.locator("[data-reader-list]")).to_be_hidden()
+                page.locator("[data-reader-select]").select_option("1")
+                expect(page.locator("[data-reader-position]")).to_have_text("2 / 2")
+            directory = os.environ.get("PANEL_SCREENSHOT_DIR")
+            if directory and width in (1440, 390):
+                page.screenshot(path=str(Path(directory) / f"panel-reader-{width}.png"), full_page=True)
+        self.open_reader("hero", "&no_media=1")
+        expect(page.locator("[data-reader-stage]")).to_contain_text("Нет изображений")
+        page.goto(self.origin + "/tests/catalog_variants_fixture.php?empty=1")
+        expect(page.locator(".catalog-reader")).to_have_count(0)
+        expect(page.locator(".cards-table .empty")).to_be_visible()
+        page.goto(self.origin + "/tests/catalog_panel_fixture.php?per_page=150")
+        page.set_viewport_size({"width": 1440, "height": 1100})
+        expect(page.locator("[data-reader-record]")).to_have_count(120)
+        self.assertLess(page.locator("[data-reader-list]").bounding_box()["height"], 650)
+
+    def test_reader_related_fields_sounds_and_no_mutation_forms(self):
+        page = self.open_reader("hero", "&rich_data=1")
+        expect(page.locator("[data-reader-data]")).to_contain_text("Ледяное пламя")
+        page.locator("[data-reader-field]").select_option(label="Buddy")
+        expect(page.locator("[data-reader-data]")).to_contain_text("Приветствие компаньона")
+        expect(page.locator("[data-reader-data] details")).to_have_count(0)
+        page.locator("[data-reader-thumb]").last.click()
+        expect(page.locator("[data-reader-stage] audio")).to_have_attribute("preload", "none")
+        self.assertTrue(page.locator("[data-reader-stage] audio").evaluate("e => e.paused"))
+        page.locator("[data-reader-next]").click()
+        expect(page.locator("[data-reader-stage] audio")).to_have_count(0)
+        self.open_reader("constructed", "&rich_data=1")
+        page.locator("[data-reader-field]").select_option(label="Patch changes")
+        expect(page.locator("[data-reader-data]")).to_contain_text("Атака увеличена на 1.")
+        page.locator("[data-reader-thumb]").last.click()
+        expect(page.locator("[data-reader-stage] audio")).to_be_visible()
+        self.open_reader("")
+        page.locator("[data-reader-field]").select_option(label="Wiki")
+        expect(page.locator("[data-reader-data]")).to_contain_text("Тестовый художник")
+        page.locator("[data-reader-field]").select_option(label="Действия")
+        expect(page.locator(".catalog-reader form, .catalog-reader input[name=csrf]")).to_have_count(0)
+        self.assertGreater(page.locator(".cards-table form").count(), 0)
+        self.open_reader("hero_skin", "&rich_data=1")
+        page.locator("[data-reader-thumb]").get_by_text("Видео", exact=True).click()
+        expect(page.locator("[data-reader-stage] video")).to_have_attribute("preload", "none")
+        self.assertTrue(page.locator("[data-reader-stage] video").evaluate("e => e.paused"))
+
+    def test_reader_broken_images_and_unavailable_module_fallback(self):
+        self.page.route("**/tests/catalog-art.svg*", lambda route: route.abort())
+        page = self.open_reader()
+        expect(page.locator("[data-reader-stage]")).to_contain_text("Изображение недоступно")
+        page.locator("[data-reader-next]").click()
+        expect(page.locator("[data-reader-position]")).to_have_text("2 / 2")
+        page.route("**/assets/catalog-reader.js*", lambda route: route.abort())
+        page.reload()
+        expect(page.locator(".cards-table")).to_be_visible()
+        expect(page.locator(".catalog-reader")).to_have_count(0)
+        expect(page.locator("[data-column-picker]")).to_be_visible()
+
 
     def test_real_catalogue_variants_and_responsive_galleries(self):
         for section in self.catalog_variants:

@@ -36,6 +36,11 @@ $record = array_fill_keys([
 ], '');
 $image = isset($_GET['no_media']) ? '' : '/tests/catalog-art.svg';
 $gallery = $image ? [['file_url'=>$image, 'thumb_url'=>$image, 'caption'=>'Тестовый арт']] : [];
+if ($image && isset($_GET['many_media'])) {
+    for ($i = 1; $i <= 14; $i++) {
+        $gallery[] = ['file_url'=>$image . '?art=' . $i, 'thumb_url'=>$image . '?art=' . $i, 'caption'=>'Вариант ' . $i];
+    }
+}
 $record = array_replace($record, [
     'id'=>42, 'dbf'=>10001, 'card_id'=>'BG_FIXTURE_1',
     'name'=>'Мурлок-разведчик', 'name_ru'=>'Мурлок-разведчик', 'name_en'=>'Scout Murloc',
@@ -61,6 +66,16 @@ foreach ([
 $related = ['name'=>'Ледяное пламя', 'text'=>'Наносит 1 ед. урона.', 'image'=>$image, 'gallery'=>$gallery];
 $record['hero_power_json'] = json_encode($related);
 $record['buddy_json'] = json_encode($related);
+if (isset($_GET['rich_data'])) {
+    $clip = ['file_url'=>'/tests/voice.ogg', 'description'=>'Приветствие компаньона', 'type'=>'Приветствие', 'transcript'=>'Север зовёт'];
+    $record['sounds_json'] = json_encode($showHeroSkins ? [$clip] : [['heading'=>'Приветствие', 'clips'=>[$clip]]]);
+    $related['sounds'] = [['heading'=>'Компаньон', 'clips'=>[$clip]]];
+    $record['buddy_json'] = json_encode($related);
+    $record['animated_image_url'] = '/tests/animation.webm';
+    $record['patch_changes_json'] = json_encode([['heading'=>'Изменения', 'entries'=>[
+        ['date'=>'2026-09-01', 'patch'=>'99.1', 'items'=>['Атака увеличена на 1.']],
+    ]]]);
+}
 $record['hero_skins_json'] = json_encode([['cards'=>[['title'=>'Ледяная Джайна', 'image_url'=>$image, 'card_id'=>'SKIN_FIXTURE']]]]);
 if ($showHeroSkins) $record['name_en'] = 'Ледяная Джайна';
 $second = array_replace($record, ['id'=>43, 'dbf'=>10002, 'card_id'=>'BG_FIXTURE_2',
