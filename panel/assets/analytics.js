@@ -1382,22 +1382,28 @@
     const updateUrlState = (module) => {
         const next = new URL(window.location.href);
         next.searchParams.set('stats', module);
-        const query = module === 'card' ? cardInput?.value.trim() : searchInput?.value.trim();
+        const query = module === 'card' ? cardInput?.value.trim() : (searchableModules.has(module) ? searchInput?.value.trim() : '');
         if (query) next.searchParams.set('stats_q', query);
         else next.searchParams.delete('stats_q');
         if (['meta', 'hsguru_archetypes', 'constructed_cards'].includes(module)) {
             next.searchParams.set('stats_format', dashboard.querySelector('[data-analytics-format]')?.value || 'standard');
-            if (module === 'meta') {
-                next.searchParams.set('stats_rank', dashboard.querySelector('[data-analytics-rank]')?.value || 'legend');
-                next.searchParams.set('stats_period', dashboard.querySelector('[data-analytics-period]')?.value || 'past_day');
-            }
         } else {
             next.searchParams.delete('stats_format');
+        }
+        if (module === 'meta') {
+            next.searchParams.set('stats_rank', dashboard.querySelector('[data-analytics-rank]')?.value || 'legend');
+            next.searchParams.set('stats_period', dashboard.querySelector('[data-analytics-period]')?.value || 'past_day');
+        } else {
             next.searchParams.delete('stats_rank');
             next.searchParams.delete('stats_period');
         }
-        if (module === 'bg_heroes') next.searchParams.set('stats_rating', dashboard.querySelector('[data-analytics-rating]')?.value || '50');
-        else next.searchParams.delete('stats_rating');
+        if (module === 'bg_heroes') {
+            next.searchParams.set('stats_rating', dashboard.querySelector('[data-analytics-rating]')?.value || '50');
+            next.searchParams.set('stats_mode', dashboard.querySelector('[data-analytics-mode]')?.value || 'solo');
+        } else {
+            next.searchParams.delete('stats_rating');
+            next.searchParams.delete('stats_mode');
+        }
         if (module === 'arena_cards') next.searchParams.set('stats_arena_source', dashboard.querySelector('[data-analytics-arena-source]')?.value || 'firestone');
         else next.searchParams.delete('stats_arena_source');
         if (module === 'constructed_cards') {
@@ -1410,6 +1416,14 @@
         window.history.replaceState({}, '', next);
     };
 
+    const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+    const validPayload = (payload) => isRecord(payload) && payload.ok === true
+        && Array.isArray(payload.columns) && payload.columns.every((column) => isRecord(column)
+            && typeof column.key === 'string' && typeof column.label === 'string')
+        && Array.isArray(payload.rows) && payload.rows.every(isRecord)
+        && (payload.summary === undefined || (Array.isArray(payload.summary) && payload.summary.every(isRecord)))
+        && (payload.warnings === undefined || Array.isArray(payload.warnings));
+
     const loadModule = async (module, force = false) => {
         if (!knownModules.has(module)) module = 'overview';
         activeModule = module;
@@ -1419,7 +1433,13 @@
         const cacheKey = request.href;
         renderLoading();
         requestController?.abort();
-        requestController = new AbortController();
+        const controller = new AbortController();
+        requestController = controller;
+        const timeout = window.setTimeout(() => {
+            controller.abort();
+            // Also settle the UI if a transport ignores cancellation.
+            if (requestController === controller) renderError('Сервис не ответил за 15 секунд. Попробуйте обновить данные.');
+        }, 15000);
 
         try {
             let payload = !force ? cache.get(cacheKey) : null;
@@ -1428,14 +1448,17 @@
                     headers: {'Accept': 'application/json'},
                     credentials: 'same-origin',
                     cache: force ? 'no-store' : 'default',
-                    signal: requestController.signal,
+                    signal: controller.signal,
                 });
                 payload = await response.json();
-                if (!response.ok || !payload.ok) {
-                    throw new Error(payload.detail || payload.message || `HTTP ${response.status}`);
+                if (controller.signal.aborted || requestController !== controller) return;
+                if (!response.ok || payload?.ok !== true) {
+                    throw new Error(payload?.detail || payload?.message || `HTTP ${response.status}`);
                 }
+                if (!validPayload(payload)) throw new Error('Сервис вернул некорректный набор данных. Повторите загрузку.');
                 cache.set(cacheKey, payload);
             }
+            if (controller.signal.aborted || requestController !== controller) return;
             activePayload = payload;
             if (title) title.textContent = payload.title || 'Статистика';
             if (description) description.textContent = payload.description || '';
@@ -1446,8 +1469,10 @@
             if (status) status.textContent = `Данные загружены. Записей: ${(payload.rows || []).length}.`;
             setBusy(false);
         } catch (error) {
-            if (error.name === 'AbortError') return;
+            if (controller.signal.aborted || requestController !== controller) return;
             renderError(error.message || 'Неизвестная ошибка.');
+        } finally {
+            window.clearTimeout(timeout);
         }
     };
 
@@ -1489,10 +1514,11 @@
     const cardPeriodInput = dashboard.querySelector('[data-analytics-card-period]');
     if (formatInput && initialFormat && Array.from(formatInput.options).some((option) => option.value === initialFormat)) formatInput.value = initialFormat;
     if (rankInput && initialRank && Array.from(rankInput.options).some((option) => option.value === initialRank)) rankInput.value = initialRank;
-    if (periodInput && initialPeriod) periodInput.value = initialPeriod;
     const setKnownOption = (select, value) => {
         if (select && value && Array.from(select.options).some((option) => option.value === value)) select.value = value;
     };
+    setKnownOption(periodInput, initialPeriod);
+    setKnownOption(dashboard.querySelector('[data-analytics-mode]'), urlState.get('stats_mode'));
     setKnownOption(ratingInput, urlState.get('stats_rating'));
     setKnownOption(arenaSourceInput, urlState.get('stats_arena_source'));
     setKnownOption(cardRankInput, urlState.get('stats_card_rank'));

@@ -28,6 +28,11 @@ The import and API contracts are documented in `LIBRARY_FULL_ART.md`.
   `/?action=parsers`. Logout remains a CSRF-protected POST.
 - `assets/workspace.js` — theme preference and mobile menu toggle, shared with
   isolated browser fixtures.
+- `partials/catalog-heading.php`, `partials/catalog-controls.php`, and
+  `partials/catalog-pagination.php` — shared catalogue presentation; SQL, row
+  actions, and CSRF handling stay in their existing server-side paths.
+- `assets/table-controls.js` — catalogue auto-submit and persistent density,
+  also loaded by the isolated catalogue/statistics/token fixtures.
 - `partials/analytics-dashboard.php` — statistics navigation, compact filters,
   accessible loading/error containers, and the shared entity-detail drawer.
 - `analytics.php` + `lib/analytics.php` — protected, read-only allowlist gateway
@@ -54,7 +59,14 @@ The import and API contracts are documented in `LIBRARY_FULL_ART.md`.
 ## Interaction contracts
 
 - Filters use URL query parameters and stay shareable/bookmarkable.
-- Changing a select submits immediately; search is debounced by 520 ms.
+- Changing a catalogue select submits immediately; search is debounced by
+  520 ms (two characters minimum, or an empty query). Manual submit/select
+  cancels a pending search timer, so a change cannot submit twice.
+- Catalogue search and section selection are always visible. Native
+  “Дополнительные фильтры” disclose the section-specific options; active
+  advanced filters start expanded. Pagination preserves the active query.
+- Battlegrounds technical columns start hidden for new preferences, but remain
+  available through the column picker. Existing saved preferences take priority.
 - Pressing `/` focuses the primary catalogue search when focus is not already in
   a form control.
 - On screens up to 760 px the navigation is collapsed behind an accessible menu
@@ -62,7 +74,8 @@ The import and API contracts are documented in `LIBRARY_FULL_ART.md`.
 - Card, golden, and framed previews use the shared `data-preview` lightbox.
 - Golden variants are represented inside their base-card row, but their IDs and
   DBFs are also searchable.
-- Catalogue action columns remain sticky during horizontal table scrolling.
+- Catalogue action columns remain sticky on desktop. On mobile the entire
+  table scrolls, so identity and action cells cannot cover the middle columns.
 - Catalogue and statistics tables provide a persistent compact-density option.
 - Large catalogue, analytics, parser, and token tables expose a shared column
   picker. The first identity column and final action column stay visible; each
@@ -86,7 +99,14 @@ The import and API contracts are documented in `LIBRARY_FULL_ART.md`.
   check history first. A confirmed rejection can be retried explicitly.
 - Manual parser runs require GitHub authentication, a same-origin CSRF token,
   an application-level rate budget and an explicit confirmation dialog.
-- The “Обзор и мета” workspace opens with the complete source registry. It shows
+- Statistics modules use one labelled selector; only applicable filters are
+  shown. Refresh and table preferences remain available outside those filters.
+  Module, query, format, rank, period, and BG Solo/Duos selection survive reload.
+- Statistics GET requests have a 15-second deadline and reject stale responses
+  after switching modules, including transports that ignore cancellation.
+  Invalid table payloads are not cached. Failed requests show an explicit retry;
+  they do not label old data as a newly loaded result.
+- The “Обзор и статистика” workspace opens with the complete source registry. It shows
   the effective state, dataset availability, last update and calculated age for
   every source returned by `/demo/overview`.
 - The overview loads `/v1/system/parsing-reliability` independently. Its primary

@@ -1819,7 +1819,7 @@ $workspaceSection = $showApiTokens
     <script src="/assets/panel-ui.js?v=3" defer></script>
     <script src="/assets/table-controls.js?v=2" defer></script>
     <script src="/assets/parsing-reliability.js?v=10" defer></script>
-    <script src="/assets/analytics.js?v=15" defer></script>
+    <script src="/assets/analytics.js?v=16" defer></script>
     <script src="/assets/parser-control-view.js?v=3" defer></script>
     <script src="/assets/parser-control.js?v=4" defer></script>
 </head>
