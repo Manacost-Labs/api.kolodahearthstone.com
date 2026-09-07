@@ -1,11 +1,30 @@
 (() => {
     'use strict';
+    const catalogue = document.querySelector('.data-panel');
+    const requestStatus = catalogue?.querySelector('[data-catalog-request-status]');
+    let pendingTimer;
+    const resetNavigation = () => {
+        clearTimeout(pendingTimer);
+        catalogue?.classList.remove('is-navigating');
+        if (requestStatus) requestStatus.textContent = '';
+    };
+    const pendingNavigation = () => {
+        resetNavigation();
+        catalogue?.classList.add('is-navigating');
+        if (requestStatus) requestStatus.textContent = 'Загружаем данные…';
+        pendingTimer = setTimeout(resetNavigation, 15000);
+    };
+    catalogue?.addEventListener('click', event => {
+        if (!event.defaultPrevented && event.button === 0 && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey
+            && event.target.closest('.pagination a[href]')) pendingNavigation();
+    });
+    catalogue?.addEventListener('submit', pendingNavigation);
+    window.addEventListener('pageshow', resetNavigation);
     document.querySelectorAll('[data-autofilter]').forEach((form) => {
         const search = form.querySelector('[data-filter-search]');
         let searchTimer = 0;
         let composing = false;
         let submittedSearch = search?.value.trim() || '';
-        const status = form.querySelector('[data-catalog-request-status]');
         const clearPage = () => {
             window.clearTimeout(searchTimer);
             const page = form.querySelector('input[name="page"]');
@@ -36,9 +55,7 @@
         form.addEventListener('submit', () => {
             clearPage();
             submittedSearch = search?.value.trim() || '';
-            if (status) status.textContent = 'Загружаем данные…';
         });
-        window.addEventListener('pageshow', () => { if (status) status.textContent = ''; });
     });
 
     document.querySelectorAll('[data-table-density]').forEach((button) => {

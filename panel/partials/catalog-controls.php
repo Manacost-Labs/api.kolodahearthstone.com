@@ -43,14 +43,14 @@ elseif ($showLibrary) $catalogHiddenColumns = $libraryType === 'trinket' ? '2,4,
                 </label>
                 <button class="button catalog-search-submit" type="submit">Найти</button>
                 <div class="catalog-browse-controls">
-                    <label><span>Сортировка всей выборки</span>
+                    <label><span>Сортировка</span>
                         <select name="sort" aria-label="Сортировка всей выборки">
                             <?php foreach (panel_catalog_sort_options() as $value => $label): ?>
                                 <option value="<?= h($value) ?>"<?= $sort === $value ? ' selected' : '' ?>><?= h($label) ?></option>
                             <?php endforeach; ?>
                         </select>
                     </label>
-                    <label><span>Записей на странице</span>
+                    <label><span>На странице</span>
                         <select name="per_page" aria-label="Карт на странице">
                             <?php foreach ([25, 50, 100, 150] as $size): ?>
                                 <option value="<?= $size ?>"<?= $perPage === $size ? ' selected' : '' ?>><?= $size ?></option>

@@ -302,7 +302,22 @@
         modes.append(button);
     }
     // Enhance only after construction succeeds. The original table remains the no-JS fallback.
-    selectRecord(0);
+    // Entry-local view state: no catalogue cache, no copied record contents.
+    // A new page starts at its first row; Back/reload finds the same ID if present.
+    const saved = history.state?.panelReader;
+    const restored = saved?.id ? records.findIndex(record => record.id === saved.id) : -1;
+    selectRecord(restored < 0 ? 0 : restored);
+    if (restored >= 0 && Array.from(find('field').options).some(option => option.value === saved.field)) {
+        find('field').value = saved.field;
+        renderData();
+    }
+    window.addEventListener('pagehide', () => {
+        try {
+            history.replaceState({...history.state, panelReader: {
+                id: records[selected].id, field: find('field').value,
+            }}, '');
+        } catch { /* History can be unavailable; native navigation still works. */ }
+    });
     source.before(reader);
     toolbar.append(modes);
     let initial = 'reader';

@@ -472,6 +472,73 @@ class PanelBrowserTests(unittest.TestCase):
                 expect(page.locator("[data-reader-position]")).to_have_text("2 / 2")
                 expect(page.locator("[data-reader-next]")).to_be_disabled()
 
+    def test_reader_switch_does_not_reprocess_source_table(self):
+        page = self.page
+        page.goto(self.origin + '/tests/catalog_panel_fixture.php?per_page=150')
+        expect(page.locator('[data-reader-record]')).to_have_count(120)
+        page.evaluate('''() => {
+            window.columnWrites = 0;
+            window.tableScans = 0;
+            const table = document.querySelector('.cards-table table');
+            const rows = Object.getOwnPropertyDescriptor(HTMLTableElement.prototype, 'rows').get;
+            Object.defineProperty(table, 'rows', {get() { window.tableScans++; return rows.call(this); }});
+            new MutationObserver(records => window.columnWrites += records.length).observe(
+                document.querySelector('.cards-table'),
+                {attributes:true, attributeFilter:['hidden'], subtree:true});
+        }''')
+        for _ in range(10):
+            page.locator('[data-reader-next]').click()
+        expect(page.locator('[data-reader-position]')).to_have_text('11 / 120')
+        self.assertEqual(page.evaluate('columnWrites'), 0, 'No column work for unrelated reader mutations')
+        self.assertEqual(page.evaluate('tableScans'), 0, 'Do not even enumerate the unchanged table rows')
+        print('120 records / 10 switches: 0 table scans, 0 hidden-attribute writes')
+
+    def test_reader_history_restores_record_and_field(self):
+        page = self.page
+        page.goto(self.origin + '/tests/catalog_panel_fixture.php?per_page=25')
+        page.locator('[data-reader-next]').click()
+        page.locator('[data-reader-field]').select_option(label='Механики')
+        title = page.locator('[data-reader-title]').inner_text()
+        page.locator('.pagination .page-next').first.click()
+        expect(page.locator('[data-reader-position]')).to_have_text('1 / 25')
+        page.go_back()
+        expect(page.locator('[data-reader-position]')).to_have_text('2 / 25')
+        expect(page.locator('[data-reader-title]')).to_have_text(title)
+        expect(page.locator('[data-reader-field] option:checked')).to_have_text('Механики')
+        page.reload()
+        expect(page.locator('[data-reader-title]')).to_have_text(title)
+        expect(page.locator('[data-reader-position]')).to_have_text('2 / 25')
+        expect(page.locator('[data-reader-field] option:checked')).to_have_text('Механики')
+
+    def test_catalog_pagination_pending_and_pageshow_reset(self):
+        page = self.open_catalog('?per_page=25')
+        # Keep the browser on this isolated fixture to observe pending/reset state.
+        page.evaluate('''() => document.addEventListener('click', event => {
+            if (event.target.closest('.pagination a')) event.preventDefault();
+        })''')
+        page.locator('.pagination .page-next').first.click()
+        expect(page.locator('[data-catalog-request-status]')).to_contain_text('Загружаем')
+        expect(page.locator('.data-panel')).to_have_class('panel data-panel is-navigating')
+        page.evaluate("window.dispatchEvent(new PageTransitionEvent('pageshow', {persisted:true}))")
+        expect(page.locator('[data-catalog-request-status]')).to_be_empty()
+        self.assertFalse(page.locator('.data-panel').evaluate("e=>e.classList.contains('is-navigating')"))
+
+    def test_mobile_toolbar_is_compact_and_record_controls_stay_available(self):
+        page = self.open_reader('hero')
+        for width in (390, 320):
+            page.set_viewport_size({'width':width, 'height':900})
+            page.evaluate('window.scrollTo(0,0)')
+            self.assertLess(page.locator('.catalog-reader').bounding_box()['y'], 680)
+            sort = page.locator('select[name=sort]').bounding_box()
+            size = page.locator('select[name=per_page]').bounding_box()
+            self.assertEqual(sort['y'], size['y'])
+            self.assertGreaterEqual(size['width'], 80)
+            page.locator('[data-reader-data]').scroll_into_view_if_needed()
+            navigation = page.locator('.reader-navigation').bounding_box()
+            self.assertGreaterEqual(navigation['y'], 0)
+            self.assertLess(navigation['y'], 900)
+            self.assertFalse(page.evaluate('document.documentElement.scrollWidth > innerWidth'))
+
     def test_reader_gallery_paging_fullscreen_and_keyboard(self):
         page = self.open_reader("constructed", "&many_media=1")
         expect(page.locator("[data-reader-media-count]")).to_have_text("1 / 15")

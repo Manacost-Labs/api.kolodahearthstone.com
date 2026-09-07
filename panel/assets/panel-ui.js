@@ -116,7 +116,8 @@
             const apply = () => {
                 Array.from(table.rows).forEach((row) => {
                     Array.from(row.cells).forEach((cell, index) => {
-                        cell.hidden = cell.colSpan === 1 && hiddenColumns.has(index);
+                        const hidden = cell.colSpan === 1 && hiddenColumns.has(index);
+                        if (cell.hidden !== hidden) cell.hidden = hidden;
                     });
                 });
             };
@@ -157,7 +158,15 @@
         };
 
         picker.addEventListener('toggle', () => { if (picker.open) build(); });
-        const observer = new MutationObserver(build);
+        const observer = new MutationObserver((changes) => {
+            // Reader/gallery/menu updates are not table updates. Still handle
+            // refreshed rows and whole-table replacement in analytics/parsers.
+            if (changes.some(({target, addedNodes, removedNodes}) => !picker.contains(target) && (
+                currentTable?.contains(target) || [...addedNodes, ...removedNodes].some(node =>
+                    node instanceof Element && (node === currentTable || node.contains(currentTable)
+                        || node.matches(targetSelector) || node.querySelector(targetSelector)))
+            ))) build();
+        });
         observer.observe(picker.closest('.data-panel, .analytics-hub, .token-list-panel, .parser-sources-panel') || document.body, { childList: true, subtree: true });
         build();
     });
