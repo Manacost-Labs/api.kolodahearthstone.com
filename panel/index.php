@@ -1817,6 +1817,7 @@ $workspaceSection = $showApiTokens
     <link rel="stylesheet" href="/assets/workspace.css?v=1">
     <script src="/assets/workspace.js?v=1" defer></script>
     <script src="/assets/panel-ui.js?v=3" defer></script>
+    <script src="/assets/table-controls.js?v=1" defer></script>
     <script src="/assets/parsing-reliability.js?v=10" defer></script>
     <script src="/assets/analytics.js?v=14" defer></script>
     <script src="/assets/parser-control-view.js?v=3" defer></script>
@@ -2051,124 +2052,7 @@ $workspaceSection = $showApiTokens
 
     <?php if ($action === 'list'): ?>
     <section class="panel data-panel" id="database-catalogue">
-        <div class="list-head">
-            <form class="filters" method="get" data-autofilter>
-                <label class="filter-search">
-                    <span>Поиск</span>
-                    <span class="search-field">
-                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m20 20-4.3-4.3m2.3-5.2a7.5 7.5 0 1 1-15 0 7.5 7.5 0 0 1 15 0Z"/></svg>
-                        <input type="search" name="q" value="<?= h($q) ?>" placeholder="<?= $showHeroSkins ? 'Скин, character, actor, class, category' : ($showPets ? 'Питомец, вариант, id, dbf' : ($showCoins ? 'Coin, RU, id, dbf, художник' : ($showHeroes ? 'Герой, сила, компаньон, художник' : 'Название, ID, DBF, текст или механика'))) ?>" autocomplete="off" data-filter-search aria-keyshortcuts="/">
-                        <kbd aria-hidden="true">/</kbd>
-                    </span>
-                </label>
-                <div class="filter-controls">
-                <button class="filter-toggle" type="button" aria-expanded="false" data-filter-toggle>
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16l-6 7v5l-4 2v-7L4 5Z"/></svg>
-                    <span>Фильтры</span>
-                    <?php if ($activeFilters): ?><b><?= count($activeFilters) ?></b><?php endif; ?>
-                </button>
-                <select name="card_type" aria-label="Раздел базы">
-                    <option value="">Все карты</option>
-                    <?php foreach (filter_card_types() as $value => $label): ?>
-                        <option value="<?= h($value) ?>"<?= $cardType === $value ? ' selected' : '' ?>><?= h($label) ?></option>
-                    <?php endforeach; ?>
-                </select>
-                <?php if (!$showHeroes && !$showHeroSkins && !$showCoins && !$showConstructed && (!$showLibrary || $libraryType === 'darkmoon_prize')): ?>
-                    <select name="tier" aria-label="Уровень таверны">
-                        <option value=""><?= $showPets ? 'Все уровни питомца' : ($showLibrary && $libraryType === 'darkmoon_prize' ? 'Все тиры' : 'Все уровни') ?></option>
-                        <?php for ($i = 1; $i <= (($showLibrary && $libraryType === 'darkmoon_prize') || $showPets ? 4 : 7); $i++): ?>
-                            <option value="<?= $i ?>"<?= $tier === (string)$i ? ' selected' : '' ?>><?= $showPets ? 'Уровень ' : ($showLibrary && $libraryType === 'darkmoon_prize' ? 'Тир ' : 'Таверна ') ?><?= $i ?></option>
-                        <?php endfor; ?>
-                    </select>
-                <?php endif; ?>
-                <?php if (!$showHeroes && !$showHeroSkins && !$showPets && !$showCoins && !$showConstructed && !$showLibrary): ?>
-                    <select name="creature_type" aria-label="Тип существа">
-                        <option value="">Все типы</option>
-                        <?php foreach (creature_types() as $value => $label): ?>
-                            <option value="<?= h($value) ?>"<?= $creatureType === $value ? ' selected' : '' ?>><?= h($label) ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                <?php endif; ?>
-                <?php if ($showConstructed): ?>
-                    <select name="constructed_format" aria-label="Формат игры">
-                        <option value="all"<?= $constructedFormat === 'all' ? ' selected' : '' ?>>Стандарт + Вольный</option>
-                        <option value="standard"<?= $constructedFormat === 'standard' ? ' selected' : '' ?>>Стандартный</option>
-                        <option value="wild"<?= $constructedFormat === 'wild' ? ' selected' : '' ?>>Вольный</option>
-                    </select>
-                    <select name="media" aria-label="Медиа и качество">
-                        <option value="">Все качества</option>
-                        <option value="golden"<?= $media === 'golden' ? ' selected' : '' ?>>Есть Golden</option>
-                        <option value="signature"<?= $media === 'signature' ? ' selected' : '' ?>>Есть Signature</option>
-                        <option value="diamond"<?= $media === 'diamond' ? ' selected' : '' ?>>Есть Diamond</option>
-                        <option value="animated_diamond"<?= $media === 'animated_diamond' ? ' selected' : '' ?>>Есть Animated Diamond</option>
-                    </select>
-                <?php endif; ?>
-                <?php if ($showHeroes): ?>
-                    <select name="media" aria-label="Медиа и качество">
-                        <option value="">Все герои</option>
-                        <?php foreach ($mediaLabels as $value => $label): ?>
-                            <option value="<?= h($value) ?>"<?= $media === $value ? ' selected' : '' ?>><?= h($label) ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                <?php endif; ?>
-                <?php if ($showHeroSkins): ?>
-                    <select name="rarity" aria-label="Редкость скина">
-                        <option value="">Любая редкость</option>
-                        <?php foreach ($skinRarityLabels as $value => $label): ?>
-                            <option value="<?= h($value) ?>"<?= $skinRarity === $value ? ' selected' : '' ?>><?= h($label) ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                    <select name="media" aria-label="Медиа и качество">
-                        <option value="">Все скины</option>
-                        <?php foreach ($skinMediaLabels as $value => $label): ?>
-                            <option value="<?= h($value) ?>"<?= $media === $value ? ' selected' : '' ?>><?= h($label) ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                <?php endif; ?>
-                <?php if ($showPets): ?>
-                    <select name="media" aria-label="Медиа и качество">
-                        <option value="">Все питомцы</option>
-                        <option value="background"<?= $media === 'background' ? ' selected' : '' ?>>Есть end screen</option>
-                        <option value="gallery"<?= $media === 'gallery' ? ' selected' : '' ?>>Есть Gallery</option>
-                    </select>
-                <?php endif; ?>
-                <?php if (!$showHeroes && !$showHeroSkins && !$showPets && !$showCoins && !$showTimewarped && !$showConstructed): ?>
-                    <select name="pool" aria-label="Статус в пуле">
-                        <option value="">Любой пул</option>
-                        <option value="1"<?= $pool === '1' ? ' selected' : '' ?>>В пуле</option>
-                        <option value="0"<?= $pool === '0' ? ' selected' : '' ?>>Не в пуле</option>
-                    </select>
-                <?php endif; ?>
-                <?php if (!$showHeroes && !$showHeroSkins && !$showPets && !$showCoins && !$showTimewarped && !$showConstructed && !$showLibrary): ?>
-                    <select name="duos" aria-label="Режим игры">
-                        <option value="">Любой режим</option>
-                        <option value="1"<?= $duos === '1' ? ' selected' : '' ?>>Только дуо</option>
-                        <option value="0"<?= $duos === '0' ? ' selected' : '' ?>>Не только дуо</option>
-                    </select>
-                <?php endif; ?>
-                <select name="per_page" aria-label="Карт на странице">
-                    <option value="25"<?= $perPage === 25 ? ' selected' : '' ?>>25 на странице</option>
-                    <option value="50"<?= $perPage === 50 ? ' selected' : '' ?>>50 на странице</option>
-                    <option value="100"<?= $perPage === 100 ? ' selected' : '' ?>>100 на странице</option>
-                    <option value="150"<?= $perPage === 150 ? ' selected' : '' ?>>150 на странице</option>
-                </select>
-                <button class="button" type="submit">Найти</button>
-                <a class="button ghost" href="<?= h($resetUrl) ?>">Сброс</a>
-                <button class="table-density-toggle" type="button" data-table-density aria-pressed="false">Компактно</button>
-                <details class="table-column-picker" data-column-picker data-table-target=".cards-table > table" data-storage-key="catalogue-<?= h($cardType !== '' ? $cardType : 'battlegrounds') ?>">
-                    <summary>Колонки</summary>
-                    <div class="column-picker-menu" data-column-picker-menu></div>
-                </details>
-                </div>
-            </form>
-            <?php if ($activeFilters): ?>
-                <div class="active-filters" aria-label="Активные фильтры">
-                    <?php foreach ($activeFilters as $filter): ?>
-                        <a href="<?= h($filter['href']) ?>"><?= h($filter['label']) ?><span aria-hidden="true">×</span></a>
-                    <?php endforeach; ?>
-                </div>
-            <?php endif; ?>
-        </div>
+        <?php require __DIR__ . '/partials/catalog-controls.php'; ?>
 
         <?php if ($showHeroes): ?>
             <div class="hero-coverage-strip" aria-label="Покрытие медиа героев">
@@ -2238,42 +2122,7 @@ $workspaceSection = $showApiTokens
             </section>
         <?php else: ?>
         <?php if ($totalPages > 1): ?>
-            <nav class="pagination" aria-label="Страницы карт">
-                <?php if ($page > 1): ?>
-                    <a class="page-link page-first" href="<?= h(query_url(['page' => 1])) ?>">Первая</a>
-                    <a class="page-link page-prev" href="<?= h(query_url(['page' => $page - 1])) ?>">Назад</a>
-                <?php else: ?>
-                    <span class="page-link page-first disabled">Первая</span>
-                    <span class="page-link page-prev disabled">Назад</span>
-                <?php endif; ?>
-
-                <?php if ($pageWindowStart > 1): ?>
-                    <a class="page-link" href="<?= h(query_url(['page' => 1])) ?>">1</a>
-                    <?php if ($pageWindowStart > 2): ?><span class="page-gap">...</span><?php endif; ?>
-                <?php endif; ?>
-
-                <?php for ($i = $pageWindowStart; $i <= $pageWindowEnd; $i++): ?>
-                    <?php if ($i === $page): ?>
-                        <span class="page-link page-number active" aria-current="page"><?= $i ?></span>
-                    <?php else: ?>
-                        <a class="page-link page-number" href="<?= h(query_url(['page' => $i])) ?>"><?= $i ?></a>
-                    <?php endif; ?>
-                <?php endfor; ?>
-
-                <?php if ($pageWindowEnd < $totalPages): ?>
-                    <?php if ($pageWindowEnd < $totalPages - 1): ?><span class="page-gap">...</span><?php endif; ?>
-                    <a class="page-link" href="<?= h(query_url(['page' => $totalPages])) ?>"><?= $totalPages ?></a>
-                <?php endif; ?>
-
-                <?php if ($page < $totalPages): ?>
-                    <a class="page-link page-next" href="<?= h(query_url(['page' => $page + 1])) ?>">Вперед</a>
-                    <a class="page-link page-last" href="<?= h(query_url(['page' => $totalPages])) ?>">Последняя</a>
-                <?php else: ?>
-                    <span class="page-link page-next disabled">Вперед</span>
-                    <span class="page-link page-last disabled">Последняя</span>
-                <?php endif; ?>
-                <span class="page-summary">Страница <?= $page ?> из <?= $totalPages ?></span>
-            </nav>
+            <?php $paginationBottom = false; require __DIR__ . '/partials/catalog-pagination.php'; ?>
         <?php endif; ?>
 
         <?php $tableNavigationTarget = '.cards-table'; $tableNavigationLabel = 'Широкая таблица'; require __DIR__ . '/partials/table-navigation.php'; ?>
@@ -3867,42 +3716,7 @@ $workspaceSection = $showApiTokens
         </div>
         <p class="table-scroll-hint"><span aria-hidden="true">←</span> Проведите по таблице в сторону, чтобы увидеть остальные столбцы <span aria-hidden="true">→</span></p>
         <?php if ($totalPages > 1): ?>
-            <nav class="pagination bottom" aria-label="Страницы карт">
-                <?php if ($page > 1): ?>
-                    <a class="page-link page-first" href="<?= h(query_url(['page' => 1])) ?>">Первая</a>
-                    <a class="page-link page-prev" href="<?= h(query_url(['page' => $page - 1])) ?>">Назад</a>
-                <?php else: ?>
-                    <span class="page-link page-first disabled">Первая</span>
-                    <span class="page-link page-prev disabled">Назад</span>
-                <?php endif; ?>
-
-                <?php if ($pageWindowStart > 1): ?>
-                    <a class="page-link" href="<?= h(query_url(['page' => 1])) ?>">1</a>
-                    <?php if ($pageWindowStart > 2): ?><span class="page-gap">...</span><?php endif; ?>
-                <?php endif; ?>
-
-                <?php for ($i = $pageWindowStart; $i <= $pageWindowEnd; $i++): ?>
-                    <?php if ($i === $page): ?>
-                        <span class="page-link page-number active" aria-current="page"><?= $i ?></span>
-                    <?php else: ?>
-                        <a class="page-link page-number" href="<?= h(query_url(['page' => $i])) ?>"><?= $i ?></a>
-                    <?php endif; ?>
-                <?php endfor; ?>
-
-                <?php if ($pageWindowEnd < $totalPages): ?>
-                    <?php if ($pageWindowEnd < $totalPages - 1): ?><span class="page-gap">...</span><?php endif; ?>
-                    <a class="page-link" href="<?= h(query_url(['page' => $totalPages])) ?>"><?= $totalPages ?></a>
-                <?php endif; ?>
-
-                <?php if ($page < $totalPages): ?>
-                    <a class="page-link page-next" href="<?= h(query_url(['page' => $page + 1])) ?>">Вперед</a>
-                    <a class="page-link page-last" href="<?= h(query_url(['page' => $totalPages])) ?>">Последняя</a>
-                <?php else: ?>
-                    <span class="page-link page-next disabled">Вперед</span>
-                    <span class="page-link page-last disabled">Последняя</span>
-                <?php endif; ?>
-                <span class="page-summary">Страница <?= $page ?> из <?= $totalPages ?></span>
-            </nav>
+            <?php $paginationBottom = true; require __DIR__ . '/partials/catalog-pagination.php'; ?>
         <?php endif; ?>
         <?php endif; ?>
     </section>
@@ -3979,73 +3793,6 @@ $workspaceSection = $showApiTokens
         termSearch?.addEventListener('input', applyTermFilters);
     }
 
-    document.querySelectorAll('[data-autofilter]').forEach((form) => {
-        const search = form.querySelector('[data-filter-search]');
-        let searchTimer = 0;
-        const clearPage = () => {
-            const page = form.querySelector('input[name="page"]');
-            if (page) page.remove();
-        };
-        const submitFilters = () => {
-            clearPage();
-            form.requestSubmit();
-        };
-
-        form.querySelectorAll('select').forEach((select) => {
-            select.addEventListener('change', submitFilters);
-        });
-        search?.addEventListener('input', () => {
-            window.clearTimeout(searchTimer);
-            const value = search.value.trim();
-            if (value !== '' && value.length < 2) return;
-            searchTimer = window.setTimeout(submitFilters, 520);
-        });
-        form.addEventListener('submit', clearPage);
-    });
-
-    document.querySelectorAll('[data-filter-toggle]').forEach((button) => {
-        const controls = button.closest('.filter-controls');
-        button.addEventListener('click', () => {
-            const expanded = controls?.classList.toggle('filters-open') || false;
-            button.setAttribute('aria-expanded', expanded ? 'true' : 'false');
-        });
-    });
-
-    document.querySelectorAll('[data-table-density]').forEach((button) => {
-        const workspace = button.closest('.data-panel, .analytics-hub, .token-list-panel');
-        const storageKey = button.dataset.densityKey || (workspace?.classList.contains('analytics-hub')
-            ? 'analyticsTableDensity'
-            : 'catalogueTableDensity');
-        const setDensity = (compact) => {
-            workspace?.classList.toggle('is-compact-table', compact);
-            button.setAttribute('aria-pressed', compact ? 'true' : 'false');
-            button.textContent = compact ? 'Обычно' : 'Компактно';
-        };
-        try {
-            setDensity(window.localStorage.getItem(storageKey) === 'compact');
-        } catch (error) {
-            setDensity(false);
-        }
-        button.addEventListener('click', () => {
-            const compact = !workspace?.classList.contains('is-compact-table');
-            setDensity(compact);
-            try {
-                window.localStorage.setItem(storageKey, compact ? 'compact' : 'normal');
-            } catch (error) {
-                // Density remains usable for this page when storage is unavailable.
-            }
-        });
-    });
-
-    // A slash focuses the catalogue search without stealing normal form input.
-    const primarySearch = document.querySelector('[data-filter-search]');
-    document.addEventListener('keydown', (event) => {
-        if (event.key !== '/' || event.ctrlKey || event.metaKey || event.altKey) return;
-        const target = event.target;
-        if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return;
-        event.preventDefault();
-        primarySearch?.focus();
-    });
 
     const moveTooltip = (event) => {
         if (!tooltip) return;
