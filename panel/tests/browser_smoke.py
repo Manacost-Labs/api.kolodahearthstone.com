@@ -613,6 +613,40 @@ class PanelBrowserTests(unittest.TestCase):
         expect(page.locator('[data-term-count]')).to_contain_text('0 из 0')
         expect(page.locator('[data-term-empty]')).to_be_visible()
 
+    def test_auth_states_preserve_headers_and_escape_messages(self):
+        page = self.page
+        for mode, code in (('login', 200), ('setup', 200), ('denied', 403), ('expired', 403), ('unavailable', 500), ('logout', 403), ('escape', 502)):
+            response = page.goto(self.origin + '/tests/auth_panel_fixture.php?mode=' + mode)
+            self.assertEqual(response.status, code)
+            self.assertIn('no-store', response.headers['cache-control'])
+            self.assertEqual(response.headers['x-frame-options'], 'DENY')
+            self.assertIn("form-action 'self' https://github.com", response.headers['content-security-policy'])
+            expect(page.locator('meta[name=robots]')).to_have_attribute('content', 'noindex,nofollow')
+            expect(page.locator('h1')).to_have_count(1)
+            if mode == 'escape':
+                expect(page.locator('main img, main script')).to_have_count(0)
+                expect(page.locator('h1')).to_have_text('<img src=x onerror=alert(1)>')
+            if mode == 'setup':
+                expect(page.locator('main form')).to_have_attribute('method', 'post')
+                expect(page.locator('main [name=manifest]')).to_have_value('fixture-only')
+            if mode == 'login':
+                expect(page.locator('.button')).to_have_attribute('href', '/auth/github')
+                page.keyboard.press('Tab')
+                expect(page.locator('.button')).to_be_focused()
+
+    def test_auth_responsive_and_saved_theme(self):
+        page = self.page
+        page.goto(self.origin + '/tests/auth_panel_fixture.php')
+        for width in (1440, 1024, 768, 390, 320):
+            page.set_viewport_size({'width': width, 'height': 1000})
+            self.assertFalse(page.evaluate('document.documentElement.scrollWidth > innerWidth'))
+            directory = os.environ.get('PANEL_SCREENSHOT_DIR')
+            if directory and width in (1440, 390):
+                page.screenshot(path=str(Path(directory) / f'panel-login-{width}.png'), full_page=True)
+        page.evaluate("localStorage.setItem('bgCardsTheme', 'dark')")
+        page.reload()
+        expect(page.locator('html')).to_have_attribute('data-theme', 'dark')
+
     def test_saved_themes_and_other_modules(self):
         page = self.open_sources()
         page.locator('[data-theme-option="dark"]').click()

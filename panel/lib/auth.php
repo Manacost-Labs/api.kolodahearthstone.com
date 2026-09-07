@@ -492,42 +492,5 @@ function panel_render_auth_page(string $title, string $message, string $bodyHtml
     http_response_code($status);
     header('Content-Type: text/html; charset=utf-8');
     panel_security_headers();
-    ?>
-<!doctype html>
-<html lang="ru" data-theme="dark">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="robots" content="noindex,nofollow">
-    <title><?= panel_html($title) ?> · HS Data</title>
-    <style>
-        :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-        * { box-sizing: border-box; }
-        body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px; color: #eef4ff; background: radial-gradient(circle at 50% 0%, #17356a 0, #0b152b 42%, #070d1b 100%); }
-        .card { width: min(100%, 460px); padding: 34px; border: 1px solid rgba(147, 180, 255, .24); border-radius: 24px; background: rgba(12, 24, 48, .9); box-shadow: 0 24px 70px rgba(0, 0, 0, .38); backdrop-filter: blur(18px); }
-        .mark { width: 52px; height: 52px; display: grid; place-items: center; margin-bottom: 24px; border-radius: 16px; color: white; font-weight: 850; letter-spacing: -.04em; background: linear-gradient(135deg, #3b82f6, #7c3aed); box-shadow: 0 12px 30px rgba(59, 130, 246, .28); }
-        h1 { margin: 0 0 12px; font-size: clamp(25px, 7vw, 34px); line-height: 1.08; letter-spacing: -.035em; }
-        p { margin: 0; color: #aebedb; line-height: 1.65; }
-        .actions { display: grid; gap: 12px; margin-top: 26px; }
-        .button { display: flex; min-height: 48px; align-items: center; justify-content: center; gap: 10px; padding: 12px 18px; border: 0; border-radius: 13px; color: #0b1020; background: #f5f7fb; font: inherit; font-weight: 750; text-decoration: none; cursor: pointer; }
-        .button:hover { background: white; transform: translateY(-1px); }
-        .button.secondary { color: #e8efff; border: 1px solid rgba(147, 180, 255, .24); background: rgba(255, 255, 255, .06); }
-        .note { display: flex; gap: 10px; margin-top: 24px; padding-top: 20px; border-top: 1px solid rgba(147, 180, 255, .15); color: #8498bb; font-size: 13px; line-height: 1.5; }
-        .dot { flex: 0 0 auto; width: 8px; height: 8px; margin-top: 6px; border-radius: 50%; background: #34d399; box-shadow: 0 0 14px rgba(52, 211, 153, .7); }
-        form { margin: 0; }
-    </style>
-</head>
-<body>
-    <main class="card">
-        <div class="mark" aria-hidden="true">HS</div>
-        <h1><?= panel_html($title) ?></h1>
-        <p><?= panel_html($message) ?></p>
-        <?php if ($bodyHtml !== ''): ?>
-            <div class="actions"><?= $bodyHtml ?></div>
-        <?php endif; ?>
-        <div class="note"><span class="dot" aria-hidden="true"></span><span>Доступ разрешён только GitHub-аккаунту <strong><?= panel_html(PANEL_AUTH_ALLOWED_LOGIN) ?></strong>. Репозитории и личные данные не запрашиваются.</span></div>
-    </main>
-</body>
-</html>
-    <?php
+    require __DIR__ . '/../partials/auth-page.php';
 }
