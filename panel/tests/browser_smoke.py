@@ -11,7 +11,7 @@ import socket
 import subprocess
 import time
 import unittest
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from playwright.sync_api import expect, sync_playwright
 
@@ -273,6 +273,96 @@ class PanelBrowserTests(unittest.TestCase):
         expect(page.locator("[data-run-status]")).to_contain_text("мог попасть в очередь")
         expect(page.locator("[data-run-cancel]")).to_be_enabled()
         expect(page.locator("[data-run-confirm]")).to_be_disabled()
+
+    def open_catalog(self, query=""):
+        self.page.goto(self.origin + "/tests/catalog_panel_fixture.php" + query)
+        return self.page
+
+    def test_catalog_filters_pagination_and_empty_reset(self):
+        page = self.open_catalog("?q=BG_FIXTURE&card_type=minion&per_page=25&pool=1")
+        expect(page.locator(".cards-table tbody tr")).to_have_count(25)
+        page.locator(".pagination .page-next").first.click()
+        self.assertIn("page=2", page.url)
+        self.assertIn("q=BG_FIXTURE", page.url)
+        self.assertIn("pool=1", page.url)
+        expect(page.locator(".catalog-toolbar-head")).to_contain_text("26–50 из 120")
+        page.locator('[name="tier"]').select_option("1")
+        expect(page.locator(".cards-table tbody tr")).to_have_count(20)
+        self.assertNotIn("page", parse_qs(urlsplit(page.url).query))
+        expect(page.locator(".catalog-toolbar-head")).to_contain_text("1–20 из 20")
+        page.locator("[data-filter-search]").fill("Несуществующая карта")
+        expect(page.locator(".catalog-empty")).to_be_visible()
+        page.locator(".catalog-empty a").click()
+        expect(page.locator(".cards-table tbody tr")).to_have_count(50)
+        expect(page.locator('[name="card_type"]')).to_have_value("minion")
+        expect(page.locator("[data-filter-search]")).to_have_value("")
+        expect(page.locator(".catalog-more")).not_to_have_attribute("open", "")
+
+    def test_catalog_columns_density_keyboard_and_responsive_layout(self):
+        page = self.open_catalog()
+        expect(page.locator(".cards-table th:visible")).to_have_count(8)
+        page.locator("[data-column-picker] summary").click()
+        page.get_by_label("CARD_ID", exact=True).check()
+        page.locator("[data-column-picker] summary").click()
+        page.locator("[data-table-density]").click()
+        page.reload()
+        expect(page.locator(".cards-table th:visible")).to_have_count(9)
+        expect(page.locator("[data-table-density]")).to_have_attribute("aria-pressed", "true")
+        page.keyboard.press("/")
+        expect(page.locator("[data-filter-search]")).to_be_focused()
+        page.locator(".catalog-more summary").focus()
+        page.keyboard.press("Enter")
+        expect(page.locator('[name="tier"]')).to_be_visible()
+        page.keyboard.press("Enter")
+        expect(page.locator('[name="tier"]')).to_be_hidden()
+        for width in (1440, 1024, 768, 390, 320):
+            with self.subTest(width=width):
+                page.set_viewport_size({"width": width, "height": 1100})
+                self.assertFalse(page.evaluate("document.documentElement.scrollWidth > innerWidth"))
+                expect(page.locator(".catalog-search-submit")).to_be_visible()
+                directory = os.environ.get("PANEL_SCREENSHOT_DIR")
+                if directory and width in (1440, 390):
+                    page.evaluate("document.activeElement.blur(); window.scrollTo(0, 0)")
+                    page.screenshot(path=str(Path(directory) / f"panel-catalog-{width}.png"), full_page=True)
+
+    def test_catalog_advanced_filters_match_each_section(self):
+        variants = {
+            "": {"tier", "creature_type", "pool", "duos"},
+            "constructed": {"constructed_format", "media"},
+            "pet": {"tier", "media"}, "hero": {"media"},
+            "hero_skin": {"rarity", "media"}, "coin": set(),
+            "darkmoon_prize": {"tier", "pool"}, "anomaly": {"pool"},
+            "timewarped": {"tier", "creature_type"},
+        }
+        for section, fields in variants.items():
+            with self.subTest(section=section):
+                page = self.open_catalog("?card_type=" + section)
+                page.locator(".catalog-more summary").click()
+                actual = page.locator(".catalog-more select").evaluate_all("els => els.map(e => e.name)")
+                self.assertEqual(set(actual), fields | {"per_page"})
+                if section in ("pet", "darkmoon_prize"):
+                    expect(page.locator('[name="tier"] option')).to_have_count(5)
+
+    def test_catalog_debounce_does_not_duplicate_manual_submission(self):
+        page = self.open_catalog()
+        page.clock.install()
+        page.evaluate("""() => {
+            window.submits = 0;
+            document.querySelector('[data-autofilter]').addEventListener('submit', e => {
+                e.preventDefault(); window.submits++;
+            });
+        }""")
+        page.locator("[data-filter-search]").fill("М")
+        page.clock.fast_forward(600)
+        self.assertEqual(page.evaluate("submits"), 0)
+        page.locator("[data-filter-search]").fill("Мурлок")
+        page.locator(".catalog-search-submit").click()
+        page.clock.fast_forward(600)
+        self.assertEqual(page.evaluate("submits"), 1)
+        page.locator("[data-filter-search]").fill("Мурлоки")
+        page.locator('[name="card_type"]').select_option("minion")
+        page.clock.fast_forward(600)
+        self.assertEqual(page.evaluate("submits"), 2)
 
     def test_saved_themes_and_other_modules(self):
         page = self.open_sources()

@@ -3,9 +3,8 @@
     <div class="topbar-copy">
         <span class="topbar-context"><?= h($workspaceSection) ?></span>
         <div>
-            <?php if ($action === 'parsers'): ?><span class="topbar-title">Управление данными</span>
+            <?php if (in_array($action, ['parsers', 'list'], true)): ?><span class="topbar-title">Управление данными</span>
             <?php else: ?><h1><?= h($workspaceTitle) ?></h1><?php endif; ?>
-            <?php if ($action === 'list'): ?><span class="result-range"><?= $pageFrom ?>–<?= $pageTo ?> из <?= $filteredTotal ?></span><?php endif; ?>
         </div>
     </div>
     <div class="topbar-actions">

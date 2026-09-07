@@ -1,5 +1,19 @@
-<?php declare(strict_types=1); ?>
+<?php
+declare(strict_types=1);
+$catalogAdvancedActive = $tier !== '' || $creatureType !== '' || $pool !== '' || $duos !== ''
+    || $media !== '' || $skinRarity !== '' || $constructedFormat !== 'all' || $perPage !== 50;
+?>
         <div class="list-head">
+            <div class="catalog-toolbar-head">
+                <div><h2>Каталог</h2><p>Показано <?= $pageFrom ?>–<?= $pageTo ?> из <?= $filteredTotal ?></p></div>
+                <div class="catalog-view-actions">
+                    <button class="table-density-toggle" type="button" data-table-density aria-pressed="false">Компактно</button>
+                    <details class="table-column-picker" data-column-picker data-table-target=".cards-table > table" data-storage-key="catalogue-<?= h($cardType !== '' ? $cardType : 'battlegrounds') ?>" data-default-hidden="<?= in_array($cardType, ['', 'minion', 'spell'], true) ? '1,2,3,4,5,11,13,14,15,16' : '' ?>">
+                        <summary>Колонки</summary>
+                        <div class="column-picker-menu" data-column-picker-menu></div>
+                    </details>
+                </div>
+            </div>
             <form class="filters" method="get" data-autofilter>
                 <label class="filter-search">
                     <span>Поиск</span>
@@ -9,18 +23,18 @@
                         <kbd aria-hidden="true">/</kbd>
                     </span>
                 </label>
-                <div class="filter-controls">
-                <button class="filter-toggle" type="button" aria-expanded="false" data-filter-toggle>
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16l-6 7v5l-4 2v-7L4 5Z"/></svg>
-                    <span>Фильтры</span>
-                    <?php if ($activeFilters): ?><b><?= count($activeFilters) ?></b><?php endif; ?>
-                </button>
+                <label class="catalog-type"><span>Раздел</span>
                 <select name="card_type" aria-label="Раздел базы">
-                    <option value="">Все карты</option>
+                    <option value="">Все карты BG</option>
                     <?php foreach (filter_card_types() as $value => $label): ?>
                         <option value="<?= h($value) ?>"<?= $cardType === $value ? ' selected' : '' ?>><?= h($label) ?></option>
                     <?php endforeach; ?>
                 </select>
+                </label>
+                <button class="button catalog-search-submit" type="submit">Найти</button>
+                <details class="catalog-more"<?= $catalogAdvancedActive ? ' open' : '' ?>>
+                <summary>Дополнительные фильтры</summary>
+                <div class="filter-controls filters-open">
                 <?php if (!$showHeroes && !$showHeroSkins && !$showCoins && !$showConstructed && (!$showLibrary || $libraryType === 'darkmoon_prize')): ?>
                     <select name="tier" aria-label="Уровень таверны">
                         <option value=""><?= $showPets ? 'Все уровни питомца' : ($showLibrary && $libraryType === 'darkmoon_prize' ? 'Все тиры' : 'Все уровни') ?></option>
@@ -100,14 +114,9 @@
                     <option value="100"<?= $perPage === 100 ? ' selected' : '' ?>>100 на странице</option>
                     <option value="150"<?= $perPage === 150 ? ' selected' : '' ?>>150 на странице</option>
                 </select>
-                <button class="button" type="submit">Найти</button>
-                <a class="button ghost" href="<?= h($resetUrl) ?>">Сброс</a>
-                <button class="table-density-toggle" type="button" data-table-density aria-pressed="false">Компактно</button>
-                <details class="table-column-picker" data-column-picker data-table-target=".cards-table > table" data-storage-key="catalogue-<?= h($cardType !== '' ? $cardType : 'battlegrounds') ?>">
-                    <summary>Колонки</summary>
-                    <div class="column-picker-menu" data-column-picker-menu></div>
-                </details>
+                <a class="button ghost" href="<?= h($resetUrl) ?>">Сбросить фильтры</a>
                 </div>
+                </details>
             </form>
             <?php if ($activeFilters): ?>
                 <div class="active-filters" aria-label="Активные фильтры">

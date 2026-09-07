@@ -4,6 +4,7 @@
         const search = form.querySelector('[data-filter-search]');
         let searchTimer = 0;
         const clearPage = () => {
+            window.clearTimeout(searchTimer);
             const page = form.querySelector('input[name="page"]');
             if (page) page.remove();
         };
@@ -22,14 +23,6 @@
             searchTimer = window.setTimeout(submitFilters, 520);
         });
         form.addEventListener('submit', clearPage);
-    });
-
-    document.querySelectorAll('[data-filter-toggle]').forEach((button) => {
-        const controls = button.closest('.filter-controls');
-        button.addEventListener('click', () => {
-            const expanded = controls?.classList.toggle('filters-open') || false;
-            button.setAttribute('aria-expanded', expanded ? 'true' : 'false');
-        });
     });
 
     document.querySelectorAll('[data-table-density]').forEach((button) => {

@@ -184,3 +184,69 @@
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; transition: none !important; }
 }
+/* Catalogue: a quiet primary toolbar with optional, native advanced filters. */
+.workspace-page-head { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 36px 0 28px; }
+.workspace-page-head h1 { margin: 0; font-size: clamp(28px, 2.8vw, 38px); line-height: 1.2; letter-spacing: -.045em; font-weight: 700; }
+.workspace-page-head p { margin: 10px 0 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.workspace-page-head > .button { flex: 0 0 auto; min-height: 42px; font-weight: 500; }
+.data-panel { margin: 0; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); box-shadow: none; }
+.data-panel .list-head { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; padding: 24px; }
+.catalog-toolbar-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.catalog-toolbar-head h2 { margin: 0; font-size: 18px; font-weight: 650; letter-spacing: -.025em; }
+.catalog-toolbar-head p { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
+.catalog-view-actions { display: flex; align-items: center; gap: 8px; }
+.catalog-view-actions .table-density-toggle, .catalog-view-actions .table-column-picker > summary { min-height: 38px; border-radius: 8px; padding: 9px 12px; background: var(--panel); font-size: 12px; font-weight: 500; }
+.data-panel .filters { display: grid; grid-template-columns: minmax(0, 1fr) minmax(180px, 230px) auto; align-items: end; gap: 16px; border: 0; border-radius: 0; padding: 0; background: transparent; }
+.data-panel .filter-search > span:first-child, .catalog-type > span { display: block; position: static; width: auto; height: auto; clip: auto; margin: 0 0 6px; overflow: visible; color: var(--label); font-size: 12px; font-weight: 500; }
+.catalog-type { min-width: 0; }
+.data-panel .filters input, .data-panel .filters select { min-height: 44px; border: 1px solid var(--line); border-radius: 8px; background-color: var(--panel); font-size: 13px; font-weight: 400; }
+.catalog-search-submit { min-height: 44px; padding: 10px 22px; border-radius: 8px; }
+.catalog-more { grid-column: 1 / -1; min-width: 0; }
+.catalog-more > summary { width: fit-content; min-height: 36px; padding: 8px 0; color: var(--label); font-size: 12px; font-weight: 500; cursor: pointer; }
+.catalog-more[open] > summary { color: var(--accent); }
+.data-panel .filter-controls { display: flex; flex-wrap: wrap; gap: 10px; padding-top: 12px; }
+.data-panel .filter-controls select { min-width: 150px; flex: 1 1 160px; max-width: 240px; }
+.data-panel .active-filters { flex-wrap: wrap; overflow: visible; padding: 0; }
+.data-panel .active-filters::before { content: none; }
+.data-panel .active-filters a { border: 0; background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+.data-panel .hero-coverage-strip { border-radius: 0; box-shadow: none; background: var(--panel); font-size: 11px; }
+.data-panel .cards-table { position: relative; max-width: 100%; max-height: 65vh; overflow: auto; border-radius: 0; }
+.data-panel .cards-table table { min-width: 900px; }
+.data-panel .cards-table th { padding: 12px 16px; background: var(--panel-soft); color: var(--muted); font-size: 11px; font-weight: 500; text-transform: none; letter-spacing: 0; }
+.data-panel .cards-table td { padding: 16px; font-size: 12px; }
+.data-panel .cards-table td.card-name { display: table-cell; }
+.data-panel .card-name > img, .data-panel .card-name > .missing-card-image { vertical-align: middle; margin-right: 10px; }
+.data-panel .card-name > .card-name-copy { display: inline-grid; vertical-align: middle; max-width: 180px; white-space: normal; }
+.data-panel .cards-table th:first-child, .data-panel .cards-table td:first-child, .data-panel .cards-table th:last-child, .data-panel .cards-table td:last-child { box-shadow: none; }
+.data-panel .cards-table td:first-child, .data-panel .cards-table th:first-child { min-width: 200px; padding-left: 24px; }
+.data-panel .card-name strong { font-size: 13px; font-weight: 600; }
+.data-panel .card-name small { display: block; margin-top: 5px; color: var(--muted); font-size: 10px; }
+.data-panel .pagination { padding: 14px 24px; background: var(--panel); gap: 6px; }
+.data-panel .pagination.bottom { display: flex; }
+.data-panel .page-link { min-height: 36px; border-radius: 7px; font-weight: 500; }
+.data-panel .page-link.active { background: var(--accent-soft); border-color: transparent; color: var(--accent); }
+.data-panel.is-compact-table .cards-table td { padding-top: 8px; padding-bottom: 8px; }
+@media (max-width: 1180px) {
+    .workspace-page-head { align-items: flex-start; flex-direction: column; }
+    .data-panel .filters { grid-template-columns: minmax(0, 1fr) auto; }
+    .data-panel .filter-search { grid-column: 1 / -1; }
+}
+@media (max-width: 760px) {
+    .workspace-page-head { padding: 24px 0; gap: 14px; }
+    .workspace-page-head h1 { font-size: 30px; }
+    .data-panel .list-head { padding: 18px; gap: 18px; }
+    .catalog-toolbar-head { flex-wrap: wrap; }
+    .catalog-toolbar-head p { font-size: 11px; }
+    .catalog-view-actions .table-density-toggle, .catalog-view-actions .table-column-picker > summary { min-height: 44px; }
+    .data-panel .filters { gap: 12px; }
+    .data-panel .filters input, .data-panel .filters select { font-size: 16px; }
+    .catalog-search-submit { padding: 10px 14px; }
+    .catalog-more > summary { min-height: 44px; padding: 12px 0; }
+    .data-panel .filter-controls { display: grid; grid-template-columns: minmax(0, 1fr); }
+    .data-panel .filter-controls select { min-width: 0; max-width: none; }
+    .data-panel .filter-controls select[name="per_page"] { order: 0; }
+    .data-panel .cards-table th:first-child, .data-panel .cards-table td:first-child, .data-panel .cards-table th:last-child, .data-panel .cards-table td:last-child { position: static; box-shadow: none; }
+    .data-panel .pagination { padding: 12px 18px; }
+    .data-panel .page-link { min-height: 44px; }
+    .data-panel .pagination.bottom { display: flex; }
+}
