@@ -14,6 +14,7 @@
     const sectionHost = root.querySelector('[data-parser-sections]');
     const runsHost = root.querySelector('[data-parser-runs]');
     const updated = root.querySelector('[data-parser-updated]');
+    const live = root.querySelector('[data-parser-live]');
     const alert = root.querySelector('[data-parser-alert]');
     const alertMessage = root.querySelector('[data-parser-alert-message]');
     const refreshButton = root.querySelector('[data-parser-refresh]');
@@ -34,6 +35,31 @@
     let selectedSection = 'all';
     let controller = null;
     let reloadTimer = 0;
+    let submitting = false;
+
+    const readFilters = () => {
+        const params = new URL(window.location.href).searchParams;
+        selectedSection = params.get('source_section') || 'all';
+        search.value = params.get('source_q') || '';
+        const status = params.get('source_status') || 'all';
+        statusFilter.value = Array.from(statusFilter.options).some((option) => option.value === status) ? status : 'all';
+    };
+    const saveFilters = () => {
+        const url = new URL(window.location.href);
+        Object.entries({ source_q: search.value.trim(), source_status: statusFilter.value, source_section: selectedSection }).forEach(([key, value]) => {
+            if (value && value !== 'all') url.searchParams.set(key, value);
+            else url.searchParams.delete(key);
+        });
+        window.history.replaceState(null, '', url);
+    };
+    readFilters();
+
+    const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+    const isEntity = (value) => isRecord(value) && typeof value.id === 'string' && value.id.length > 0;
+    const isSnapshot = (value) => isRecord(value) && Array.isArray(value.sections)
+        && value.sections.every((section) => isEntity(section) && Array.isArray(section.sources) && section.sources.every(isEntity))
+        && (value.recentRuns === undefined || (Array.isArray(value.recentRuns) && value.recentRuns.every(isEntity)))
+        && (value.activeRun == null || isEntity(value.activeRun));
 
     const element = (tag, className, text) => {
         const node = document.createElement(tag);
@@ -64,6 +90,7 @@
         if (!source.lastError) return null;
         const details = element('details', 'parser-source-diagnostics');
         const summary = element('summary', '', 'Подробности ошибки');
+        summary.dataset.parserFocus = `source:${source.id}:diagnostics`;
         const body = element('div', 'parser-source-diagnostics-body');
         body.append(
             element('b', '', view.errorSummary(source.lastError)),
@@ -106,17 +133,22 @@
         const all = element('button', selectedSection === 'all' ? 'active' : '', `Все · ${view.flattenSources(snapshot).length}`);
         all.type = 'button';
         all.dataset.sectionId = 'all';
+        all.dataset.parserFocus = 'section:all';
         all.setAttribute('aria-pressed', selectedSection === 'all' ? 'true' : 'false');
         sectionHost.append(all);
         sections.forEach((section) => {
             const button = element('button', selectedSection === section.id ? 'active' : '', `${section.label} · ${section.sourceCount ?? section.sources?.length ?? 0}`);
             button.type = 'button';
             button.dataset.sectionId = String(section.id || '');
+            button.dataset.parserFocus = `section:${section.id}`;
             button.setAttribute('aria-pressed', selectedSection === section.id ? 'true' : 'false');
             if (section.enabled === false) button.classList.add('is-disabled');
             sectionHost.append(button);
         });
         runSectionButton.hidden = selectedSection === 'all';
+        const selected = sections.find((section) => section.id === selectedSection);
+        runSectionButton.disabled = !selected || selected.enabled === false
+            || !(selected.sources || []).some((source) => source.canRunManually !== false && source.enabled !== false);
     };
 
     const sourceMatches = (source) => {
@@ -132,6 +164,7 @@
     };
 
     const openRunDialog = ({ sourceId = '', sectionId = '', label = '' }) => {
+        if (submitting) return;
         runSourceId.value = sourceId;
         runSectionId.value = sectionId;
         runTitle.textContent = sourceId ? `Запустить «${label}»` : `Запустить раздел «${label}»`;
@@ -146,6 +179,7 @@
     };
 
     const renderSources = () => {
+        if (!snapshot) return;
         const allSources = view.flattenSources(snapshot);
         const priority = { unavailable: 0, fallback: 1, upstream_pending: 2, fresh: 3, disabled: 4 };
         const sources = allSources.filter(sourceMatches).sort((left, right) => {
@@ -197,19 +231,25 @@
             const actionCell = element('td', 'parser-row-action');
             const button = element('button', 'parser-run-button', 'Запустить');
             button.type = 'button';
-            button.disabled = source.canRunManually === false || source.sectionEnabled === false;
+            button.disabled = source.canRunManually === false || source.sectionEnabled === false || source.enabled === false;
+            button.dataset.parserFocus = `source:${source.id}:run`;
             button.addEventListener('click', () => openRunDialog({ sourceId: source.id, label: source.label || source.id }));
             actionCell.append(button);
             row.append(sourceCell, stateCell, attemptCell, rowsCell, scheduleCell, nextCell, actionCell);
             sourcesBody.append(row);
         });
         empty.hidden = sources.length > 0;
+        const hasSources = allSources.length > 0;
+        root.querySelector('[data-parser-empty-message]').textContent = hasSources
+            ? 'Источники с такими параметрами не найдены.' : 'В реестре пока нет источников данных.';
+        root.querySelector('[data-parser-reset]').hidden = !hasSources;
         sourceCount.textContent = `Показано ${view.formatNumber(sources.length)} из ${view.formatNumber(allSources.length)} источников`;
     };
 
     const renderRunDetails = (run) => {
         const details = element('details', 'parser-run-details');
         const summary = element('summary', '', 'Подробности');
+        summary.dataset.parserFocus = `run:${run.id}`;
         const content = element('div', 'parser-run-detail-grid');
         const fields = [
             ['ID запуска', run.id], ['Инициатор', run.requestedBy], ['Причина', run.reason],
@@ -262,43 +302,84 @@
     const showError = (message) => {
         alertMessage.textContent = message || 'Попробуйте повторить запрос.';
         alert.hidden = false;
+        live.textContent = 'Нет связи · повторим автоматически';
+        updated.textContent = snapshot ? 'Показано последнее полученное состояние' : 'Состояние недоступно';
+        if (!snapshot) {
+            sourcesBody.replaceChildren();
+            sourceCount.textContent = 'Не удалось загрузить реестр';
+            runsHost.replaceChildren(element('p', 'parser-empty', 'История запусков временно недоступна.'));
+        }
     };
 
     const scheduleReload = () => {
         window.clearTimeout(reloadTimer);
         if (document.hidden) return;
-        reloadTimer = window.setTimeout(load, snapshot?.activeRun ? 12_000 : 60_000);
+        reloadTimer = window.setTimeout(() => {
+            // Expanded diagnostics deliberately pause polling; ordinary focus does not.
+            if (dialog.open || root.querySelector('.parser-source-diagnostics[open], .parser-run-details[open]')) {
+                live.textContent = 'Автообновление приостановлено · закройте подробности или диалог';
+                scheduleReload();
+            } else load();
+        }, snapshot?.activeRun ? 12_000 : 60_000);
     };
 
     async function load() {
         controller?.abort();
-        controller = new AbortController();
+        const request = new AbortController();
+        controller = request;
+        let timedOut = false;
+        const deadline = window.setTimeout(() => { timedOut = true; request.abort(); }, 15_000);
         refreshButton.disabled = true;
+        summaryHost.setAttribute('aria-busy', 'true');
         try {
             const response = await fetch(endpoint, {
-                credentials: 'same-origin', headers: { Accept: 'application/json' }, signal: controller.signal,
+                credentials: 'same-origin', headers: { Accept: 'application/json' }, signal: request.signal,
             });
             const payload = await response.json();
             if (!response.ok || payload.ok !== true || !payload.data) throw new Error(payload.message || 'Не удалось загрузить состояние.');
+            if (!isSnapshot(payload.data)) throw new Error('Сервер вернул некорректный реестр источников.');
+            if (controller !== request) return;
+            const focusedKey = document.activeElement?.dataset.parserFocus;
             snapshot = payload.data;
+            if (!snapshot.sections?.some((section) => section.id === selectedSection)) selectedSection = 'all';
             alert.hidden = true;
             renderSummary();
             renderSections();
             renderSources();
             renderRuns();
+            if (focusedKey) {
+                const control = Array.from(root.querySelectorAll('[data-parser-focus]'))
+                    .find((node) => node.dataset.parserFocus === focusedKey && !node.disabled);
+                (control || search).focus({ preventScroll: true });
+            }
             const generated = view.formatDate(snapshot.generatedAt);
             updated.textContent = generated === '—' ? 'Состояние обновлено' : `Обновлено ${generated.relative}`;
             updated.title = generated === '—' ? '' : generated.exact;
+            live.textContent = snapshot.activeRun ? 'Обновление каждые 12 секунд' : 'Обновление каждую минуту';
         } catch (error) {
-            if (error.name !== 'AbortError') showError(error.message);
+            if (controller === request && (timedOut || error.name !== 'AbortError')) {
+                showError(timedOut ? 'Сервер не ответил за 15 секунд. Попробуйте обновить состояние.' : error.message);
+            }
         } finally {
-            refreshButton.disabled = false;
-            scheduleReload();
+            window.clearTimeout(deadline);
+            if (controller === request) {
+                refreshButton.disabled = false;
+                summaryHost.setAttribute('aria-busy', 'false');
+                scheduleReload();
+            }
         }
     }
 
     const submitRun = async () => {
+        if (submitting || !runReason.value.trim()) return;
+        submitting = true;
         runConfirm.disabled = true;
+        runReason.readOnly = true;
+        const cancel = root.querySelector('[data-run-cancel]');
+        cancel.disabled = true;
+        const request = new AbortController();
+        const deadline = window.setTimeout(() => request.abort(), 20_000);
+        let rejected = false;
         runStatus.textContent = 'Ставим запуск в очередь…';
         const body = { action: 'run', reason: runReason.value.trim() };
         if (runSourceId.value) body.source_ids = [runSourceId.value];
@@ -308,15 +389,27 @@
                 method: 'POST', credentials: 'same-origin',
                 headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
                 body: JSON.stringify(body),
+                signal: request.signal,
             });
             const payload = await response.json();
-            if (!response.ok || payload.ok !== true) throw new Error(payload.message || 'Не удалось запустить парсер.');
-            runStatus.textContent = payload.data?.deduplicated ? 'Такой запуск уже находится в очереди.' : 'Запуск добавлен в очередь.';
-            window.setTimeout(() => dialog.close(), 650);
-            window.setTimeout(load, 750);
+            if (!response.ok || payload.ok !== true) {
+                rejected = response.status >= 400 && response.status < 500;
+                throw new Error(payload.message || 'Не удалось запустить парсер.');
+            }
+            const feedback = root.querySelector('[data-parser-run-feedback]');
+            feedback.textContent = payload.data?.deduplicated ? 'Такой запуск уже находится в очереди.' : 'Запуск добавлен в очередь.';
+            feedback.hidden = false;
+            dialog.close();
+            load();
         } catch (error) {
-            runStatus.textContent = error.message;
-            runConfirm.disabled = false;
+            runStatus.textContent = rejected ? error.message
+                : 'Подтверждение не получено. Запуск мог попасть в очередь. Закройте окно и обновите историю перед повторной попыткой.';
+            runConfirm.disabled = !rejected;
+        } finally {
+            window.clearTimeout(deadline);
+            submitting = false;
+            runReason.readOnly = false;
+            cancel.disabled = false;
         }
     };
 
@@ -324,11 +417,26 @@
         const button = event.target.closest('[data-section-id]');
         if (!button) return;
         selectedSection = button.dataset.sectionId || 'all';
+        saveFilters();
         renderSections();
         renderSources();
+        sectionHost.querySelectorAll('[data-section-id]').forEach((item) => {
+            if (item.dataset.sectionId === selectedSection) item.focus();
+        });
     });
-    search.addEventListener('input', renderSources);
-    statusFilter.addEventListener('change', renderSources);
+    const filterSources = () => { saveFilters(); renderSources(); };
+    search.addEventListener('input', filterSources);
+    statusFilter.addEventListener('change', filterSources);
+    root.querySelector('[data-parser-reset]').addEventListener('click', () => {
+        search.value = '';
+        statusFilter.value = 'all';
+        selectedSection = 'all';
+        saveFilters();
+        renderSections();
+        renderSources();
+        search.focus();
+    });
+    window.addEventListener('popstate', () => { readFilters(); renderSections(); renderSources(); });
     refreshButton.addEventListener('click', load);
     root.querySelector('[data-parser-retry]').addEventListener('click', load);
     runSectionButton.addEventListener('click', () => {
@@ -341,8 +449,9 @@
         submitRun();
     });
     dialog.addEventListener('click', (event) => {
-        if (event.target === dialog) dialog.close();
+        if (event.target === dialog && !submitting) dialog.close();
     });
+    dialog.addEventListener('cancel', (event) => { if (submitting) event.preventDefault(); });
     densityButton.addEventListener('click', () => {
         const compact = root.classList.toggle('is-compact');
         densityButton.setAttribute('aria-pressed', compact ? 'true' : 'false');

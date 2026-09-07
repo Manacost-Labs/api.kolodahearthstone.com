@@ -1806,7 +1806,7 @@ $workspaceSection = $showApiTokens
         : ($showAnalyticsDashboard ? 'Аналитика' : 'База данных'));
 ?>
 <!doctype html>
-<html lang="ru" data-theme="dark">
+<html lang="ru" data-theme="light">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -1814,135 +1814,20 @@ $workspaceSection = $showApiTokens
     <title>HS Data · Управление базой Hearthstone</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232563eb'/%3E%3Ctext x='32' y='40' text-anchor='middle' font-family='system-ui,sans-serif' font-size='25' font-weight='800' fill='white'%3EHS%3C/text%3E%3C/svg%3E">
     <link rel="stylesheet" href="/assets/style.css?v=36">
-    <script src="/assets/panel-ui.js?v=2" defer></script>
+    <link rel="stylesheet" href="/assets/workspace.css?v=1">
+    <script src="/assets/workspace.js?v=1" defer></script>
+    <script src="/assets/panel-ui.js?v=3" defer></script>
     <script src="/assets/parsing-reliability.js?v=10" defer></script>
     <script src="/assets/analytics.js?v=14" defer></script>
     <script src="/assets/parser-control-view.js?v=3" defer></script>
-    <script src="/assets/parser-control.js?v=3" defer></script>
+    <script src="/assets/parser-control.js?v=4" defer></script>
 </head>
 <body data-page="<?= h($action) ?>">
+<a class="skip-link" href="#main-content">Перейти к содержимому</a>
 <main class="shell">
-    <aside class="sidebar" aria-label="Навигация по базе">
-        <div class="sidebar-brand">
-            <span class="brand-mark" aria-hidden="true">
-                <svg viewBox="0 0 24 24" focusable="false">
-                    <path d="M12 2.4a9.6 9.6 0 1 0 9.6 9.6c0-2.9-1.3-5.6-3.4-7.4.4 1.6-.1 3.3-1.3 4.4-1.2 1.1-3 1.3-4.4.6-1.2-.6-1.9-1.9-1.7-3.2.2-1 1-1.8 2-2-2.6-.2-5 1.3-6 3.7-1 2.4-.3 5.2 1.8 6.8 1.8 1.4 4.4 1.4 6.2 0 1.3-1 1.9-2.7 1.4-4.3.8 1.2.8 2.9 0 4.1-1.2 1.9-3.8 2.6-5.8 1.5-1.2-.6-2-1.7-2.3-3 1.1 1.1 2.8 1.4 4.2.7 1-.5 1.6-1.5 1.5-2.6-.1-.8-.6-1.5-1.3-1.8.4.8.1 1.8-.6 2.2-.9.5-2 .1-2.5-.8-.6-1.1-.3-2.5.7-3.3 1.2-1 3-1 4.2-.1 1.7 1.2 2.3 3.4 1.5 5.3-.9 2.3-3.5 3.5-5.8 2.7-2.8-.9-4.3-4-3.4-6.8C7.4 5.3 9.5 3.2 12 2.4Z"/>
-                </svg>
-            </span>
-            <div>
-                <strong>HS Data</strong>
-                <p>центр управления данными</p>
-            </div>
-            <button class="sidebar-toggle" type="button" aria-controls="sidebarNav" aria-expanded="false" data-sidebar-toggle>
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
-                <span>Меню</span>
-            </button>
-        </div>
-
-        <nav class="side-nav" id="sidebarNav">
-            <section class="side-section">
-                <h2>Основное</h2>
-                <a class="side-link<?= !$cardType && $action === 'list' ? ' active' : '' ?>" href="/">
-                    <span>Карты BG</span><b><?= $total ?></b>
-                </a>
-                <a class="side-link<?= $showHeroes ? ' active' : '' ?>" href="/?card_type=hero">
-                    <span>Герои</span><b><?= $heroTotal ?></b>
-                </a>
-                <a class="side-link<?= $showHeroSkins ? ' active' : '' ?>" href="/?card_type=hero_skin">
-                    <span>Скины героев</span><b><?= $heroSkinsTotal ?></b>
-                </a>
-                <a class="side-link<?= $showPets ? ' active' : '' ?>" href="/?card_type=pet">
-                    <span>Питомцы</span><b><?= $petsTotal ?></b>
-                </a>
-                <a class="side-link<?= $showCoins ? ' active' : '' ?>" href="/?card_type=coin">
-                    <span>Монетки</span><b><?= $coinsTotal ?></b>
-                </a>
-            </section>
-
-            <section class="side-section">
-                <h2>Статистика</h2>
-                <a class="side-link<?= $action === 'analytics' ? ' active' : '' ?>" href="/?action=analytics#statistics">
-                    <span>Обзор и мета</span><b>Live</b>
-                </a>
-            </section>
-
-            <section class="side-section">
-                <h2>Операции</h2>
-                <a class="side-link<?= $showParserControl ? ' active' : '' ?>" href="/?action=parsers">
-                    <span>Парсеры</span><b>Live</b>
-                </a>
-            </section>
-
-            <section class="side-section">
-                <h2>Доступ</h2>
-                <a class="side-link<?= $showApiTokens ? ' active' : '' ?>" href="/?action=api_tokens">
-                    <span>API-токены</span><b>v1</b>
-                </a>
-            </section>
-
-            <section class="side-section">
-                <h2>Коллекции</h2>
-                <a class="side-link<?= $showTimewarped ? ' active' : '' ?>" href="/?card_type=timewarped">
-                    <span>Хрономальные</span><b><?= $timewarpedTotal ?></b>
-                </a>
-                <a class="side-link<?= $showConstructed ? ' active' : '' ?>" href="/?card_type=constructed">
-                    <span>Стандарт / Вольный</span><b><?= $constructedTotal ?></b>
-                </a>
-                <a class="side-link<?= $cardType === 'anomaly' ? ' active' : '' ?>" href="/?card_type=anomaly">
-                    <span>Аномалии</span>
-                </a>
-                <a class="side-link<?= $cardType === 'quest' ? ' active' : '' ?>" href="/?card_type=quest">
-                    <span>Квесты</span>
-                </a>
-                <a class="side-link<?= $cardType === 'darkmoon_prize' ? ' active' : '' ?>" href="/?card_type=darkmoon_prize">
-                    <span>Призы</span>
-                </a>
-                <a class="side-link<?= $cardType === 'reward' ? ' active' : '' ?>" href="/?card_type=reward">
-                    <span>Награды</span>
-                </a>
-                <a class="side-link<?= $cardType === 'trinket' ? ' active' : '' ?>" href="/?card_type=trinket">
-                    <span>Аксессуары</span>
-                </a>
-            </section>
-
-        </nav>
-
-        <div class="sidebar-footer">
-            <div class="theme-switcher" aria-label="Тема панели">
-                <button class="theme-button" type="button" data-theme-option="light">Светлая</button>
-                <button class="theme-button" type="button" data-theme-option="dark">Темная</button>
-                <button class="theme-button" type="button" data-theme-option="tavern">Таверна</button>
-                <button class="theme-button" type="button" data-theme-option="arcane">Аркана</button>
-            </div>
-        </div>
-    </aside>
-
-    <section class="workspace">
-        <header class="topbar">
-            <div class="topbar-copy">
-                <span class="topbar-context"><?= h($workspaceSection) ?></span>
-                <div>
-                    <h1><?= h($workspaceTitle) ?></h1>
-                    <?php if ($action === 'list'): ?>
-                        <span class="result-range"><?= $pageFrom ?>–<?= $pageTo ?> из <?= $filteredTotal ?></span>
-                    <?php endif; ?>
-                </div>
-            </div>
-            <div class="topbar-actions">
-                <button class="topbar-command" type="button" data-command-open aria-haspopup="dialog" aria-keyshortcuts="Control+K Meta+K">
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m20 20-4.3-4.3m2.3-5.2a7.5 7.5 0 1 1-15 0 7.5 7.5 0 0 1 15 0Z"/></svg>
-                    <span>Быстрый переход</span>
-                    <kbd>⌘ K</kbd>
-                </button>
-                <div class="panel-account" aria-label="Аккаунт администратора">
-                    <span class="panel-account-name"><i aria-hidden="true"></i>GitHub · <?= h($panelUser['login']) ?></span>
-                    <form action="/auth/logout" method="post">
-                        <input type="hidden" name="csrf" value="<?= h(panel_logout_csrf_token()) ?>">
-                        <button class="panel-logout" type="submit">Выйти</button>
-                    </form>
-                </div>
-            </div>
-        </header>
+    <?php require __DIR__ . '/partials/sidebar.php'; ?>
+    <section class="workspace" id="main-content" tabindex="-1">
+        <?php require __DIR__ . '/partials/topbar.php'; ?>
 
     <?php if ($message): ?><div class="notice"><?= h($message) ?></div><?php endif; ?>
     <?php if ($error): ?><div class="notice error"><?= h($error) ?></div><?php endif; ?>
@@ -4036,9 +3921,6 @@ $workspaceSection = $showApiTokens
 </div>
 <script>
 (() => {
-    const THEME_KEY = 'bgCardsTheme';
-    const themes = new Set(['light', 'dark', 'tavern', 'arcane']);
-    const themeButtons = Array.from(document.querySelectorAll('[data-theme-option]'));
     const tooltip = document.getElementById('cardTooltip');
     const tooltipImage = tooltip?.querySelector('img');
     const tooltipText = tooltip?.querySelector('div');
@@ -4068,44 +3950,6 @@ $workspaceSection = $showApiTokens
         });
     });
 
-    const saveTheme = (theme) => {
-        try {
-            window.localStorage.setItem(THEME_KEY, theme);
-        } catch (error) {
-            // The panel still works if localStorage is unavailable.
-        }
-    };
-
-    const readTheme = () => {
-        try {
-            return window.localStorage.getItem(THEME_KEY) || 'dark';
-        } catch (error) {
-            return 'dark';
-        }
-    };
-
-    const setTheme = (theme, persist = true) => {
-        const nextTheme = themes.has(theme) ? theme : 'light';
-        document.documentElement.dataset.theme = nextTheme;
-        themeButtons.forEach((button) => {
-            const active = button.dataset.themeOption === nextTheme;
-            button.classList.toggle('active', active);
-            button.setAttribute('aria-pressed', active ? 'true' : 'false');
-        });
-        if (persist) saveTheme(nextTheme);
-    };
-
-    themeButtons.forEach((button) => {
-        button.addEventListener('click', () => setTheme(button.dataset.themeOption || 'light'));
-    });
-    setTheme(readTheme(), false);
-
-    const sidebar = document.querySelector('.sidebar');
-    const sidebarToggle = document.querySelector('[data-sidebar-toggle]');
-    sidebarToggle?.addEventListener('click', () => {
-        const expanded = sidebar?.classList.toggle('nav-open') || false;
-        sidebarToggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
-    });
 
     const termsPage = document.querySelector('[data-terms-page]');
     if (termsPage) {

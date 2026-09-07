@@ -1,5 +1,7 @@
 <?php
 declare(strict_types=1);
+$action = 'api_tokens';
+require __DIR__ . '/shell_fixture.php';
 
 require __DIR__ . '/../lib/api_tokens.php';
 
@@ -62,17 +64,24 @@ $apiTokens = [
 ];
 ?>
 <!doctype html>
-<html lang="ru" data-theme="dark">
+<html lang="ru" data-theme="light">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>API-токены · UI fixture</title>
     <link rel="stylesheet" href="/assets/style.css?v=31">
+    <link rel="stylesheet" href="/assets/workspace.css">
+    <script src="/assets/workspace.js" defer></script>
     <script src="/assets/panel-ui.js?v=2" defer></script>
 </head>
 <body>
-<main class="workspace">
-    <?php require __DIR__ . '/../partials/api-token-manager.php'; ?>
+<main class="shell">
+    <?php require __DIR__ . '/../partials/sidebar.php'; ?>
+    <section class="workspace" id="main-content" tabindex="-1">
+        <?php require __DIR__ . '/../partials/topbar.php'; ?>
+        <?php require __DIR__ . '/../partials/api-token-manager.php'; ?>
+    </section>
 </main>
+<?php require __DIR__ . '/../partials/command-palette.php'; ?>
 </body>
 </html>

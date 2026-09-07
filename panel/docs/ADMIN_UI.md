@@ -19,6 +19,15 @@ The import and API contracts are documented in `LIBRARY_FULL_ART.md`.
   behavior.
 - `assets/style.css` — theme tokens, reusable components, catalogue layouts, and
   responsive behavior.
+- `assets/workspace.css` — shared white/blue workspace and the Sources redesign;
+  loaded after legacy module styles. Uses semantic tokens so saved dark, tavern,
+  and arcane themes still work. New visitors start in light mode.
+- `partials/sidebar.php`, `partials/topbar.php`, `lib/panel_shell.php` — common
+  navigation, authenticated account controls, and static SVG icons. Catalogues
+  remain reachable through an expandable group; the sources route stays
+  `/?action=parsers`. Logout remains a CSRF-protected POST.
+- `assets/workspace.js` — theme preference and mobile menu toggle, shared with
+  isolated browser fixtures.
 - `partials/analytics-dashboard.php` — statistics navigation, compact filters,
   accessible loading/error containers, and the shared entity-detail drawer.
 - `analytics.php` + `lib/analytics.php` — protected, read-only allowlist gateway
@@ -48,12 +57,12 @@ The import and API contracts are documented in `LIBRARY_FULL_ART.md`.
 - Changing a select submits immediately; search is debounced by 520 ms.
 - Pressing `/` focuses the primary catalogue search when focus is not already in
   a form control.
-- On screens up to 1120 px the navigation is collapsed behind an accessible menu
+- On screens up to 760 px the navigation is collapsed behind an accessible menu
   button.
 - Card, golden, and framed previews use the shared `data-preview` lightbox.
 - Golden variants are represented inside their base-card row, but their IDs and
   DBFs are also searchable.
-- The action column remains sticky during horizontal table scrolling.
+- Catalogue action columns remain sticky during horizontal table scrolling.
 - Catalogue and statistics tables provide a persistent compact-density option.
 - Large catalogue, analytics, parser, and token tables expose a shared column
   picker. The first identity column and final action column stay visible; each
@@ -61,9 +70,20 @@ The import and API contracts are documented in `LIBRARY_FULL_ART.md`.
 - Every horizontally overflowing table exposes the same explicit left/right
   navigation with start, percentage, and end feedback. It remains hidden when
   all columns fit, so compact tables do not gain redundant controls.
-- The parser workspace prioritizes error/partial sources, keeps source and
-  action columns sticky, and exposes schedules, published row counts and recent
-  run progress without loading raw operational logs into the initial view.
+- The Sources workspace prioritizes unavailable/fallback sources. Its five
+  initial columns show identity, published data, last attempt, next run and the
+  manual action. Schedules and row counts are available through “Колонки”; saved
+  choices survive data refresh. Error diagnostics remain expandable. On small
+  screens the table scrolls inside its panel without widening the entire page.
+- Source search, status and section use `source_q`, `source_status` and
+  `source_section` URL parameters. A clear action resets an empty filtered view.
+- State GET requests have a 15-second deadline; failed refresh preserves the
+  previous snapshot with a stale-state warning. Polling runs every 12 seconds
+  during a run and every minute otherwise; it pauses while the tab is hidden,
+  a run dialog is open, or source/run details are being read.
+- Manual POSTs are single-flight with a 20-second deadline. An uncertain network
+  or server failure never triggers an automatic retry: the user is asked to
+  check history first. A confirmed rejection can be retried explicitly.
 - Manual parser runs require GitHub authentication, a same-origin CSRF token,
   an application-level rate budget and an explicit confirmation dialog.
 - The “Обзор и мета” workspace opens with the complete source registry. It shows
@@ -120,12 +140,12 @@ The import and API contracts are documented in `LIBRARY_FULL_ART.md`.
 
 ## Responsive rules
 
-- Above 1440 px: persistent sidebar and full data table.
-- 1121–1440 px: navigation becomes a horizontal catalogue header and secondary
-  BG columns are hidden to keep primary data readable.
-- Up to 1120 px: compact menu, full-width workspace, and wrapped controls.
-- Up to 680 px: two-column filters, compact pagination, and horizontal table
-  scrolling for data that cannot be represented safely as cards.
+- Above 1180 px: persistent 248 px sidebar and full-width workspace content.
+- 761–1180 px: 220 px sidebar; Sources summary uses two columns.
+- Up to 760 px: accessible collapsible menu, full-width workspace and stacked
+  Source filters. Theme controls are available inside the expanded menu.
+- Wide data tables scroll inside their panels with explicit left/right controls;
+  the entire page must not overflow at 320, 390, 768, 1024 or 1440 px.
 
 ## Maintenance rules
 
@@ -135,10 +155,27 @@ The import and API contracts are documented in `LIBRARY_FULL_ART.md`.
 3. New image previews should use `data-preview`, `data-tooltip`, keyboard focus,
    and an explicit accessible name.
 4. Preserve `loading="lazy"` and `decoding="async"` for table media.
-5. Increment the `style.css` query version in `index.php` after visible CSS
-   changes so browsers and proxies receive the new interface.
+5. Increment the affected asset query version in `index.php` after visible CSS
+   or JavaScript changes so browsers and proxies receive the new interface.
 
 ## Verification
+
+From the repository root, `make check` is the canonical API/panel/platform/SDK
+gate. `make security` runs the repository security checks. If the checkout has
+no `.venv`, supply a tested interpreter with `make check PYTHON=/path/to/python`
+or provision the development environment first.
+
+`make panel-browser-check` runs additional isolated browser regressions using
+Python Playwright and Chromium. Override `BROWSER_PYTHON` / `PANEL_CHROMIUM` when
+needed. The suite starts its own loopback-only PHP server, uses shared production
+partials with fixture data, blocks external requests, and mocks every parser
+operation. It covers 320–1440 px layouts, all shared-shell modules, themes,
+keyboard navigation, URL filters, persistent columns, empty/error/loading states,
+request deadlines, text escaping and single-flight manual-run confirmation.
+Set `PANEL_SCREENSHOT_DIR` to an existing directory to capture desktop/mobile
+Sources screenshots. Fixtures do not prove production authentication or live
+producer outcomes; those remain release verification steps. Tests are excluded
+from panel release artifacts by the existing runtime-layout contract.
 
 Before deployment:
 

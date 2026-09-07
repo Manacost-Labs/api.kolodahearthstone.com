@@ -1,7 +1,8 @@
 PYTHON := .venv/bin/python
 AI_QUALITY_BIN := /home/debian/server/tools/ai-quality/bin
+BROWSER_PYTHON ?= python3
 
-.PHONY: setup check test panel-check platform-check provider-check docs-check sdk-check lint-report security benchmark-smoke
+.PHONY: setup check test panel-check panel-browser-check platform-check provider-check docs-check sdk-check lint-report security benchmark-smoke
 
 API_BENCHMARK_BASE_URL ?= http://127.0.0.1:8000
 
@@ -30,6 +31,9 @@ panel-check:
 	panel/tests/test_sync_locking.sh
 	panel/tests/runtime_layout_test.sh
 	@find panel -type f -name '*.php' -print0 | xargs -0 -n1 php -l >/dev/null
+
+panel-browser-check:
+	$(BROWSER_PYTHON) panel/tests/browser_smoke.py
 
 platform-check:
 	PANEL_ROOT=$(CURDIR)/panel platform/tests/admin-ui-contract.sh

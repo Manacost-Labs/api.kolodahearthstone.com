@@ -9,18 +9,19 @@ declare(strict_types=1);
 >
     <header class="parser-hero">
         <div>
-            <span class="eyebrow">Операционный центр</span>
-            <h2>Парсеры и источники</h2>
-            <p>Свежесть данных, расписание и ручные запуски в одном рабочем пространстве.</p>
+            <h1>Источники данных</h1>
+            <p>Следите за обновлениями и управляйте сбором данных.</p>
         </div>
         <div class="parser-hero-actions">
             <span class="parser-updated" data-parser-updated>Получаем состояние…</span>
-            <button class="button secondary" type="button" data-parser-refresh>
+            <button class="button" type="button" data-parser-refresh>
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5M4 18v-5h5M6.1 9a7 7 0 0 1 11.5-2.4L20 11M4 13l2.4 4.4A7 7 0 0 0 17.9 15"/></svg>
                 Обновить
             </button>
         </div>
     </header>
+
+    <p class="notice" role="status" data-parser-run-feedback hidden></p>
 
     <div class="parser-alert" role="alert" data-parser-alert hidden>
         <span aria-hidden="true">!</span>
@@ -38,14 +39,14 @@ declare(strict_types=1);
     <section class="panel parser-sources-panel">
         <div class="parser-panel-head">
             <div>
-                <h3>Источники данных</h3>
+                <h3>Все источники</h3>
                 <p data-parser-source-count>Загрузка реестра…</p>
             </div>
             <div class="parser-view-actions">
                 <button class="parser-density-button" type="button" data-parser-density aria-pressed="false">
                     Компактно
                 </button>
-                <details class="table-column-picker" data-column-picker data-table-target=".parser-source-table" data-storage-key="parser-sources">
+                <details class="table-column-picker" data-column-picker data-table-target=".parser-source-table" data-storage-key="parser-sources" data-default-hidden="3,4">
                     <summary>Колонки</summary>
                     <div class="column-picker-menu" data-column-picker-menu></div>
                 </details>
@@ -95,13 +96,16 @@ declare(strict_types=1);
                 </tbody>
             </table>
         </div>
-        <p class="parser-empty" data-parser-empty hidden>Источники с такими параметрами не найдены.</p>
+        <div class="parser-empty" data-parser-empty hidden>
+            <p data-parser-empty-message>Источники с такими параметрами не найдены.</p>
+            <button class="parser-filter-reset" type="button" data-parser-reset>Сбросить фильтры</button>
+        </div>
     </section>
 
     <section class="panel parser-runs-panel">
         <div class="parser-panel-head">
             <div><h3>Последние запуски</h3><p>История выполнения и результат каждого сбора.</p></div>
-            <span class="parser-live-indicator"><i aria-hidden="true"></i> Автообновление</span>
+            <span class="parser-live-indicator" data-parser-live>Получаем состояние…</span>
         </div>
         <div class="parser-runs-list" data-parser-runs aria-live="polite">
             <p class="parser-empty">Загрузка запусков…</p>

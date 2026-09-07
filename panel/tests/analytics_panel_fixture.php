@@ -1,5 +1,7 @@
 <?php
 declare(strict_types=1);
+$action = 'analytics';
+require __DIR__ . '/shell_fixture.php';
 
 function h($value): string
 {
@@ -9,32 +11,25 @@ function h($value): string
 $_GET['stats'] = 'overview';
 ?>
 <!doctype html>
-<html lang="ru" data-theme="dark">
+<html lang="ru" data-theme="light">
 <head>
+    <script src="/assets/workspace.js" defer></script>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Статистика · UI fixture</title>
     <link rel="stylesheet" href="/assets/style.css?v=31">
     <script src="/assets/panel-ui.js?v=2" defer></script>
+    <link rel="stylesheet" href="/assets/workspace.css">
 </head>
 <body>
 <main class="shell">
-    <aside class="sidebar">
-        <div class="sidebar-brand"><span class="brand-mark">HS</span><div><strong>HS Data</strong><p>центр управления данными</p></div></div>
-        <nav class="side-nav">
-            <section class="side-section"><h2>Основное</h2><a class="side-link" href="#"><span>Карты BG</span><b>1240</b></a><a class="side-link" href="#"><span>Герои</span><b>105</b></a></section>
-            <section class="side-section"><h2>Статистика</h2><a class="side-link active" href="#"><span>Обзор и мета</span><b>Live</b></a></section>
-            <section class="side-section"><h2>Операции</h2><a class="side-link" href="#"><span>Парсеры</span><b>Live</b></a></section>
-        </nav>
-    </aside>
-    <section class="workspace">
-        <header class="topbar">
-            <div class="topbar-copy"><span class="topbar-context">Аналитика</span><div><h1>Обзор и мета</h1></div></div>
-            <div class="topbar-actions"><button class="topbar-command" type="button"><span>Быстрый переход</span><kbd>⌘ K</kbd></button><div class="panel-account"><span class="panel-account-name"><i></i>GitHub · Zulut30</span></div></div>
-        </header>
+    <?php require __DIR__ . '/../partials/sidebar.php'; ?>
+    <section class="workspace" id="main-content" tabindex="-1">
+        <?php require __DIR__ . '/../partials/topbar.php'; ?>
         <?php require __DIR__ . '/../partials/analytics-dashboard.php'; ?>
     </section>
 </main>
+<?php require __DIR__ . '/../partials/command-palette.php'; ?>
 <script>
 window.fetch = async () => ({
     ok: true,

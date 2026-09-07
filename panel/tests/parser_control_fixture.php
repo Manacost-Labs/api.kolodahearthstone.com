@@ -1,5 +1,7 @@
 <?php
 declare(strict_types=1);
+$action = 'parsers';
+require __DIR__ . '/shell_fixture.php';
 
 function h($value): string
 {
@@ -12,27 +14,24 @@ function panel_parser_control_csrf_token(): string
 }
 ?>
 <!doctype html>
-<html lang="ru" data-theme="dark">
+<html lang="ru" data-theme="light">
 <head>
+    <script src="/assets/workspace.js" defer></script>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Parser panel fixture</title>
     <link rel="stylesheet" href="/assets/style.css">
+    <link rel="stylesheet" href="/assets/workspace.css">
 </head>
 <body>
 <main class="shell">
-    <aside class="sidebar">
-        <div class="sidebar-brand"><span class="brand-mark">HS</span><div><strong>HS Data</strong><p>центр управления данными</p></div></div>
-        <nav class="side-nav">
-            <section class="side-section"><h2>Основное</h2><a class="side-link" href="#"><span>Карты BG</span><b>1240</b></a><a class="side-link" href="#"><span>Герои</span><b>105</b></a></section>
-            <section class="side-section"><h2>Операции</h2><a class="side-link active" href="#"><span>Парсеры</span><b>Live</b></a></section>
-        </nav>
-    </aside>
-    <section class="workspace">
-        <header class="topbar"><div class="topbar-copy"><h1>Парсеры</h1></div><div class="panel-account"><span class="panel-account-name"><i></i>GitHub · Zulut30</span></div></header>
+    <?php require __DIR__ . '/../partials/sidebar.php'; ?>
+    <section class="workspace" id="main-content" tabindex="-1">
+        <?php require __DIR__ . '/../partials/topbar.php'; ?>
         <?php require __DIR__ . '/../partials/parser-control.php'; ?>
     </section>
 </main>
+<?php require __DIR__ . '/../partials/command-palette.php'; ?>
 <script>
 const fixture = {
     generatedAt: new Date().toISOString(), revision: 4,
@@ -57,7 +56,33 @@ const fixture = {
         {id:'run-old',status:'partial',reason:'Плановый сбор меты',requestedBy:'scheduler',createdAt:new Date(Date.now()-3*3600000).toISOString(),startedAt:new Date(Date.now()-3*3600000).toISOString(),finishedAt:new Date(Date.now()-2.8*3600000).toISOString(),totalSources:4,completedSources:3,failedSources:1,errors:['HSGuru Wild: сохранена стабильная предыдущая версия']}
     ]
 };
-window.fetch = async () => ({ok:true,status:200,json:async()=>({ok:true,data:fixture})});
+// Deterministic, isolated browser harness. This fixture never calls the parser bridge.
+const fixtureParams = new URL(location.href).searchParams;
+window.parserFixture = {
+    data: fixture,
+    mode: fixtureParams.get('fixture_mode') || 'success',
+    delay: Number(fixtureParams.get('fixture_delay')) || 0,
+    calls: [],
+};
+window.fetch = async (url, options = {}) => {
+    const harness = window.parserFixture;
+    const mode = harness.mode;
+    harness.calls.push({url, method: options.method || 'GET', body: options.body, headers: options.headers});
+    await new Promise((resolve, reject) => {
+        const timer = setTimeout(resolve, harness.delay);
+        const abort = () => { clearTimeout(timer); reject(new DOMException('Aborted', 'AbortError')); };
+        if (options.signal?.aborted) abort();
+        else options.signal?.addEventListener('abort', abort, {once:true});
+    });
+    if (mode === 'offline') throw new TypeError('Тест: сеть недоступна');
+    if (mode === 'error') return {ok:false,status:503,json:async()=>({ok:false,message:'Тест: сервис временно недоступен'})};
+    if (options.method === 'POST') {
+        if (mode === 'rejected') return {ok:false,status:429,json:async()=>({ok:false,message:'Лимит запусков. Попробуйте позже.'})};
+        return {ok:true,status:200,json:async()=>({ok:true,data:{deduplicated:mode==='deduplicated'}})};
+    }
+    const data = mode === 'empty' ? {...fixture,sections:[],recentRuns:[],activeRun:null} : harness.data;
+    return {ok:true,status:200,json:async()=>({ok:true,data})};
+};
 </script>
 <script src="/assets/parser-control-view.js"></script>
 <script src="/assets/parser-control.js"></script>

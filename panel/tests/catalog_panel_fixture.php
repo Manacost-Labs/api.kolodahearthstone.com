@@ -1,5 +1,7 @@
 <?php
 declare(strict_types=1);
+$action = 'list';
+require __DIR__ . '/shell_fixture.php';
 
 function h($value): string
 {
@@ -9,30 +11,22 @@ $fixtureEmpty = isset($_GET['empty']);
 $horizontalArtUrl = 'https://api.kolodahearthstone.com/uploads/horizontal-art/battleground_card/BG28_897.webp';
 ?>
 <!doctype html>
-<html lang="ru" data-theme="dark">
+<html lang="ru" data-theme="light">
 <head>
+    <script src="/assets/workspace.js" defer></script>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Каталог · UI fixture</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232563eb'/%3E%3C/svg%3E">
     <link rel="stylesheet" href="/assets/style.css?v=32">
     <script src="/assets/panel-ui.js?v=2" defer></script>
+    <link rel="stylesheet" href="/assets/workspace.css">
 </head>
 <body>
 <main class="shell">
-    <aside class="sidebar">
-        <div class="sidebar-brand"><span class="brand-mark">HS</span><div><strong>HS Data</strong><p>центр управления данными</p></div><button class="sidebar-toggle" type="button" data-sidebar-toggle aria-expanded="false">Меню</button></div>
-        <nav class="side-nav">
-            <section class="side-section"><h2>Основное</h2><a class="side-link active" href="#"><span>Карты BG</span><b>1240</b></a><a class="side-link" href="#"><span>Герои</span><b>105</b></a><a class="side-link" href="#"><span>Скины героев</span><b>284</b></a></section>
-            <section class="side-section"><h2>Статистика</h2><a class="side-link" href="#"><span>Обзор и мета</span><b>Live</b></a></section>
-            <section class="side-section"><h2>Операции</h2><a class="side-link" href="#"><span>Парсеры</span><b>Live</b></a></section>
-        </nav>
-    </aside>
-    <section class="workspace">
-        <header class="topbar">
-            <div class="topbar-copy"><span class="topbar-context">База данных</span><div><h1>Карты Полей сражений</h1><span class="result-range">1–50 из 1240</span></div></div>
-            <div class="topbar-actions"><button class="topbar-command" type="button" data-command-open><svg viewBox="0 0 24 24"><path d="m20 20-4.3-4.3m2.3-5.2a7.5 7.5 0 1 1-15 0 7.5 7.5 0 0 1 15 0Z"/></svg><span>Быстрый переход</span><kbd>⌘ K</kbd></button><div class="panel-account"><span class="panel-account-name"><i></i>GitHub · Zulut30</span></div></div>
-        </header>
+    <?php require __DIR__ . '/../partials/sidebar.php'; ?>
+    <section class="workspace" id="main-content" tabindex="-1">
+        <?php require __DIR__ . '/../partials/topbar.php'; ?>
         <section class="panel data-panel">
             <div class="list-head">
                 <form class="filters">

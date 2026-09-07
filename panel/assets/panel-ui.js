@@ -70,12 +70,14 @@
         }
     });
 
-    const storageGet = (key) => {
+    const storageGet = (key, fallback = []) => {
         try {
-            const value = JSON.parse(localStorage.getItem(key) || '[]');
+            const stored = localStorage.getItem(key);
+            if (stored === null) return fallback;
+            const value = JSON.parse(stored);
             return Array.isArray(value) ? value.filter(Number.isInteger) : [];
         } catch (error) {
-            return [];
+            return fallback;
         }
     };
     const storageSet = (key, value) => {
@@ -86,9 +88,11 @@
         const menu = picker.querySelector('[data-column-picker-menu]');
         const targetSelector = picker.dataset.tableTarget || 'table';
         let signature = '';
+        let currentTable = null;
+        let applyColumns = () => {};
 
         const build = () => {
-            const scope = picker.closest('.data-panel, .analytics-hub, .token-list-panel') || document;
+            const scope = picker.closest('.data-panel, .analytics-hub, .token-list-panel, .parser-sources-panel') || document;
             const table = scope.querySelector(targetSelector);
             const headers = Array.from(table?.querySelectorAll('thead tr:first-child > th') || []);
             if (!table || headers.length < 3 || !menu) {
@@ -99,18 +103,24 @@
             const moduleKey = table.dataset.module || picker.dataset.storageKey || 'default';
             const key = `panelColumns:${moduleKey}`;
             const nextSignature = `${key}:${headers.map((header) => header.textContent.trim()).join('|')}`;
-            if (signature === nextSignature) return;
+            if (signature === nextSignature && currentTable === table) {
+                applyColumns();
+                return;
+            }
             signature = nextSignature;
-            const hiddenColumns = new Set(storageGet(key));
+            currentTable = table;
+            const defaults = (picker.dataset.defaultHidden || '').split(',').filter(Boolean).map(Number);
+            const hiddenColumns = new Set(storageGet(key, defaults).filter((index) => index > 0 && index < headers.length - 1));
             const configurable = headers.map((header, index) => ({ header, index }))
                 .filter(({ index }) => index > 0 && index < headers.length - 1);
             const apply = () => {
                 Array.from(table.rows).forEach((row) => {
                     Array.from(row.cells).forEach((cell, index) => {
-                        cell.hidden = hiddenColumns.has(index);
+                        cell.hidden = cell.colSpan === 1 && hiddenColumns.has(index);
                     });
                 });
             };
+            applyColumns = apply;
             menu.replaceChildren();
             const heading = document.createElement('div');
             heading.className = 'column-picker-head';
@@ -148,7 +158,7 @@
 
         picker.addEventListener('toggle', () => { if (picker.open) build(); });
         const observer = new MutationObserver(build);
-        observer.observe(picker.closest('.data-panel, .analytics-hub, .token-list-panel') || document.body, { childList: true, subtree: true });
+        observer.observe(picker.closest('.data-panel, .analytics-hub, .token-list-panel, .parser-sources-panel') || document.body, { childList: true, subtree: true });
         build();
     });
 
@@ -220,7 +230,9 @@
     document.addEventListener('keydown', (event) => {
         if (event.key === 'Escape' && sidebar?.classList.contains('nav-open')) {
             sidebar.classList.remove('nav-open');
-            document.querySelector('[data-sidebar-toggle]')?.setAttribute('aria-expanded', 'false');
+            const toggle = document.querySelector('[data-sidebar-toggle]');
+            toggle?.setAttribute('aria-expanded', 'false');
+            toggle?.focus();
         }
     });
 })();
