@@ -74,10 +74,7 @@ if (isset($_GET['revoked'])) $apiTokens[1]['revoked_at'] = '2026-08-12T16:50:00Z
     <title>API-токены · UI fixture</title>
     <link rel="stylesheet" href="/assets/style.css?v=31">
     <link rel="stylesheet" href="/assets/workspace.css">
-    <script src="/assets/table-controls.js" defer></script>
-    <script src="/assets/token-controls.js" defer></script>
-    <script src="/assets/workspace.js" defer></script>
-    <script src="/assets/panel-ui.js?v=2" defer></script>
+    <?php require __DIR__ . '/../partials/page-assets.php'; ?>
 </head>
 <body>
 <main class="shell">

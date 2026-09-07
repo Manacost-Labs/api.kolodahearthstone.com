@@ -8,7 +8,7 @@ function check_assets(bool $ok, string $message): void {
 $common = ['workspace', 'panel-ui'];
 $modules = [
     'list' => ['table-controls', 'media-preview'],
-    'analytics' => ['table-controls', 'parsing-reliability', 'analytics'],
+    'analytics' => ['table-controls', 'parsing-reliability', 'analytics', 'media-preview'],
     'parsers' => ['parser-control-view', 'parser-control'],
     'api_tokens' => ['table-controls', 'token-controls'],
     'new' => ['editor-controls'],

@@ -201,6 +201,14 @@
 .catalog-type { min-width: 0; }
 .data-panel .filters input, .data-panel .filters select { min-height: 44px; border: 1px solid var(--line); border-radius: 8px; background-color: var(--panel); font-size: 13px; font-weight: 400; }
 .catalog-search-submit { min-height: 44px; padding: 10px 22px; border-radius: 8px; }
+.catalog-browse-controls { grid-column: 1 / -1; display: flex; align-items: end; flex-wrap: wrap; gap: 12px; }
+.catalog-browse-controls label { min-width: 0; display: grid; gap: 6px; }
+.catalog-browse-controls label > span { color: var(--label); font-size: 12px; font-weight: 500; }
+.catalog-browse-controls select { min-width: 150px; width: 100%; }
+.catalog-request-status { align-self: center; color: var(--muted); font-size: 12px; }
+.catalog-page-jump { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-left: auto; font-size: 12px; }
+.catalog-page-jump input[type="number"] { width: 76px; min-height: 38px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; color: var(--text); background: var(--panel); }
+.catalog-page-jump .button { min-height: 38px; padding: 8px 12px; font-size: 12px; }
 .catalog-more { grid-column: 1 / -1; min-width: 0; }
 .catalog-more > summary { width: fit-content; min-height: 36px; padding: 8px 0; color: var(--label); font-size: 12px; font-weight: 500; cursor: pointer; }
 .catalog-more[open] > summary { color: var(--accent); }
@@ -241,12 +249,15 @@
     .data-panel .filters { gap: 12px; }
     .data-panel .filters input, .data-panel .filters select { font-size: 16px; }
     .catalog-search-submit { padding: 10px 14px; }
+    .catalog-browse-controls { display: grid; grid-template-columns: minmax(0, 1fr); }
+    .catalog-page-jump { width: 100%; margin: 4px 0 0; }
+    .catalog-page-jump input[type="number"], .catalog-page-jump .button { min-height: 44px; font-size: 16px; }
     .catalog-more > summary { min-height: 44px; padding: 12px 0; }
     .data-panel .filter-controls { display: grid; grid-template-columns: minmax(0, 1fr); }
     .data-panel .filter-controls select { min-width: 0; max-width: none; }
     .data-panel .filter-controls select[name="per_page"] { order: 0; }
     .data-panel .cards-table th:first-child, .data-panel .cards-table td:first-child, .data-panel .cards-table th:last-child, .data-panel .cards-table td:last-child { position: static; box-shadow: none; }
-    .data-panel .pagination { padding: 12px 18px; }
+    .data-panel .pagination { padding: 12px 18px; flex-wrap: wrap; overflow: visible; }
     .data-panel .page-link { min-height: 44px; }
     .data-panel .pagination.bottom { display: flex; }
 }

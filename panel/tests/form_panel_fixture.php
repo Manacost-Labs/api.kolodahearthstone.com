@@ -33,8 +33,7 @@ $wikiTermGroups = panel_wiki_editor_values($wikiTermGroups, $_POST, $error);
     <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Формы · UI fixture</title><link rel="icon" href="data:,">
     <link rel="stylesheet" href="/assets/style.css"><link rel="stylesheet" href="/assets/workspace.css">
-    <script src="/assets/workspace.js" defer></script><script src="/assets/panel-ui.js" defer></script>
-    <script src="/assets/editor-controls.js" defer></script>
+    <?php require __DIR__ . '/../partials/page-assets.php'; ?>
 </head><body><main class="shell">
     <?php require __DIR__ . '/../partials/sidebar.php'; ?>
     <section class="workspace" id="main-content" tabindex="-1">

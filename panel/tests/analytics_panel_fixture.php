@@ -13,14 +13,12 @@ function h($value): string
 <!doctype html>
 <html lang="ru" data-theme="light">
 <head>
-    <script src="/assets/workspace.js" defer></script>
+    <?php require __DIR__ . '/../partials/page-assets.php'; ?>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Статистика · UI fixture</title>
     <link rel="stylesheet" href="/assets/style.css?v=31">
-    <script src="/assets/panel-ui.js?v=2" defer></script>
     <link rel="stylesheet" href="/assets/workspace.css">
-    <script src="/assets/table-controls.js" defer></script>
 </head>
 <body>
 <main class="shell">
@@ -30,6 +28,7 @@ function h($value): string
         <?php require __DIR__ . '/../partials/analytics-dashboard.php'; ?>
     </section>
 </main>
+<?php require __DIR__ . '/../partials/media-preview.php'; ?>
 <?php require __DIR__ . '/../partials/command-palette.php'; ?>
 <script>
 window.analyticsFixture = {payload: {
@@ -62,6 +61,5 @@ window.analyticsFixture = {payload: {
 }};
 </script>
 <script src="/tests/analytics_fixture_transport.js"></script>
-<script src="/assets/analytics.js?v=4"></script>
 </body>
 </html>

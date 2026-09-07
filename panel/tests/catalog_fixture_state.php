@@ -2,6 +2,8 @@
 declare(strict_types=1);
 // Only fixture data/URL adapters; production SQL and POST routes are never loaded.
 require_once __DIR__ . '/../lib/catalog_view.php';
+require_once __DIR__ . '/../lib/catalog_navigation.php';
+$sort = panel_catalog_sort($_GET['sort'] ?? null);
 function query_url(array $overrides = []): string {
     $query = array_merge($_GET, $overrides);
     unset($query['action'], $query['id']);
@@ -39,12 +41,20 @@ foreach (['q'=>$q, 'tier'=>$tier, 'creature_type'=>$creatureType, 'pool'=>$pool,
 $names = ['Мурлок-разведчик', 'Золотой дракон', 'Ночной охотник', 'Пират таверны', 'Механический страж', 'Древний элементаль'];
 $fixtureRows = [];
 for ($i=1; $i<=120; $i++) {
-    $row = ['name'=>$names[($i-1)%count($names)], 'id'=>'BG_FIXTURE_' . $i, 'tier'=>(string)(1+($i-1)%6)];
+    $row = ['name'=>$names[($i-1)%count($names)], 'id'=>'BG_FIXTURE_' . $i, 'tier'=>(string)(1+($i-1)%6), 'updated_at'=>$i];
     if ($q !== '' && mb_stripos($row['name'] . ' ' . $row['id'], $q) === false) continue;
     if ($tier !== '' && $row['tier'] !== $tier) continue;
     $fixtureRows[] = $row;
 }
 if (isset($_GET['empty'])) $fixtureRows = [];
+if ($sort !== 'default') {
+    usort($fixtureRows, static function (array $a, array $b) use ($sort): int {
+        if ($sort === 'updated_desc') return $b['updated_at'] <=> $a['updated_at'];
+        $order = strcmp($a['name'], $b['name']);
+        if ($sort === 'name_desc') $order *= -1;
+        return $order ?: strnatcmp($a['id'], $b['id']);
+    });
+}
 $filteredTotal = count($fixtureRows);
 $totalPages = max(1, (int)ceil($filteredTotal / $perPage));
 $page = max(1, min($totalPages, (int)($_GET['page'] ?? 1)));

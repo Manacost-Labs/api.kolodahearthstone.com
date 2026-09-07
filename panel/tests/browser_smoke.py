@@ -294,7 +294,7 @@ class PanelBrowserTests(unittest.TestCase):
         expect(page.locator(".catalog-empty")).to_be_visible()
         page.locator(".catalog-empty a").click()
         expect(page.locator(".cards-table tbody tr")).to_have_count(50)
-        expect(page.locator('[name="card_type"]')).to_have_value("minion")
+        expect(page.locator('select[name="card_type"]')).to_have_value("minion")
         expect(page.locator("[data-filter-search]")).to_have_value("")
         expect(page.locator(".catalog-more")).not_to_have_attribute("open", "")
 
@@ -320,6 +320,9 @@ class PanelBrowserTests(unittest.TestCase):
                 page.set_viewport_size({"width": width, "height": 1100})
                 self.assertFalse(page.evaluate("document.documentElement.scrollWidth > innerWidth"))
                 expect(page.locator(".catalog-search-submit")).to_be_visible()
+                for navigation in page.locator('.data-panel .pagination').all():
+                    self.assertFalse(navigation.evaluate('e => e.scrollWidth > e.clientWidth'),
+                                     'Pagination and page-jump controls must not be clipped')
                 directory = os.environ.get("PANEL_SCREENSHOT_DIR")
                 if directory and width in (1440, 390):
                     page.evaluate("document.activeElement.blur(); window.scrollTo(0, 0)")
@@ -339,7 +342,9 @@ class PanelBrowserTests(unittest.TestCase):
                 page = self.open_catalog("?card_type=" + section)
                 page.locator(".catalog-more summary").click()
                 actual = page.locator(".catalog-more select").evaluate_all("els => els.map(e => e.name)")
-                self.assertEqual(set(actual), fields | {"per_page"})
+                self.assertEqual(set(actual), fields)
+                expect(page.locator('.catalog-browse-controls [name="per_page"]')).to_be_visible()
+                expect(page.locator('.catalog-browse-controls [name="sort"]')).to_be_visible()
                 if section in ("pet", "darkmoon_prize"):
                     expect(page.locator('[name="tier"] option')).to_have_count(5)
 
@@ -363,6 +368,73 @@ class PanelBrowserTests(unittest.TestCase):
         page.locator('[name="card_type"]').select_option("minion")
         page.clock.fast_forward(600)
         self.assertEqual(page.evaluate("submits"), 2)
+
+    def test_catalog_sort_jump_and_reload_preserve_filters(self):
+        page = self.open_catalog("?q=BG_FIXTURE&card_type=minion&per_page=25&pool=0&page=2")
+        page.locator('[name="sort"]').select_option("updated_desc")
+        expect(page.locator('.cards-table tbody tr').first).to_contain_text('BG_FIXTURE_120')
+        self.assertNotIn('page', parse_qs(urlsplit(page.url).query))
+        jump = page.locator('.catalog-page-jump').first
+        jump.locator('[name="page"]').fill('4')
+        jump.get_by_role('button', name='Перейти').click()
+        expect(page.locator('.catalog-toolbar-head')).to_contain_text('76–100 из 120')
+        params = parse_qs(urlsplit(page.url).query)
+        for key, value in {'q':'BG_FIXTURE', 'card_type':'minion', 'per_page':'25', 'pool':'0', 'sort':'updated_desc', 'page':'4'}.items():
+            self.assertEqual(params[key], [value])
+        page.reload()
+        expect(page.locator('select[name="sort"]')).to_have_value('updated_desc')
+        expect(page.locator('.cards-table tbody tr').first).to_contain_text('BG_FIXTURE_45')
+        jump.locator('[name="page"]').fill('999')
+        jump.get_by_role('button', name='Перейти').click()
+        self.assertIn('page=4', page.url)
+        expect(page.locator('.catalog-toolbar-head')).to_contain_text('76–100 из 120')
+
+    def test_catalog_navigation_without_javascript(self):
+        with self.browser.new_context(java_script_enabled=False) as context:
+            page = context.new_page()
+            page.goto(self.origin + '/tests/catalog_panel_fixture.php?per_page=25&pool=0')
+            page.locator('[name="sort"]').select_option('updated_desc')
+            page.get_by_role('button', name='Найти', exact=True).click()
+            expect(page.locator('.cards-table tbody tr').first).to_contain_text('BG_FIXTURE_120')
+            jump = page.locator('.catalog-page-jump').last
+            jump.locator('[name="page"]').fill('3')
+            jump.get_by_role('button', name='Перейти').click()
+            expect(page.locator('.catalog-toolbar-head')).to_contain_text('51–75 из 120')
+            self.assertIn('pool=0', page.url)
+            self.assertIn('sort=updated_desc', page.url)
+
+    def test_catalog_ime_and_unchanged_search_do_not_reload(self):
+        page = self.open_catalog('?q=BG_FIXTURE')
+        page.clock.install()
+        page.evaluate("""() => {
+            window.submits = 0;
+            document.querySelector('[data-autofilter]').addEventListener('submit', e => {
+                e.preventDefault(); window.submits++;
+            });
+        }""")
+        search = page.locator('[data-filter-search]')
+        search.fill('BG_FIXTURE ')
+        page.clock.fast_forward(600)
+        self.assertEqual(page.evaluate('submits'), 0)
+        search.dispatch_event('compositionstart')
+        search.fill('Мурлок')
+        page.clock.fast_forward(600)
+        self.assertEqual(page.evaluate('submits'), 0)
+        search.dispatch_event('compositionend')
+        page.clock.fast_forward(600)
+        self.assertEqual(page.evaluate('submits'), 1)
+
+    def test_catalog_network_script_budget(self):
+        page = self.open_catalog()
+        resources = page.evaluate("""performance.getEntriesByType('resource')
+            .filter(r => r.initiatorType === 'script' && new URL(r.name).pathname.startsWith('/assets/'))
+            .map(r => ({path: new URL(r.name).pathname, bytes:r.decodedBodySize}))""")
+        self.assertEqual({r['path'] for r in resources}, {
+            '/assets/workspace.js', '/assets/panel-ui.js', '/assets/table-controls.js', '/assets/media-preview.js'})
+        size = sum(r['bytes'] for r in resources)
+        self.assertGreater(size, 0)
+        self.assertLess(size, 26000)
+        print(f'Catalogue browser script budget: {len(resources)} requests, {size} decoded bytes')
 
     catalog_variants = ("", "minion", "spell", "constructed", "hero", "hero_skin", "pet", "coin",
                         "timewarped", "anomaly", "quest", "darkmoon_prize", "reward", "trinket")
@@ -445,6 +517,32 @@ class PanelBrowserTests(unittest.TestCase):
         self.page.goto(self.origin + "/tests/analytics_panel_fixture.php" + query)
         expect(self.page.locator("[data-analytics-content]")).to_have_attribute("aria-busy", "false")
         return self.page
+
+    def test_analytics_images_open_and_restore_keyboard_focus(self):
+        page = self.open_analytics('?stats=bg_heroes')
+        page.evaluate("""() => {
+            analyticsFixture.payload.columns = [
+                {key:'hero',label:'Герой'}, {key:'image',label:'Изображение',type:'image'},
+                {key:'winrate',label:'Победы',type:'number'}];
+            analyticsFixture.payload.rows = [
+                {hero:'Тестовый герой', image:'/tests/catalog-art.svg', winrate:51}];
+        }""")
+        page.locator('[data-analytics-refresh]').click()
+        preview = page.get_by_role('button', name='Открыть изображение Тестовый герой на весь экран')
+        expect(preview).to_be_visible()
+        preview.focus()
+        page.keyboard.press('Enter')
+        dialog = page.get_by_role('dialog', name='Просмотр изображения')
+        expect(dialog).to_be_visible()
+        expect(dialog.locator('img')).to_have_attribute('src', self.origin + '/tests/catalog-art.svg')
+        close = dialog.get_by_role('button', name='Закрыть')
+        expect(close).to_be_focused()
+        page.keyboard.press('Tab')
+        expect(close).to_be_focused()
+        page.keyboard.press('Escape')
+        expect(dialog).to_be_hidden()
+        expect(preview).to_be_focused()
+        expect(page.locator('main.shell')).not_to_have_attribute('inert', '')
 
     def test_analytics_modules_filters_and_url_restore(self):
         page = self.open_analytics()

@@ -16,7 +16,7 @@ function panel_parser_control_csrf_token(): string
 <!doctype html>
 <html lang="ru" data-theme="light">
 <head>
-    <script src="/assets/workspace.js" defer></script>
+    <?php require __DIR__ . '/../partials/page-assets.php'; ?>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Parser panel fixture</title>
@@ -84,8 +84,5 @@ window.fetch = async (url, options = {}) => {
     return {ok:true,status:200,json:async()=>({ok:true,data})};
 };
 </script>
-<script src="/assets/parser-control-view.js"></script>
-<script src="/assets/parser-control.js"></script>
-<script src="/assets/panel-ui.js"></script>
 </body>
 </html>

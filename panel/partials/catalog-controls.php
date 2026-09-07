@@ -1,7 +1,9 @@
 <?php
 declare(strict_types=1);
+require_once __DIR__ . '/../lib/catalog_navigation.php';
+$sort = panel_catalog_sort($sort ?? ($_GET['sort'] ?? null));
 $catalogAdvancedActive = $tier !== '' || $creatureType !== '' || $pool !== '' || $duos !== ''
-    || $media !== '' || $skinRarity !== '' || $constructedFormat !== 'all' || $perPage !== 50;
+    || $media !== '' || $skinRarity !== '' || $constructedFormat !== 'all';
 $catalogIsGallery = $showPets || $showCoins || $showHeroSkins;
 $catalogHiddenColumns = '1,2,3,4,5,11,13,14,15,16';
 if ($showConstructed) $catalogHiddenColumns = '1,2,4,10';
@@ -40,6 +42,23 @@ elseif ($showLibrary) $catalogHiddenColumns = $libraryType === 'trinket' ? '2,4,
                 </select>
                 </label>
                 <button class="button catalog-search-submit" type="submit">Найти</button>
+                <div class="catalog-browse-controls">
+                    <label><span>Сортировка всей выборки</span>
+                        <select name="sort" aria-label="Сортировка всей выборки">
+                            <?php foreach (panel_catalog_sort_options() as $value => $label): ?>
+                                <option value="<?= h($value) ?>"<?= $sort === $value ? ' selected' : '' ?>><?= h($label) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </label>
+                    <label><span>Записей на странице</span>
+                        <select name="per_page" aria-label="Карт на странице">
+                            <?php foreach ([25, 50, 100, 150] as $size): ?>
+                                <option value="<?= $size ?>"<?= $perPage === $size ? ' selected' : '' ?>><?= $size ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </label>
+                    <span class="catalog-request-status" data-catalog-request-status role="status" aria-live="polite"></span>
+                </div>
                 <details class="catalog-more"<?= $catalogAdvancedActive ? ' open' : '' ?>>
                 <summary>Дополнительные фильтры</summary>
                 <div class="filter-controls filters-open">
@@ -116,12 +135,6 @@ elseif ($showLibrary) $catalogHiddenColumns = $libraryType === 'trinket' ? '2,4,
                         <option value="0"<?= $duos === '0' ? ' selected' : '' ?>>Не только дуо</option>
                     </select>
                 <?php endif; ?>
-                <select name="per_page" aria-label="Карт на странице">
-                    <option value="25"<?= $perPage === 25 ? ' selected' : '' ?>>25 на странице</option>
-                    <option value="50"<?= $perPage === 50 ? ' selected' : '' ?>>50 на странице</option>
-                    <option value="100"<?= $perPage === 100 ? ' selected' : '' ?>>100 на странице</option>
-                    <option value="150"<?= $perPage === 150 ? ' selected' : '' ?>>150 на странице</option>
-                </select>
                 <a class="button ghost" href="<?= h($resetUrl) ?>">Сбросить фильтры</a>
                 </div>
                 </details>

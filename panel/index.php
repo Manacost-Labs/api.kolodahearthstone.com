@@ -7,6 +7,7 @@ require __DIR__ . '/lib/parser_control.php';
 require __DIR__ . '/lib/catalog_view.php';
 require __DIR__ . '/lib/editor_state.php';
 require __DIR__ . '/lib/catalog_read.php';
+require __DIR__ . '/lib/catalog_navigation.php';
 
 $panelUser = panel_require_auth();
 
@@ -675,6 +676,8 @@ $showTimewarped = $cardType === 'timewarped';
 $showConstructed = $cardType === 'constructed';
 $showLibrary = array_key_exists($cardType, library_types());
 $libraryType = $showLibrary ? $cardType : '';
+$sort = panel_catalog_sort($_GET['sort'] ?? null);
+$orderSql = panel_catalog_order($cardType, $sort);
 if (!in_array($constructedFormat, ['all', 'standard', 'wild'], true)) {
     $constructedFormat = 'all';
 }
@@ -1009,7 +1012,7 @@ if ($action !== 'list') {
     $offset = ($page - 1) * $perPage;
 
     $sql = 'SELECT * FROM hero_skins' . $whereSql
-        . ' ORDER BY class_name_en IS NULL, class_name_en ASC, name_en ASC LIMIT :limit OFFSET :offset';
+        . ' ORDER BY ' . $orderSql . ' LIMIT :limit OFFSET :offset';
     $stmt = $pdo->prepare($sql);
     bind_statement_params($stmt, $params);
     $stmt->bindValue(':limit', $perPage, PDO::PARAM_INT);
@@ -1034,7 +1037,7 @@ if ($action !== 'list') {
     $offset = ($page - 1) * $perPage;
 
     $sql = 'SELECT * FROM hearthstone_pets' . $whereSql
-        . ' ORDER BY pet_id ASC, level IS NULL, level ASC, variant_id ASC LIMIT :limit OFFSET :offset';
+        . ' ORDER BY ' . $orderSql . ' LIMIT :limit OFFSET :offset';
     $stmt = $pdo->prepare($sql);
     bind_statement_params($stmt, $params);
     $stmt->bindValue(':limit', $perPage, PDO::PARAM_INT);
@@ -1059,7 +1062,7 @@ if ($action !== 'list') {
     $offset = ($page - 1) * $perPage;
 
     $sql = 'SELECT * FROM hearthstone_coins' . $whereSql
-        . ' ORDER BY cosmetic_sort_order IS NULL, cosmetic_sort_order ASC, coin_name_en ASC LIMIT :limit OFFSET :offset';
+        . ' ORDER BY ' . $orderSql . ' LIMIT :limit OFFSET :offset';
     $stmt = $pdo->prepare($sql);
     bind_statement_params($stmt, $params);
     $stmt->bindValue(':limit', $perPage, PDO::PARAM_INT);
@@ -1084,7 +1087,7 @@ if ($action !== 'list') {
     $offset = ($page - 1) * $perPage;
 
     $sql = 'SELECT * FROM battlegrounds_heroes' . $whereSql
-        . ' ORDER BY name_en ASC LIMIT :limit OFFSET :offset';
+        . ' ORDER BY ' . $orderSql . ' LIMIT :limit OFFSET :offset';
     $stmt = $pdo->prepare($sql);
     bind_statement_params($stmt, $params);
     $stmt->bindValue(':limit', $perPage, PDO::PARAM_INT);
@@ -1109,7 +1112,7 @@ if ($action !== 'list') {
     $offset = ($page - 1) * $perPage;
 
     $sql = 'SELECT * FROM battlegrounds_timewarped_cards' . $whereSql
-        . ' ORDER BY tavern_tier IS NULL, tavern_tier ASC, card_type ASC, name_en ASC LIMIT :limit OFFSET :offset';
+        . ' ORDER BY ' . $orderSql . ' LIMIT :limit OFFSET :offset';
     $stmt = $pdo->prepare($sql);
     bind_statement_params($stmt, $params);
     $stmt->bindValue(':limit', $perPage, PDO::PARAM_INT);
@@ -1139,13 +1142,12 @@ if ($action !== 'list') {
                  FROM constructed_format_cards active_format
                  WHERE active_format.card_id = card.card_id AND active_format.in_format = 1) AS formats
             FROM (
-                SELECT c.card_id, c.name_ru, c.name_en'
+                SELECT c.card_id, c.name_ru, c.name_en, c.updated_at'
         . $fromSql . $whereSql
-        . ' ORDER BY c.name_ru IS NULL, c.name_ru ASC, c.name_en ASC, c.card_id ASC
-                LIMIT :limit OFFSET :offset
+        . ' ORDER BY ' . $orderSql . ' LIMIT :limit OFFSET :offset
             ) page
             INNER JOIN constructed_cards card ON card.card_id = page.card_id
-            ORDER BY page.name_ru IS NULL, page.name_ru ASC, page.name_en ASC, page.card_id ASC';
+            ORDER BY ' . panel_catalog_order('constructed', $sort, true);
     $stmt = $pdo->prepare($sql);
     bind_statement_params($stmt, $params);
     $stmt->bindValue(':limit', $perPage, PDO::PARAM_INT);
@@ -1172,7 +1174,7 @@ if ($action !== 'list') {
     $offset = ($page - 1) * $perPage;
 
     $sql = 'SELECT * FROM battlegrounds_library_cards' . $whereSql
-        . ' ORDER BY in_pool DESC, sort_order IS NULL, sort_order ASC, name_ru ASC LIMIT :limit OFFSET :offset';
+        . ' ORDER BY ' . $orderSql . ' LIMIT :limit OFFSET :offset';
     $stmt = $pdo->prepare($sql);
     bind_statement_params($stmt, $params);
     $stmt->bindValue(':limit', $perPage, PDO::PARAM_INT);
@@ -1197,7 +1199,7 @@ if ($action !== 'list') {
     $offset = ($page - 1) * $perPage;
 
     $sql = 'SELECT * FROM battlegrounds_cards' . $whereSql
-        . ' ORDER BY in_pool DESC, tavern_tier IS NULL, tavern_tier ASC, name ASC LIMIT :limit OFFSET :offset';
+        . ' ORDER BY ' . $orderSql . ' LIMIT :limit OFFSET :offset';
     $stmt = $pdo->prepare($sql);
     bind_statement_params($stmt, $params);
     $stmt->bindValue(':limit', $perPage, PDO::PARAM_INT);
@@ -1335,7 +1337,7 @@ $workspaceSection = $showApiTokens
     <title>HS Data · Управление базой Hearthstone</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232563eb'/%3E%3Ctext x='32' y='40' text-anchor='middle' font-family='system-ui,sans-serif' font-size='25' font-weight='800' fill='white'%3EHS%3C/text%3E%3C/svg%3E">
     <link rel="stylesheet" href="/assets/style.css?v=36">
-    <link rel="stylesheet" href="/assets/workspace.css?v=7">
+    <link rel="stylesheet" href="/assets/workspace.css?v=8">
     <?php require __DIR__ . '/partials/page-assets.php'; ?>
 </head>
 <body data-page="<?= h($action) ?>">
@@ -1464,7 +1466,7 @@ $workspaceSection = $showApiTokens
     <?php endif; ?>
     </section>
 </main>
-<?php if ($action === 'list') require __DIR__ . '/partials/media-preview.php'; ?>
+<?php if (in_array($action, ['list', 'analytics'], true)) require __DIR__ . '/partials/media-preview.php'; ?>
 <?php require __DIR__ . '/partials/command-palette.php'; ?>
 </body>
 </html>
