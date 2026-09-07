@@ -4,6 +4,7 @@ Run: make panel-browser-check (Python Playwright and Chromium required).
 Optional PANEL_SCREENSHOT_DIR captures the tested layouts into an existing directory.
 """
 
+import json
 import os
 from pathlib import Path
 import shutil
@@ -54,6 +55,9 @@ class PanelBrowserTests(unittest.TestCase):
         self.addCleanup(self.context.close)
         self.context.route("**/*", lambda route: route.continue_()
                            if urlsplit(route.request.url).netloc == urlsplit(self.origin).netloc else route.abort())
+        # Catalogue enhancement must never reach real auth/session/API handlers in fixtures.
+        self.context.route("**/analytics.php?**", lambda route: route.fulfill(
+            status=503, content_type="application/json", body='{"ok":false}'))
         self.page = self.context.new_page()
         self.errors = []
         self.page.on("pageerror", lambda error: self.errors.append(str(error)))
@@ -433,14 +437,182 @@ class PanelBrowserTests(unittest.TestCase):
             .map(r => ({path: new URL(r.name).pathname, bytes:r.decodedBodySize}))""")
         self.assertEqual({r['path'] for r in resources}, {
             '/assets/workspace.js', '/assets/panel-ui.js', '/assets/table-controls.js', '/assets/media-preview.js',
-            '/assets/catalog-reader.js'})
+            '/assets/catalog-reader.js', '/assets/catalog-statistics.js'})
         size = sum(r['bytes'] for r in resources)
         self.assertGreater(size, 0)
-        self.assertLess(size, 44000)
+        statistics_size = next(r['bytes'] for r in resources if r['path'].endswith('catalog-statistics.js'))
+        self.assertLess(size - statistics_size, 45000)
+        self.assertLess(statistics_size, 9000)
+        self.assertLess(size, 53000)
         print(f'Catalogue browser script budget: {len(resources)} requests, {size} decoded bytes')
 
     catalog_variants = ("", "minion", "spell", "constructed", "hero", "hero_skin", "pet", "coin",
                         "timewarped", "anomaly", "quest", "darkmoon_prize", "reward", "trinket")
+
+    def mock_card_statistics(self):
+        self.stats_requests = []
+        self.stats_response = {"ok": True, "rows": [{
+            "card_id": "BG_FIXTURE_1", "dbf_id": 10001, "dataset": "BG существо",
+            "source": "fixture-hsreplay", "context": "Таверна 1", "recorded_at": "2026-09-07T12:00:00Z",
+            "popularity": 12.5, "winrate": 55.25, "avg_placement": 4.12, "games": 12000, "impact": None,
+        }], "meta": {}, "warnings": []}
+        self.stats_http_status = 200
+
+        def respond(route):
+            self.stats_requests.append(parse_qs(urlsplit(route.request.url).query))
+            route.fulfill(status=self.stats_http_status, content_type="application/json",
+                          body=json.dumps(self.stats_response))
+
+        self.context.route("**/analytics.php?**", respond)
+
+    def test_inline_statistics_visible_identity_and_snapshot(self):
+        self.mock_card_statistics()
+        original = self.stats_response["rows"][0]
+        self.stats_response["rows"] += [
+            {**original, "card_id": "WRONG_ID", "dbf_id": 10001, "games": 999999,
+             "recorded_at": "2026-09-08T12:00:00Z"},
+            {**original, "games": 6000, "recorded_at": "2026-09-06T12:00:00Z"},
+        ]
+        page = self.open_reader("minion")
+        stats = page.get_by_role("region", name="Статистика выбранной карты")
+        expect(stats).to_contain_text("55,25%")
+        expect(stats).to_contain_text("Винрейт боя")
+        expect(stats).to_contain_text("fixture-hsreplay")
+        expect(stats).to_contain_text("07.09.2026")
+        expect(stats.locator("details")).to_have_count(0)
+        expect(stats.locator("select option")).to_have_count(2)
+        expect(stats).not_to_contain_text("999")
+        self.assertEqual(self.stats_requests, [{"module": ["card"], "card_name": ["Scout Murloc"]}])
+        stats.get_by_label("Срез статистики").select_option("1")
+        expect(stats.locator(".reader-stats-metrics")).to_contain_text("6\u00a0000")
+        page.locator("[data-reader-field]").select_option(label="Wiki")
+        expect(stats.locator(".reader-stats-metrics")).to_be_visible()
+        page.locator("[data-reader-next]").click()
+        expect(stats).to_contain_text("Для этой карты статистики пока нет")
+        expect(stats.locator(".reader-stats-metrics")).to_have_count(0)
+        page.locator("[data-reader-prev]").click()
+        expect(stats).to_contain_text("55,25%")
+        self.assertEqual(len(self.stats_requests), 2, "Returning to a record reuses bounded page-local cache")
+        stats.get_by_role("button", name="Обновить").click()
+        expect(stats.get_by_role("button", name="Обновить")).to_be_focused()
+        expect(stats.get_by_role("status")).to_have_text("Показатели выбранного среза")
+        self.assertEqual(len(self.stats_requests), 3)
+
+    def test_inline_statistics_empty_partial_stale_and_error(self):
+        self.mock_card_statistics()
+        self.stats_response["rows"] = []
+        page = self.open_reader("spell")
+        stats = page.locator(".reader-statistics")
+        expect(stats).to_contain_text("Для этой карты статистики пока нет")
+        self.stats_response["warnings"] = ["Internal error must not be exposed"]
+        stats.get_by_role("button", name="Обновить").click()
+        expect(stats).to_contain_text("Часть источников недоступна")
+        expect(stats).to_contain_text("данные не получены")
+        expect(stats).not_to_contain_text("Internal error")
+        self.stats_response["meta"] = {"stale_cache": True}
+        stats.get_by_role("button", name="Обновить").click()
+        expect(stats).to_contain_text("Сохранённый срез")
+        self.stats_http_status = 502
+        stats.get_by_role("button", name="Обновить").click()
+        expect(stats).to_contain_text("Статистика временно недоступна")
+        self.stats_http_status = 401
+        stats.get_by_role("button", name="Обновить").click()
+        expect(stats).to_contain_text("Сессия истекла")
+        expect(page.locator("[data-reader-next]")).to_be_enabled()
+
+    def test_inline_statistics_name_match_nulls_and_safe_text(self):
+        self.mock_card_statistics()
+        self.stats_response["rows"] = [{
+            "dataset": "Динамика карты", "source": '<img src=x onerror="alert(1)">',
+            "context": "Mage", "games": 0, "winrate": None, "popularity": "", "impact": "oops",
+        }, {"dataset": "BG герой", "games": 999}]
+        page = self.open_reader("constructed")
+        stats = page.locator(".reader-statistics")
+        expect(stats).to_contain_text("Совпадение по названию")
+        expect(stats).to_contain_text("Дата не указана")
+        expect(stats.locator(".reader-stats-metrics dd")).to_have_text("0")
+        expect(stats.locator("img, [onerror]")).to_have_count(0)
+        expect(stats).not_to_contain_text("999")
+        expect(stats.locator(".reader-stats-full")).to_have_attribute("href", self.origin + "/?action=analytics&stats=card&stats_q=Scout%20Murloc#statistics")
+
+    def test_inline_statistics_only_visible_selected_card_and_supported_sections(self):
+        self.mock_card_statistics()
+        page = self.open_catalog_variant("minion")
+        page.wait_for_timeout(400)
+        self.assertEqual(self.stats_requests, [])
+        page.get_by_role("button", name="Просмотр", exact=True).click()
+        expect(page.locator(".reader-statistics")).to_contain_text("55,25%")
+        for section in ("hero_skin", "pet", "coin", "timewarped", "anomaly", "quest", "reward", "trinket", "darkmoon_prize"):
+            self.open_catalog_variant(section)
+            page.get_by_role("button", name="Просмотр", exact=True).click()
+            expect(page.locator(".reader-statistics")).to_have_count(0)
+        self.assertEqual(len(self.stats_requests), 1)
+
+    def test_inline_statistics_race_abort_timeout_and_native_navigation(self):
+        self.page.add_init_script("""(() => {
+            const original = window.fetch;
+            window.statsPending = []; window.statsSignals = [];
+            window.fetch = (url, options) => {
+                if (new URL(url, location.href).pathname !== '/analytics.php') return original(url, options);
+                window.statsSignals.push(options.signal);
+                return new Promise((resolve, reject) => {
+                    window.statsPending.push(payload => resolve(new Response(JSON.stringify(payload))));
+                    // First response deliberately ignores abort to exercise the stale-result guard.
+                    if (window.statsPending.length > 1) options.signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+                });
+            };
+        })();""")
+        page = self.open_reader("hero")
+        page.wait_for_function("statsPending.length === 1")
+        page.locator("[data-reader-next]").click()
+        page.wait_for_function("statsPending.length === 2")
+        self.assertTrue(page.evaluate("statsSignals[0].aborted"))
+        page.evaluate("statsPending[1]({ok:true,rows:[{card_id:'BG_FIXTURE_2',dataset:'BG герой',avg_placement:3.25}]})")
+        expect(page.locator(".reader-statistics")).to_contain_text("3,25")
+        page.evaluate("statsPending[0]({ok:true,rows:[{card_id:'BG_FIXTURE_1',games:999999}]})")
+        expect(page.locator(".reader-statistics")).to_contain_text("3,25")
+        expect(page.locator(".reader-statistics")).not_to_contain_text("999")
+        page.clock.install()
+        page.locator(".reader-statistics").get_by_role("button", name="Обновить").click()
+        page.clock.fast_forward(300)
+        page.wait_for_function("statsPending.length === 3")
+        page.clock.fast_forward(15001)
+        expect(page.locator(".reader-statistics")).to_contain_text("Источник отвечает долго")
+        self.assertTrue(page.evaluate("statsSignals[2].aborted"))
+        page.locator(".reader-statistics").get_by_role("button", name="Обновить").click()
+        page.clock.fast_forward(300)
+        page.get_by_role("button", name="Таблица", exact=True).click()
+        self.assertTrue(page.evaluate("statsSignals[3].aborted"))
+        page.get_by_role("button", name="Просмотр", exact=True).click()
+        page.locator(".reader-statistics").get_by_role("button", name="Обновить").click()
+        page.clock.fast_forward(300)
+        page.evaluate("dispatchEvent(new PageTransitionEvent('pagehide'))")
+        self.assertTrue(page.evaluate("statsSignals[4].aborted"))
+        page.evaluate("dispatchEvent(new PageTransitionEvent('pageshow', {persisted:true}))")
+        page.clock.fast_forward(300)
+        self.assertEqual(page.evaluate("statsPending.length"), 6)
+        page.goto(self.origin + '/tests/catalog_panel_fixture.php?per_page=25')
+        page.locator('.pagination .page-next').first.click()
+        expect(page.locator('[data-reader-position]')).to_have_text('1 / 25')
+        self.assertIn('page=2', page.url)
+
+    def test_inline_statistics_responsive_and_theme(self):
+        self.mock_card_statistics()
+        page = self.open_reader("minion")
+        stats = page.locator(".reader-statistics")
+        expect(stats).to_contain_text("55,25%")
+        for theme in ("light", "dark"):
+            page.evaluate("theme => document.documentElement.dataset.theme = theme", theme)
+            for width in (1440, 1024, 768, 390, 320):
+                page.set_viewport_size({"width": width, "height": 1100})
+                self.assertFalse(page.evaluate("document.documentElement.scrollWidth > innerWidth"))
+                self.assertFalse(stats.evaluate("e => e.scrollWidth > e.clientWidth"))
+                self.assertLess(stats.bounding_box()["height"], 510)
+                stats.get_by_role("button", name="Обновить").focus()
+                expect(stats.get_by_role("button", name="Обновить")).to_be_focused()
+                directory = os.environ.get("PANEL_SCREENSHOT_DIR")
+                if directory and width in (1440, 390):
+                    page.locator(".catalog-reader").screenshot(path=str(Path(directory) / f"panel-inline-stats-{theme}-{width}.png"))
 
     def open_catalog_variant(self, section, extra=""):
         self.context.add_init_script("localStorage.setItem('panel-catalog-view', 'table')")

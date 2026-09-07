@@ -67,7 +67,7 @@
                             <?php endif; ?>
                             <span class="card-name-copy">
                                 <span><?= h($card['name_ru'] ?: '—') ?></span>
-                                <a class="card-stats-link" href="/?action=analytics&amp;stats=card&amp;stats_q=<?= rawurlencode((string)($card['name_en'] ?: $card['name_ru'])) ?>#statistics">Статистика</a>
+                                <a class="card-stats-link" data-stats-card-id="<?= h($card['card_id']) ?>" data-stats-dbf-id="<?= h($card['dbf']) ?>" href="/?action=analytics&amp;stats=card&amp;stats_q=<?= rawurlencode((string)($card['name_en'] ?: $card['name_ru'])) ?>#statistics">Статистика</a>
                             </span>
                         </td>
                         <td class="name-en">
@@ -980,7 +980,7 @@
                             <?php endif; ?>
                             <span class="card-name-copy">
                                 <span><?= h($hero['name_en']) ?></span>
-                                <a class="card-stats-link" href="/?action=analytics&amp;stats=card&amp;stats_q=<?= rawurlencode((string)$hero['name_en']) ?>#statistics">Статистика</a>
+                                <a class="card-stats-link" data-stats-card-id="<?= h($hero['card_id']) ?>" data-stats-dbf-id="<?= h($hero['dbf']) ?>" href="/?action=analytics&amp;stats=card&amp;stats_q=<?= rawurlencode((string)$hero['name_en']) ?>#statistics">Статистика</a>
                             </span>
                         </td>
                         <td><?= horizontal_art_preview($hero['horizontal_image_url'] ?? null, (string)($hero['name_ru'] ?: $hero['name_en'])) ?: '<span class="muted-dash">—</span>' ?></td>
@@ -1341,7 +1341,7 @@
                             <?php endif; ?>
                             <span class="card-name-copy">
                                 <span><?= h($card['name']) ?></span>
-                                <a class="card-stats-link" href="/?action=analytics&amp;stats=card&amp;stats_q=<?= rawurlencode((string)($card['name_en'] ?: $card['name'])) ?>#statistics">Статистика</a>
+                                <a class="card-stats-link" data-stats-card-id="<?= h($card['card_id']) ?>" data-stats-dbf-id="<?= h($card['dbf']) ?>" href="/?action=analytics&amp;stats=card&amp;stats_q=<?= rawurlencode((string)($card['name_en'] ?: $card['name'])) ?>#statistics">Статистика</a>
                             </span>
                         </td>
                         <td class="name-en"><?= h($card['name_en'] ?: '—') ?></td>

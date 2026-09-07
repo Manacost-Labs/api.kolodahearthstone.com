@@ -126,6 +126,11 @@
             </div>
         </article>`;
     const find = selector => reader.querySelector(`[data-reader-${selector}]`);
+    const notifySelection = () => {
+        if (reader.isConnected) document.dispatchEvent(new CustomEvent('panel:reader-selection', {
+            detail: {reader, row: records[selected].row},
+        }));
+    };
     let selected = 0, mediaIndex = 0, mediaPage = 0, media = [], groups = [];
     const pageSize = 6;
     const pause = () => reader.querySelectorAll('video,audio').forEach(node => node.pause());
@@ -262,6 +267,7 @@
         media = mediaFor(record);
         mediaIndex = 0; mediaPage = 0;
         renderMedia();
+        notifySelection();
     }
     find('field').addEventListener('change', renderData);
     find('select').addEventListener('change', event => selectRecord(Number(event.target.value)));
@@ -294,6 +300,7 @@
         modes.querySelectorAll('button').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.mode === mode)));
         try { localStorage.setItem('panel-catalog-view', mode); } catch { /* Storage is optional. */ }
         window.dispatchEvent(new Event('resize'));
+        notifySelection();
     }
     for (const [mode, label] of [['reader', 'Просмотр'], ['table', 'Таблица']]) {
         const button = el('button', label);

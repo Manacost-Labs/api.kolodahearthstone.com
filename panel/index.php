@@ -1357,7 +1357,7 @@ $workspaceSection = $showApiTokens
     <title>HS Data · Управление базой Hearthstone</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232563eb'/%3E%3Ctext x='32' y='40' text-anchor='middle' font-family='system-ui,sans-serif' font-size='25' font-weight='800' fill='white'%3EHS%3C/text%3E%3C/svg%3E">
     <link rel="stylesheet" href="/assets/style.css?v=36">
-    <link rel="stylesheet" href="/assets/workspace.css?v=10">
+    <link rel="stylesheet" href="/assets/workspace.css?v=11">
     <?php require __DIR__ . '/partials/page-assets.php'; ?>
 </head>
 <body data-page="<?= h($action) ?>">
