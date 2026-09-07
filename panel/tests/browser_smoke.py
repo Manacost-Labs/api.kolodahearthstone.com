@@ -489,6 +489,65 @@ class PanelBrowserTests(unittest.TestCase):
         self.assertNotIn("stats_rank", parse_qs(urlsplit(page.url).query))
         self.assertNotIn("stats_period", parse_qs(urlsplit(page.url).query))
 
+    def test_tokens_form_contract_and_responsive_disclosure(self):
+        page = self.page
+        page.goto(self.origin + '/tests/api_token_panel_fixture.php')
+        expect(page.locator('h1')).to_have_text('Доступ к API')
+        expect(page.locator('.token-issue-form')).to_be_hidden()
+        expect(page.locator('[data-token-secret]')).to_have_count(0)
+        expect(page.locator('.token-table th:visible')).to_have_count(7)
+        page.locator('.token-create summary').first.click()
+        expect(page.locator('.token-issue-form')).to_be_visible()
+        expect(page.locator('.token-issue-form')).to_have_attribute('method', 'post')
+        expect(page.locator('.token-issue-form [name="csrf"]')).to_have_value('fixture-csrf')
+        expect(page.locator('.token-issue-form [name="form_nonce"]')).to_have_value('fixture-nonce')
+        expect(page.locator('.token-issue-form input[type=checkbox]:checked')).to_have_count(1)
+        expect(page.locator('.token-issue-form input[type=checkbox]:checked')).to_have_value('database:read')
+        page.evaluate("document.querySelector('.token-issue-form').addEventListener('submit', e => { e.preventDefault(); window.tokenSubmission = Array.from(new FormData(e.target)); })")
+        page.locator('.token-issue-form [name=name]').fill('My integration')
+        page.locator('.token-issue-form button[type=submit]').click()
+        self.assertIn(['action', 'issue_api_token'], page.evaluate('tokenSubmission'))
+        self.assertIn(['name', 'My integration'], page.evaluate('tokenSubmission'))
+        for width in (1440, 1024, 768, 390, 320):
+            page.set_viewport_size({'width': width, 'height': 1100})
+            self.assertFalse(page.evaluate('document.documentElement.scrollWidth > innerWidth'))
+            directory = os.environ.get('PANEL_SCREENSHOT_DIR')
+            if directory and width in (1440, 390):
+                page.evaluate('document.activeElement.blur(); window.scrollTo(0, 0)')
+                page.screenshot(path=str(Path(directory) / f'panel-tokens-{width}.png'), full_page=True)
+
+    def test_tokens_secret_copy_and_revoke_confirmation(self):
+        page = self.page
+        page.goto(self.origin + '/tests/api_token_panel_fixture.php?issued')
+        page.evaluate("Object.defineProperty(navigator, 'clipboard', {value: {writeText: async value => { window.copiedFixtureToken = value; }}, configurable: true})")
+        page.locator('[data-copy-token]').click()
+        expect(page.locator('[data-copy-token-status]')).to_contain_text('Токен скопирован')
+        self.assertEqual(page.evaluate('copiedFixtureToken'), page.locator('[data-token-secret]').inner_text())
+        storage = page.evaluate('JSON.stringify(localStorage) + JSON.stringify(sessionStorage)')
+        self.assertNotIn('DemoToken001', storage)
+        page.evaluate("Object.defineProperty(navigator, 'clipboard', {value: {writeText: async () => { throw Error('denied'); }}, configurable: true})")
+        page.locator('[data-copy-token]').click()
+        expect(page.locator('[data-copy-token-status]')).to_contain_text('Выделите токен вручную')
+        expect(page.locator('.token-table button').first).to_be_disabled()
+        page.once('dialog', lambda dialog: dialog.dismiss())
+        page.get_by_role('button', name='Отозвать токен WordPress production').click()
+        self.assertIn('/tests/api_token_panel_fixture.php', page.url)
+        revoke = page.locator('form').filter(has=page.locator('[name=token_id]'))
+        expect(revoke.locator('[name=token_id]')).to_have_value('DemoRead0001')
+        expect(revoke.locator('[name=csrf]')).to_have_value('fixture-csrf')
+
+    def test_tokens_missing_empty_error_and_revoked_states(self):
+        for query, selector, text in (
+            ('missing', '.token-empty-state', 'Панель ещё не подключена'),
+            ('empty', '.token-empty-state', 'Пока нет выпущенных токенов'),
+            ('error', '.token-inline-error', 'Не удалось загрузить реестр'),
+            ('revoked', '.token-table', 'Отозван'),
+        ):
+            self.page.goto(self.origin + '/tests/api_token_panel_fixture.php?' + query)
+            expect(self.page.locator(selector)).to_contain_text(text)
+            if query == 'missing':
+                expect(self.page.locator('.token-issue-form')).to_have_count(0)
+
     def test_saved_themes_and_other_modules(self):
         page = self.open_sources()
         page.locator('[data-theme-option="dark"]').click()

@@ -20,10 +20,10 @@ $apiTokenManagerConfig = [
     'expires_at' => '2027-08-12T00:00:00Z',
 ];
 $apiTokenIssueNonce = 'fixture-nonce';
-$issuedApiToken = [
+$issuedApiToken = isset($_GET['issued']) ? [
     'token' => 'khs_v1_DemoToken001_' . str_repeat('x', 43),
-];
-$apiTokenLoadError = '';
+] : null;
+$apiTokenLoadError = isset($_GET['error']) ? 'Не удалось загрузить реестр. Обновите страницу.' : '';
 $apiTokens = [
     [
         'id' => 'PanelKey0001',
@@ -62,6 +62,9 @@ $apiTokens = [
         ],
     ],
 ];
+if (isset($_GET['missing'])) $apiTokenManagerConfig = null;
+if (isset($_GET['empty'])) $apiTokens = [];
+if (isset($_GET['revoked'])) $apiTokens[1]['revoked_at'] = '2026-08-12T16:50:00Z';
 ?>
 <!doctype html>
 <html lang="ru" data-theme="light">
@@ -72,6 +75,7 @@ $apiTokens = [
     <link rel="stylesheet" href="/assets/style.css?v=31">
     <link rel="stylesheet" href="/assets/workspace.css">
     <script src="/assets/table-controls.js" defer></script>
+    <script src="/assets/token-controls.js" defer></script>
     <script src="/assets/workspace.js" defer></script>
     <script src="/assets/panel-ui.js?v=2" defer></script>
 </head>

@@ -300,3 +300,54 @@
     .analytics-hub .analytics-table th:first-child, .analytics-hub .analytics-table td:first-child, .analytics-hub .analytics-table th:last-child, .analytics-hub .analytics-table td:last-child { position: static; box-shadow: none; }
     .analytics-hub .parsing-reliability { margin: 0 18px 18px; }
 }
+/* Access management: registry first, deliberate disclosure for issuing access. */
+.token-workspace { gap: 24px; padding-top: 0; }
+.token-workspace .workspace-page-head { padding-bottom: 0; }
+.token-workspace h2 { margin: 0; font-size: 19px; font-weight: 650; letter-spacing: -.02em; }
+.token-workspace .eyebrow { font-size: 10px; font-weight: 600; }
+.token-connection { font-size: 11px; font-weight: 500; }
+.token-create { min-width: 0; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+.token-create > summary { width: fit-content; margin: 18px 24px; padding: 12px 18px; border-radius: 8px; background: var(--accent); color: var(--button-text); cursor: pointer; font-size: 13px; font-weight: 600; }
+.token-create .token-layout { grid-template-columns: minmax(0, 1fr) minmax(220px, .4fr); gap: 24px; padding: 0 24px 24px; }
+.token-create .token-issue-panel { padding: 0; border: 0; box-shadow: none; }
+.token-create .token-issue-form { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.token-issue-form > .token-field:first-of-type, .token-issue-form .token-scopes, .token-issue-form .token-form-actions { grid-column: 1 / -1; }
+.token-field > span, .token-scopes legend { font-size: 12px; font-weight: 500; }
+.token-field input, .token-field select { min-height: 44px; border-radius: 8px; background: var(--panel); font-size: 14px; font-weight: 400; }
+.token-expiry-field { max-width: none; }
+.token-scope-option { padding: 14px; background: var(--panel); }
+.token-scope-option b { font-weight: 600; }
+.token-form-actions { align-items: flex-start; flex-direction: column; gap: 8px; }
+.token-form-actions p { text-align: left; }
+.token-guidance { padding: 20px; border: 0; background: var(--panel-soft); }
+.token-guidance h2 { font-size: 15px; }
+.token-manager-expiry { font-weight: 400; font-size: 10px; }
+.token-secret-card { grid-template-columns: minmax(0, 1fr); padding: 24px; gap: 16px; background: var(--accent-soft); box-shadow: none; }
+.token-secret-value code { white-space: normal; overflow-wrap: anywhere; user-select: all; }
+.token-copy-status { grid-column: 1; margin: 0; }
+.token-workspace .token-list-panel { padding: 0; border: 1px solid var(--line); box-shadow: none; }
+.token-list-panel > .token-section-head { flex-wrap: wrap; padding: 24px; }
+.token-list-actions { flex-wrap: wrap; }
+.token-list-actions .table-density-toggle, .token-list-actions summary { min-height: 40px; border-radius: 8px; padding: 10px 12px; background: var(--panel); font-size: 12px; font-weight: 500; }
+.token-summary span { border: 0; padding: 0 8px 0 0; background: transparent; }
+.token-list-panel .token-table-shell { position: relative; margin: 0; max-height: 65vh; }
+.token-table { min-width: 980px; }
+.token-table th { font-size: 11px; font-weight: 500; text-transform: none; letter-spacing: 0; background: var(--panel-soft); }
+.token-table td { padding: 18px 16px; font-size: 12px; }
+.token-list-panel .token-inline-error, .token-list-panel .token-empty-state { margin: 0 24px 24px; padding: 24px; }
+.token-workspace > .token-empty-state { margin: 0; padding: 28px; background: var(--panel); }
+@media (max-width: 1024px) {
+    .token-create .token-layout { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 760px) {
+    .token-workspace { gap: 18px; }
+    .token-create > summary { margin: 18px; }
+    .token-create .token-layout { padding: 0 18px 18px; gap: 18px; }
+    .token-create .token-issue-form { grid-template-columns: minmax(0, 1fr); }
+    .token-field input, .token-field select { font-size: 16px; }
+    .token-secret-card, .token-list-panel > .token-section-head { padding: 18px; }
+    .token-section-head { flex-wrap: wrap; }
+    .token-scope-option > span { grid-template-columns: minmax(0, 1fr); }
+    .token-list-actions .table-density-toggle, .token-list-actions summary, .token-workspace .button { min-height: 44px; }
+    .token-table th:first-child, .token-table td:first-child, .token-table th:last-child, .token-table td:last-child { position: static; box-shadow: none; }
+}

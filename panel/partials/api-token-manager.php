@@ -30,14 +30,13 @@ $tokenFormRate = $issuedApiToken === null ? (string)($_POST['rate_limit_per_minu
 $tokenFormQuota = $issuedApiToken === null ? (string)($_POST['monthly_quota'] ?? '1000000') : '1000000';
 ?>
 <section class="token-workspace" data-token-page aria-labelledby="api-token-heading">
-    <header class="token-page-head">
+    <header class="token-page-head workspace-page-head">
         <div>
-            <span class="eyebrow">Доступ к api.kolodahearthstone.com/v1</span>
-            <h2 id="api-token-heading">Управление API-токенами</h2>
+            <h1 id="api-token-heading">Доступ к API</h1>
             <p>Выпускайте отдельный токен для каждого сервиса и выдавайте только необходимые права.</p>
         </div>
         <?php if ($apiTokenManagerConfig !== null): ?>
-            <span class="token-connection is-ready"><i aria-hidden="true"></i>Подключено</span>
+            <span class="token-connection is-ready"><i aria-hidden="true"></i>Ключ панели настроен</span>
         <?php else: ?>
             <span class="token-connection is-error"><i aria-hidden="true"></i>Не настроено</span>
         <?php endif; ?>
@@ -47,7 +46,7 @@ $tokenFormQuota = $issuedApiToken === null ? (string)($_POST['monthly_quota'] ??
         <section class="token-secret-card" aria-labelledby="new-token-heading" role="status" aria-live="polite">
             <div class="token-secret-copy">
                 <span class="eyebrow">Показывается один раз</span>
-                <h3 id="new-token-heading">Скопируйте новый токен</h3>
+                <h2 id="new-token-heading">Скопируйте новый токен</h2>
                 <p>После ухода со страницы восстановить секрет нельзя. При потере отзовите токен и выпустите новый.</p>
             </div>
             <div class="token-secret-value">
@@ -60,16 +59,17 @@ $tokenFormQuota = $issuedApiToken === null ? (string)($_POST['monthly_quota'] ??
 
     <?php if ($apiTokenManagerConfig === null): ?>
         <div class="token-empty-state" role="alert">
-            <h3>Панель ещё не подключена к управлению токенами</h3>
+            <h2>Панель ещё не подключена к управлению токенами</h2>
             <p>Нужен отдельный серверный токен со scope <code>tokens:manage</code>. Он хранится вне сайта и никогда не передаётся браузеру.</p>
         </div>
     <?php else: ?>
+        <details class="token-create"<?= !empty($_POST) && $issuedApiToken === null ? ' open' : '' ?>>
+        <summary>Выпустить новый токен</summary>
         <div class="token-layout">
             <section class="panel token-issue-panel" aria-labelledby="issue-token-heading">
                 <div class="token-section-head">
                     <div>
-                        <span class="eyebrow">Новый доступ</span>
-                        <h3 id="issue-token-heading">Выпустить токен</h3>
+                        <h2 id="issue-token-heading">Новый токен</h2>
                     </div>
                     <span class="token-manager-expiry">Ключ панели до <?= h($tokenFormatDate($apiTokenManagerConfig['expires_at'])) ?></span>
                 </div>
@@ -80,7 +80,7 @@ $tokenFormQuota = $issuedApiToken === null ? (string)($_POST['monthly_quota'] ??
                     <input type="hidden" name="action" value="issue_api_token">
 
                     <label class="token-field">
-                        <span>Название</span>
+                        <span>Название — обязательно</span>
                         <input name="name" value="<?= h($tokenFormName) ?>" maxlength="80" required autocomplete="off" placeholder="Например, telegram-bot">
                         <small>Один понятный токен на один сервис.</small>
                     </label>
@@ -128,7 +128,7 @@ $tokenFormQuota = $issuedApiToken === null ? (string)($_POST['monthly_quota'] ??
             </section>
 
             <aside class="token-guidance" aria-labelledby="token-guidance-heading">
-                <h3 id="token-guidance-heading">Как выбирать права</h3>
+                <h2 id="token-guidance-heading">Как выбирать права</h2>
                 <dl>
                     <div><dt>Интеграция читает базу</dt><dd><code>database:read</code></dd></div>
                     <div><dt>Запускает обновления</dt><dd><code>admin</code></dd></div>
@@ -138,11 +138,11 @@ $tokenFormQuota = $issuedApiToken === null ? (string)($_POST['monthly_quota'] ??
             </aside>
         </div>
 
+        </details>
         <section class="panel token-list-panel" aria-labelledby="token-list-heading">
             <div class="token-section-head">
                 <div>
-                    <span class="eyebrow">Реестр доступа</span>
-                    <h3 id="token-list-heading">Выпущенные токены</h3>
+                    <h2 id="token-list-heading">Выпущенные токены</h2>
                 </div>
                 <div class="token-list-actions">
                     <div class="token-summary" aria-label="Состояние токенов">
@@ -150,7 +150,7 @@ $tokenFormQuota = $issuedApiToken === null ? (string)($_POST['monthly_quota'] ??
                         <span><b><?= $tokenRevokedCount ?></b> отозвано</span>
                     </div>
                     <button class="table-density-toggle" type="button" data-table-density data-density-key="apiTokenTableDensity" aria-pressed="false">Компактно</button>
-                    <details class="table-column-picker" data-column-picker data-table-target=".token-table" data-storage-key="api-tokens">
+                    <details class="table-column-picker" data-column-picker data-table-target=".token-table" data-storage-key="api-tokens" data-default-hidden="2,4">
                         <summary>Колонки</summary>
                         <div class="column-picker-menu" data-column-picker-menu></div>
                     </details>

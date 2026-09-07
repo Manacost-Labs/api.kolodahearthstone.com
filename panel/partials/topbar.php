@@ -3,7 +3,7 @@
     <div class="topbar-copy">
         <span class="topbar-context"><?= h($workspaceSection) ?></span>
         <div>
-            <?php if (in_array($action, ['parsers', 'list', 'analytics'], true)): ?><span class="topbar-title">Управление данными</span>
+            <?php if (in_array($action, ['parsers', 'list', 'analytics', 'api_tokens'], true)): ?><span class="topbar-title">Управление данными</span>
             <?php else: ?><h1><?= h($workspaceTitle) ?></h1><?php endif; ?>
         </div>
     </div>
