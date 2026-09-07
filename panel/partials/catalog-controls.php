@@ -2,17 +2,25 @@
 declare(strict_types=1);
 $catalogAdvancedActive = $tier !== '' || $creatureType !== '' || $pool !== '' || $duos !== ''
     || $media !== '' || $skinRarity !== '' || $constructedFormat !== 'all' || $perPage !== 50;
+$catalogIsGallery = $showPets || $showCoins || $showHeroSkins;
+$catalogHiddenColumns = '1,2,3,4,5,11,13,14,15,16';
+if ($showConstructed) $catalogHiddenColumns = '1,2,4,10';
+elseif ($showHeroes) $catalogHiddenColumns = '1,3,4,8';
+elseif ($showTimewarped) $catalogHiddenColumns = '1,2,3,4,9';
+elseif ($showLibrary) $catalogHiddenColumns = $libraryType === 'trinket' ? '2,4,5,9,10' : '1,3,4,8,9';
 ?>
         <div class="list-head">
             <div class="catalog-toolbar-head">
                 <div><h2>Каталог</h2><p>Показано <?= $pageFrom ?>–<?= $pageTo ?> из <?= $filteredTotal ?></p></div>
+                <?php if (!$catalogIsGallery): ?>
                 <div class="catalog-view-actions">
                     <button class="table-density-toggle" type="button" data-table-density aria-pressed="false">Компактно</button>
-                    <details class="table-column-picker" data-column-picker data-table-target=".cards-table > table" data-storage-key="catalogue-<?= h($cardType !== '' ? $cardType : 'battlegrounds') ?>" data-default-hidden="<?= in_array($cardType, ['', 'minion', 'spell'], true) ? '1,2,3,4,5,11,13,14,15,16' : '' ?>">
+                    <details class="table-column-picker" data-column-picker data-table-target=".cards-table > table" data-storage-key="catalogue-<?= h($cardType !== '' ? $cardType : 'battlegrounds') ?>" data-default-hidden="<?= h($catalogHiddenColumns) ?>">
                         <summary>Колонки</summary>
                         <div class="column-picker-menu" data-column-picker-menu></div>
                     </details>
                 </div>
+                <?php endif; ?>
             </div>
             <form class="filters" method="get" data-autofilter>
                 <label class="filter-search">

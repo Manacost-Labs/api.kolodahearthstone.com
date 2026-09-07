@@ -1,12 +1,7 @@
 <?php
 declare(strict_types=1);
 // Only fixture data/URL adapters; production SQL and POST routes are never loaded.
-function filter_card_types(): array {
-    return ['minion'=>'Существа', 'spell'=>'Заклинания', 'hero'=>'Герои', 'hero_skin'=>'Скины героев',
-        'pet'=>'Питомцы', 'coin'=>'Монетки', 'timewarped'=>'Хрономальные', 'constructed'=>'Стандарт/Вольный',
-        'anomaly'=>'Аномалии', 'quest'=>'Квесты', 'darkmoon_prize'=>'Призы Ярмарки', 'reward'=>'Награды', 'trinket'=>'Аксессуары'];
-}
-function creature_types(): array { return ['murloc'=>'Мурлок', 'dragon'=>'Дракон', 'beast'=>'Зверь']; }
+require_once __DIR__ . '/../lib/catalog_view.php';
 function query_url(array $overrides = []): string {
     $query = array_merge($_GET, $overrides);
     unset($query['action'], $query['id']);

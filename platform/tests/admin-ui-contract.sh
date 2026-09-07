@@ -25,8 +25,8 @@ assert_not_contains() {
 
 assert_contains partials/catalog-content.php 'class="art-preview[^\"]*"' 'art must render as a lightbox thumbnail'
 assert_contains partials/catalog-content.php 'data-preview="<\?= h\(\$artImage\)' 'art thumbnail must target the full image'
-assert_contains index.php 'lastFullscreenTrigger' 'lightbox must restore focus to its trigger'
-assert_contains index.php "event\.key === 'Tab'" 'lightbox must trap keyboard focus'
+assert_contains assets/media-preview.js 'lastFullscreenTrigger' 'lightbox must restore focus to its trigger'
+assert_contains assets/media-preview.js "event\.key === 'Tab'" 'lightbox must trap keyboard focus'
 assert_contains partials/analytics-dashboard.php "'hsguru_archetypes'" 'HSGuru archetypes module must be visible'
 assert_contains partials/analytics-dashboard.php "'arena_cards'" 'Arena card statistics module must be visible'
 assert_contains partials/analytics-dashboard.php 'data-analytics-rating-control' 'hero rating filter must be visible'

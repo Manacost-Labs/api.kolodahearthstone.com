@@ -1,6 +1,5 @@
 <?php
 declare(strict_types=1);
-function h($value): string { return htmlspecialchars((string)$value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); }
 function check(bool $value, string $message): void { if (!$value) throw new RuntimeException($message); }
 $_GET = ['q'=>'<img src=x onerror=alert(1)>', 'card_type'=>'minion', 'per_page'=>'25', 'pool'=>'0', 'page'=>'2'];
 require __DIR__ . '/catalog_fixture_state.php';

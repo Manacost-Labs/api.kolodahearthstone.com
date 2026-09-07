@@ -55,6 +55,7 @@
     const primarySearch = document.querySelector('[data-filter-search]');
     document.addEventListener('keydown', (event) => {
         if (event.key !== '/' || event.ctrlKey || event.metaKey || event.altKey) return;
+        if (primarySearch?.closest('[inert]')) return;
         const target = event.target;
         if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return;
         event.preventDefault();

@@ -1,22 +1,22 @@
 <?php declare(strict_types=1); ?>
-        <div class="cards-table">
+        <div class="cards-table<?= $showPets || $showCoins || $showHeroSkins ? ' is-gallery' : '' ?>">
             <?php if ($showConstructed): ?>
             <table class="constructed-table">
                 <thead>
                 <tr>
-                    <th>Карта RU</th>
-                    <th>Card EN</th>
-                    <th>Crop</th>
-                    <th>Форматы</th>
-                    <th>Set</th>
-                    <th>Тип</th>
-                    <th>Класс</th>
-                    <th>Мана</th>
-                    <th>Статы</th>
-                    <th>Картинки</th>
-                    <th>Wiki</th>
-                    <th>Gallery</th>
-                    <th>Patch changes</th>
+                    <th scope="col">Карта RU</th>
+                    <th scope="col">Card EN</th>
+                    <th scope="col">Crop</th>
+                    <th scope="col">Форматы</th>
+                    <th scope="col">Set</th>
+                    <th scope="col">Тип</th>
+                    <th scope="col">Класс</th>
+                    <th scope="col">Мана</th>
+                    <th scope="col">Статы</th>
+                    <th scope="col">Картинки</th>
+                    <th scope="col">Wiki</th>
+                    <th scope="col">Gallery</th>
+                    <th scope="col">Patch changes</th>
                 </tr>
                 </thead>
                 <tbody>
@@ -317,18 +317,18 @@
             <table class="library-table">
                 <thead>
                 <tr>
-                    <th>Карта RU</th>
-                    <?php if ($libraryType === 'trinket'): ?><th>Full art</th><?php endif; ?>
-                    <th>Crop</th>
-                    <th>Описание</th>
-                    <th>card_id</th>
-                    <th>dbf</th>
-                    <th>Статус</th>
-                    <th>Тир</th>
-                    <th>Группа</th>
-                    <th>Тип</th>
-                    <th>Источник</th>
-                    <th>Wiki</th>
+                    <th scope="col">Карта RU</th>
+                    <?php if ($libraryType === 'trinket'): ?><th scope="col">Full art</th><?php endif; ?>
+                    <th scope="col">Crop</th>
+                    <th scope="col">Описание</th>
+                    <th scope="col">card_id</th>
+                    <th scope="col">dbf</th>
+                    <th scope="col">Статус</th>
+                    <th scope="col">Тир</th>
+                    <th scope="col">Группа</th>
+                    <th scope="col">Тип</th>
+                    <th scope="col">Источник</th>
+                    <th scope="col">Wiki</th>
                 </tr>
                 </thead>
                 <tbody>
@@ -429,18 +429,18 @@
             <table class="timewarped-table">
                 <thead>
                 <tr>
-                    <th>Карта</th>
-                    <th>Card EN</th>
-                    <th>Crop</th>
-                    <th>CARD_ID</th>
-                    <th>DBF</th>
-                    <th>Тип</th>
-                    <th>Таверна</th>
-                    <th>Статы</th>
-                    <th>Золотая</th>
-                    <th>Wiki</th>
-                    <th>Gallery</th>
-                    <th>Card changes</th>
+                    <th scope="col">Карта</th>
+                    <th scope="col">Card EN</th>
+                    <th scope="col">Crop</th>
+                    <th scope="col">CARD_ID</th>
+                    <th scope="col">DBF</th>
+                    <th scope="col">Тип</th>
+                    <th scope="col">Таверна</th>
+                    <th scope="col">Статы</th>
+                    <th scope="col">Золотая</th>
+                    <th scope="col">Wiki</th>
+                    <th scope="col">Gallery</th>
+                    <th scope="col">Card changes</th>
                 </tr>
                 </thead>
                 <tbody>
@@ -645,10 +645,10 @@
                             <?php endif; ?>
                             <div class="skin-media-strip">
                                 <?php if ($petCardImage !== ''): ?>
-                                    <button type="button" data-preview="<?= h($petCardImage) ?>" data-tooltip="Pet card">Card</button>
+                                    <button type="button" data-preview="<?= h($petCardImage) ?>" data-tooltip="Pet card">Карта</button>
                                 <?php endif; ?>
                                 <?php if ($petBackground !== ''): ?>
-                                    <button type="button" data-preview="<?= h($petBackground) ?>" data-tooltip="End screen background">End screen</button>
+                                    <button type="button" data-preview="<?= h($petBackground) ?>" data-tooltip="End screen background">Фон</button>
                                 <?php endif; ?>
                             </div>
                             <?= horizontal_art_preview($pet['horizontal_image_url'] ?? null, (string)$pet['variant_name']) ?>
@@ -667,14 +667,14 @@
                             </div>
                             <div class="skin-meta-grid">
                                 <div><b>Дата выхода</b><span><?= h(format_release_date_ru($pet['release_date'] ?? null)) ?></span></div>
-                                <div><b>Pet ID</b><span><?= h($pet['pet_id']) ?></span></div>
-                                <div><b>Variant</b><span><?= h($pet['variant_id']) ?></span></div>
-                                <div><b>Background</b><span><?= $petBackground !== '' ? 'yes' : '—' ?></span></div>
-                                <div><b>Wiki</b><span><a href="<?= h($pet['page_url']) ?>" target="_blank" rel="noopener">open</a></span></div>
+                                <div><b>ID питомца</b><span><?= h($pet['pet_id']) ?></span></div>
+                                <div><b>Вариант</b><span><?= h($pet['variant_id']) ?></span></div>
+                                <div><b>Фон</b><span><?= $petBackground !== '' ? 'Есть' : '—' ?></span></div>
+                                <div><b>Wiki</b><span><a href="<?= h($pet['page_url']) ?>" target="_blank" rel="noopener">Открыть</a></span></div>
                             </div>
                             <div class="skin-card-details">
                                 <?php if ($petGallery): ?>
-                                    <details class="media-details"><summary>Gallery · <?= count($petGallery) ?></summary><div class="hero-media-grid art-grid skin-gallery-mini">
+                                    <details class="media-details"><summary>Галерея · <?= count($petGallery) ?></summary><div class="hero-media-grid art-grid skin-gallery-mini">
                                         <?php foreach ($petGallery as $item): ?>
                                             <?php
                                             $galleryImage = (string)($item['thumb_url'] ?? $item['file_url'] ?? '');
@@ -723,10 +723,10 @@
                             <?php endif; ?>
                             <div class="skin-media-strip">
                                 <?php if ($coinImage !== ''): ?>
-                                    <button type="button" data-preview="<?= h($coinImage) ?>" data-tooltip="Coin card">Card</button>
+                                    <button type="button" data-preview="<?= h($coinImage) ?>" data-tooltip="Coin card">Карта</button>
                                 <?php endif; ?>
                                 <?php if ($coinCrop !== ''): ?>
-                                    <button type="button" data-preview="<?= h($coinCrop) ?>" data-tooltip="Crop art">Crop</button>
+                                    <button type="button" data-preview="<?= h($coinCrop) ?>" data-tooltip="Crop art">Фрагмент</button>
                                 <?php endif; ?>
                             </div>
                             <?= horizontal_art_preview($coin['horizontal_image_url'] ?? null, (string)$coin['coin_name_en']) ?>
@@ -758,14 +758,14 @@
                             <?php endif; ?>
                             <div class="skin-card-details">
                                 <?php if ($coinGeneratedBy): ?>
-                                    <details class="media-details"><summary>Generated by · <?= count($coinGeneratedBy) ?></summary><div class="wiki-tags skin-tags">
+                                    <details class="media-details"><summary>Создаётся · <?= count($coinGeneratedBy) ?></summary><div class="wiki-tags skin-tags">
                                         <?php foreach ($coinGeneratedBy as $linkedCard): ?>
                                             <code title="<?= h((string)($linkedCard['name_en'] ?? $linkedCard['page_title'] ?? '')) ?>"><?= h((string)($linkedCard['card_id'] ?? '')) ?></code>
                                         <?php endforeach; ?>
                                     </div></details>
                                 <?php endif; ?>
                                 <?php if ($coinRelated): ?>
-                                    <details class="media-details"><summary>Related with · <?= count($coinRelated) ?></summary><div class="wiki-tags skin-tags">
+                                    <details class="media-details"><summary>Связанные карты · <?= count($coinRelated) ?></summary><div class="wiki-tags skin-tags">
                                         <?php foreach ($coinRelated as $linkedCard): ?>
                                             <code title="<?= h((string)($linkedCard['name_en'] ?? $linkedCard['page_title'] ?? '')) ?>"><?= h((string)($linkedCard['card_id'] ?? '')) ?></code>
                                         <?php endforeach; ?>
@@ -810,11 +810,11 @@
                             <?php if (!empty($skin['static_image_url'])): ?>
                                 <img class="skin-portrait" src="<?= h($skin['static_image_url']) ?>" alt="<?= h($skin['name_en']) ?>" loading="lazy" decoding="async" tabindex="0" role="button" data-preview="<?= h($skin['static_image_url']) ?>" data-tooltip="<?= h($skinTooltip) ?>">
                             <?php else: ?>
-                                <span class="missing-card-image">Нет static</span>
+                                <span class="missing-card-image">Нет изображения</span>
                             <?php endif; ?>
                             <div class="skin-media-strip">
                                 <?php if (!empty($skin['static_image_url'])): ?>
-                                    <button type="button" data-preview="<?= h($skin['static_image_url']) ?>" data-tooltip="Static">Static</button>
+                                    <button type="button" data-preview="<?= h($skin['static_image_url']) ?>" data-tooltip="Static">Карта</button>
                                 <?php endif; ?>
                                 <?php if (!empty($skin['animated_image_url'])): ?>
                                     <button type="button" data-preview="<?= h($skin['animated_image_url']) ?>" data-preview-type="<?= h($skinAnimatedType) ?>" data-tooltip="Animated <?= h($skinAnimatedLabel) ?>"><?= h($skinAnimatedLabel) ?></button>
@@ -822,7 +822,7 @@
                                     <span class="skin-asset-pill" title="<?= h(compact_text($skinAnimatedAssets)) ?>">Asset</span>
                                 <?php endif; ?>
                                 <?php if ($skinFullArt !== ''): ?>
-                                    <button type="button" data-preview="<?= h($skinFullArt) ?>" data-tooltip="Full art">Full art</button>
+                                    <button type="button" data-preview="<?= h($skinFullArt) ?>" data-tooltip="Full art">Арт</button>
                                 <?php endif; ?>
                             </div>
                             <?= horizontal_art_preview($skin['horizontal_image_url'] ?? null, (string)$skin['name_en']) ?>
@@ -841,11 +841,11 @@
                             </div>
                             <div class="skin-meta-grid">
                                 <div><b>Дата выхода</b><span><?= h(format_release_date_ru($skin['release_date'] ?? null)) ?></span></div>
-                                <div><b>Rarity</b><span><?= h($skinRarityLabel) ?></span></div>
-                                <div><b>Actor</b><span><?= h($skin['actor'] ?: '—') ?></span></div>
-                                <div><b>Artist</b><span><?= h($skin['artist'] ?: '—') ?></span></div>
+                                <div><b>Редкость</b><span><?= h($skinRarityLabel) ?></span></div>
+                                <div><b>Озвучка</b><span><?= h($skin['actor'] ?: '—') ?></span></div>
+                                <div><b>Художник</b><span><?= h($skin['artist'] ?: '—') ?></span></div>
                                 <div><b>DBF</b><span><?= h($skin['dbf'] ?? '—') ?></span></div>
-                                <div><b>Wiki</b><span><a href="<?= h($skin['page_url']) ?>" target="_blank" rel="noopener">open</a></span></div>
+                                <div><b>Wiki</b><span><a href="<?= h($skin['page_url']) ?>" target="_blank" rel="noopener">Открыть</a></span></div>
                             </div>
                             <?php if ($skinTags || count($skinCategories) > 1): ?>
                                 <div class="wiki-tags skin-tags">
@@ -855,7 +855,7 @@
                             <?php endif; ?>
                             <div class="skin-card-details">
                                 <?php if ($skinGallery): ?>
-                                    <details class="media-details"><summary>Gallery · <?= count($skinGallery) ?></summary><div class="hero-media-grid art-grid skin-gallery-mini">
+                                    <details class="media-details"><summary>Галерея · <?= count($skinGallery) ?></summary><div class="hero-media-grid art-grid skin-gallery-mini">
                                         <?php foreach ($skinGallery as $item): ?>
                                             <?php
                                             $galleryImage = (string)($item['thumb_url'] ?? $item['file_url'] ?? '');
@@ -873,7 +873,7 @@
                                 <?php endif; ?>
                                 <?php if ($skinSounds): ?>
                                     <details class="related-media-details">
-                                        <summary>Sounds · <?= count($skinSounds) ?></summary>
+                                        <summary>Звуки · <?= count($skinSounds) ?></summary>
                                         <ul class="sound-list skin-sound-list">
                                             <?php foreach (array_slice($skinSounds, 0, 12) as $sound): ?>
                                                 <li>
@@ -888,7 +888,7 @@
                                 <?php endif; ?>
                                 <?php if ($skinAnimatedAssets): ?>
                                     <details class="related-media-details">
-                                        <summary>Animated assets · <?= count($skinAnimatedAssets) ?></summary>
+                                        <summary>Файлы анимации · <?= count($skinAnimatedAssets) ?></summary>
                                         <div class="wiki-tags skin-tags">
                                             <?php foreach ($skinAnimatedAssets as $asset): ?><code><?= h(($asset['kind'] ?? 'asset') . ': ' . ($asset['asset'] ?? '')) ?></code><?php endforeach; ?>
                                         </div>
@@ -906,18 +906,18 @@
             <table class="heroes-table">
                 <thead>
                 <tr>
-                    <th>Герой</th>
-                    <th>Crop</th>
-                    <th>RU</th>
-                    <th>card_id</th>
-                    <th>dbf</th>
-                    <th>Armor</th>
-                    <th>Сила героя</th>
-                    <th>Buddy</th>
-                    <th>Wiki</th>
-                    <th>Hero skins</th>
-                    <th>Gallery</th>
-                    <th>Card changes</th>
+                    <th scope="col">Герой</th>
+                    <th scope="col">Crop</th>
+                    <th scope="col">RU</th>
+                    <th scope="col">card_id</th>
+                    <th scope="col">dbf</th>
+                    <th scope="col">Armor</th>
+                    <th scope="col">Сила героя</th>
+                    <th scope="col">Buddy</th>
+                    <th scope="col">Wiki</th>
+                    <th scope="col">Hero skins</th>
+                    <th scope="col">Gallery</th>
+                    <th scope="col">Card changes</th>
                 </tr>
                 </thead>
                 <tbody>
@@ -1263,24 +1263,24 @@
             <table class="battlegrounds-table">
                 <thead>
                 <tr>
-                    <th>Карта</th>
-                    <th>Card EN</th>
-                    <th>Crop</th>
-                    <th>CARD_ID</th>
-                    <th>DBF</th>
-                    <th>Категория</th>
-                    <th>Таверна</th>
-                    <th>Тип</th>
-                    <th>Атака</th>
-                    <th>Здоровье</th>
-                    <th>В пуле</th>
-                    <th>Дуо</th>
-                    <th>Механики</th>
-                    <th>Золотая</th>
-                    <th>Арт</th>
-                    <th>Рамка</th>
-                    <th>Wiki</th>
-                    <th>Действия</th>
+                    <th scope="col">Карта</th>
+                    <th scope="col">Card EN</th>
+                    <th scope="col">Crop</th>
+                    <th scope="col">CARD_ID</th>
+                    <th scope="col">DBF</th>
+                    <th scope="col">Категория</th>
+                    <th scope="col">Таверна</th>
+                    <th scope="col">Тип</th>
+                    <th scope="col">Атака</th>
+                    <th scope="col">Здоровье</th>
+                    <th scope="col">В пуле</th>
+                    <th scope="col">Дуо</th>
+                    <th scope="col">Механики</th>
+                    <th scope="col">Золотая</th>
+                    <th scope="col">Арт</th>
+                    <th scope="col">Рамка</th>
+                    <th scope="col">Wiki</th>
+                    <th scope="col">Действия</th>
                 </tr>
                 </thead>
                 <tbody>

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="240" height="320" viewBox="0 0 240 320">
+<rect width="240" height="320" rx="12" fill="#eaf1ff"/>
+<path d="M0 250 85 110l60 95 40-65 55 110v70H0Z" fill="#b3ceff"/>
+<circle cx="172" cy="72" r="25" fill="#76a5ff"/>
+<text x="120" y="290" text-anchor="middle" font-family="sans-serif" font-size="16" fill="#244a82">UI fixture</text>
+</svg>

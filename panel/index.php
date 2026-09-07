@@ -1362,10 +1362,10 @@ $workspaceSection = $showApiTokens
     <title>HS Data · Управление базой Hearthstone</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232563eb'/%3E%3Ctext x='32' y='40' text-anchor='middle' font-family='system-ui,sans-serif' font-size='25' font-weight='800' fill='white'%3EHS%3C/text%3E%3C/svg%3E">
     <link rel="stylesheet" href="/assets/style.css?v=36">
-    <link rel="stylesheet" href="/assets/workspace.css?v=5">
+    <link rel="stylesheet" href="/assets/workspace.css?v=6">
     <script src="/assets/workspace.js?v=1" defer></script>
-    <script src="/assets/panel-ui.js?v=3" defer></script>
-    <script src="/assets/table-controls.js?v=2" defer></script>
+    <script src="/assets/panel-ui.js?v=4" defer></script>
+    <script src="/assets/table-controls.js?v=3" defer></script>
     <script src="/assets/token-controls.js?v=1" defer></script>
     <script src="/assets/editor-controls.js?v=1" defer></script>
     <script src="/assets/parsing-reliability.js?v=10" defer></script>
@@ -1483,10 +1483,14 @@ $workspaceSection = $showApiTokens
             <?php $paginationBottom = false; require __DIR__ . '/partials/catalog-pagination.php'; ?>
         <?php endif; ?>
 
-        <?php $tableNavigationTarget = '.cards-table'; $tableNavigationLabel = 'Широкая таблица'; require __DIR__ . '/partials/table-navigation.php'; ?>
+        <?php if (!$catalogIsGallery): ?>
+            <?php $tableNavigationTarget = '.cards-table'; $tableNavigationLabel = 'Широкая таблица'; require __DIR__ . '/partials/table-navigation.php'; ?>
+        <?php endif; ?>
 
         <?php require __DIR__ . '/partials/catalog-content.php'; ?>
-        <p class="table-scroll-hint"><span aria-hidden="true">←</span> Проведите по таблице в сторону, чтобы увидеть остальные столбцы <span aria-hidden="true">→</span></p>
+        <?php if (!$catalogIsGallery): ?>
+            <p class="table-scroll-hint"><span aria-hidden="true">←</span> Проведите по таблице в сторону, чтобы увидеть остальные столбцы <span aria-hidden="true">→</span></p>
+        <?php endif; ?>
         <?php if ($totalPages > 1): ?>
             <?php $paginationBottom = true; require __DIR__ . '/partials/catalog-pagination.php'; ?>
         <?php endif; ?>
@@ -1495,172 +1499,8 @@ $workspaceSection = $showApiTokens
     <?php endif; ?>
     </section>
 </main>
-<div class="card-tooltip" id="cardTooltip" hidden>
-    <img src="" alt="">
-    <div></div>
-</div>
-<div class="fullscreen-card" id="fullscreenCard" hidden role="dialog" aria-modal="true" aria-label="Просмотр изображения" aria-describedby="fullscreenMeta" tabindex="-1">
-    <button class="fullscreen-close" type="button" data-fullscreen-close>Закрыть</button>
-    <img src="" alt="">
-    <video controls loop playsinline hidden></video>
-    <div class="fullscreen-meta" id="fullscreenMeta"></div>
-</div>
-<script>
-(() => {
-    const tooltip = document.getElementById('cardTooltip');
-    const tooltipImage = tooltip?.querySelector('img');
-    const tooltipText = tooltip?.querySelector('div');
-    const fullscreen = document.getElementById('fullscreenCard');
-    const fullscreenImage = fullscreen?.querySelector('img');
-    const fullscreenVideo = fullscreen?.querySelector('video');
-    const fullscreenMeta = fullscreen?.querySelector('.fullscreen-meta');
-    const fullscreenClose = fullscreen?.querySelector('[data-fullscreen-close]');
-    let lastFullscreenTrigger = null;
-
-
-
-
-
-    const moveTooltip = (event) => {
-        if (!tooltip) return;
-        const gap = 18;
-        const rect = tooltip.getBoundingClientRect();
-        let left = event.clientX + gap;
-        let top = event.clientY + gap;
-        if (left + rect.width > window.innerWidth - 12) left = event.clientX - rect.width - gap;
-        if (top + rect.height > window.innerHeight - 12) top = window.innerHeight - rect.height - 12;
-        tooltip.style.left = `${Math.max(12, left)}px`;
-        tooltip.style.top = `${Math.max(12, top)}px`;
-    };
-
-    let tooltipTarget = null;
-    const previewImageFromEvent = (event) => {
-        const target = event.target;
-        if (!(target instanceof Element)) return null;
-        return target.closest('[data-preview]');
-    };
-
-    const showTooltip = (image, event) => {
-        if (!tooltip || !tooltipImage || !tooltipText || tooltipTarget === image) return;
-        tooltipTarget = image;
-        if (image.dataset.previewType === 'video') {
-            tooltipImage.src = '';
-            tooltipImage.hidden = true;
-        } else {
-            tooltipImage.hidden = false;
-            tooltipImage.src = image.dataset.preview || '';
-        }
-        tooltipText.textContent = image.dataset.tooltip || '';
-        tooltip.hidden = false;
-        moveTooltip(event);
-    };
-
-    const hideTooltip = () => {
-        if (!tooltip || !tooltipImage) return;
-        tooltipTarget = null;
-        tooltip.hidden = true;
-        tooltipImage.src = '';
-        tooltipImage.hidden = false;
-    };
-
-    const openFullscreen = (image) => {
-        if (!fullscreen || !fullscreenImage || !fullscreenVideo || !fullscreenMeta) return;
-        hideTooltip();
-        lastFullscreenTrigger = image instanceof HTMLElement ? image : null;
-        const preview = image.dataset.preview || image.src;
-        const isVideo = image.dataset.previewType === 'video' || /\.(webm|mp4)(?:\?|$)/i.test(preview);
-        fullscreenImage.hidden = isVideo;
-        fullscreenVideo.hidden = !isVideo;
-        if (isVideo) {
-            fullscreenImage.src = '';
-            fullscreenVideo.src = preview;
-            fullscreenVideo.play().catch(() => {});
-        } else {
-            fullscreenVideo.pause();
-            fullscreenVideo.removeAttribute('src');
-            fullscreenVideo.load();
-            fullscreenImage.src = preview;
-            fullscreenImage.alt = image.alt || 'Карта';
-        }
-        fullscreenMeta.textContent = image.dataset.tooltip || '';
-        fullscreen.hidden = false;
-        document.body.classList.add('modal-open');
-        fullscreenClose?.focus({preventScroll: true});
-    };
-
-    const closeFullscreen = () => {
-        if (!fullscreen || !fullscreenImage || !fullscreenVideo || !fullscreenMeta) return;
-        fullscreen.hidden = true;
-        fullscreenImage.src = '';
-        fullscreenImage.hidden = false;
-        fullscreenVideo.pause();
-        fullscreenVideo.removeAttribute('src');
-        fullscreenVideo.load();
-        fullscreenVideo.hidden = true;
-        fullscreenMeta.textContent = '';
-        document.body.classList.remove('modal-open');
-        const trigger = lastFullscreenTrigger;
-        lastFullscreenTrigger = null;
-        trigger?.focus({preventScroll: true});
-    };
-
-    document.addEventListener('mouseover', (event) => {
-        const image = previewImageFromEvent(event);
-        if (image) showTooltip(image, event);
-    });
-    document.addEventListener('mousemove', (event) => {
-        if (tooltipTarget) moveTooltip(event);
-    });
-    document.addEventListener('mouseout', (event) => {
-        if (!tooltipTarget) return;
-        const nextTarget = event.relatedTarget;
-        if (nextTarget instanceof Node && tooltipTarget.contains(nextTarget)) return;
-        hideTooltip();
-    });
-    document.addEventListener('click', (event) => {
-        const image = previewImageFromEvent(event);
-        if (image) {
-            event.preventDefault();
-            openFullscreen(image);
-        }
-    });
-    document.addEventListener('keydown', (event) => {
-        if (event.key !== 'Enter' && event.key !== ' ') return;
-        const image = previewImageFromEvent(event);
-        if (!image) return;
-        event.preventDefault();
-        openFullscreen(image);
-    });
-    fullscreen?.addEventListener('click', (event) => {
-        if (event.target === fullscreen || event.target.closest('[data-fullscreen-close]')) {
-            closeFullscreen();
-        }
-    });
-    document.addEventListener('keydown', (event) => {
-        if (event.key === 'Escape' && fullscreen && !fullscreen.hidden) {
-            closeFullscreen();
-        }
-        if (event.key === 'Tab' && fullscreen && !fullscreen.hidden) {
-            const focusable = Array.from(fullscreen.querySelectorAll('button:not([disabled]), video:not([hidden])'))
-                .filter((element) => element instanceof HTMLElement && element.offsetParent !== null);
-            if (!focusable.length) {
-                event.preventDefault();
-                fullscreen.focus({preventScroll: true});
-                return;
-            }
-            const first = focusable[0];
-            const last = focusable[focusable.length - 1];
-            if (event.shiftKey && document.activeElement === first) {
-                event.preventDefault();
-                last.focus();
-            } else if (!event.shiftKey && document.activeElement === last) {
-                event.preventDefault();
-                first.focus();
-            }
-        }
-    });
-})();
-</script>
+<?php require __DIR__ . '/partials/media-preview.php'; ?>
+<script src="/assets/media-preview.js?v=1" defer></script>
 <?php require __DIR__ . '/partials/command-palette.php'; ?>
 </body>
 </html>

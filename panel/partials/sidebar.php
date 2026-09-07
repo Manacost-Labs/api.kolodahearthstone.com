@@ -2,6 +2,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/../lib/panel_shell.php';
 $catalogActive = !in_array($action, ['analytics', 'parsers', 'api_tokens'], true);
+$catalogNavType = in_array((string)$cardType, ['minion', 'spell'], true) ? '' : (string)$cardType;
 $catalogLinks = [
     ['', 'Карты BG', $total ?? null],
     ['hero', 'Герои', $heroTotal ?? null],
@@ -31,7 +32,7 @@ $catalogLinks = [
         <details class="sidebar-catalog"<?= $catalogActive ? ' open' : '' ?>>
             <summary><?= panel_icon('catalog') ?><span>Каталог карт</span><span class="nav-chevron" aria-hidden="true">›</span></summary>
             <div class="sidebar-catalog-links">
-                <?php foreach ($catalogLinks as [$type, $label, $count]): $active = $action === 'list' && (string)$cardType === $type; ?>
+                <?php foreach ($catalogLinks as [$type, $label, $count]): $active = $action === 'list' && $catalogNavType === $type; ?>
                     <a class="side-link<?= $active ? ' active' : '' ?>" href="<?= $type === '' ? '/' : '/?card_type=' . h($type) ?>"<?= $active ? ' aria-current="page"' : '' ?>>
                         <span><?= h($label) ?></span><?php if ($count !== null): ?><b><?= h($count) ?></b><?php endif; ?>
                     </a>

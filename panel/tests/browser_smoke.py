@@ -364,6 +364,81 @@ class PanelBrowserTests(unittest.TestCase):
         page.clock.fast_forward(600)
         self.assertEqual(page.evaluate("submits"), 2)
 
+    catalog_variants = ("", "minion", "spell", "constructed", "hero", "hero_skin", "pet", "coin",
+                        "timewarped", "anomaly", "quest", "darkmoon_prize", "reward", "trinket")
+
+    def open_catalog_variant(self, section, extra=""):
+        response = self.page.goto(self.origin + "/tests/catalog_variants_fixture.php?card_type=" + section + extra)
+        self.assertEqual(response.status, 200)
+        self.assertNotIn("Fatal error", self.page.content())
+        return self.page
+
+    def test_real_catalogue_variants_and_responsive_galleries(self):
+        for section in self.catalog_variants:
+            with self.subTest(section=section):
+                page = self.open_catalog_variant(section)
+                gallery = section in ("hero_skin", "pet", "coin")
+                expect(page.locator("h1")).to_have_count(1)
+                expect(page.locator(".side-link[aria-current=page]")).to_have_count(1)
+                expect(page.locator(".skin-card" if gallery else ".cards-table tbody tr")).to_have_count(2)
+                if gallery:
+                    expect(page.locator("[data-column-picker], [data-table-density], [data-table-navigation]")).to_have_count(0)
+                    self.assertTrue(page.locator(".cards-table").evaluate("e => e.scrollHeight <= e.clientHeight + 1"))
+                else:
+                    expect(page.locator("[data-column-picker]")).to_be_visible()
+                    self.assertEqual(page.locator(".cards-table th:not([scope=col])").count(), 0)
+                    self.assertGreater(page.locator(".cards-table th[hidden]").count(), 0)
+                for width in (1440, 1024, 768, 390, 320):
+                    page.set_viewport_size({"width": width, "height": 1100})
+                    self.assertFalse(page.evaluate("document.documentElement.scrollWidth > innerWidth"), (section, width))
+                    if gallery:
+                        self.assertTrue(page.locator(".skin-card").evaluate_all("els => els.every(e => e.scrollWidth <= e.clientWidth + 1)"), (section, width))
+                    directory = os.environ.get("PANEL_SCREENSHOT_DIR")
+                    if directory and width in (1440, 390):
+                        page.screenshot(path=str(Path(directory) / f"panel-catalog-{section or 'bg'}-{width}.png"), full_page=True)
+                page.set_viewport_size({"width": 1440, "height": 1100})
+
+    def test_real_catalogue_empty_and_missing_media_variants(self):
+        for section in self.catalog_variants:
+            with self.subTest(section=section):
+                page = self.open_catalog_variant(section, "&empty=1")
+                expect(page.locator(".cards-table .empty")).to_be_visible()
+                expect(page.locator(".cards-table [data-preview]")).to_have_count(0)
+                self.open_catalog_variant(section, "&no_media=1")
+                expect(page.locator(".cards-table img")).to_have_count(0)
+                expect(page.locator(".missing-card-image")).to_have_count(4 if section == "trinket" else 2)
+
+    def test_real_catalogue_previews_keyboard_and_details(self):
+        for section in self.catalog_variants:
+            with self.subTest(section=section):
+                page = self.open_catalog_variant(section)
+                preview = page.locator(".cards-table [data-preview]:visible").first
+                preview.focus()
+                page.keyboard.press("Enter")
+                dialog = page.get_by_role("dialog", name="Просмотр изображения")
+                expect(dialog).to_be_visible()
+                expect(dialog.locator("img")).to_have_attribute("src", expect_string := preview.get_attribute("data-preview"))
+                self.assertTrue(expect_string.startswith("/tests/catalog-art.svg"))
+                close = dialog.get_by_role("button", name="Закрыть")
+                expect(close).to_be_focused()
+                page.keyboard.press("Tab")
+                expect(close).to_be_focused()
+                page.keyboard.press("Shift+Tab")
+                expect(close).to_be_focused()
+                expect(page.locator("main.shell")).to_have_attribute("inert", "")
+                page.keyboard.press("/")
+                expect(close).to_be_focused()
+                page.keyboard.press("Control+k")
+                expect(page.locator("[data-command-palette]")).not_to_be_visible()
+                page.keyboard.press("Escape")
+                expect(dialog).to_be_hidden()
+                expect(preview).to_be_focused()
+                expect(page.locator("main.shell")).not_to_have_attribute("inert", "")
+                details = page.locator(".cards-table details:visible").first
+                if details.count():
+                    details.locator("summary").first.click()
+                    expect(details).to_have_attribute("open", "")
+
     def open_analytics(self, query=""):
         self.page.goto(self.origin + "/tests/analytics_panel_fixture.php" + query)
         expect(self.page.locator("[data-analytics-content]")).to_have_attribute("aria-busy", "false")

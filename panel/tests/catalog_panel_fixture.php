@@ -2,7 +2,6 @@
 declare(strict_types=1);
 $action = 'list';
 require __DIR__ . '/shell_fixture.php';
-function h($value): string { return htmlspecialchars((string)$value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); }
 require __DIR__ . '/catalog_fixture_state.php';
 ?>
 <!doctype html>

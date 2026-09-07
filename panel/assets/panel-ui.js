@@ -34,7 +34,7 @@
         setActiveCommand(0);
     };
     const openPalette = () => {
-        if (!palette) return;
+        if (!palette || commandButton?.closest('[inert]')) return;
         palette.showModal();
         if (commandSearch) commandSearch.value = '';
         filterCommands();
