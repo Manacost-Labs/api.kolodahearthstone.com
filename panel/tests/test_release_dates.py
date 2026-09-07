@@ -139,7 +139,9 @@ class ReleaseDateContractTest(unittest.TestCase):
         self.assertGreaterEqual(source.count("'release_date' =>"), 3)
 
     def test_web_cards_show_release_date_in_russian(self):
-        source = (ROOT / "index.php").read_text(encoding="utf-8")
+        source = "\n".join((ROOT / path).read_text(encoding="utf-8") for path in (
+            "index.php", "lib/catalog_view.php", "partials/catalog-content.php",
+        ))
 
         self.assertIn("function format_release_date_ru", source)
         self.assertGreaterEqual(source.count("<b>Дата выхода</b>"), 3)

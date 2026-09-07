@@ -381,7 +381,9 @@ class HorizontalArtTest(unittest.TestCase):
             self.assertIn(f"'{entity_type}'", api)
 
     def test_web_panel_displays_horizontal_art_for_supported_entities(self) -> None:
-        panel = (ROOT / "index.php").read_text(encoding="utf-8")
+        panel = "\n".join((ROOT / path).read_text(encoding="utf-8") for path in (
+            "index.php", "lib/catalog_view.php", "partials/catalog-content.php",
+        ))
         styles = (ROOT / "assets" / "style.css").read_text(encoding="utf-8")
         self.assertIn("function panel_attach_horizontal_art(", panel)
         self.assertIn("function horizontal_art_preview(", panel)
