@@ -548,6 +548,71 @@ class PanelBrowserTests(unittest.TestCase):
             if query == 'missing':
                 expect(self.page.locator('.token-issue-form')).to_have_count(0)
 
+    def test_card_editing_fields_upload_contract_and_rejected_values(self):
+        page = self.page
+        page.goto(self.origin + '/tests/form_panel_fixture.php?mode=edit')
+        expect(page.locator('h1')).to_have_text('Редактировать карту')
+        form = page.locator('.card-form')
+        expect(form).to_have_attribute('enctype', 'multipart/form-data')
+        expect(form.locator('[name=csrf]')).to_have_value('fixture-csrf')
+        expect(form.locator('[name=action]')).to_have_value('save')
+        expect(form.locator('input[type=file]')).to_have_count(4)
+        expected_names = {'csrf','action','id','name','name_en','card_id','dbf','card_type','tavern_tier','creature_type','attack','health','in_pool','duos_only','card_image_file','golden_image_file','art_image_file','framed_image_file','notes'}
+        self.assertEqual(set(form.locator('[name]').evaluate_all('els => els.map(e => e.name)')), expected_names)
+        form.locator('[name=name]').fill('Изменённое имя <b>')
+        form.locator('[name=attack]').fill('7')
+        form.locator('[name=notes]').fill('Не терять заметки после ошибки')
+        form.locator('[name=in_pool]').uncheck()
+        form.locator('[name=duos_only]').check()
+        form.locator('button[type=submit]').click()
+        expect(page.locator('[role=alert]')).to_contain_text('Тестовый отказ')
+        expect(form.locator('[name=name]')).to_have_value('Изменённое имя <b>')
+        expect(form.locator('[name=attack]')).to_have_value('7')
+        expect(form.locator('[name=notes]')).to_have_value('Не терять заметки после ошибки')
+        expect(form.locator('[name=in_pool]')).not_to_be_checked()
+        expect(form.locator('[name=duos_only]')).to_be_checked()
+        expect(form.locator('[name=id]')).to_have_value('42')
+
+    def test_wiki_filters_do_not_change_when_editing_rows(self):
+        page = self.page
+        page.goto(self.origin + '/tests/form_panel_fixture.php?mode=wiki')
+        expect(page.locator('[data-term-row]:visible')).to_have_count(5)
+        missing = page.locator('button[data-term-status=missing]')
+        missing.click()
+        expect(page.locator('[data-term-row]:visible')).to_have_count(2)
+        row = page.locator('[data-term-row]:visible').first
+        row.locator('input:not([type=hidden])').fill('Провокация')
+        expect(missing).to_have_attribute('aria-pressed', 'true')
+        page.locator('button[data-term-status=translated]').click()
+        expect(page.locator('[data-term-row]:visible')).to_have_count(4)
+        page.locator('[data-term-filter]').fill('Провокация')
+        expect(page.locator('[data-term-row]:visible')).to_have_count(1)
+        # Hidden translations remain in FormData, so filtering cannot erase them.
+        values = page.locator('.terms-form').evaluate('f => Array.from(new FormData(f))')
+        self.assertEqual(len([key for key, value in values if key.endswith('[en]')]), 5)
+        self.assertIn(['terms[mechanics][1][ru]', 'Провокация'], values)
+        page.locator('[data-term-filter]').fill('no such term')
+        expect(page.locator('[data-term-empty]')).to_be_visible()
+        page.locator('[data-term-reset]').click()
+        expect(page.locator('[data-term-row]:visible')).to_have_count(5)
+        expect(page.locator('[data-term-filter]')).to_be_focused()
+
+    def test_forms_responsive_and_empty_wiki(self):
+        page = self.page
+        for mode in ('new', 'edit', 'wiki'):
+            page.goto(self.origin + '/tests/form_panel_fixture.php?mode=' + mode)
+            expect(page.locator('h1')).to_have_count(1)
+            for width in (1440, 1024, 768, 390, 320):
+                page.set_viewport_size({'width': width, 'height': 1100})
+                self.assertFalse(page.evaluate('document.documentElement.scrollWidth > innerWidth'), (mode, width))
+                directory = os.environ.get('PANEL_SCREENSHOT_DIR')
+                if directory and width in (1440, 390):
+                    page.evaluate('window.scrollTo(0, 0)')
+                    page.screenshot(path=str(Path(directory) / f'panel-{mode}-{width}.png'), full_page=True)
+        page.goto(self.origin + '/tests/form_panel_fixture.php?mode=wiki&empty')
+        expect(page.locator('[data-term-count]')).to_contain_text('0 из 0')
+        expect(page.locator('[data-term-empty]')).to_be_visible()
+
     def test_saved_themes_and_other_modules(self):
         page = self.open_sources()
         page.locator('[data-theme-option="dark"]').click()

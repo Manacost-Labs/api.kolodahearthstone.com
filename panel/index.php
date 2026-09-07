@@ -1814,11 +1814,12 @@ $workspaceSection = $showApiTokens
     <title>HS Data · Управление базой Hearthstone</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232563eb'/%3E%3Ctext x='32' y='40' text-anchor='middle' font-family='system-ui,sans-serif' font-size='25' font-weight='800' fill='white'%3EHS%3C/text%3E%3C/svg%3E">
     <link rel="stylesheet" href="/assets/style.css?v=36">
-    <link rel="stylesheet" href="/assets/workspace.css?v=4">
+    <link rel="stylesheet" href="/assets/workspace.css?v=5">
     <script src="/assets/workspace.js?v=1" defer></script>
     <script src="/assets/panel-ui.js?v=3" defer></script>
     <script src="/assets/table-controls.js?v=2" defer></script>
     <script src="/assets/token-controls.js?v=1" defer></script>
+    <script src="/assets/editor-controls.js?v=1" defer></script>
     <script src="/assets/parsing-reliability.js?v=10" defer></script>
     <script src="/assets/analytics.js?v=16" defer></script>
     <script src="/assets/parser-control-view.js?v=3" defer></script>
@@ -1831,8 +1832,8 @@ $workspaceSection = $showApiTokens
     <section class="workspace" id="main-content" tabindex="-1">
         <?php require __DIR__ . '/partials/topbar.php'; ?>
 
-    <?php if ($message): ?><div class="notice"><?= h($message) ?></div><?php endif; ?>
-    <?php if ($error): ?><div class="notice error"><?= h($error) ?></div><?php endif; ?>
+    <?php if ($message): ?><div class="notice" role="status"><?= h($message) ?></div><?php endif; ?>
+    <?php if ($error): ?><div class="notice error" role="alert"><?= h($error) ?></div><?php endif; ?>
 
     <?php if ($showAnalyticsDashboard): ?>
         <?php require __DIR__ . '/partials/analytics-dashboard.php'; ?>
@@ -1850,205 +1851,12 @@ $workspaceSection = $showApiTokens
         <?php
         $wikiTermGroups = wiki_term_groups($pdo);
         $wikiTermLabels = wiki_term_type_labels();
-        $wikiTermStats = [];
-        $wikiTermTotal = 0;
-        $wikiTermMissingTotal = 0;
-        foreach ($wikiTermGroups as $termType => $termRows) {
-            $missing = 0;
-            foreach ($termRows as $termRow) {
-                if (trim((string)($termRow['term_ru'] ?? '')) === '') {
-                    $missing++;
-                }
-            }
-            $count = count($termRows);
-            $wikiTermTotal += $count;
-            $wikiTermMissingTotal += $missing;
-            $wikiTermStats[$termType] = [
-                'label' => $wikiTermLabels[$termType] ?? $termType,
-                'total' => $count,
-                'missing' => $missing,
-                'done' => $count - $missing,
-            ];
-        }
+        require __DIR__ . '/partials/wiki-terms.php';
         ?>
-        <section class="panel terms-panel" data-terms-page>
-            <div class="list-head">
-                <div>
-                    <h2>Переводы Wiki</h2>
-                    <p class="muted">Заполните русские названия для английских Wiki mechanics, Wiki tags и Full tags. API сразу отдаст mechanics/tags в локализованных полях.</p>
-                </div>
-                <a class="button secondary" href="<?= h(query_url(['action' => null])) ?>">Назад к базе</a>
-            </div>
-            <div class="terms-summary-grid" aria-label="Покрытие переводов Wiki">
-                <div class="term-stat is-total">
-                    <span>Всего терминов</span>
-                    <b><?= $wikiTermTotal ?></b>
-                </div>
-                <div class="term-stat<?= $wikiTermMissingTotal > 0 ? ' is-warn' : ' is-ok' ?>">
-                    <span>Без перевода</span>
-                    <b><?= $wikiTermMissingTotal ?></b>
-                </div>
-                <?php foreach ($wikiTermStats as $stat): ?>
-                    <div class="term-stat">
-                        <span><?= h($stat['label']) ?></span>
-                        <b><?= $stat['done'] ?>/<?= $stat['total'] ?></b>
-                    </div>
-                <?php endforeach; ?>
-            </div>
-            <div class="terms-toolbar">
-                <label class="term-search">
-                    <span>Поиск термина</span>
-                    <input type="search" placeholder="Battlecry, Race, BG..." data-term-filter autocomplete="off">
-                </label>
-                <div class="term-status-filter" aria-label="Фильтр переводов">
-                    <button class="button ghost active" type="button" data-term-status="all">Все</button>
-                    <button class="button ghost" type="button" data-term-status="missing">Без перевода</button>
-                    <button class="button ghost" type="button" data-term-status="translated">Переведенные</button>
-                </div>
-            </div>
-            <form method="post" class="terms-form">
-                <input type="hidden" name="csrf" value="<?= h(csrf()) ?>">
-                <input type="hidden" name="action" value="save_wiki_terms">
-                <div class="term-grid">
-                    <?php foreach ($wikiTermLabels as $termType => $termTitle): ?>
-                        <section class="term-column" data-term-section="<?= h($termType) ?>">
-                            <div class="term-column-head">
-                                <h3><?= h($termTitle) ?></h3>
-                                <?php $stat = $wikiTermStats[$termType] ?? ['done' => 0, 'total' => 0, 'missing' => 0]; ?>
-                                <span><?= (int)$stat['done'] ?>/<?= (int)$stat['total'] ?> готово<?php if ((int)$stat['missing'] > 0): ?> · <?= (int)$stat['missing'] ?> пусто<?php endif; ?></span>
-                            </div>
-                            <?php if (!empty($wikiTermGroups[$termType])): ?>
-                                <?php foreach ($wikiTermGroups[$termType] as $termIndex => $termRow): ?>
-                                    <?php
-                                    $termRu = trim((string)($termRow['term_ru'] ?? ''));
-                                    $termStatus = $termRu === '' ? 'missing' : 'translated';
-                                    $termSearchText = mb_strtolower(($termRow['term_en'] ?? '') . ' ' . $termRu . ' ' . $termTitle, 'UTF-8');
-                                    ?>
-                                    <label class="term-row" data-term-row data-term-status="<?= h($termStatus) ?>" data-term-text="<?= h($termSearchText) ?>">
-                                        <span class="term-source">
-                                            <code><?= h($termRow['term_en']) ?></code>
-                                            <small><?= h($termTitle) ?></small>
-                                        </span>
-                                        <input type="hidden" name="terms[<?= h($termType) ?>][<?= (int)$termIndex ?>][en]" value="<?= h($termRow['term_en']) ?>">
-                                        <input
-                                            name="terms[<?= h($termType) ?>][<?= (int)$termIndex ?>][ru]"
-                                            value="<?= h($termRu) ?>"
-                                            placeholder="Русский перевод"
-                                        >
-                                    </label>
-                                <?php endforeach; ?>
-                            <?php else: ?>
-                                <p class="muted">Пока нет терминов этого типа.</p>
-                            <?php endif; ?>
-                        </section>
-                    <?php endforeach; ?>
-                </div>
-                <div class="actions">
-                    <button class="button" type="submit">Сохранить переводы</button>
-                </div>
-            </form>
-        </section>
     <?php endif; ?>
 
     <?php if (in_array($action, ['new', 'edit'], true) && !$showHeroes && !$showHeroSkins && !$showPets && !$showCoins && !$showTimewarped && !$showConstructed && !$showLibrary): ?>
-    <section class="panel entry-panel<?= $editCard ? ' is-editing' : '' ?>" id="add-card">
-        <div class="entry-head">
-            <div>
-                <h2><?= $editCard ? 'Редактировать карту' : 'Добавить карту' ?></h2>
-                <p class="muted"><?= $editCard ? 'Измените данные и сохраните запись.' : 'Заполните основные поля новой записи.' ?></p>
-            </div>
-            <a class="button ghost" href="/">Вернуться к таблице</a>
-        </div>
-        <form method="post" enctype="multipart/form-data" class="card-form">
-            <input type="hidden" name="csrf" value="<?= h(csrf()) ?>">
-            <input type="hidden" name="action" value="save">
-            <input type="hidden" name="id" value="<?= h($form['id']) ?>">
-
-            <label>Название карты
-                <input name="name" value="<?= h($form['name']) ?>" required>
-            </label>
-            <label>Название EN
-                <input name="name_en" value="<?= h($form['name_en']) ?>">
-            </label>
-            <label>card_id
-                <input name="card_id" value="<?= h($form['card_id']) ?>" required placeholder="BG30_123">
-            </label>
-            <label>dbf
-                <input name="dbf" type="number" min="0" value="<?= h($form['dbf']) ?>">
-            </label>
-            <label>Тип карты
-                <select name="card_type">
-                    <?php foreach (card_types() as $value => $label): ?>
-                        <option value="<?= h($value) ?>"<?= (string)($form['card_type'] ?? 'minion') === $value ? ' selected' : '' ?>><?= h($label) ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </label>
-            <label>Уровень таверны
-                <input name="tavern_tier" type="number" min="1" max="7" value="<?= h($form['tavern_tier']) ?>">
-            </label>
-            <label>Тип существа
-                <select name="creature_type">
-                    <option value="">Без типа</option>
-                    <?php foreach (creature_types() as $value => $label): ?>
-                        <option value="<?= h($value) ?>"<?= (string)$form['creature_type'] === $value ? ' selected' : '' ?>><?= h($label) ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </label>
-            <label>Атака
-                <input name="attack" type="number" value="<?= h($form['attack']) ?>">
-            </label>
-            <label>Здоровье
-                <input name="health" type="number" value="<?= h($form['health']) ?>">
-            </label>
-            <label>Пул
-                <span class="checkbox-line">
-                    <input name="in_pool" type="checkbox" value="1"<?= !empty($form['in_pool']) ? ' checked' : '' ?>>
-                    В текущем пуле
-                </span>
-            </label>
-            <label>Дуо
-                <span class="checkbox-line">
-                    <input name="duos_only" type="checkbox" value="1"<?= !empty($form['duos_only']) ? ' checked' : '' ?>>
-                    Только в дуо
-                </span>
-            </label>
-            <label>Картинка карты
-                <input name="card_image_file" type="file" accept="image/png,image/jpeg,image/webp">
-            </label>
-            <label>Золотая / триплет
-                <input name="golden_image_file" type="file" accept="image/png,image/jpeg,image/webp">
-            </label>
-            <label>Арт карты
-                <input name="art_image_file" type="file" accept="image/png,image/jpeg,image/webp">
-            </label>
-            <label>Арт в рамке
-                <input name="framed_image_file" type="file" accept="image/png,image/jpeg,image/webp">
-            </label>
-            <label class="wide">Заметки
-                <textarea name="notes" rows="3"><?= h($form['notes']) ?></textarea>
-            </label>
-
-            <div class="preview-row wide">
-                <?php if (!empty($form['card_image'])): ?>
-                    <figure><img src="<?= h(versioned_asset($form['card_image'], $form['updated_at'] ?? null)) ?>" alt=""><figcaption>Карта</figcaption></figure>
-                <?php endif; ?>
-                <?php if (!empty($form['golden_image'])): ?>
-                    <figure><img src="<?= h(versioned_asset($form['golden_image'], $form['updated_at'] ?? null)) ?>" alt=""><figcaption>Золотая / триплет</figcaption></figure>
-                <?php endif; ?>
-                <?php if (!empty($form['art_image'])): ?>
-                    <figure><img src="<?= h(versioned_asset($form['art_image'], $form['updated_at'] ?? null)) ?>" alt=""><figcaption>Арт</figcaption></figure>
-                <?php endif; ?>
-                <?php if (!empty($form['framed_image'])): ?>
-                    <figure><img src="<?= h(versioned_asset($form['framed_image'], $form['updated_at'] ?? null)) ?>" alt=""><figcaption>Арт в рамке</figcaption></figure>
-                <?php endif; ?>
-            </div>
-
-            <div class="wide actions">
-                <button class="button" type="submit"><?= $editCard ? 'Сохранить' : 'Добавить' ?></button>
-                <a class="button secondary" href="/">Отмена</a>
-            </div>
-        </form>
-    </section>
+    <?php require __DIR__ . '/partials/card-editor.php'; ?>
     <?php endif; ?>
 
     <?php if ($action === 'list'): ?>
@@ -3749,33 +3557,6 @@ $workspaceSection = $showApiTokens
 
 
 
-    const termsPage = document.querySelector('[data-terms-page]');
-    if (termsPage) {
-        const termSearch = termsPage.querySelector('[data-term-filter]');
-        const statusButtons = Array.from(termsPage.querySelectorAll('[data-term-status]'));
-        const termRows = Array.from(termsPage.querySelectorAll('[data-term-row]'));
-        let activeTermStatus = 'all';
-
-        const applyTermFilters = () => {
-            const query = (termSearch?.value || '').trim().toLocaleLowerCase('ru-RU');
-            termRows.forEach((row) => {
-                const rowStatus = row.dataset.termStatus || 'missing';
-                const rowText = row.dataset.termText || '';
-                const statusMatch = activeTermStatus === 'all' || rowStatus === activeTermStatus;
-                const textMatch = query === '' || rowText.includes(query);
-                row.hidden = !(statusMatch && textMatch);
-            });
-        };
-
-        statusButtons.forEach((button) => {
-            button.addEventListener('click', () => {
-                activeTermStatus = button.dataset.termStatus || 'all';
-                statusButtons.forEach((item) => item.classList.toggle('active', item === button));
-                applyTermFilters();
-            });
-        });
-        termSearch?.addEventListener('input', applyTermFilters);
-    }
 
 
     const moveTooltip = (event) => {
