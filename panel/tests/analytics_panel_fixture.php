@@ -8,7 +8,7 @@ function h($value): string
     return htmlspecialchars((string)$value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 }
 
-$_GET['stats'] = 'overview';
+
 ?>
 <!doctype html>
 <html lang="ru" data-theme="light">
@@ -20,6 +20,7 @@ $_GET['stats'] = 'overview';
     <link rel="stylesheet" href="/assets/style.css?v=31">
     <script src="/assets/panel-ui.js?v=2" defer></script>
     <link rel="stylesheet" href="/assets/workspace.css">
+    <script src="/assets/table-controls.js" defer></script>
 </head>
 <body>
 <main class="shell">
@@ -31,18 +32,15 @@ $_GET['stats'] = 'overview';
 </main>
 <?php require __DIR__ . '/../partials/command-palette.php'; ?>
 <script>
-window.fetch = async () => ({
-    ok: true,
-    status: 200,
-    json: async () => ({
+window.analyticsFixture = {payload: {
         ok: true,
         title: 'Состояние источников',
         description: 'Актуальность всех наборов и последняя успешная публикация.',
         summary: [
-            {label: 'Источники', value: '98', tone: 'neutral'},
-            {label: 'Работают', value: '91', tone: 'good'},
-            {label: 'Внимание', value: '5', tone: 'warning'},
-            {label: 'Ошибки', value: '2', tone: 'bad'}
+            {label: 'Источники', value: '5', tone: 'neutral'},
+            {label: 'Работают', value: '3', tone: 'good'},
+            {label: 'Внимание', value: '1', tone: 'warning'},
+            {label: 'Ошибки', value: '1', tone: 'bad'}
         ],
         columns: [
             {key: 'source', label: 'Источник'},
@@ -61,9 +59,9 @@ window.fetch = async () => ({
         ],
         meta: {updated_at: '2026-08-13T00:37:00Z', source_id: 'dataset-registry'},
         parsing_reliability: null
-    })
-});
+}};
 </script>
+<script src="/tests/analytics_fixture_transport.js"></script>
 <script src="/assets/analytics.js?v=4"></script>
 </body>
 </html>

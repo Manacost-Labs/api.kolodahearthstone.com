@@ -3,7 +3,7 @@
     if (!dashboard) return;
 
     const endpoint = dashboard.dataset.analyticsEndpoint || '/analytics.php';
-    const moduleButtons = Array.from(dashboard.querySelectorAll('[data-analytics-module]'));
+    const moduleSelect = dashboard.querySelector('[data-analytics-module-select]');
     const controls = dashboard.querySelector('[data-analytics-controls]');
     const searchInput = dashboard.querySelector('[data-analytics-search]');
     const queryControl = dashboard.querySelector('.analytics-query-control');
@@ -36,7 +36,7 @@
     const detailBody = dashboard.querySelector('[data-analytics-detail-body]');
     const reliabilityHost = dashboard.querySelector('[data-parsing-reliability]');
     const urlState = new URLSearchParams(window.location.search);
-    const knownModules = new Set(moduleButtons.map((button) => button.dataset.analyticsModule));
+    const knownModules = new Set(Array.from(moduleSelect?.options || [], (option) => option.value));
     knownModules.add('card');
 
     const searchableModules = new Set(['archetypes', 'hsguru_archetypes', 'constructed_cards', 'arena_cards', 'decks', 'bg_heroes', 'bg_minions']);
@@ -1323,14 +1323,11 @@
     };
 
     const updateControls = () => {
-        moduleButtons.forEach((button) => {
-            const active = button.dataset.analyticsModule === activeModule;
-            button.classList.toggle('active', active);
-            button.setAttribute('aria-pressed', active ? 'true' : 'false');
-        });
+        if (moduleSelect) moduleSelect.value = activeModule;
         const searchable = searchableModules.has(activeModule);
         const hasFilters = searchable || ['meta', 'hsguru_archetypes', 'constructed_cards', 'arena_cards', 'bg_heroes'].includes(activeModule);
         controls?.classList.toggle('is-refresh-only', !hasFilters);
+        controls?.toggleAttribute('hidden', !hasFilters);
         searchInput?.toggleAttribute('disabled', !searchable);
         queryControl?.toggleAttribute('hidden', !searchable);
         applyButton?.toggleAttribute('hidden', !hasFilters);
@@ -1454,8 +1451,9 @@
         }
     };
 
-    moduleButtons.forEach((button) => {
-        button.addEventListener('click', () => loadModule(button.dataset.analyticsModule || 'overview'));
+    moduleSelect?.addEventListener('change', () => {
+        loadModule(moduleSelect.value);
+        if (moduleSelect.value === 'card') cardInput?.focus();
     });
     controls?.addEventListener('submit', (event) => {
         event.preventDefault();

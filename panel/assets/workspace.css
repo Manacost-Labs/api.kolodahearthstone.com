@@ -250,3 +250,53 @@
     .data-panel .page-link { min-height: 44px; }
     .data-panel .pagination.bottom { display: flex; }
 }
+/* Statistics uses the same surface and spacing, with one compact module picker. */
+.workspace > .analytics-hub { display: block; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 12px; box-shadow: none; background: var(--panel); }
+.analytics-hub .analytics-hub-head { align-items: flex-end; flex-wrap: wrap; padding: 24px; border: 0; }
+.analytics-module-select { width: 300px; max-width: 100%; }
+.analytics-module-select > span { display: block; margin-bottom: 8px; color: var(--label); font-size: 12px; font-weight: 500; }
+.analytics-hub .analytics-module-select select, .analytics-hub .analytics-controls input, .analytics-hub .analytics-controls select { min-height: 44px; border: 1px solid var(--line); border-radius: 8px; background-color: var(--panel); font-size: 13px; font-weight: 400; }
+.analytics-view-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.analytics-view-actions > button, .analytics-view-actions summary { min-height: 42px; padding: 10px 14px; border-radius: 8px; font-size: 12px; font-weight: 500; }
+.analytics-view-actions .table-density-toggle, .analytics-view-actions summary { background: var(--panel); }
+.analytics-hub .analytics-controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 14px; margin: 0; padding: 0 24px 24px; border: 0; background: var(--panel); }
+.analytics-hub .analytics-controls > label { min-width: 150px; flex: 1 1 150px; max-width: 230px; }
+.analytics-hub .analytics-controls > .analytics-query-control { flex-basis: 260px; max-width: none; }
+.analytics-hub .analytics-controls label > span { color: var(--label); font-size: 12px; font-weight: 500; text-transform: none; letter-spacing: 0; }
+.analytics-hub .analytics-control-actions { flex: 0 0 auto; }
+.analytics-hub .analytics-control-actions .button { min-height: 44px; }
+.analytics-hub .analytics-result { display: flex; flex-direction: column; gap: 0; padding: 0; margin: 0; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: var(--panel); }
+.analytics-hub .analytics-result-head { display: block; padding: 24px; }
+.analytics-hub .analytics-result-head h3 { font-size: 20px; font-weight: 650; }
+.analytics-hub .analytics-result-head p { margin-top: 8px; font-size: 12px; line-height: 1.6; }
+.analytics-hub .analytics-summary { display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 24px; margin-top: 24px; }
+.analytics-hub .analytics-summary-item { min-width: 100px; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; text-align: left; }
+.analytics-hub .analytics-summary-item small { font-size: 11px; font-weight: 500; text-transform: none; letter-spacing: 0; }
+.analytics-hub .analytics-summary-item b { display: block; margin-top: 6px; font-size: 22px; font-weight: 650; }
+.analytics-hub .analytics-card-search input { font-size: 14px; font-weight: 400; border-radius: 8px; }
+.analytics-hub [data-analytics-table] { position: relative; max-height: 65vh; overflow: auto; border-radius: 0; }
+.analytics-hub .analytics-table { min-width: 860px; }
+.analytics-hub .analytics-table th { padding: 12px 16px; background: var(--panel-soft); color: var(--muted); font-size: 11px; font-weight: 500; letter-spacing: 0; text-transform: none; }
+.analytics-hub .analytics-table td { padding: 18px 16px; font-size: 12px; }
+.analytics-hub .analytics-table th:first-child, .analytics-hub .analytics-table td:first-child { padding-left: 24px; box-shadow: none; }
+.analytics-hub .analytics-meta { margin: 0; padding: 16px 24px; color: var(--muted); font-size: 11px; }
+.analytics-hub .parsing-reliability { order: 1; margin: 0 24px 24px; }
+.analytics-hub .analytics-card-search { display: block; margin: 0; padding: 24px; border: 0; border-top: 1px solid var(--line); border-radius: 0 0 12px 12px; background: var(--panel); }
+.analytics-hub .analytics-card-search label { max-width: 620px; }
+.analytics-hub .analytics-card-search label > span:first-child { font-size: 13px; font-weight: 600; text-transform: none; letter-spacing: 0; }
+.analytics-hub .analytics-card-search p { margin-top: 10px; font-size: 11px; }
+.analytics-hub .analytics-empty { padding: 40px 24px; }
+.analytics-hub.is-compact-table .analytics-table td { padding-top: 8px; padding-bottom: 8px; }
+@media (max-width: 760px) {
+    .analytics-hub .analytics-hub-head, .analytics-hub .analytics-result-head, .analytics-hub .analytics-card-search { padding: 18px; }
+    .analytics-module-select { width: 100%; }
+    .analytics-view-actions { width: 100%; }
+    .analytics-view-actions > button, .analytics-view-actions summary { min-height: 44px; padding: 10px; }
+    .analytics-hub .analytics-controls { padding: 0 18px 18px; }
+    .analytics-hub .analytics-controls > label { min-width: 0; flex-basis: 100%; max-width: none; }
+    .analytics-hub .analytics-controls > .analytics-query-control { flex-basis: 100%; }
+    .analytics-hub .analytics-module-select select, .analytics-hub .analytics-controls input, .analytics-hub .analytics-controls select { font-size: 16px; }
+    .analytics-hub .analytics-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+    .analytics-hub .analytics-table th:first-child, .analytics-hub .analytics-table td:first-child, .analytics-hub .analytics-table th:last-child, .analytics-hub .analytics-table td:last-child { position: static; box-shadow: none; }
+    .analytics-hub .parsing-reliability { margin: 0 18px 18px; }
+}

@@ -364,6 +364,88 @@ class PanelBrowserTests(unittest.TestCase):
         page.clock.fast_forward(600)
         self.assertEqual(page.evaluate("submits"), 2)
 
+    def open_analytics(self, query=""):
+        self.page.goto(self.origin + "/tests/analytics_panel_fixture.php" + query)
+        expect(self.page.locator("[data-analytics-content]")).to_have_attribute("aria-busy", "false")
+        return self.page
+
+    def test_analytics_modules_filters_and_url_restore(self):
+        page = self.open_analytics()
+        expect(page.locator("h1")).to_have_text("Обзор и статистика")
+        expect(page.locator("[data-analytics-controls]")).to_be_hidden()
+        modules = page.locator("[data-analytics-module-select]")
+        expect(modules.locator("option")).to_have_count(12)
+        for module in ("meta", "hsguru_archetypes", "constructed_cards", "arena_cards", "archetypes", "decks", "bg_heroes", "bg_minions", "arena", "patches"):
+            modules.select_option(module)
+            expect(page.locator("[data-analytics-title]")).to_have_text("Тестовый набор: " + module)
+            self.assertEqual(parse_qs(urlsplit(page.url).query)["stats"], [module])
+        modules.select_option("constructed_cards")
+        page.locator("[data-analytics-format]").select_option("wild")
+        page.locator("[data-analytics-card-period]").select_option("3d")
+        page.locator("[data-analytics-search]").fill("Fire Fly")
+        page.locator("[data-analytics-controls] button[type=submit]").click()
+        expect(page.locator("[data-analytics-content]")).to_have_attribute("aria-busy", "false")
+        request = parse_qs(urlsplit(page.evaluate("analyticsFixture.calls.at(-1)")).query)
+        self.assertEqual(request["q"], ["Fire Fly"])
+        self.assertEqual(request["format"], ["wild"])
+        self.assertEqual(request["card_period"], ["3d"])
+        page.reload()
+        expect(modules).to_have_value("constructed_cards")
+        expect(page.locator("[data-analytics-search]")).to_have_value("Fire Fly")
+        expect(page.locator("[data-analytics-format]")).to_have_value("wild")
+        expect(page.locator("[data-analytics-card-period]")).to_have_value("3d")
+
+    def test_analytics_card_search_and_detail_keyboard(self):
+        page = self.open_analytics()
+        detail = page.locator(".analytics-row-action button").first
+        detail.click()
+        drawer = page.locator("[data-analytics-detail-drawer]")
+        expect(drawer).to_be_visible()
+        page.keyboard.press("Escape")
+        expect(drawer).to_be_hidden()
+        expect(detail).to_be_focused()
+        page.locator("[data-card-statistics-input]").fill("Fire Fly")
+        page.locator("[data-card-statistics-form] button").click()
+        expect(page.locator("[data-analytics-module-select]")).to_have_value("card")
+        expect(page.locator("[data-analytics-title]")).to_have_text("Тестовый набор: card")
+        request = parse_qs(urlsplit(page.evaluate("analyticsFixture.calls.at(-1)")).query)
+        self.assertEqual(request["card_name"], ["Fire Fly"])
+
+    def test_analytics_error_retry_empty_and_view_preferences(self):
+        page = self.open_analytics()
+        picker = page.locator("[data-column-picker]")
+        picker.locator("summary").click()
+        picker.get_by_label("Набор", exact=True).uncheck()
+        picker.locator("summary").click()
+        page.locator("[data-table-density]").click()
+        page.evaluate("analyticsFixture.mode = 'error'")
+        page.locator("[data-analytics-refresh]").click()
+        expect(page.locator(".analytics-empty.is-error")).to_contain_text("Тестовая ошибка сервиса")
+        page.evaluate("analyticsFixture.mode = 'success'")
+        page.locator(".analytics-empty button").click()
+        expect(page.locator(".analytics-table tbody tr")).to_have_count(5)
+        expect(page.locator('.analytics-table th[data-column="dataset"]')).to_be_hidden()
+        page.reload()
+        expect(page.locator("[data-table-density]")).to_have_attribute("aria-pressed", "true")
+        expect(page.locator('.analytics-table th[data-column="dataset"]')).to_be_hidden()
+        page.evaluate("analyticsFixture.mode = 'empty'")
+        page.locator("[data-analytics-refresh]").click()
+        expect(page.locator(".analytics-empty")).to_contain_text("Нет данных по выбранным фильтрам")
+        expect(page.locator(".analytics-table")).to_have_count(0)
+
+    def test_analytics_responsive_layout(self):
+        page = self.open_analytics()
+        for width in (1440, 1024, 768, 390, 320):
+            with self.subTest(width=width):
+                page.set_viewport_size({"width": width, "height": 1100})
+                self.assertFalse(page.evaluate("document.documentElement.scrollWidth > innerWidth"))
+                expect(page.locator("[data-analytics-module-select]")).to_be_visible()
+                expect(page.locator("[data-analytics-refresh]")).to_be_visible()
+                directory = os.environ.get("PANEL_SCREENSHOT_DIR")
+                if directory and width in (1440, 390):
+                    page.evaluate("window.scrollTo(0, 0)")
+                    page.screenshot(path=str(Path(directory) / f"panel-analytics-{width}.png"), full_page=True)
+
     def test_saved_themes_and_other_modules(self):
         page = self.open_sources()
         page.locator('[data-theme-option="dark"]').click()

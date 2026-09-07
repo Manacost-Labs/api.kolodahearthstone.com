@@ -23,6 +23,10 @@ $statisticsFormat = trim((string)($_GET['stats_format'] ?? 'standard'));
 $statisticsRank = trim((string)($_GET['stats_rank'] ?? 'legend'));
 $statisticsPeriod = trim((string)($_GET['stats_period'] ?? 'past_day'));
 ?>
+<header class="workspace-page-head">
+    <div><h1>Обзор и статистика</h1><p>Состояние данных и игровые показатели. Только чтение.</p></div>
+    <a class="button secondary" href="/">Открыть каталог <span aria-hidden="true">↗</span></a>
+</header>
 <section
     class="panel analytics-hub"
     id="statistics"
@@ -31,24 +35,23 @@ $statisticsPeriod = trim((string)($_GET['stats_period'] ?? 'past_day'));
     data-default-module="<?= h($statisticsModule) ?>"
 >
     <div class="analytics-hub-head">
-        <div>
-            <span class="eyebrow">Единый центр данных</span>
-            <h2>База и игровая статистика</h2>
-            <p>Каталоги, статистика API и нормализованные срезы PostgreSQL собраны в одной панели. Данные статистики доступны только для чтения.</p>
+        <label class="analytics-module-select">
+            <span>Раздел статистики</span>
+            <select data-analytics-module-select>
+                <?php foreach ($statisticsModules + ['card' => 'Поиск конкретной карты'] as $moduleKey => $moduleLabel): ?>
+                    <option value="<?= h($moduleKey) ?>"<?= $statisticsModule === $moduleKey ? ' selected' : '' ?>><?= h($moduleLabel) ?></option>
+                <?php endforeach; ?>
+            </select>
+        </label>
+        <div class="analytics-view-actions">
+            <button class="button" type="button" data-analytics-refresh>Обновить данные</button>
+            <button class="table-density-toggle" type="button" data-table-density aria-pressed="false">Компактно</button>
+            <details class="table-column-picker" data-column-picker data-table-target=".analytics-table" data-storage-key="analytics">
+                <summary>Колонки</summary>
+                <div class="column-picker-menu" data-column-picker-menu></div>
+            </details>
         </div>
-        <a class="button secondary" href="#database-catalogue">Перейти к каталогу</a>
     </div>
-
-    <nav class="analytics-module-nav" aria-label="Разделы статистики">
-        <?php foreach ($statisticsModules as $moduleKey => $moduleLabel): ?>
-            <button
-                type="button"
-                data-analytics-module="<?= h($moduleKey) ?>"
-                aria-pressed="<?= $statisticsModule === $moduleKey ? 'true' : 'false' ?>"
-                class="<?= $statisticsModule === $moduleKey ? 'active' : '' ?>"
-            ><?= h($moduleLabel) ?></button>
-        <?php endforeach; ?>
-    </nav>
 
     <form class="analytics-controls" data-analytics-controls>
         <label class="analytics-query-control">
@@ -131,12 +134,6 @@ $statisticsPeriod = trim((string)($_GET['stats_period'] ?? 'past_day'));
         </label>
         <div class="analytics-control-actions">
             <button class="button secondary" type="submit">Применить</button>
-            <button class="button ghost" type="button" data-analytics-refresh>Обновить</button>
-            <button class="table-density-toggle" type="button" data-table-density aria-pressed="false">Компактно</button>
-            <details class="table-column-picker" data-column-picker data-table-target=".analytics-table" data-storage-key="analytics">
-                <summary>Колонки</summary>
-                <div class="column-picker-menu" data-column-picker-menu></div>
-            </details>
         </div>
     </form>
 
