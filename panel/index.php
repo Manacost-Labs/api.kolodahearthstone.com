@@ -1123,6 +1123,7 @@ $showCoins = $cardType === 'coin';
 $showTimewarped = $cardType === 'timewarped';
 $showConstructed = $cardType === 'constructed';
 $showLibrary = array_key_exists($cardType, library_types());
+$showBattlegrounds = $cardType === '';
 $libraryType = $showLibrary ? $cardType : '';
 if (!in_array($constructedFormat, ['all', 'standard', 'wild'], true)) {
     $constructedFormat = 'all';
@@ -1813,8 +1814,9 @@ $workspaceSection = $showApiTokens
     <meta name="robots" content="noindex,nofollow">
     <title>HS Data · Управление базой Hearthstone</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232563eb'/%3E%3Ctext x='32' y='40' text-anchor='middle' font-family='system-ui,sans-serif' font-size='25' font-weight='800' fill='white'%3EHS%3C/text%3E%3C/svg%3E">
-    <link rel="stylesheet" href="/assets/style.css?v=36">
-    <script src="/assets/panel-ui.js?v=2" defer></script>
+    <link rel="stylesheet" href="/assets/style.css?v=37">
+    <script src="/assets/catalog-workspace-view.js?v=1" defer></script>
+    <script src="/assets/panel-ui.js?v=3" defer></script>
     <script src="/assets/parsing-reliability.js?v=10" defer></script>
     <script src="/assets/analytics.js?v=14" defer></script>
     <script src="/assets/parser-control-view.js?v=3" defer></script>
@@ -1929,7 +1931,7 @@ $workspaceSection = $showApiTokens
                 </div>
             </div>
             <div class="topbar-actions">
-                <button class="topbar-command" type="button" data-command-open aria-haspopup="dialog" aria-keyshortcuts="Control+K Meta+K">
+                <button class="topbar-command" type="button" data-command-open aria-label="Быстрый переход" aria-haspopup="dialog" aria-keyshortcuts="Control+K Meta+K">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m20 20-4.3-4.3m2.3-5.2a7.5 7.5 0 1 1-15 0 7.5 7.5 0 0 1 15 0Z"/></svg>
                     <span>Быстрый переход</span>
                     <kbd>⌘ K</kbd>
@@ -2270,7 +2272,7 @@ $workspaceSection = $showApiTokens
                 <button class="button" type="submit">Найти</button>
                 <a class="button ghost" href="<?= h($resetUrl) ?>">Сброс</a>
                 <button class="table-density-toggle" type="button" data-table-density aria-pressed="false">Компактно</button>
-                <details class="table-column-picker" data-column-picker data-table-target=".cards-table > table" data-storage-key="catalogue-<?= h($cardType !== '' ? $cardType : 'battlegrounds') ?>">
+                <details class="table-column-picker" data-column-picker data-table-target=".cards-table > table" data-storage-key="catalogue-<?= h($cardType !== '' ? $cardType : 'battlegrounds-v2') ?>">
                     <summary>Колонки</summary>
                     <div class="column-picker-menu" data-column-picker-menu></div>
                 </details>
@@ -2391,7 +2393,12 @@ $workspaceSection = $showApiTokens
             </nav>
         <?php endif; ?>
 
-        <?php $tableNavigationTarget = '.cards-table'; $tableNavigationLabel = 'Широкая таблица'; require __DIR__ . '/partials/table-navigation.php'; ?>
+        <?php if ($showBattlegrounds): ?>
+        <div class="catalog-workbench" data-catalog-workbench>
+            <section class="catalog-list-pane" aria-label="Список карт">
+        <?php endif; ?>
+
+        <?php $tableNavigationTarget = '.cards-table'; $tableNavigationLabel = $showBattlegrounds ? 'Список карт' : 'Широкая таблица'; require __DIR__ . '/partials/table-navigation.php'; ?>
 
         <div class="cards-table">
             <?php if ($showConstructed): ?>
@@ -2823,7 +2830,7 @@ $workspaceSection = $showApiTokens
             <table class="timewarped-table">
                 <thead>
                 <tr>
-                    <th>Карта</th>
+                    <th class="catalog-col-card">Карта</th>
                     <th>Card EN</th>
                     <th>Crop</th>
                     <th>CARD_ID</th>
@@ -3654,27 +3661,27 @@ $workspaceSection = $showApiTokens
                 </tbody>
             </table>
             <?php else: ?>
-            <table class="battlegrounds-table">
+            <table class="battlegrounds-table" data-default-hidden="1,2,3,4,7,10,11,12,13,14,15,16">
                 <thead>
                 <tr>
                     <th>Карта</th>
-                    <th>Card EN</th>
-                    <th>Crop</th>
-                    <th>CARD_ID</th>
-                    <th>DBF</th>
-                    <th>Категория</th>
-                    <th>Таверна</th>
-                    <th>Тип</th>
-                    <th>Атака</th>
-                    <th>Здоровье</th>
-                    <th>В пуле</th>
-                    <th>Дуо</th>
-                    <th>Механики</th>
-                    <th>Золотая</th>
-                    <th>Арт</th>
-                    <th>Рамка</th>
-                    <th>Wiki</th>
-                    <th>Действия</th>
+                    <th hidden>Card EN</th>
+                    <th hidden>Crop</th>
+                    <th hidden>CARD_ID</th>
+                    <th hidden>DBF</th>
+                    <th class="catalog-col-type">Категория</th>
+                    <th class="catalog-col-tier">Таверна</th>
+                    <th hidden>Тип</th>
+                    <th class="catalog-col-stat">Атака</th>
+                    <th class="catalog-col-stat">Здоровье</th>
+                    <th hidden>В пуле</th>
+                    <th hidden>Дуо</th>
+                    <th hidden>Механики</th>
+                    <th hidden>Золотая</th>
+                    <th hidden>Арт</th>
+                    <th hidden>Рамка</th>
+                    <th hidden>Wiki</th>
+                    <th class="catalog-col-action">Просмотр</th>
                 </tr>
                 </thead>
                 <tbody>
@@ -3714,6 +3721,24 @@ $workspaceSection = $showApiTokens
                         data-type="<?= h($card['creature_type']) ?>"
                         data-pool="<?= !empty($card['in_pool']) ? '1' : '0' ?>"
                         data-duos="<?= !empty($card['duos_only']) ? '1' : '0' ?>"
+                        data-catalog-record
+                        data-record-id="<?= h($card['card_id']) ?>"
+                        data-record-dbf="<?= h($card['dbf']) ?>"
+                        data-record-name="<?= h($card['name']) ?>"
+                        data-record-english-name="<?= h($card['name_en'] ?: '—') ?>"
+                        data-record-image="<?= h($cardImage) ?>"
+                        data-record-type="<?= h(card_type_label($card['card_type'] ?? 'minion')) ?>"
+                        data-record-tier="<?= h($card['tavern_tier']) ?>"
+                        data-record-attack="<?= h($card['attack']) ?>"
+                        data-record-health="<?= h($card['health']) ?>"
+                        data-record-mechanics="<?= h(implode(' | ', array_column($mechanics, 'label'))) ?>"
+                        data-record-updated="<?= h($card['updated_at'] ?: 'Нет данных') ?>"
+                        data-record-pool="<?= !empty($card['in_pool']) ? 'В пуле' : 'Не в пуле' ?>"
+                        data-record-duo="<?= !empty($card['duos_only']) ? 'Только дуо' : 'Обычный режим' ?>"
+                        data-record-edit-url="/?action=edit&amp;id=<?= (int)$card['id'] ?>"
+                        data-record-stats-url="/?action=analytics&amp;stats=card&amp;stats_q=<?= rawurlencode((string)($card['name_en'] ?: $card['name'])) ?>#statistics"
+                        tabindex="0"
+                        aria-selected="false"
                     >
                         <td class="card-name" title="<?= h($tooltip) ?>">
                             <?php if ($cardImage): ?>
@@ -3738,26 +3763,26 @@ $workspaceSection = $showApiTokens
                                 <a class="card-stats-link" href="/?action=analytics&amp;stats=card&amp;stats_q=<?= rawurlencode((string)($card['name_en'] ?: $card['name'])) ?>#statistics">Статистика</a>
                             </span>
                         </td>
-                        <td class="name-en"><?= h($card['name_en'] ?: '—') ?></td>
-                        <td><?= horizontal_art_preview($card['horizontal_image_url'] ?? null, (string)$card['name']) ?: '<span class="muted-dash">—</span>' ?></td>
-                        <td><code><?= h($card['card_id']) ?></code></td>
-                        <td><?= h($card['dbf']) ?></td>
-                        <td><span class="type-badge <?= h($card['card_type'] ?? 'minion') ?>"><?= h(card_type_label($card['card_type'] ?? 'minion')) ?></span></td>
-                        <td><?= h($card['tavern_tier']) ?></td>
-                        <td><?= h(creature_type_label($card['creature_type'])) ?></td>
-                        <td><?= h($card['attack']) ?></td>
-                        <td><?= h($card['health']) ?></td>
-                        <td>
+                        <td class="name-en" hidden><?= h($card['name_en'] ?: '—') ?></td>
+                        <td hidden><?= horizontal_art_preview($card['horizontal_image_url'] ?? null, (string)$card['name']) ?: '<span class="muted-dash">—</span>' ?></td>
+                        <td hidden><code><?= h($card['card_id']) ?></code></td>
+                        <td hidden><?= h($card['dbf']) ?></td>
+                        <td class="catalog-col-type"><span class="type-badge <?= h($card['card_type'] ?? 'minion') ?>"><?= h(card_type_label($card['card_type'] ?? 'minion')) ?></span></td>
+                        <td class="catalog-col-tier"><?= h($card['tavern_tier']) ?></td>
+                        <td hidden><?= h(creature_type_label($card['creature_type'])) ?></td>
+                        <td class="catalog-col-stat"><?= h($card['attack']) ?></td>
+                        <td class="catalog-col-stat"><?= h($card['health']) ?></td>
+                        <td hidden>
                             <span class="pool-badge<?= !empty($card['in_pool']) ? '' : ' off' ?>">
                                 <?= !empty($card['in_pool']) ? 'Да' : 'Нет' ?>
                             </span>
                         </td>
-                        <td>
+                        <td hidden>
                             <span class="pool-badge<?= !empty($card['duos_only']) ? ' duos' : ' off' ?>">
                                 <?= !empty($card['duos_only']) ? 'Да' : 'Нет' ?>
                             </span>
                         </td>
-                        <td class="mechanics-cell">
+                        <td class="mechanics-cell" hidden>
                             <?php if ($mechanics): ?>
                                 <?php foreach ($mechanics as $mechanic): ?>
                                     <span class="mechanic-badge" title="<?= h($mechanic['slug']) ?>"><?= h($mechanic['label']) ?></span>
@@ -3766,7 +3791,7 @@ $workspaceSection = $showApiTokens
                                 <span class="muted-dash">—</span>
                             <?php endif; ?>
                         </td>
-                        <td>
+                        <td hidden>
                             <?php if ($goldenImage): ?>
                                 <img
                                     class="variant-preview"
@@ -3786,7 +3811,7 @@ $workspaceSection = $showApiTokens
                                 <span class="missing-mini">Нет</span>
                             <?php endif; ?>
                         </td>
-                        <td>
+                        <td hidden>
                             <?php if ($artImage): ?>
                                 <img
                                     class="art-preview variant-preview"
@@ -3806,7 +3831,7 @@ $workspaceSection = $showApiTokens
                                 <span class="missing-mini">Нет</span>
                             <?php endif; ?>
                         </td>
-                        <td>
+                        <td hidden>
                             <?php if ($framedImage): ?>
                                 <img
                                     class="framed-preview"
@@ -3826,7 +3851,7 @@ $workspaceSection = $showApiTokens
                                 <span class="missing-framed">Нет</span>
                             <?php endif; ?>
                         </td>
-                        <td class="wiki-cell">
+                        <td class="wiki-cell" hidden>
                             <?php if ($wikiMeta): ?>
                                 <details class="wiki-details">
                                     <summary>
@@ -3963,13 +3988,7 @@ $workspaceSection = $showApiTokens
                             <?php endif; ?>
                         </td>
                         <td class="row-actions">
-                            <a class="mini" href="/?action=edit&id=<?= (int)$card['id'] ?>">Править</a>
-                            <form method="post" onsubmit="return confirm('Удалить карту?')">
-                                <input type="hidden" name="csrf" value="<?= h(csrf()) ?>">
-                                <input type="hidden" name="action" value="delete">
-                                <input type="hidden" name="id" value="<?= (int)$card['id'] ?>">
-                                <button class="mini danger" type="submit">Удалить</button>
-                            </form>
+                            <button class="mini" type="button" data-catalog-open>Подробнее</button>
                         </td>
                     </tr>
                 <?php endforeach; ?>
@@ -4018,6 +4037,43 @@ $workspaceSection = $showApiTokens
                 <?php endif; ?>
                 <span class="page-summary">Страница <?= $page ?> из <?= $totalPages ?></span>
             </nav>
+        <?php endif; ?>
+        <?php if ($showBattlegrounds): ?>
+            </section>
+            <aside class="catalog-inspector" data-catalog-inspector aria-label="Детали выбранной карты" hidden>
+                <header class="catalog-inspector-head">
+                    <div>
+                        <span>Выбранная карта</span>
+                        <h2 data-inspector-field="name">Детали карты</h2>
+                        <code data-inspector-field="id">—</code>
+                    </div>
+                    <button class="button ghost" type="button" data-inspector-close>Закрыть</button>
+                </header>
+                <div class="catalog-inspector-media">
+                    <img src="" alt="" data-inspector-image hidden>
+                    <p data-inspector-image-empty>Изображение отсутствует</p>
+                </div>
+                <dl class="catalog-inspector-facts">
+                    <div><dt>Название EN</dt><dd data-inspector-field="englishName">—</dd></div>
+                    <div><dt>DBF ID</dt><dd data-inspector-field="dbf">—</dd></div>
+                    <div><dt>Категория</dt><dd data-inspector-field="type">—</dd></div>
+                    <div><dt>Таверна</dt><dd data-inspector-field="tier">—</dd></div>
+                    <div><dt>Атака</dt><dd data-inspector-field="attack">—</dd></div>
+                    <div><dt>Здоровье</dt><dd data-inspector-field="health">—</dd></div>
+                    <div><dt>Пул</dt><dd data-inspector-field="pool">—</dd></div>
+                    <div><dt>Режим</dt><dd data-inspector-field="duo">—</dd></div>
+                    <div><dt>Обновлено</dt><dd data-inspector-field="updated">—</dd></div>
+                </dl>
+                <section class="catalog-inspector-section">
+                    <h3>Механики</h3>
+                    <div class="catalog-inspector-mechanics" data-inspector-mechanics></div>
+                </section>
+                <div class="catalog-inspector-actions">
+                    <a class="button" href="#" data-inspector-link="edit">Править</a>
+                    <a class="button ghost" href="#" data-inspector-link="stats">Статистика</a>
+                </div>
+            </aside>
+        </div>
         <?php endif; ?>
         <?php endif; ?>
     </section>

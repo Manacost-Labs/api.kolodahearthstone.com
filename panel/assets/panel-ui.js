@@ -81,6 +81,9 @@
     const storageSet = (key, value) => {
         try { localStorage.setItem(key, JSON.stringify(value)); } catch (error) { /* optional preference */ }
     };
+    const storageHas = (key) => {
+        try { return localStorage.getItem(key) !== null; } catch (error) { return false; }
+    };
 
     document.querySelectorAll('[data-column-picker]').forEach((picker) => {
         const menu = picker.querySelector('[data-column-picker-menu]');
@@ -101,7 +104,11 @@
             const nextSignature = `${key}:${headers.map((header) => header.textContent.trim()).join('|')}`;
             if (signature === nextSignature) return;
             signature = nextSignature;
-            const hiddenColumns = new Set(storageGet(key));
+            const defaultHidden = (table.dataset.defaultHidden || '')
+                .split(',')
+                .map((value) => Number.parseInt(value, 10))
+                .filter(Number.isInteger);
+            const hiddenColumns = new Set(storageHas(key) ? storageGet(key) : defaultHidden);
             const configurable = headers.map((header, index) => ({ header, index }))
                 .filter(({ index }) => index > 0 && index < headers.length - 1);
             const apply = () => {
@@ -110,6 +117,7 @@
                         cell.hidden = hiddenColumns.has(index);
                     });
                 });
+                table.classList.toggle('has-expanded-columns', hiddenColumns.size < defaultHidden.length);
             };
             menu.replaceChildren();
             const heading = document.createElement('div');
@@ -223,4 +231,127 @@
             document.querySelector('[data-sidebar-toggle]')?.setAttribute('aria-expanded', 'false');
         }
     });
+
+    const workspaceView = window.CatalogWorkspaceView;
+    const beginNavigation = () => {
+        document.documentElement.classList.add('is-navigating');
+        document.querySelector('.workspace')?.setAttribute('aria-busy', 'true');
+    };
+    const endNavigation = () => {
+        document.documentElement.classList.remove('is-navigating');
+        document.querySelector('.workspace')?.removeAttribute('aria-busy');
+    };
+
+    document.addEventListener('click', (event) => {
+        const target = event.target;
+        if (!(target instanceof Element) || !workspaceView) return;
+        const link = target.closest('a[href]');
+        if (!link || !workspaceView.shouldSignalNavigation({
+            href: link.getAttribute('href') || '',
+            target: link.target,
+            download: link.hasAttribute('download'),
+            button: event.button,
+            ctrlKey: event.ctrlKey,
+            metaKey: event.metaKey,
+            shiftKey: event.shiftKey,
+            altKey: event.altKey,
+            defaultPrevented: event.defaultPrevented,
+        }, window.location.href)) return;
+        beginNavigation();
+    });
+    document.addEventListener('submit', (event) => {
+        const form = event.target;
+        if (form instanceof HTMLFormElement && form.method.toLocaleLowerCase() === 'get') beginNavigation();
+    });
+    window.addEventListener('pageshow', endNavigation);
+
+    const inspector = document.querySelector('[data-catalog-inspector]');
+    const catalogRows = Array.from(document.querySelectorAll('[data-catalog-record]'));
+    let lastSelectedRow = null;
+    const inspectorFields = inspector ? Object.fromEntries(
+        Array.from(inspector.querySelectorAll('[data-inspector-field]'))
+            .map((field) => [field.dataset.inspectorField, field]),
+    ) : {};
+    const setInspectorText = (name, value) => {
+        const field = inspectorFields[name];
+        if (field) field.textContent = value;
+    };
+    const selectCatalogRow = (row, moveFocus = false) => {
+        if (!inspector || !workspaceView || !(row instanceof HTMLElement)) return;
+        const record = workspaceView.recordFromDataset(row.dataset);
+        catalogRows.forEach((item) => {
+            const selected = item === row;
+            item.classList.toggle('is-selected', selected);
+            item.setAttribute('aria-selected', selected ? 'true' : 'false');
+        });
+        lastSelectedRow = row;
+        setInspectorText('name', record.name);
+        setInspectorText('id', record.id);
+        setInspectorText('dbf', record.dbf);
+        setInspectorText('englishName', record.englishName);
+        setInspectorText('type', record.type);
+        setInspectorText('tier', record.tier);
+        setInspectorText('attack', record.attack);
+        setInspectorText('health', record.health);
+        setInspectorText('pool', record.pool);
+        setInspectorText('duo', record.duo);
+        setInspectorText('updated', record.updated);
+
+        const image = inspector.querySelector('[data-inspector-image]');
+        const imageEmpty = inspector.querySelector('[data-inspector-image-empty]');
+        if (image instanceof HTMLImageElement) {
+            image.src = record.image;
+            image.alt = record.image ? `Карта ${record.name}` : '';
+            image.hidden = !record.image;
+        }
+        if (imageEmpty) imageEmpty.hidden = Boolean(record.image);
+
+        const mechanics = inspector.querySelector('[data-inspector-mechanics]');
+        if (mechanics) {
+            mechanics.replaceChildren();
+            const values = record.mechanics.length ? record.mechanics : ['Не указаны'];
+            values.forEach((value) => {
+                const item = document.createElement('span');
+                item.textContent = value;
+                mechanics.append(item);
+            });
+        }
+        [['edit', record.editUrl], ['stats', record.statsUrl]].forEach(([name, href]) => {
+            const link = inspector.querySelector(`[data-inspector-link="${name}"]`);
+            if (link instanceof HTMLAnchorElement) {
+                link.href = href || '#';
+                link.hidden = !href;
+            }
+        });
+        inspector.hidden = false;
+        document.body.classList.add('catalog-inspector-open');
+        if (moveFocus) inspector.querySelector('[data-inspector-close]')?.focus();
+    };
+    const closeInspector = () => {
+        if (!inspector) return;
+        inspector.hidden = true;
+        document.body.classList.remove('catalog-inspector-open');
+        catalogRows.forEach((row) => {
+            row.classList.remove('is-selected');
+            row.setAttribute('aria-selected', 'false');
+        });
+        lastSelectedRow?.focus();
+    };
+
+    catalogRows.forEach((row) => {
+        row.addEventListener('click', (event) => {
+            const target = event.target;
+            if (target instanceof Element && target.closest('a, button, input, select, details')) {
+                if (!target.closest('[data-catalog-open]')) return;
+            }
+            selectCatalogRow(row);
+        });
+        row.addEventListener('keydown', (event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault();
+            selectCatalogRow(row, true);
+        });
+    });
+    inspector?.querySelector('[data-inspector-close]')?.addEventListener('click', closeInspector);
+    if (catalogRows.length && window.matchMedia('(min-width: 1121px)').matches) selectCatalogRow(catalogRows[0]);
 })();
