@@ -10,22 +10,19 @@ from app.main import app
 client = TestClient(app)
 
 
-def test_reliability_report_cache_reuses_revision_and_invalidates_on_write() -> None:
+def test_reliability_report_cache_reuses_recent_snapshot_despite_telemetry_write() -> None:
     from app.routers import system
 
     system._reset_reliability_report_cache_for_tests()
     with (
-        patch(
-            "app.routers.system.reliability_cache_revision",
-            side_effect=["revision-a", "revision-a", "revision-b"],
-        ),
+        patch("app.routers.system.time.monotonic", side_effect=[100.0, 100.0, 110.0]),
         patch(
             "app.routers.system.build_reliability_report",
-            side_effect=[{"version": 1}, {"version": 2}],
+            return_value={"version": 1},
         ) as build,
         patch(
             "app.routers.system.ConvergenceStore.public_summary",
-            side_effect=[{"chains": 1}, {"chains": 2}],
+            return_value={"chains": 1},
         ) as convergence,
     ):
         assert system._cached_reliability_report() == {
@@ -36,13 +33,35 @@ def test_reliability_report_cache_reuses_revision_and_invalidates_on_write() -> 
             "version": 1,
             "convergence": {"chains": 1},
         }
-        assert system._cached_reliability_report() == {
-            "version": 2,
-            "convergence": {"chains": 2},
-        }
 
-    assert build.call_count == 2
-    assert convergence.call_count == 2
+    assert build.call_count == 1
+    assert convergence.call_count == 1
+    system._reset_reliability_report_cache_for_tests()
+
+
+def test_reliability_report_cache_refreshes_stale_snapshot_in_background() -> None:
+    from app.routers import system
+
+    system._reset_reliability_report_cache_for_tests()
+    with (
+        patch("app.routers.system.time.monotonic", side_effect=[100.0, 100.0, 116.0]),
+        patch(
+            "app.routers.system.build_reliability_report",
+            return_value={"version": 1},
+        ) as build,
+        patch(
+            "app.routers.system.ConvergenceStore.public_summary",
+            return_value={"chains": 1},
+        ),
+        patch("app.routers.system.threading.Thread") as thread,
+    ):
+        expected = {"version": 1, "convergence": {"chains": 1}}
+        assert system._cached_reliability_report() == expected
+        assert system._cached_reliability_report() == expected
+
+    assert build.call_count == 1
+    thread.return_value.start.assert_called_once()
+    system._reset_reliability_report_cache_for_tests()
 
 
 def test_v1_sources_returns_registry_envelope() -> None:

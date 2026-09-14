@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ..convergence_store import ConvergenceStore
 from ..parser_control import load_resolved_public_dataset
-from ..reliability_telemetry import build_reliability_report, reliability_cache_revision
+from ..reliability_telemetry import build_reliability_report
 from ..source_contracts import (
     HSREPLAY_FRESHNESS_GATED_SOURCE_IDS,
     HSREPLAY_META_FRESHNESS_GATED_SOURCE_IDS,
@@ -25,50 +25,77 @@ canonical_router = APIRouter(prefix="/v1", tags=["v1-system"])
 _RELIABILITY_REPORT_CACHE_TTL_SECONDS = 15.0
 _reliability_report_cache_lock = threading.Lock()
 _reliability_report_cache_payload: dict[str, Any] | None = None
-_reliability_report_cache_revision: str | None = None
 _reliability_report_cache_at = 0.0
+_reliability_report_refresh_in_progress = False
+
+
+def _build_reliability_report_payload() -> dict[str, Any]:
+    return {
+        **build_reliability_report(),
+        "convergence": ConvergenceStore().public_summary(),
+    }
+
+
+def _refresh_reliability_report_cache() -> None:
+    global _reliability_report_cache_at
+    global _reliability_report_cache_payload
+    global _reliability_report_refresh_in_progress
+
+    try:
+        payload = _build_reliability_report_payload()
+    finally:
+        with _reliability_report_cache_lock:
+            if "payload" in locals():
+                _reliability_report_cache_payload = payload
+                _reliability_report_cache_at = time.monotonic()
+            _reliability_report_refresh_in_progress = False
 
 
 def _cached_reliability_report() -> dict[str, Any]:
-    """Return a short-lived report cache, invalidated by telemetry DB writes.
+    """Return a short-lived report cache without blocking reads on refresh.
 
     The public route remains ``Cache-Control: no-store``. This only coalesces
-    duplicate local SQLite aggregations for a report whose inputs are unchanged.
+    duplicate local SQLite aggregations. A stale snapshot starts one background
+    refresh, so operational polling never waits on a report aggregation.
     """
 
     global _reliability_report_cache_at
     global _reliability_report_cache_payload
-    global _reliability_report_cache_revision
+    global _reliability_report_refresh_in_progress
 
-    revision = reliability_cache_revision()
     now = time.monotonic()
     with _reliability_report_cache_lock:
-        if (
-            _reliability_report_cache_payload is not None
-            and _reliability_report_cache_revision == revision
-            and now - _reliability_report_cache_at
-            < _RELIABILITY_REPORT_CACHE_TTL_SECONDS
-        ):
+        if _reliability_report_cache_payload is not None:
+            if (
+                now - _reliability_report_cache_at >= _RELIABILITY_REPORT_CACHE_TTL_SECONDS
+                and not _reliability_report_refresh_in_progress
+            ):
+                _reliability_report_refresh_in_progress = True
+                threading.Thread(
+                    target=_refresh_reliability_report_cache,
+                    name="reliability-report-refresh",
+                    daemon=True,
+                ).start()
             return _reliability_report_cache_payload
-        payload = {
-            **build_reliability_report(),
-            "convergence": ConvergenceStore().public_summary(),
-        }
-        _reliability_report_cache_payload = payload
-        _reliability_report_cache_revision = revision
-        _reliability_report_cache_at = now
-        return payload
+
+        _reliability_report_refresh_in_progress = True
+
+    _refresh_reliability_report_cache()
+    with _reliability_report_cache_lock:
+        if _reliability_report_cache_payload is None:
+            raise RuntimeError("reliability report cache was not populated")
+        return _reliability_report_cache_payload
 
 
 def _reset_reliability_report_cache_for_tests() -> None:
     global _reliability_report_cache_at
     global _reliability_report_cache_payload
-    global _reliability_report_cache_revision
+    global _reliability_report_refresh_in_progress
 
     with _reliability_report_cache_lock:
         _reliability_report_cache_payload = None
-        _reliability_report_cache_revision = None
         _reliability_report_cache_at = 0.0
+        _reliability_report_refresh_in_progress = False
 
 
 class SourceSummary(BaseModel):
