@@ -384,6 +384,10 @@ class HorizontalArtTest(unittest.TestCase):
         panel = (ROOT / "index.php").read_text(encoding="utf-8")
         styles = (ROOT / "assets" / "style.css").read_text(encoding="utf-8")
         self.assertIn("function panel_attach_horizontal_art(", panel)
+        loader_start = panel.index("function load_wiki_meta_map(")
+        loader_end = panel.index("\n}\n", loader_start)
+        loader = panel[loader_start:loader_end]
+        self.assertIn("$variants = panel_attach_horizontal_art(", loader)
         self.assertIn("function horizontal_art_preview(", panel)
         self.assertGreaterEqual(panel.count("horizontal_art_preview("), 9)
         self.assertIn('class="horizontal-art-button"', panel)

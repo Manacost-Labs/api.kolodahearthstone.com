@@ -703,7 +703,7 @@ function load_wiki_meta_map(PDO $pdo, array $cards): array
     $stmt = $pdo->prepare('SELECT * FROM battlegrounds_card_wiki_meta WHERE card_id IN (' . $placeholders . ')');
     $stmt->execute($cardIds);
 
-    $variants = attach_horizontal_art(
+    $variants = panel_attach_horizontal_art(
         $pdo,
         $stmt->fetchAll(),
         'battleground_card',
