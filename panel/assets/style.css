@@ -7600,6 +7600,163 @@ html.is-navigating::after {
     font-size: 12px;
 }
 
+.catalog-inspector-visuals {
+    border-bottom: 1px solid var(--line);
+    background: var(--panel-soft);
+}
+
+.catalog-inspector-visuals h3 {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.catalog-inspector-visuals h3 span {
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 2px 6px;
+    background: var(--panel);
+    color: var(--label);
+    font-variant-numeric: tabular-nums;
+}
+
+.catalog-inspector-gallery {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.catalog-inspector-image {
+    min-width: 0;
+    margin: 0;
+}
+
+.catalog-inspector-image button {
+    width: 100%;
+    height: 150px;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    padding: 7px;
+    background: var(--panel);
+    cursor: zoom-in;
+}
+
+.catalog-inspector-image button:hover,
+.catalog-inspector-image button:focus-visible {
+    border-color: var(--accent);
+    outline: none;
+}
+
+.catalog-inspector-image img {
+    width: 100%;
+    max-width: 100%;
+    height: 132px;
+    max-height: 132px;
+    display: block;
+    object-fit: contain;
+}
+
+.catalog-inspector-image figcaption {
+    margin-top: 5px;
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 750;
+    line-height: 1.25;
+}
+
+.catalog-inspector-image-horizontal,
+.catalog-inspector-image-golden-horizontal {
+    grid-column: 1 / -1;
+}
+
+.catalog-inspector-image-horizontal button,
+.catalog-inspector-image-golden-horizontal button {
+    height: 92px;
+}
+
+.catalog-inspector-image-horizontal img,
+.catalog-inspector-image-golden-horizontal img {
+    height: 74px;
+    max-height: 74px;
+}
+
+.catalog-inspector-empty {
+    margin: 0;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.catalog-inspector-identifiers {
+    border-bottom: 1px solid var(--line);
+}
+
+.catalog-inspector-id-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1px;
+    margin: 0;
+    background: var(--line-soft);
+}
+
+.catalog-inspector-id-grid div {
+    min-width: 0;
+    padding: 9px;
+    background: var(--panel-soft);
+}
+
+.catalog-inspector-id-grid dt {
+    margin-bottom: 4px;
+    color: var(--muted);
+    font-size: 9px;
+}
+
+.catalog-inspector-id-grid dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+    font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+    font-size: 11px;
+    font-weight: 750;
+}
+
+.catalog-inspector-api-links {
+    display: grid;
+    gap: 6px;
+    margin-top: 10px;
+}
+
+.catalog-inspector-api-link {
+    min-width: 0;
+    display: grid;
+    gap: 3px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    padding: 8px 9px;
+    background: var(--panel-soft);
+    color: var(--label);
+    text-decoration: none;
+}
+
+.catalog-inspector-api-link:hover,
+.catalog-inspector-api-link:focus-visible {
+    border-color: var(--accent);
+}
+
+.catalog-inspector-api-link span {
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 750;
+}
+
+.catalog-inspector-api-link code {
+    overflow: hidden;
+    color: var(--text);
+    font-size: 10px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .catalog-inspector-facts {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));

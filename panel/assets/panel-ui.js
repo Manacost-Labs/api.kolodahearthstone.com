@@ -287,7 +287,11 @@
         lastSelectedRow = row;
         setInspectorText('name', record.name);
         setInspectorText('id', record.id);
+        setInspectorText('internalId', record.identifiers.internalId);
+        setInspectorText('cardId', record.identifiers.cardId);
         setInspectorText('dbf', record.dbf);
+        setInspectorText('goldenCardId', record.identifiers.goldenCardId);
+        setInspectorText('goldenDbf', record.identifiers.goldenDbf);
         setInspectorText('englishName', record.englishName);
         setInspectorText('type', record.type);
         setInspectorText('tier', record.tier);
@@ -297,14 +301,51 @@
         setInspectorText('duo', record.duo);
         setInspectorText('updated', record.updated);
 
-        const image = inspector.querySelector('[data-inspector-image]');
+        const images = inspector.querySelector('[data-inspector-images]');
         const imageEmpty = inspector.querySelector('[data-inspector-image-empty]');
-        if (image instanceof HTMLImageElement) {
-            image.src = record.image;
-            image.alt = record.image ? `Карта ${record.name}` : '';
-            image.hidden = !record.image;
+        if (images) {
+            images.replaceChildren();
+            record.images.forEach(({ kind, label, url }) => {
+                const figure = document.createElement('figure');
+                figure.className = `catalog-inspector-image catalog-inspector-image-${kind}`;
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.dataset.preview = url;
+                button.dataset.tooltip = `${record.name}\n${label}`;
+                button.setAttribute('aria-label', `Открыть изображение «${label}» для ${record.name}`);
+                const preview = document.createElement('img');
+                preview.src = url;
+                preview.alt = `${label}: ${record.name}`;
+                preview.loading = 'lazy';
+                preview.decoding = 'async';
+                const caption = document.createElement('figcaption');
+                caption.textContent = label;
+                button.append(preview);
+                figure.append(button, caption);
+                images.append(figure);
+            });
         }
-        if (imageEmpty) imageEmpty.hidden = Boolean(record.image);
+        if (imageEmpty) imageEmpty.hidden = record.images.length > 0;
+        setInspectorText('imageCount', String(record.images.length));
+
+        const apiLinks = inspector.querySelector('[data-inspector-api-links]');
+        if (apiLinks) {
+            apiLinks.replaceChildren();
+            record.apiLinks.forEach(({ label, value, url }) => {
+                const link = document.createElement('a');
+                link.className = 'catalog-inspector-api-link';
+                link.href = url;
+                link.target = '_blank';
+                link.rel = 'noopener';
+                link.setAttribute('aria-label', `${label}: ${value}. Открыть JSON API`);
+                const description = document.createElement('span');
+                description.textContent = label;
+                const endpoint = document.createElement('code');
+                endpoint.textContent = url;
+                link.append(description, endpoint);
+                apiLinks.append(link);
+            });
+        }
 
         const mechanics = inspector.querySelector('[data-inspector-mechanics]');
         if (mechanics) {

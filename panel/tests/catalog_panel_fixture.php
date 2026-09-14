@@ -6,8 +6,14 @@ function h($value): string
     return htmlspecialchars((string)$value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 }
 $fixtureEmpty = isset($_GET['empty']);
-$horizontalArtUrl = 'https://api.kolodahearthstone.com/uploads/horizontal-art/battleground_card/BG28_897.webp';
-$cardImageUrl = 'https://api.kolodahearthstone.com/uploads/cards/BG28_897.png';
+$horizontalArtUrl = 'https://api.kolodahearthstone.com/uploads/horizontal-art/battleground_card/BG26_146.webp';
+$goldenHorizontalArtUrl = 'https://api.kolodahearthstone.com/uploads/horizontal-art/battleground_card/BG26_146_G.webp';
+$cardImageUrl = 'https://api.kolodahearthstone.com/uploads/cards/BG26_146.png';
+$goldenImageUrl = 'https://api.kolodahearthstone.com/uploads/cards/BG26_146_G.png';
+$artImageUrl = 'https://api.kolodahearthstone.com/uploads/art/BG26_146.jpg';
+$goldenArtImageUrl = 'https://api.kolodahearthstone.com/uploads/art/BG26_146_G.jpg';
+$framedImageUrl = 'https://api.kolodahearthstone.com/uploads/framed/BG26_146.png';
+$goldenFramedImageUrl = 'https://api.kolodahearthstone.com/uploads/framed/BG26_146_G.png';
 ?>
 <!doctype html>
 <html lang="ru" data-theme="dark">
@@ -16,9 +22,9 @@ $cardImageUrl = 'https://api.kolodahearthstone.com/uploads/cards/BG28_897.png';
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Каталог · UI fixture</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232563eb'/%3E%3C/svg%3E">
-    <link rel="stylesheet" href="/assets/style.css?v=37">
-    <script src="/assets/catalog-workspace-view.js?v=1" defer></script>
-    <script src="/assets/panel-ui.js?v=3" defer></script>
+    <link rel="stylesheet" href="/assets/style.css?v=38">
+    <script src="/assets/catalog-workspace-view.js?v=2" defer></script>
+    <script src="/assets/panel-ui.js?v=4" defer></script>
 </head>
 <body>
 <main class="shell">
@@ -60,7 +66,8 @@ $cardImageUrl = 'https://api.kolodahearthstone.com/uploads/cards/BG28_897.png';
                     <thead><tr><th class="catalog-col-card">Карта</th><th class="catalog-col-type">Категория</th><th class="catalog-col-tier">Таверна</th><th class="catalog-col-stat">Атака</th><th class="catalog-col-stat">Здоровье</th><th class="catalog-col-action">Просмотр</th></tr></thead>
                     <tbody>
                     <?php foreach ([['Мурлок-разведчик','Существо','1','2','3','Боевой клич','В пуле'],['Золотой дракон','Существо','4','6','8','Божественный щит','В пуле'],['Призыв таверны','Заклинание','3','—','—','Обновление','В пуле'],['Ночной охотник','Существо','5','8','7','Предсмертный хрип','Не в пуле']] as $index => $row): ?>
-                        <tr data-catalog-record data-record-id="BG_FIXTURE_<?= $index + 1 ?>" data-record-dbf="<?= 69042 + $index ?>" data-record-name="<?= h($row[0]) ?>" data-record-english-name="Fixture card <?= $index + 1 ?>" data-record-image="<?= h($cardImageUrl) ?>" data-record-type="<?= h($row[1]) ?>" data-record-tier="<?= h($row[2]) ?>" data-record-attack="<?= h($row[3]) ?>" data-record-health="<?= h($row[4]) ?>" data-record-mechanics="<?= h($row[5]) ?>" data-record-updated="14 сент. 2026, 13:42 UTC" data-record-pool="<?= h($row[6]) ?>" data-record-duo="Обычный режим" data-record-edit-url="#edit" data-record-stats-url="#statistics" tabindex="0" aria-selected="false"><td class="card-name catalog-col-card"><img src="<?= h($cardImageUrl) ?>" alt="<?= h($row[0]) ?>" loading="lazy" decoding="async"><span class="card-name-copy"><span><?= h($row[0]) ?></span><code>BG_FIXTURE_<?= $index + 1 ?></code></span></td><td class="catalog-col-type"><span class="type-badge"><?= h($row[1]) ?></span></td><td class="catalog-col-tier"><?= h($row[2]) ?></td><td class="catalog-col-stat"><?= h($row[3]) ?></td><td class="catalog-col-stat"><?= h($row[4]) ?></td><td class="row-actions catalog-col-action"><button class="mini" type="button" data-catalog-open>Подробнее</button></td></tr>
+                        <?php $fixtureCardId = $index === 0 ? 'BG26_146' : 'BG_FIXTURE_' . ($index + 1); ?>
+                        <tr data-catalog-record data-record-internal-id="<?= 42 + $index ?>" data-record-id="<?= h($fixtureCardId) ?>" data-record-dbf="<?= $index === 0 ? 98582 : 69042 + $index ?>" data-record-golden-id="<?= h($index === 0 ? 'BG26_146_G' : $fixtureCardId . '_G') ?>" data-record-golden-dbf="<?= $index === 0 ? 98585 : 79042 + $index ?>" data-record-name="<?= h($row[0]) ?>" data-record-english-name="Fixture card <?= $index + 1 ?>" data-record-image="<?= h($cardImageUrl) ?>" data-record-golden-image="<?= h($goldenImageUrl) ?>" data-record-art-image="<?= h($artImageUrl) ?>" data-record-golden-art-image="<?= h($goldenArtImageUrl) ?>" data-record-framed-image="<?= h($framedImageUrl) ?>" data-record-golden-framed-image="<?= h($goldenFramedImageUrl) ?>" data-record-horizontal-image="<?= h($horizontalArtUrl) ?>" data-record-golden-horizontal-image="<?= h($goldenHorizontalArtUrl) ?>" data-record-type="<?= h($row[1]) ?>" data-record-tier="<?= h($row[2]) ?>" data-record-attack="<?= h($row[3]) ?>" data-record-health="<?= h($row[4]) ?>" data-record-mechanics="<?= h($row[5]) ?>" data-record-updated="14 сент. 2026, 13:42 UTC" data-record-pool="<?= h($row[6]) ?>" data-record-duo="Обычный режим" data-record-edit-url="#edit" data-record-stats-url="#statistics" tabindex="0" aria-selected="false"><td class="card-name catalog-col-card"><img src="<?= h($cardImageUrl) ?>" alt="<?= h($row[0]) ?>" loading="lazy" decoding="async"><span class="card-name-copy"><span><?= h($row[0]) ?></span><code><?= h($fixtureCardId) ?></code></span></td><td class="catalog-col-type"><span class="type-badge"><?= h($row[1]) ?></span></td><td class="catalog-col-tier"><?= h($row[2]) ?></td><td class="catalog-col-stat"><?= h($row[3]) ?></td><td class="catalog-col-stat"><?= h($row[4]) ?></td><td class="row-actions catalog-col-action"><button class="mini" type="button" data-catalog-open>Подробнее</button></td></tr>
                     <?php endforeach; ?>
                     </tbody>
                 </table>
@@ -68,8 +75,9 @@ $cardImageUrl = 'https://api.kolodahearthstone.com/uploads/cards/BG28_897.png';
             </section>
             <aside class="catalog-inspector" data-catalog-inspector aria-label="Детали выбранной карты" hidden>
                 <header class="catalog-inspector-head"><div><span>Выбранная карта</span><h2 data-inspector-field="name">Детали карты</h2><code data-inspector-field="id">—</code></div><button class="button ghost" type="button" data-inspector-close>Закрыть</button></header>
-                <div class="catalog-inspector-media"><img src="" alt="" data-inspector-image hidden><p data-inspector-image-empty>Изображение отсутствует</p></div>
-                <dl class="catalog-inspector-facts"><div><dt>Название EN</dt><dd data-inspector-field="englishName">—</dd></div><div><dt>DBF ID</dt><dd data-inspector-field="dbf">—</dd></div><div><dt>Категория</dt><dd data-inspector-field="type">—</dd></div><div><dt>Таверна</dt><dd data-inspector-field="tier">—</dd></div><div><dt>Атака</dt><dd data-inspector-field="attack">—</dd></div><div><dt>Здоровье</dt><dd data-inspector-field="health">—</dd></div><div><dt>Пул</dt><dd data-inspector-field="pool">—</dd></div><div><dt>Режим</dt><dd data-inspector-field="duo">—</dd></div><div><dt>Обновлено</dt><dd data-inspector-field="updated">—</dd></div></dl>
+                <section class="catalog-inspector-section catalog-inspector-visuals"><h3>Все изображения <span data-inspector-field="imageCount">0</span></h3><div class="catalog-inspector-gallery" data-inspector-images></div><p class="catalog-inspector-empty" data-inspector-image-empty>Изображения отсутствуют</p></section>
+                <section class="catalog-inspector-section catalog-inspector-identifiers"><h3>Идентификаторы и API</h3><dl class="catalog-inspector-id-grid"><div><dt>ID записи</dt><dd data-inspector-field="internalId">—</dd></div><div><dt>card_id</dt><dd data-inspector-field="cardId">—</dd></div><div><dt>dbf</dt><dd data-inspector-field="dbf">—</dd></div><div><dt>Golden card_id</dt><dd data-inspector-field="goldenCardId">—</dd></div><div><dt>Golden dbf</dt><dd data-inspector-field="goldenDbf">—</dd></div></dl><div class="catalog-inspector-api-links" data-inspector-api-links></div></section>
+                <dl class="catalog-inspector-facts"><div><dt>Название EN</dt><dd data-inspector-field="englishName">—</dd></div><div><dt>Категория</dt><dd data-inspector-field="type">—</dd></div><div><dt>Таверна</dt><dd data-inspector-field="tier">—</dd></div><div><dt>Атака</dt><dd data-inspector-field="attack">—</dd></div><div><dt>Здоровье</dt><dd data-inspector-field="health">—</dd></div><div><dt>Пул</dt><dd data-inspector-field="pool">—</dd></div><div><dt>Режим</dt><dd data-inspector-field="duo">—</dd></div><div><dt>Обновлено</dt><dd data-inspector-field="updated">—</dd></div></dl>
                 <section class="catalog-inspector-section"><h3>Механики</h3><div class="catalog-inspector-mechanics" data-inspector-mechanics></div></section>
                 <div class="catalog-inspector-actions"><a class="button" href="#" data-inspector-link="edit">Править</a><a class="button ghost" href="#" data-inspector-link="stats">Статистика</a></div>
             </aside>

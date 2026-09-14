@@ -703,8 +703,14 @@ function load_wiki_meta_map(PDO $pdo, array $cards): array
     $stmt = $pdo->prepare('SELECT * FROM battlegrounds_card_wiki_meta WHERE card_id IN (' . $placeholders . ')');
     $stmt->execute($cardIds);
 
+    $variants = attach_horizontal_art(
+        $pdo,
+        $stmt->fetchAll(),
+        'battleground_card',
+        static fn(array $row): string => (string)$row['card_id']
+    );
     $map = [];
-    foreach ($stmt->fetchAll() as $row) {
+    foreach ($variants as $row) {
         $map[(string)$row['card_id']] = $row;
     }
 
@@ -1814,9 +1820,9 @@ $workspaceSection = $showApiTokens
     <meta name="robots" content="noindex,nofollow">
     <title>HS Data · Управление базой Hearthstone</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232563eb'/%3E%3Ctext x='32' y='40' text-anchor='middle' font-family='system-ui,sans-serif' font-size='25' font-weight='800' fill='white'%3EHS%3C/text%3E%3C/svg%3E">
-    <link rel="stylesheet" href="/assets/style.css?v=37">
-    <script src="/assets/catalog-workspace-view.js?v=1" defer></script>
-    <script src="/assets/panel-ui.js?v=3" defer></script>
+    <link rel="stylesheet" href="/assets/style.css?v=38">
+    <script src="/assets/catalog-workspace-view.js?v=2" defer></script>
+    <script src="/assets/panel-ui.js?v=4" defer></script>
     <script src="/assets/parsing-reliability.js?v=10" defer></script>
     <script src="/assets/analytics.js?v=14" defer></script>
     <script src="/assets/parser-control-view.js?v=3" defer></script>
@@ -3701,6 +3707,15 @@ $workspaceSection = $showApiTokens
                         : (!empty($card['golden_image']) ? versioned_asset($card['golden_image'], $card['updated_at']) : '');
                     $artImage = !empty($card['art_image']) ? versioned_asset($card['art_image'], $card['updated_at']) : '';
                     $framedImage = !empty($card['framed_image']) ? versioned_asset($card['framed_image'], $card['updated_at']) : '';
+                    $goldenArtImage = $goldenVariant && !empty($goldenVariant['art_image'])
+                        ? versioned_asset($goldenVariant['art_image'], $goldenVariant['updated_at'])
+                        : '';
+                    $goldenFramedImage = $goldenVariant && !empty($goldenVariant['framed_image'])
+                        ? versioned_asset($goldenVariant['framed_image'], $goldenVariant['updated_at'])
+                        : '';
+                    $goldenHorizontalImage = $goldenVariant
+                        ? (string)($goldenVariant['horizontal_image_url'] ?? '')
+                        : '';
                     $mechanics = card_mechanics($card['notes'] ?? null);
                     $wikiMeta = $wikiMetaMap[(string)$card['card_id']] ?? null;
                     $wikiMechanics = json_array($wikiMeta['wiki_mechanics_json'] ?? null);
@@ -3722,11 +3737,21 @@ $workspaceSection = $showApiTokens
                         data-pool="<?= !empty($card['in_pool']) ? '1' : '0' ?>"
                         data-duos="<?= !empty($card['duos_only']) ? '1' : '0' ?>"
                         data-catalog-record
+                        data-record-internal-id="<?= (int)$card['id'] ?>"
                         data-record-id="<?= h($card['card_id']) ?>"
                         data-record-dbf="<?= h($card['dbf']) ?>"
                         data-record-name="<?= h($card['name']) ?>"
                         data-record-english-name="<?= h($card['name_en'] ?: '—') ?>"
                         data-record-image="<?= h($cardImage) ?>"
+                        data-record-golden-image="<?= h($goldenImage) ?>"
+                        data-record-art-image="<?= h($artImage) ?>"
+                        data-record-golden-art-image="<?= h($goldenArtImage) ?>"
+                        data-record-framed-image="<?= h($framedImage) ?>"
+                        data-record-golden-framed-image="<?= h($goldenFramedImage) ?>"
+                        data-record-horizontal-image="<?= h($card['horizontal_image_url'] ?? '') ?>"
+                        data-record-golden-horizontal-image="<?= h($goldenHorizontalImage) ?>"
+                        data-record-golden-id="<?= h($goldenVariant['card_id'] ?? '') ?>"
+                        data-record-golden-dbf="<?= h($goldenVariant['dbf'] ?? '') ?>"
                         data-record-type="<?= h(card_type_label($card['card_type'] ?? 'minion')) ?>"
                         data-record-tier="<?= h($card['tavern_tier']) ?>"
                         data-record-attack="<?= h($card['attack']) ?>"
@@ -4049,13 +4074,24 @@ $workspaceSection = $showApiTokens
                     </div>
                     <button class="button ghost" type="button" data-inspector-close>Закрыть</button>
                 </header>
-                <div class="catalog-inspector-media">
-                    <img src="" alt="" data-inspector-image hidden>
-                    <p data-inspector-image-empty>Изображение отсутствует</p>
-                </div>
+                <section class="catalog-inspector-section catalog-inspector-visuals">
+                    <h3>Все изображения <span data-inspector-field="imageCount">0</span></h3>
+                    <div class="catalog-inspector-gallery" data-inspector-images></div>
+                    <p class="catalog-inspector-empty" data-inspector-image-empty>Изображения отсутствуют</p>
+                </section>
+                <section class="catalog-inspector-section catalog-inspector-identifiers">
+                    <h3>Идентификаторы и API</h3>
+                    <dl class="catalog-inspector-id-grid">
+                        <div><dt>ID записи</dt><dd data-inspector-field="internalId">—</dd></div>
+                        <div><dt>card_id</dt><dd data-inspector-field="cardId">—</dd></div>
+                        <div><dt>dbf</dt><dd data-inspector-field="dbf">—</dd></div>
+                        <div><dt>Golden card_id</dt><dd data-inspector-field="goldenCardId">—</dd></div>
+                        <div><dt>Golden dbf</dt><dd data-inspector-field="goldenDbf">—</dd></div>
+                    </dl>
+                    <div class="catalog-inspector-api-links" data-inspector-api-links></div>
+                </section>
                 <dl class="catalog-inspector-facts">
                     <div><dt>Название EN</dt><dd data-inspector-field="englishName">—</dd></div>
-                    <div><dt>DBF ID</dt><dd data-inspector-field="dbf">—</dd></div>
                     <div><dt>Категория</dt><dd data-inspector-field="type">—</dd></div>
                     <div><dt>Таверна</dt><dd data-inspector-field="tier">—</dd></div>
                     <div><dt>Атака</dt><dd data-inspector-field="attack">—</dd></div>
