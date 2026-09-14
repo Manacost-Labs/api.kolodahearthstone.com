@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+import time
 from datetime import datetime
 from typing import Any, Literal
 
@@ -8,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ..convergence_store import ConvergenceStore
 from ..parser_control import load_resolved_public_dataset
-from ..reliability_telemetry import build_reliability_report
+from ..reliability_telemetry import build_reliability_report, reliability_cache_revision
 from ..source_contracts import (
     HSREPLAY_FRESHNESS_GATED_SOURCE_IDS,
     HSREPLAY_META_FRESHNESS_GATED_SOURCE_IDS,
@@ -19,6 +21,54 @@ from .models import ApiMeta, Envelope, freshest_timestamp, timestamp_is_stale
 
 router = APIRouter(prefix="/v1/system", tags=["v1-system"])
 canonical_router = APIRouter(prefix="/v1", tags=["v1-system"])
+
+_RELIABILITY_REPORT_CACHE_TTL_SECONDS = 15.0
+_reliability_report_cache_lock = threading.Lock()
+_reliability_report_cache_payload: dict[str, Any] | None = None
+_reliability_report_cache_revision: str | None = None
+_reliability_report_cache_at = 0.0
+
+
+def _cached_reliability_report() -> dict[str, Any]:
+    """Return a short-lived report cache, invalidated by telemetry DB writes.
+
+    The public route remains ``Cache-Control: no-store``. This only coalesces
+    duplicate local SQLite aggregations for a report whose inputs are unchanged.
+    """
+
+    global _reliability_report_cache_at
+    global _reliability_report_cache_payload
+    global _reliability_report_cache_revision
+
+    revision = reliability_cache_revision()
+    now = time.monotonic()
+    with _reliability_report_cache_lock:
+        if (
+            _reliability_report_cache_payload is not None
+            and _reliability_report_cache_revision == revision
+            and now - _reliability_report_cache_at
+            < _RELIABILITY_REPORT_CACHE_TTL_SECONDS
+        ):
+            return _reliability_report_cache_payload
+        payload = {
+            **build_reliability_report(),
+            "convergence": ConvergenceStore().public_summary(),
+        }
+        _reliability_report_cache_payload = payload
+        _reliability_report_cache_revision = revision
+        _reliability_report_cache_at = now
+        return payload
+
+
+def _reset_reliability_report_cache_for_tests() -> None:
+    global _reliability_report_cache_at
+    global _reliability_report_cache_payload
+    global _reliability_report_cache_revision
+
+    with _reliability_report_cache_lock:
+        _reliability_report_cache_payload = None
+        _reliability_report_cache_revision = None
+        _reliability_report_cache_at = 0.0
 
 
 class SourceSummary(BaseModel):
@@ -56,9 +106,7 @@ def _public_upstream_freshness(
     data = (dataset or {}).get("data") if isinstance(dataset, dict) else None
     structured = data.get("structured") if isinstance(data, dict) else None
     freshness = (
-        structured.get("upstream_freshness")
-        if isinstance(structured, dict)
-        else None
+        structured.get("upstream_freshness") if isinstance(structured, dict) else None
     )
     if not isinstance(freshness, dict):
         return {"status": "unknown", "reason": "missing_evidence"}, False
@@ -81,13 +129,18 @@ def _public_upstream_freshness(
     ):
         return {"status": "unknown", "reason": "invalid_age"}, False
     body_as_of = freshness.get("body_as_of")
-    if source_id in HSREPLAY_META_FRESHNESS_GATED_SOURCE_IDS and status in {
-        "fresh",
-        "stale",
-    } and (
-        not isinstance(body_as_of, str)
-        or len(body_as_of) > 64
-        or _parse_iso_timestamp(body_as_of) is None
+    if (
+        source_id in HSREPLAY_META_FRESHNESS_GATED_SOURCE_IDS
+        and status
+        in {
+            "fresh",
+            "stale",
+        }
+        and (
+            not isinstance(body_as_of, str)
+            or len(body_as_of) > 64
+            or _parse_iso_timestamp(body_as_of) is None
+        )
     ):
         return {"status": "unknown", "reason": "invalid_body_as_of"}, False
     public = {
@@ -593,10 +646,7 @@ def health() -> Envelope[dict[str, Any]]:
 )
 def parsing_reliability(response: Response) -> Envelope[ReliabilityReport]:
     response.headers["Cache-Control"] = "no-store"
-    report_payload = {
-        **build_reliability_report(),
-        "convergence": ConvergenceStore().public_summary(),
-    }
+    report_payload = _cached_reliability_report()
     report = ReliabilityReport.model_validate(report_payload)
     day = next((window for window in report.windows if window.window == "24h"), None)
     eligible_attempts = day.eligible_attempts if day is not None else 0

@@ -10,6 +10,41 @@ from app.main import app
 client = TestClient(app)
 
 
+def test_reliability_report_cache_reuses_revision_and_invalidates_on_write() -> None:
+    from app.routers import system
+
+    system._reset_reliability_report_cache_for_tests()
+    with (
+        patch(
+            "app.routers.system.reliability_cache_revision",
+            side_effect=["revision-a", "revision-a", "revision-b"],
+        ),
+        patch(
+            "app.routers.system.build_reliability_report",
+            side_effect=[{"version": 1}, {"version": 2}],
+        ) as build,
+        patch(
+            "app.routers.system.ConvergenceStore.public_summary",
+            side_effect=[{"chains": 1}, {"chains": 2}],
+        ) as convergence,
+    ):
+        assert system._cached_reliability_report() == {
+            "version": 1,
+            "convergence": {"chains": 1},
+        }
+        assert system._cached_reliability_report() == {
+            "version": 1,
+            "convergence": {"chains": 1},
+        }
+        assert system._cached_reliability_report() == {
+            "version": 2,
+            "convergence": {"chains": 2},
+        }
+
+    assert build.call_count == 2
+    assert convergence.call_count == 2
+
+
 def test_v1_sources_returns_registry_envelope() -> None:
     fetched_at = datetime.now(UTC).isoformat()
 
