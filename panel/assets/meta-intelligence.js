@@ -2,7 +2,7 @@
 
 (() => {
   const state = {
-    epoch: 0, controllers: new Set(), view: "archetypes", format: "standard",
+    epoch: 0, controllers: new Set(), ready: false, view: "archetypes", format: "standard",
     scope: null, health: null, budget: null, rows: [], selected: null, detail: null,
     detailTab: "decks", selectedDecks: new Set(), deckSort: "games", minDeckGames: 0,
     signalState: "", signalKind: "", requestSequence: 0,
@@ -101,7 +101,7 @@
   function renderScopeOptions() {
     const select = inside("#meta-scope");
     const available = (state.health?.scopes || []).filter((item) => item.format === state.format);
-    available.sort((a,b) => Number(b.rank === "legend") - Number(a.rank === "legend") || Number(b.period === "past_week") - Number(a.period === "past_week") || b.latest.localeCompare(a.latest));
+    available.sort((a,b) => Number(b.rank === "legend") - Number(a.rank === "legend") || Number(b.period === "past_week") - Number(a.period === "past_week") || String(b.latest || "").localeCompare(String(a.latest || "")));
     const previous = state.scope && JSON.stringify([state.scope.rank,state.scope.period,state.scope.patch]);
     select.innerHTML = available.length ? available.map((item) => {
       const value = JSON.stringify([item.rank,item.period,item.patch]);
@@ -120,6 +120,7 @@
 
   async function load() {
     abortRequests();
+    state.ready = false;
     inside("#meta-error").hidden = true;
     inside("#meta-content").setAttribute("aria-busy", "true");
     inside("#meta-refresh").disabled = true;
@@ -127,6 +128,7 @@
       [state.health,state.budget] = await Promise.all([request("/health"),request("/budget")]);
       renderScopeOptions();
       renderSummary();
+      state.ready = true;
       await renderView();
     } finally {
       if (root()) { inside("#meta-content").setAttribute("aria-busy", "false"); inside("#meta-refresh").disabled = false; }
@@ -254,8 +256,20 @@
       const button = event.target.closest("button");
       if (!button) return;
       if (button.id === "meta-refresh") load().catch(showError);
-      if (button.dataset.metaView) { state.view = button.dataset.metaView; abortRequests(); renderView().catch(showError); }
-      if (button.dataset.metaFormat) { state.format = button.dataset.metaFormat; container.querySelectorAll("[data-meta-format]").forEach((item) => item.setAttribute("aria-pressed", String(item === button))); renderScopeOptions(); renderView().catch(showError); }
+      if (button.dataset.metaView) {
+        state.view = button.dataset.metaView;
+        renderTabs();
+        if (!state.ready) return;
+        abortRequests();
+        renderView().catch(showError);
+      }
+      if (button.dataset.metaFormat) {
+        state.format = button.dataset.metaFormat;
+        container.querySelectorAll("[data-meta-format]").forEach((item) => item.setAttribute("aria-pressed", String(item === button)));
+        if (!state.ready) return;
+        renderScopeOptions();
+        renderView().catch(showError);
+      }
       if (button.dataset.metaArch) openArchetype(button.dataset.metaArch).catch(showError);
       if (button.dataset.metaDetailTab) { state.detailTab = button.dataset.metaDetailTab; renderArchetypeDetail(); }
       if (button.id === "meta-compare") compareSelected().catch(showError);
@@ -270,7 +284,7 @@
     });
     container.addEventListener("change", (event) => {
       const input = event.target;
-      if (input.id === "meta-scope") { abortRequests(); selectScope(); renderView().catch(showError); }
+      if (input.id === "meta-scope" && state.ready) { abortRequests(); selectScope(); renderView().catch(showError); }
       if (input.matches("[data-meta-select-deck]")) {
         if (input.checked && state.selectedDecks.size >= 2) { input.checked = false; return; }
         if (input.checked) state.selectedDecks.add(input.dataset.metaSelectDeck); else state.selectedDecks.delete(input.dataset.metaSelectDeck);
