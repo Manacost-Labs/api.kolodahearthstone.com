@@ -499,12 +499,11 @@ app.include_router(meta_intelligence_router, dependencies=[Depends(require_admin
 
 
 @app.get("/ui/meta-intelligence", include_in_schema=False)
-def meta_intelligence_panel() -> FileResponse:
-    return FileResponse(WEB_DIR / "meta-intelligence.html", headers={
+def meta_intelligence_panel() -> RedirectResponse:
+    return RedirectResponse("/ui#meta-lab", headers={
         "Cache-Control": "private, no-store",
         "Referrer-Policy": "no-referrer",
         "X-Content-Type-Options": "nosniff",
-        "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
     })
 
 

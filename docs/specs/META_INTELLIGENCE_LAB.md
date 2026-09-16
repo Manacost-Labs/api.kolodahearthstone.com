@@ -7,7 +7,9 @@ No WordPress changes, public recommendations, notifications or automatic publish
 
 ## Entry points
 
-- Panel: `/ui/meta-intelligence`. Its public HTML shell contains no research data.
+- Panel: `/ui#meta-lab`, integrated into the existing API panel and source sidebar.
+  The legacy `/ui/meta-intelligence` URL redirects to this view. Its public HTML
+  shell contains no research data.
 - Research API: `/v1/meta-intelligence/*`, protected by the existing `require_admin`
   dependency and `X-API-Key`. Missing server key fails closed.
 - API responses, including auth errors, are `private, no-store`, excluded from the

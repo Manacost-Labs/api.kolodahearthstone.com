@@ -1,198 +1,342 @@
 "use strict";
-(() => {
-  const $ = (q) => document.querySelector(q);
-  const escape = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-  const num = (v, digits = 0) => v == null ? "—" : Number(v).toLocaleString("ru-RU", {maximumFractionDigits: digits, minimumFractionDigits: digits});
-  const pct = (v) => v == null ? "—" : `${num(v, 1)}%`;
-  const signed = (v) => v == null ? "—" : `${v > 0 ? "+" : ""}${num(v, 1)}`;
-  const date = (v) => v ? new Date(v).toLocaleString("ru-RU", {day:"2-digit", month:"short", hour:"2-digit", minute:"2-digit"}) : "—";
-  const ranks = {all:"Все ранги",legend:"Legend",diamond_4to1:"Diamond 4–1",top_legend:"Top Legend",top_5k:"Top 5K",unknown:"Ранг не указан"};
-  const periods = {past_week:"7 дней",past_day:"24 часа",unknown:"Период не указан"};
-  const states = {fresh:"Свежие",stale:"Устарели",cached:"Последние доступные",missing:"Нет данных",observing:"Наблюдение",early:"Ранний",confirmed:"Подтверждён",rejected:"Не подтвердился"};
-  const kinds = {popularity_rise:"Рост популярности",popularity_drop:"Снижение популярности",winrate_shift:"Изменение винрейта",matchup_shift:"Изменение матчапа",deck_variant_detected:"Новая сборка",streamer_burst:"Интерес стримеров"};
-  const badge = (state) => `<span class="badge ${escape(state)}">${escape(states[state] || state)}</span>`;
-  let key = "", epoch = 0, view = "archetypes", format = "standard", scope = null;
-  let health = null, budget = null, rows = [], selected = null, detail = null, tab = "decks", selectedDecks = new Set(), archRequest = 0;
-  let signalState = "", signalKind = "", deckSort = "games", minDeckGames = 0;
-  const controllers = new Set();
 
-  function renew() { epoch++; controllers.forEach((c) => c.abort()); controllers.clear(); }
-  function announce(message) { $("#status").textContent = message; }
-  function error(err) {
-    if (err.name === "AbortError") return;
-    $("#error").textContent = err.message || "Не удалось загрузить данные. Повторите попытку.";
-    $("#error").hidden = false;
+(() => {
+  const state = {
+    key: "", epoch: 0, controllers: new Set(), view: "archetypes", format: "standard",
+    scope: null, health: null, budget: null, rows: [], selected: null, detail: null,
+    detailTab: "decks", selectedDecks: new Set(), deckSort: "games", minDeckGames: 0,
+    signalState: "", signalKind: "", requestSequence: 0,
+  };
+  const ranks = {all:"Все ранги",legend:"Legend",diamond:"Diamond",diamond_4to1:"Diamond 4–1",diamond_to_legend:"Diamond → Legend",top_legend:"Top Legend",top_5k:"Top 5K",top_500:"Top 500",top_100:"Top 100",unknown:"Ранг не указан"};
+  const periods = {past_day:"24 часа",past_3_days:"3 дня",past_week:"7 дней",past_2_weeks:"14 дней",most_wanted:"Текущий сезон",unknown:"Период не указан"};
+  const labels = {fresh:"Свежие",stale:"Устарели",cached:"Последние доступные",missing:"Нет данных",observing:"Наблюдение",early:"Ранний сигнал",confirmed:"Подтверждён",rejected:"Не подтвердился"};
+  const signalKinds = {popularity_rise:"Рост популярности",popularity_drop:"Снижение популярности",winrate_shift:"Изменение винрейта",matchup_shift:"Изменение матчапа",deck_variant_detected:"Новая сборка",streamer_burst:"Интерес стримеров"};
+  const periodLabel = (value) => periods[value] || (String(value).startsWith("patch_") ? `Патч ${String(value).slice(6)}` : value);
+
+  const root = () => document.getElementById("meta-lab-root");
+  const inside = (selector) => root()?.querySelector(selector);
+  const escape = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[char]);
+  const number = (value, digits = 0) => value == null ? "—" : Number(value).toLocaleString("ru-RU", {maximumFractionDigits:digits, minimumFractionDigits:digits});
+  const percent = (value) => value == null ? "—" : `${number(value, 1)}%`;
+  const signed = (value) => value == null ? "—" : `${value > 0 ? "+" : ""}${number(value, 1)}`;
+  const date = (value) => value ? new Date(value).toLocaleString("ru-RU", {day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}) : "—";
+  const badge = (value) => `<span class="meta-state meta-state--${escape(value)}">${escape(labels[value] || value)}</span>`;
+  const empty = (title, text) => `<div class="meta-empty"><strong>${escape(title)}</strong><span>${escape(text)}</span></div>`;
+
+  function abortRequests() {
+    state.epoch += 1;
+    state.controllers.forEach((controller) => controller.abort());
+    state.controllers.clear();
   }
+
+  function activateNavigation(button) {
+    document.querySelectorAll(".source-btn").forEach((item) => item.classList.remove("active"));
+    button?.classList.add("active");
+    document.querySelectorAll(".topnav-link").forEach((link) => link.removeAttribute("aria-current"));
+    document.getElementById("meta-lab-nav")?.setAttribute("aria-current", "page");
+    document.getElementById("placeholder")?.classList.add("hidden");
+    document.getElementById("detail")?.classList.remove("hidden");
+    history.replaceState(null, "", "/ui#meta-lab");
+  }
+
+  function shell() {
+    return `
+      <section id="meta-lab-root" aria-label="Meta Intelligence Lab">
+        <div class="meta-lab-heading">
+          <div><span class="block-eyebrow">Meta Intelligence Lab</span><h2>Глубокий анализ меты</h2><p class="meta-line">Сравнение сборок, эффективность карт, матчапы и история изменений.</p></div>
+          <div class="meta-lab-heading-actions"><button class="mini-action" id="meta-refresh" hidden>Обновить</button><button class="mini-action" id="meta-logout" hidden>Выйти</button></div>
+        </div>
+        <section class="block block--accent meta-login" id="meta-login">
+          <div><span class="block-eyebrow">Закрытый раздел</span><h3>Доступ к аналитике</h3><p class="meta-line">Используйте действующий ключ нашего API. Ключ остаётся только в памяти этой вкладки.</p></div>
+          <form id="meta-login-form" class="meta-login-form"><label for="meta-api-key">Ключ API</label><input id="meta-api-key" type="password" autocomplete="off" spellcheck="false" required><button class="mini-action meta-primary" type="submit">Открыть Meta Lab</button></form>
+        </section>
+        <div id="meta-app" hidden>
+          <nav class="meta-tabs" aria-label="Разделы Meta Lab">
+            <button class="mini-action active" data-meta-view="archetypes">Архетипы</button><button class="mini-action" data-meta-view="cards">Карты</button><button class="mini-action" data-meta-view="signals">Сигналы</button><button class="mini-action" data-meta-view="health">Качество данных</button>
+          </nav>
+          <section class="block meta-toolbar" id="meta-filters">
+            <div class="meta-format" role="group" aria-label="Формат"><button data-meta-format="standard" aria-pressed="true">Standard</button><button data-meta-format="wild" aria-pressed="false">Wild</button></div>
+            <label>Срез данных<select id="meta-scope" aria-label="Ранг, период и патч"></select></label><label>Поиск<input id="meta-search" type="search" autocomplete="off" placeholder="Архетип или карта"></label>
+          </section>
+          <div class="meta-summary" id="meta-summary"></div><div id="meta-error" class="block warn" role="alert" hidden></div><div id="meta-content" aria-busy="false"></div>
+        </div>
+        <dialog class="meta-dialog" id="meta-dialog"><div class="meta-dialog-head"><h3 id="meta-dialog-title">Подробности</h3><button class="mini-action" data-meta-close>Закрыть</button></div><div id="meta-dialog-body"></div></dialog>
+      </section>`;
+  }
+
+  function renderLogin(message = "") {
+    const login = inside("#meta-login");
+    if (!login) return;
+    login.hidden = false;
+    inside("#meta-app").hidden = true;
+    inside("#meta-refresh").hidden = true;
+    inside("#meta-logout").hidden = true;
+    if (message) login.querySelector(".meta-line").textContent = message;
+    requestAnimationFrame(() => inside("#meta-api-key")?.focus());
+  }
+
+  function showApp() {
+    inside("#meta-login").hidden = true;
+    inside("#meta-app").hidden = false;
+    inside("#meta-refresh").hidden = false;
+    inside("#meta-logout").hidden = false;
+  }
+
+  function showError(error) {
+    if (error?.name === "AbortError" || !root()) return;
+    const box = inside("#meta-error");
+    box.textContent = error?.message || "Не удалось загрузить данные.";
+    box.hidden = false;
+  }
+
   async function request(path) {
-    const captured = epoch, controller = new AbortController();
-    controllers.add(controller);
+    const captured = state.epoch;
+    const controller = new AbortController();
+    state.controllers.add(controller);
     try {
-      const response = await fetch(`/v1/meta-intelligence${path}`, {headers:{"X-API-Key":key,Accept:"application/json"},cache:"no-store",signal:controller.signal});
-      if (captured !== epoch) throw new DOMException("Cancelled", "AbortError");
+      const response = await fetch(`/v1/meta-intelligence${path}`, {headers:{"X-API-Key":state.key,Accept:"application/json"},cache:"no-store",signal:controller.signal});
+      if (captured !== state.epoch || !root()) throw new DOMException("Cancelled", "AbortError");
       if (!response.ok) {
-        if (response.status === 401) { logout(); throw new Error("Ключ доступа не подошёл. Введите действующий ключ."); }
-        if (response.status === 503) throw new Error("Лаборатория ещё не включена в настройках сервиса.");
+        if (response.status === 401 || response.status === 403) {
+          state.key = "";
+          renderLogin("Ключ не подошёл. Введите действующий ключ API.");
+          throw new Error("Доступ не подтверждён.");
+        }
         if (response.status === 404) throw new Error("Для выбранного среза этих данных пока нет.");
-        throw new Error("Сервис не смог вернуть данные. Попробуйте обновить страницу.");
+        if (response.status === 503) throw new Error("Meta Lab временно выключен в API.");
+        throw new Error("API не вернул данные. Попробуйте обновить раздел.");
       }
-      return await response.json();
-    } finally { controllers.delete(controller); }
+      return response.json();
+    } finally {
+      state.controllers.delete(controller);
+    }
   }
-  function query(extra = {}) { return new URLSearchParams({...scope,...extra}).toString(); }
-  function empty(title, description) { return `<div class="empty"><h3>${escape(title)}</h3><p>${escape(description)}</p></div>`; }
-  function scopeOptions() {
-    const available = (health.scopes || []).filter((s) => s.format === format);
-    available.sort((a,b) => Number(b.rank === "legend")-Number(a.rank === "legend") || b.latest.localeCompare(a.latest));
-    const previous = scope && JSON.stringify([scope.rank,scope.period,scope.patch]);
-    $("#scope-select").innerHTML = available.length ? available.map((s) => `<option value="${escape(JSON.stringify([s.rank,s.period,s.patch]))}">${escape(ranks[s.rank] || s.rank)} · ${escape(periods[s.period] || s.period)} · ${escape(s.patch === "unknown" ? "Патч не указан" : s.patch.replace("patch_", "Патч "))}</option>`).join("") : '<option value="">Нет сохранённых срезов</option>';
-    if (available.some((s) => JSON.stringify([s.rank,s.period,s.patch]) === previous)) $("#scope-select").value = previous;
-    applyScope();
-  }
-  function applyScope() {
-    const value = $("#scope-select").value;
+
+  function scopeQuery(extra = {}) { return new URLSearchParams({...state.scope,...extra}).toString(); }
+
+  function selectScope() {
+    const value = inside("#meta-scope")?.value;
     const parts = value ? JSON.parse(value) : null;
-    scope = parts ? {format,rank:parts[0],period:parts[1],patch:parts[2]} : null;
-    selected = null; detail = null; selectedDecks.clear();
+    state.scope = parts ? {format:state.format,rank:parts[0],period:parts[1],patch:parts[2]} : null;
+    state.selected = null;
+    state.detail = null;
+    state.selectedDecks.clear();
   }
-  function summary() {
-    $("#summary").innerHTML = `<span><strong>${num(health.scopes.reduce((n,s) => n+s.snapshots,0))}</strong> снимков в истории</span><span><strong>${num(budget.monthly_spent_hsguru)}</strong> credits учтено за месяц</span><span>${budget.month_complete ? "Учёт за полный месяц" : "Учёт начат не с начала месяца"}</span>`;
-    $("#demo-notice").hidden = !health.demo;
+
+  function renderScopeOptions() {
+    const select = inside("#meta-scope");
+    const available = (state.health?.scopes || []).filter((item) => item.format === state.format);
+    available.sort((a,b) => Number(b.rank === "legend") - Number(a.rank === "legend") || Number(b.period === "past_week") - Number(a.period === "past_week") || b.latest.localeCompare(a.latest));
+    const previous = state.scope && JSON.stringify([state.scope.rank,state.scope.period,state.scope.patch]);
+    select.innerHTML = available.length ? available.map((item) => {
+      const value = JSON.stringify([item.rank,item.period,item.patch]);
+      const patch = item.patch === "unknown" ? "патч не указан" : item.patch.replace("patch_", "патч ");
+      return `<option value="${escape(value)}">${escape(ranks[item.rank] || item.rank)} · ${escape(periodLabel(item.period))} · ${escape(patch)}</option>`;
+    }).join("") : '<option value="">Нет сохранённых срезов</option>';
+    if (available.some((item) => JSON.stringify([item.rank,item.period,item.patch]) === previous)) select.value = previous;
+    selectScope();
   }
+
+  function renderSummary() {
+    const total = (state.health?.scopes || []).reduce((sum,item) => sum + item.snapshots, 0);
+    const budgetText = state.budget?.month_complete ? `${number(state.budget.monthly_spent_hsguru)} credits за месяц` : "Расход с начала месяца ещё не подтверждён";
+    inside("#meta-summary").innerHTML = `<span><b>${number(total)}</b> снимков</span><span><b>${number(state.health?.scopes?.length || 0)}</b> срезов</span><span>${escape(budgetText)}</span>`;
+  }
+
   async function load() {
-    renew(); $("#error").hidden = true; $("#content").setAttribute("aria-busy", "true");
-    $("#refresh").disabled = true;
+    abortRequests();
+    showApp();
+    inside("#meta-error").hidden = true;
+    inside("#meta-content").setAttribute("aria-busy", "true");
+    inside("#meta-refresh").disabled = true;
     try {
-      [health,budget] = await Promise.all([request("/health"),request("/budget")]);
-      scopeOptions(); summary(); await renderView();
-    } finally { $("#refresh").disabled = false; $("#content").setAttribute("aria-busy", "false"); }
+      [state.health,state.budget] = await Promise.all([request("/health"),request("/budget")]);
+      renderScopeOptions();
+      renderSummary();
+      await renderView();
+    } finally {
+      if (root()) { inside("#meta-content").setAttribute("aria-busy", "false"); inside("#meta-refresh").disabled = false; }
+    }
   }
-  function renderNav() {
-    document.querySelectorAll("[data-view]").forEach((button) => {
-      const active = button.dataset.view === view;
+
+  function renderTabs() {
+    root()?.querySelectorAll("[data-meta-view]").forEach((button) => {
+      const active = button.dataset.metaView === state.view;
       button.classList.toggle("active", active);
-      if (active) button.setAttribute("aria-current", "page"); else button.removeAttribute("aria-current");
+      button.setAttribute("aria-pressed", String(active));
     });
-    $("#page-title").textContent = {archetypes:"Исследование меты",cards:"Карты в мете",signals:"Изменения меты",health:"Качество и стоимость данных"}[view];
-    $("#filters").hidden = view === "health";
-    $("#search").placeholder = view === "cards" ? "Название карты…" : "Название архетипа…";
+    inside("#meta-filters").hidden = state.view === "health";
+    const search = inside("#meta-search");
+    search.closest("label").hidden = state.view === "signals";
+    search.placeholder = state.view === "cards" ? "Название карты" : "Название архетипа";
   }
+
   async function renderView() {
-    renderNav(); $("#error").hidden = true;
-    if (view === "health") { renderHealth(); return; }
-    if (view === "signals") { await renderSignals(); return; }
-    if (!scope) { $("#content").innerHTML = `<div class="panel">${empty("История ещё не собрана", "После первого успешного сбора здесь появятся архетипы, варианты колод и статистика карт.")}</div>`; return; }
-    if (view === "cards") { await renderCards(); return; }
-    const result = await request(`/archetypes?${query({limit:500})}`);
-    rows = result.data; renderArchetypes();
+    renderTabs();
+    inside("#meta-error").hidden = true;
+    if (state.view === "health") return renderHealth();
+    if (state.view === "signals") return renderSignals();
+    if (!state.scope) { inside("#meta-content").innerHTML = empty("История ещё не собрана", "После первого успешного импорта здесь появятся данные."); return; }
+    if (state.view === "cards") return renderCards();
+    const result = await request(`/archetypes?${scopeQuery({limit:500})}`);
+    state.rows = result.data;
+    renderArchetypes();
   }
+
   function renderArchetypes() {
-    const term = $("#search").value.toLocaleLowerCase("ru-RU");
-    const visible = rows.filter((r) => r.archetype.toLocaleLowerCase("ru-RU").includes(term));
-    if (!visible.length) { $("#content").innerHTML = `<div class="panel">${empty("Архетипы не найдены", "Измените поиск или выберите другой срез данных.")}</div>`; return; }
-    $("#content").innerHTML = `<div class="workspace-grid"><section class="panel"><div class="panel-header"><h3>Архетипы</h3><span class="badge">${visible.length}</span></div><div class="arch-list">${visible.map((r) => `<button class="arch-row ${r.archetype === selected ? "selected" : ""}" data-arch="${escape(r.archetype)}"><strong>${escape(r.archetype)}</strong><small>${num(r.games)} игр · ${r.decks} сборок</small><span class="wr">${pct(r.winrate)}</span></button>`).join("")}</div></section><section class="panel" id="detail">${empty("Выберите архетип", "Откройте его сборки, карты и историю.")}</section></div>`;
-    openArch(visible.some((r) => r.archetype === selected) ? selected : visible[0].archetype).catch(error);
+    const query = inside("#meta-search").value.toLocaleLowerCase("ru-RU");
+    const visible = state.rows.filter((row) => row.archetype.toLocaleLowerCase("ru-RU").includes(query));
+    if (!visible.length) { inside("#meta-content").innerHTML = empty("Архетипы не найдены", "Измените поиск или выберите другой срез."); return; }
+    inside("#meta-content").innerHTML = `<div class="meta-workspace"><section class="block meta-arch-panel"><div class="meta-section-head"><h3>Архетипы</h3><span class="badge ok">${visible.length}</span></div><div class="meta-arch-list">${visible.map((row) => `<button class="meta-arch ${row.archetype === state.selected ? "active" : ""}" data-meta-arch="${escape(row.archetype)}"><span><b>${escape(row.archetype)}</b><small>${number(row.games)} игр · ${row.decks} сборок</small></span><strong>${percent(row.winrate)}</strong></button>`).join("")}</div></section><section class="block meta-detail" id="meta-detail">${empty("Загрузка", "Получаем подробную статистику архетипа.")}</section></div>`;
+    const next = visible.some((row) => row.archetype === state.selected) ? state.selected : visible[0].archetype;
+    openArchetype(next).catch(showError);
   }
-  async function openArch(name) {
-    const sequence = ++archRequest; selected = name; selectedDecks.clear();
-    document.querySelectorAll("[data-arch]").forEach((b) => b.classList.toggle("selected", b.dataset.arch === name));
-    $("#detail").innerHTML = empty("Загружаем данные…", "");
-    const result = await request(`/archetypes/${encodeURIComponent(name)}?${query()}`);
-    if (sequence !== archRequest || !$("#detail")) return;
-    detail = result; renderDetail();
+
+  async function openArchetype(name) {
+    const sequence = ++state.requestSequence;
+    state.selected = name;
+    state.selectedDecks.clear();
+    root()?.querySelectorAll("[data-meta-arch]").forEach((button) => button.classList.toggle("active", button.dataset.metaArch === name));
+    const result = await request(`/archetypes/${encodeURIComponent(name)}?${scopeQuery()}`);
+    if (sequence !== state.requestSequence || !inside("#meta-detail")) return;
+    state.detail = result;
+    renderArchetypeDetail();
   }
-  function renderDetail() {
-    const row = rows.find((r) => r.archetype === selected);
-    $("#detail").innerHTML = `<div class="detail-title"><span class="eyebrow">${escape(ranks[scope.rank] || scope.rank)} · ${escape(periods[scope.period] || scope.period)}</span><h2>${escape(detail.archetype)}</h2>${badge(row?.freshness?.state || "missing")} <span class="hint">${num(row?.games)} игр · ${pct(row?.popularity_pct)} меты</span>${detail.evidence.some((e) => e.patch_scope !== "single_patch") ? '<p class="hint">Период может включать игры до указанного патча. Подтверждение сигналов ограничено.</p>' : ""}</div><div class="detail-tabs" role="group" aria-label="Данные архетипа">${[["decks","Сборки"],["cards","Карты"],["matchups","Матчапы"],["history","История"]].map(([id,label]) => `<button data-tab="${id}" aria-pressed="${tab === id}">${label}</button>`).join("")}</div><div id="detail-body"></div>`;
-    renderTab().catch(error);
+
+  function renderArchetypeDetail() {
+    const row = state.rows.find((item) => item.archetype === state.selected);
+    const unverified = state.detail.evidence.some((item) => item.patch_scope !== "single_patch");
+    inside("#meta-detail").innerHTML = `<div class="meta-detail-head"><div><span class="block-eyebrow">${escape(ranks[state.scope.rank] || state.scope.rank)} · ${escape(periodLabel(state.scope.period))}</span><h3>${escape(state.detail.archetype)}</h3></div><div>${badge(row?.freshness?.state || "missing")} <span class="meta-kpi">${number(row?.games)} игр · ${percent(row?.popularity_pct)} меты</span></div></div>${unverified ? '<p class="meta-note">Период может включать данные до текущего патча; сигналы по нему не подтверждаются автоматически.</p>' : ""}<div class="meta-subtabs" role="group" aria-label="Данные архетипа">${[["decks","Сборки"],["cards","Карты"],["matchups","Матчапы"],["history","История"]].map(([id,label]) => `<button class="mini-action ${state.detailTab === id ? "active" : ""}" data-meta-detail-tab="${id}">${label}</button>`).join("")}</div><div id="meta-detail-body"></div>`;
+    renderDetailTab().catch(showError);
   }
-  async function renderTab() {
-    const body = $("#detail-body");
-    if (tab === "decks") {
-      const visibleDecks = detail.decks.map((d,i) => ({...d, displayIndex:i})).filter((d) => (d.games || 0) >= minDeckGames).sort((a,b) => (b[deckSort] ?? -1)-(a[deckSort] ?? -1));
-      body.innerHTML = detail.decks.length ? `<div class="signal-controls"><label>Сортировка<select id="deck-sort"><option value="games" ${deckSort === "games" ? "selected" : ""}>По числу игр</option><option value="winrate" ${deckSort === "winrate" ? "selected" : ""}>По винрейту</option></select></label><label>Выборка<select id="deck-games"><option value="0" ${minDeckGames === 0 ? "selected" : ""}>Все сборки</option><option value="500" ${minDeckGames === 500 ? "selected" : ""}>От 500 игр</option><option value="1000" ${minDeckGames === 1000 ? "selected" : ""}>От 1 000 игр</option></select></label></div><div class="table-scroll"><table><thead><tr><th><span class="sr-only">Сравнить</span></th><th>Сборка</th><th class="numeric">Винрейт</th><th class="numeric">Игры</th><th>Состав</th></tr></thead><tbody>${visibleDecks.map((d) => { const i = d.displayIndex; return `<tr><td><input class="table-check" type="checkbox" data-select-deck="${d.id}" aria-label="Выбрать сборку ${i+1} для сравнения" ${selectedDecks.has(d.id) ? "checked" : ""}></td><td><strong>Вариант ${String(i+1).padStart(2,"0")}</strong><small>${d.fresh ? "Свежие данные" : "Свежесть не подтверждена"}</small></td><td class="numeric"><strong class="positive">${pct(d.winrate)}</strong><small>${d.winrate_interval ? `${num(d.winrate_interval[0],1)}–${num(d.winrate_interval[1],1)}%` : "Нет интервала"}</small></td><td class="numeric">${num(d.games)}<small>${d.sample_sufficient ? "Достаточная выборка" : "Мало данных"}</small></td><td><button class="table-action" data-deck="${d.id}">Посмотреть</button></td></tr>`; }).join("") || '<tr><td colspan="5">Нет сборок с такой выборкой.</td></tr>'}</tbody></table></div><div class="compare-dock"><span id="selection-count">Выбрано ${selectedDecks.size} из 2 сборок</span><button id="compare-button" class="primary" ${selectedDecks.size !== 2 ? "disabled" : ""}>Сравнить составы →</button></div><p class="hint">Показаны доступные сборки, а не все сыгранные колоды. Диапазон под винрейтом — приблизительный 95% интервал; он не учитывает различия игроков.</p>` : empty("Сборки пока не собраны", "Обзор меты уже доступен. Подробные сборки появятся после сбора выбранного архетипа.");
-    } else if (tab === "cards") {
-      body.innerHTML = detail.cards.length ? `<p class="hint">Показатели источника для всего архетипа. Не означают эффект карты в каждой конкретной сборке.</p><div class="table-scroll"><table><thead><tr><th>Карта</th><th class="numeric">Муллиган</th><th class="numeric">Добор</th><th class="numeric">Оставлена</th></tr></thead><tbody>${detail.cards.map((c) => `<tr><td>${escape(c.card_name || c.id)}<small>${c.sample_sufficient ? "Выборка достаточна" : "Мало наблюдений"}</small></td>${["mulligan","drawn","kept"].map((m) => `<td class="numeric"><strong class="${c[`${m}_impact`] >= 0 ? "positive" : "negative"}">${signed(c[`${m}_impact`])}</strong><small>${num(c[`${m}_count`])} наблюдений</small></td>`).join("")}</tr>`).join("")}</tbody></table></div>` : empty("Карточной статистики пока нет", "Выберите другой срез или дождитесь подробного сбора этого архетипа.");
-    } else if (tab === "matchups") {
-      body.innerHTML = detail.matchups.length ? `<p class="hint">Матчапы архетипа против классов. Они не являются статистикой каждой отдельной сборки.</p><div class="table-scroll"><table><thead><tr><th>Соперник</th><th class="numeric">Винрейт</th><th class="numeric">Игры</th><th class="numeric">Доля</th></tr></thead><tbody>${detail.matchups.map((m) => `<tr><td>${escape(m.class_name || m.class || m.class_key || m.opponent)}</td><td class="numeric"><strong>${pct(m.winrate)}</strong></td><td class="numeric">${num(m.games)}</td><td class="numeric">${pct(m.share_pct)}</td></tr>`).join("")}</tbody></table></div>` : empty("Матчапы пока не собраны", "Данные по соперникам появятся после подробного сбора.");
-    } else {
-      body.innerHTML = empty("Загружаем историю…", "");
-      const name = selected, result = await request(`/archetypes/${encodeURIComponent(selected)}/timeline?${query()}`);
-      if (selected !== name || tab !== "history") return;
-      body.innerHTML = result.data.length ? `${chart(result.data)}<div class="table-scroll"><table><thead><tr><th>Снимок</th><th class="numeric">Винрейт</th><th class="numeric">Популярность</th><th class="numeric">Игры</th></tr></thead><tbody>${result.data.map((r) => `<tr><td><button class="table-action" data-snapshot="${r.snapshot_id}">${date(r.fetched_at)}</button></td><td class="numeric">${pct(r.winrate)}</td><td class="numeric">${pct(r.popularity_pct)}</td><td class="numeric">${num(r.games)}</td></tr>`).join("")}</tbody></table></div>` : empty("История ещё накапливается", "После нескольких сборов здесь можно будет сравнивать изменения.");
+
+  async function renderDetailTab() {
+    const body = inside("#meta-detail-body");
+    if (!body) return;
+    if (state.detailTab === "decks") {
+      const decks = state.detail.decks.map((deck,index) => ({...deck,index})).filter((deck) => (deck.games || 0) >= state.minDeckGames).sort((a,b) => (b[state.deckSort] ?? -1) - (a[state.deckSort] ?? -1));
+      if (!state.detail.decks.length) { body.innerHTML = empty("Сборки пока не собраны", "Обзор меты доступен, подробные варианты появятся после обновления каталога."); return; }
+      body.innerHTML = `<div class="meta-inline-filters"><label>Сортировка<select id="meta-deck-sort"><option value="games">По числу игр</option><option value="winrate">По винрейту</option></select></label><label>Минимум игр<select id="meta-deck-games"><option value="0">Все</option><option value="500">500</option><option value="1000">1 000</option></select></label></div><div class="table-scroll"><table class="simple meta-table"><thead><tr><th>Сравнить</th><th>Сборка</th><th>Винрейт</th><th>Игры</th><th>Состав</th></tr></thead><tbody>${decks.map((deck) => `<tr><td><input type="checkbox" data-meta-select-deck="${deck.id}" aria-label="Выбрать сборку ${deck.index + 1}" ${state.selectedDecks.has(deck.id) ? "checked" : ""}></td><td><b>Вариант ${String(deck.index + 1).padStart(2,"0")}</b><small>${deck.fresh ? "Свежие данные" : "Свежесть не подтверждена"}</small></td><td><b class="metric-good">${percent(deck.winrate)}</b><small>${deck.winrate_interval ? `${number(deck.winrate_interval[0],1)}–${number(deck.winrate_interval[1],1)}%` : "нет интервала"}</small></td><td>${number(deck.games)}<small>${deck.sample_sufficient ? "выборка достаточна" : "мало данных"}</small></td><td><button class="mini-action" data-meta-deck="${deck.id}">Открыть</button></td></tr>`).join("") || '<tr><td colspan="5">Нет сборок с такой выборкой.</td></tr>'}</tbody></table></div><div class="meta-compare-bar"><span id="meta-selection-count">Выбрано ${state.selectedDecks.size} из 2</span><button class="mini-action meta-primary" id="meta-compare" ${state.selectedDecks.size !== 2 ? "disabled" : ""}>Сравнить составы</button></div><p class="meta-note">Винрейт описывает сыгранную выборку. Он не доказывает, что конкретная замена карты стала причиной результата.</p>`;
+      inside("#meta-deck-sort").value = state.deckSort;
+      inside("#meta-deck-games").value = String(state.minDeckGames);
+      return;
     }
+    if (state.detailTab === "cards") {
+      body.innerHTML = state.detail.cards.length ? `<p class="meta-note">Метрики относятся ко всему архетипу, а не к каждой отдельной сборке.</p><div class="table-scroll"><table class="simple meta-table"><thead><tr><th>Карта</th><th>Муллиган</th><th>Добор</th><th>Оставлена</th></tr></thead><tbody>${state.detail.cards.map((card) => `<tr><td><b>${escape(card.card_name || card.id)}</b><small>${card.sample_sufficient ? "выборка достаточна" : "мало наблюдений"}</small></td>${["mulligan","drawn","kept"].map((metric) => `<td><b class="${card[`${metric}_impact`] >= 0 ? "metric-good" : "metric-bad"}">${signed(card[`${metric}_impact`])}</b><small>${number(card[`${metric}_count`])} наблюдений</small></td>`).join("")}</tr>`).join("")}</tbody></table></div>` : empty("Карточной статистики пока нет", "Выберите другой срез или дождитесь обновления анализа.");
+      return;
+    }
+    if (state.detailTab === "matchups") {
+      body.innerHTML = state.detail.matchups.length ? `<p class="meta-note">Матчапы архетипа против классов; для отдельных сборок статистика не смешивается.</p><div class="meta-matchups">${state.detail.matchups.map((matchup) => `<div><span>${escape(matchup.class_label || matchup.class_key)}</span><b class="${matchup.winrate >= 50 ? "metric-good" : "metric-bad"}">${percent(matchup.winrate)}</b><small>${number(matchup.games)} игр</small></div>`).join("")}</div>` : empty("Матчапов пока нет", "Источник не опубликовал полную выборку для этого архетипа.");
+      return;
+    }
+    const timeline = await request(`/archetypes/${encodeURIComponent(state.selected)}/timeline?${scopeQuery()}`);
+    if (!timeline.data.length) { body.innerHTML = empty("История ещё не накоплена", "Она появится после нескольких успешных обновлений."); return; }
+    const points = [...timeline.data].reverse();
+    const width = 680, height = 150;
+    const rates = points.map((point) => point.winrate).filter((value) => value != null);
+    const low = Math.min(...rates,45) - 1, high = Math.max(...rates,55) + 1;
+    const coordinates = points.map((point,index) => { const x = points.length === 1 ? width / 2 : 18 + index * (width - 36) / (points.length - 1); const y = point.winrate == null ? height / 2 : 14 + (high - point.winrate) * (height - 32) / Math.max(1, high - low); return `${x},${y}`; }).join(" ");
+    body.innerHTML = `<div class="meta-chart"><svg viewBox="0 0 ${width} ${height}" role="img" aria-label="История винрейта"><line x1="18" y1="${height / 2}" x2="${width - 18}" y2="${height / 2}"></line><polyline points="${coordinates}"></polyline></svg></div><div class="meta-timeline">${points.map((point) => `<button class="mini-action" data-meta-snapshot="${point.snapshot_id}"><b>${percent(point.winrate)}</b><span>${date(point.fetched_at)}</span><small>${number(point.games)} игр</small></button>`).join("")}</div>`;
   }
-  function chart(data) {
-    const eligible = data.filter((r) => r.winrate != null);
-    if (!eligible.length) return "";
-    const values = eligible.filter((r) => r.source_id === eligible[0].source_id).slice(0,12).reverse();
-    if (values.length < 2) return '<p class="hint">Для графика нужны как минимум два снимка одного источника.</p>';
-    const low = Math.floor(Math.min(...values.map((r) => r.winrate))-1), high = Math.ceil(Math.max(...values.map((r) => r.winrate))+1);
-    const first = Date.parse(values[0].fetched_at), last = Date.parse(values.at(-1).fetched_at);
-    const points = values.map((r) => [45+(Date.parse(r.fetched_at)-first)/Math.max(last-first,1)*475,130-(r.winrate-low)/(high-low)*110]);
-    return `<div class="chart"><h3>Винрейт во времени</h3><svg viewBox="0 0 550 165" role="img" aria-label="История винрейта: от ${pct(values[0].winrate)} до ${pct(values.at(-1).winrate)}"><line class="chart-grid" x1="45" y1="20" x2="520" y2="20"/><line class="chart-grid" x1="45" y1="130" x2="520" y2="130"/><text x="0" y="24">${high}%</text><text x="0" y="134">${low}%</text><polyline class="chart-line" points="${points.map((p) => p.join(",")).join(" ")}"/>${points.map(([x,y]) => `<circle class="chart-dot" cx="${x}" cy="${y}" r="4"/>`).join("")}<text x="45" y="158">${date(values[0].fetched_at)}</text><text x="520" y="158" text-anchor="end">${date(values.at(-1).fetched_at)}</text></svg></div>`;
-  }
-  function showDialog(title, html) { $("#comparison-title").textContent = title; $("#comparison-content").innerHTML = html; if (!$("#comparison").open) $("#comparison").showModal(); }
-  async function compareSelected() {
-    const [left,right] = [...selectedDecks], result = await request(`/archetypes/${encodeURIComponent(selected)}/compare?${query({left,right})}`);
-    showDialog("Сравнение сборок", `<div class="duel">${[result.left,result.right].map((d,i) => `<div><span class="eyebrow">СБОРКА ${i === 0 ? "A" : "B"}</span><strong>${pct(d.winrate)}</strong><small>${num(d.games)} игр · ${d.fresh ? "свежие" : "свежесть не подтверждена"}</small></div>`).join("")}</div><p class="hint">${escape(result.reason)} ${!result.comparable ? "Для надёжного сравнения не хватает свежести, состава или размера выборки." : ""}</p><div class="table-scroll"><table><thead><tr><th>Изменения состава</th><th class="numeric">A</th><th class="numeric">B</th></tr></thead><tbody>${result.changes.map((c) => `<tr><td>${escape(c.name)}${c.sideboard_owner ? `<small>Дополнительный набор #${c.sideboard_owner}</small>` : ""}</td><td class="numeric">${c.left_count || "—"}</td><td class="numeric">${c.right_count || "—"}</td></tr>`).join("") || '<tr><td colspan="3">Различий в доступных составах не найдено.</td></tr>'}</tbody></table></div>`);
-  }
+
   async function renderCards() {
-    const result = await request(`/cards?${query({q:$("#search").value})}`);
-    $("#content").innerHTML = result.data.length ? `<p class="hint">Одна карта — разные архетипы. Показатели не объединяются в общий «рейтинг силы».</p><div class="cards-grid">${result.data.map((c) => `<article class="card-entry"><h3>${escape(c.name)}</h3><ul>${c.archetypes.map((a) => `<li><span>${escape(a.archetype)}<small>${num(a.mulligan_count)} наблюдений · ${escape(states[a.evidence.freshness.state])}</small></span><span><strong class="${a.mulligan_impact >= 0 ? "positive" : "negative"}">${signed(a.mulligan_impact)}</strong><small>муллиган</small></span></li>`).join("")}</ul></article>`).join("")}</div>` : `<div class="panel">${empty("Карты не найдены", "Измените поиск или выберите срез с карточной статистикой.")}</div>`;
+    const result = await request(`/cards?${scopeQuery({q:inside("#meta-search").value})}`);
+    inside("#meta-content").innerHTML = result.data.length ? `<section class="block"><div class="meta-section-head"><h3>Карты в выбранной мете</h3><span class="badge ok">${result.data.length}</span></div><p class="meta-note">Одна карта может иметь разные показатели в разных архетипах. Общий «рейтинг силы» не рассчитывается.</p><div class="meta-card-grid">${result.data.map((card) => `<article><h4>${escape(card.name)}</h4>${card.archetypes.map((item) => `<div><span>${escape(item.archetype)}<small>${number(item.mulligan_count)} наблюдений</small></span><b class="${item.mulligan_impact >= 0 ? "metric-good" : "metric-bad"}">${signed(item.mulligan_impact)}</b></div>`).join("")}</article>`).join("")}</div></section>` : empty("Карты не найдены", "Измените поиск или выберите срез с карточной статистикой.");
   }
+
   async function renderSignals() {
-    const params = scope ? {...scope} : {format};
-    if (signalState) params.state = signalState; if (signalKind) params.kind = signalKind;
-    const result = await request(`/signals?${new URLSearchParams(params)}`);
-    const options = (map,value) => Object.entries(map).map(([k,v]) => `<option value="${k}" ${value === k ? "selected" : ""}>${escape(v)}</option>`).join("");
-    $("#content").innerHTML = `<section class="panel"><div class="signal-controls"><label>Состояние<select id="signal-state"><option value="">Все состояния</option>${options(Object.fromEntries(["observing","early","confirmed","rejected"].map((s) => [s,states[s]])),signalState)}</select></label><label>Тип изменения<select id="signal-kind"><option value="">Все типы</option>${options(kinds,signalKind)}</select></label></div>${result.data.length ? result.data.map((s) => `<article class="signal-card">${badge(s.state)} <small>${date(s.detected_at)}</small><h3>${escape(s.archetype)} · ${escape(kinds[s.kind])}</h3><p>${escape(s.reason)}</p><button class="table-action" data-signal="${s.id}">Посмотреть доказательства →</button></article>`).join("") : empty("Подходящих сигналов пока нет", "Система ждёт последовательных наблюдений. Отсутствие сигнала не означает отсутствие сильных колод.")}</section>`;
+    const query = {...state.scope,limit:200};
+    if (state.signalState) query.state = state.signalState;
+    if (state.signalKind) query.kind = state.signalKind;
+    const result = await request(`/signals?${new URLSearchParams(query)}`);
+    inside("#meta-content").innerHTML = `<section class="block"><div class="meta-section-head"><h3>Изменения меты</h3><span class="badge ok">${result.total}</span></div><div class="meta-inline-filters"><label>Состояние<select id="meta-signal-state"><option value="">Все</option>${["observing","early","confirmed","rejected"].map((value) => `<option value="${value}">${labels[value]}</option>`).join("")}</select></label><label>Тип<select id="meta-signal-kind"><option value="">Все</option>${Object.entries(signalKinds).map(([value,label]) => `<option value="${value}">${label}</option>`).join("")}</select></label></div><div class="meta-signal-list">${result.data.map((signal) => `<button data-meta-signal="${signal.id}"><span>${badge(signal.state)}<small>${escape(signalKinds[signal.kind] || signal.kind)} · ${date(signal.detected_at)}</small></span><b>${escape(signal.archetype)}</b><p>${escape(signal.reason)}</p></button>`).join("") || empty("Сигналов пока нет", "Система продолжает накапливать историю и проверять изменения.")}</div></section>`;
+    inside("#meta-signal-state").value = state.signalState;
+    inside("#meta-signal-kind").value = state.signalKind;
   }
+
   function renderHealth() {
-    const labels = {normal:"В пределах бюджета",soft_alert:"Приближаемся к лимиту",deep_analysis_throttled:"Глубокий сбор ограничен",hard_limit_reached:"Дополнительный сбор остановлен"};
-    $("#content").innerHTML = `<div class="metrics"><section class="metric"><span>Расход с начала учёта в этом месяце</span><strong>${num(budget.monthly_spent_hsguru)} <small>credits</small></strong><progress value="${Math.min(budget.budget_exposure,budget.limits.hard)}" max="${budget.limits.hard}" aria-label="Расход относительно лимита"></progress></section><section class="metric"><span>Прогноз на полный месяц</span><strong>${budget.forecast_month_end == null ? "Недостаточно данных" : num(budget.forecast_month_end)}</strong></section><section class="metric"><span>Состояние бюджета</span><h2>${escape(labels[budget.state])}</h2><span>Порог дополнительных задач: ${num(budget.limits.hard)}</span></section></div><p class="hint">Подтверждено провайдером: ${num(budget.reported_credits)} · Расчётная стоимость: ${num(budget.estimated_credits)} · Резерв и неизвестная стоимость: ${num(budget.reserved_or_unknown_credits)}. Базовый сбор продолжает работать.</p><section class="panel"><div class="panel-header"><h2>Свежесть по срезам</h2><span class="badge">${health.slices.length} срезов</span></div><div class="table-scroll"><table><thead><tr><th>Формат / ранг</th><th>Период</th><th>Последний сбор</th><th>Состояние</th></tr></thead><tbody>${health.slices.map((s) => `<tr><td>${escape(s.format)} · ${escape(ranks[s.rank] || s.rank)}<small>${s.source_id.includes("matchup") ? "Матчапы" : s.source_id.includes("details") || s.source_id.includes("analysis") ? "Подробная аналитика" : "Мета"}</small></td><td>${escape(periods[s.period] || s.period)}</td><td>${date(s.fetched_at)}</td><td>${badge(s.state)}<small>${s.reasons.includes("latest_source_failure") ? "Последний сбор завершился ошибкой" : s.reasons.includes("expected_interval_exceeded") ? "Пропущен ожидаемый интервал" : ""}</small></td></tr>`).join("")}</tbody></table></div></section>`;
+    const slices = state.health?.slices || [];
+    const counts = slices.reduce((result,item) => ({...result,[item.state]:(result[item.state] || 0) + 1}), {});
+    const budget = state.budget || {};
+    inside("#meta-content").innerHTML = `<div class="meta-health-grid"><section class="block"><h3>Свежесть данных</h3><div class="archetype-kpis"><span><b>${counts.fresh || 0}</b>свежих</span><span><b>${counts.stale || 0}</b>устарели</span><span><b>${counts.cached || 0}</b>из кеша</span><span><b>${counts.missing || 0}</b>нет данных</span></div></section><section class="block"><h3>Расход сбора</h3><div class="archetype-kpis"><span><b>${number(budget.monthly_spent_hsguru)}</b>credits учтено</span><span><b>${number(budget.budget_exposure)}</b>с резервом</span><span><b>${escape(budget.state || "unknown")}</b>режим</span><span><b>${budget.month_complete ? "Да" : "Нет"}</b>полный месяц</span></div><p class="meta-note">Платные глубокие сборы включаются только после подтверждения расхода за текущий месяц.</p></section></div><section class="block"><h3>Источники и срезы</h3><div class="table-scroll"><table class="simple meta-table"><thead><tr><th>Источник</th><th>Формат</th><th>Ранг</th><th>Период</th><th>Состояние</th><th>Обновлено</th></tr></thead><tbody>${slices.map((item) => `<tr><td>${escape(item.source_id)}</td><td>${escape(item.format)}</td><td>${escape(ranks[item.rank] || item.rank)}</td><td>${escape(periodLabel(item.period))}</td><td>${badge(item.state)}</td><td>${date(item.fetched_at)}</td></tr>`).join("")}</tbody></table></div></section>`;
   }
-  function logout() {
-    renew(); key = ""; health = null; budget = null; rows = []; detail = null; selected = null; selectedDecks.clear();
-    $("#application").hidden = true; $("#login").hidden = false; $("#logout").hidden = true;
-    $("#content").replaceChildren(); $("#summary").replaceChildren(); $("#comparison-content").replaceChildren();
-    $("#comparison").close(); $("#api-key").value = "";
-    $("#api-key").focus();
+
+  function showDialog(title, content) {
+    inside("#meta-dialog-title").textContent = title;
+    inside("#meta-dialog-body").innerHTML = content;
+    inside("#meta-dialog").showModal();
   }
-  $("#login-form").addEventListener("submit", async (event) => {
-    event.preventDefault(); key = $("#api-key").value.trim(); $("#api-key").value = ""; $("#error").hidden = true;
-    const button = event.submitter; button.disabled = true;
-    try { await load(); $("#login").hidden = true; $("#application").hidden = false; $("#logout").hidden = false; announce("Лаборатория открыта"); }
-    catch (err) { key = ""; error(err); } finally { button.disabled = false; }
-  });
-  $("#logout").addEventListener("click", logout);
-  $("#refresh").addEventListener("click", () => load().catch(error));
-  $("#close-comparison").addEventListener("click", () => $("#comparison").close());
-  $("#navigation").addEventListener("click", (event) => { const b = event.target.closest("[data-view]"); if (!b || !key || !health) return; renew(); view = b.dataset.view; renderView().catch(error); });
-  document.querySelectorAll("[data-format]").forEach((b) => b.addEventListener("click", () => { if (!health) return; renew(); format = b.dataset.format; document.querySelectorAll("[data-format]").forEach((x) => x.setAttribute("aria-pressed", String(x === b))); scopeOptions(); renderView().catch(error); }));
-  $("#scope-select").addEventListener("change", () => { renew(); applyScope(); renderView().catch(error); });
-  let searchTimer;
-  $("#search").addEventListener("input", () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => { if (!key) return; if (view === "archetypes") renderArchetypes(); else if (view === "cards") { renew(); renderCards().catch(error); } }, 180); });
-  $("#content").addEventListener("change", (event) => {
-    const input = event.target;
-    if (input.matches("[data-select-deck]")) {
-      if (input.checked && selectedDecks.size >= 2) { input.checked = false; announce("Можно сравнить две сборки. Сначала снимите один выбор."); return; }
-      if (input.checked) selectedDecks.add(input.dataset.selectDeck); else selectedDecks.delete(input.dataset.selectDeck);
-      $("#selection-count").textContent = `Выбрано ${selectedDecks.size} из 2 сборок`; $("#compare-button").disabled = selectedDecks.size !== 2;
-    }
-    if (input.id === "deck-sort" || input.id === "deck-games") { deckSort = $("#deck-sort").value; minDeckGames = Number($("#deck-games").value); selectedDecks.clear(); renderTab().catch(error); document.getElementById(input.id).focus(); }
-    if (input.id === "signal-state" || input.id === "signal-kind") { signalState = $("#signal-state").value; signalKind = $("#signal-kind").value; renew(); renderSignals().catch(error); }
-  });
-  $("#content").addEventListener("click", (event) => {
-    const button = event.target.closest("button"); if (!button) return;
-    if (button.dataset.arch) openArch(button.dataset.arch).catch(error);
-    if (button.dataset.tab) { tab = button.dataset.tab; renderDetail(); document.querySelector(`[data-tab="${tab}"]`).focus(); }
-    if (button.id === "compare-button") compareSelected().catch(error);
-    if (button.dataset.deck) {
-      const deck = detail.decks.find((d) => d.id === button.dataset.deck);
-      showDialog("Состав сборки", `<p class="hint">${pct(deck.winrate)} · ${num(deck.games)} игр. ${deck.composition_complete ? "Состав доступен полностью." : "Полный состав недоступен."}</p><ul class="composition">${deck.cards.map((c) => `<li><span>${escape(c.name)}${c.sideboard_owner ? " · дополнительный набор" : ""}</span><strong>×${c.count}</strong></li>`).join("")}</ul>${deck.deck_code ? `<div class="compare-dock"><span>Код колоды</span><button class="primary" id="copy-code" data-code="${escape(deck.deck_code)}">Скопировать</button></div>` : ""}`);
-    }
-    if (button.dataset.snapshot) request(`/snapshots/${button.dataset.snapshot}`).then((s) => showDialog("Основание статистики", `<div class="signal-card">${badge(s.freshness.state)}<h3>${date(s.fetched_at)}</h3><p>${escape(s.format)} · ${escape(ranks[s.rank] || s.rank)} · ${escape(periods[s.period] || s.period)}</p><p>Патч: ${escape(s.patch)}<br>Покрытие обязательных полей: ${pct(s.coverage*100)}</p><small>Снимок ${escape(s.id.slice(0,16))} · ${escape(s.source_id)}</small></div>`)).catch(error);
-    if (button.dataset.signal) request(`/signals/${button.dataset.signal}`).then((s) => showDialog("Доказательства сигнала", `<div class="signal-card">${badge(s.state)}<h3>${escape(s.archetype)}</h3><p>${escape(s.reason)}</p><p>Снимков: ${s.evidence.snapshot_ids.length} · Правило: ${escape(s.rule_version)}</p><small>Уверенность — оценка правила, не вероятность истинности.</small></div>${s.history.map((h) => `<div class="signal-card">${date(h.at)} ${badge(h.state)}</div>`).join("")}`)).catch(error);
-  });
-  $("#comparison-content").addEventListener("click", (event) => { const button = event.target.closest("#copy-code"); if (button) navigator.clipboard.writeText(button.dataset.code).then(() => { button.textContent = "Скопировано"; announce("Код колоды скопирован"); }).catch(() => error(new Error("Браузер не разрешил копирование."))); });
+
+  async function compareSelected() {
+    const [left,right] = [...state.selectedDecks];
+    const result = await request(`/archetypes/${encodeURIComponent(state.selected)}/compare?${scopeQuery({left,right})}`);
+    const deck = (item,label) => `<div><span>${label}</span><b>${percent(item.winrate)}</b><small>${number(item.games)} игр</small></div>`;
+    showDialog("Сравнение сборок", `<div class="meta-duel">${deck(result.left,"Сборка A")}${deck(result.right,"Сборка B")}</div><p class="meta-note">${escape(result.reason)}</p><div class="table-scroll"><table class="simple meta-table"><thead><tr><th>Карта</th><th>A</th><th>B</th></tr></thead><tbody>${result.changes.map((item) => `<tr><td>${escape(item.name || `Карта #${item.dbf_id}`)}</td><td>${item.left_count}</td><td>${item.right_count}</td></tr>`).join("") || '<tr><td colspan="3">Составы совпадают.</td></tr>'}</tbody></table></div>`);
+  }
+
+  function bindEvents() {
+    const container = root();
+    container.addEventListener("submit", (event) => {
+      if (event.target.id !== "meta-login-form") return;
+      event.preventDefault();
+      state.key = inside("#meta-api-key").value;
+      inside("#meta-api-key").value = "";
+      load().catch(showError);
+    });
+    container.addEventListener("click", (event) => {
+      const button = event.target.closest("button");
+      if (!button) return;
+      if (button.id === "meta-refresh") load().catch(showError);
+      if (button.id === "meta-logout") { abortRequests(); state.key = ""; state.health = null; state.budget = null; renderLogin("Введите ключ API, чтобы открыть аналитику."); }
+      if (button.dataset.metaView) { state.view = button.dataset.metaView; abortRequests(); renderView().catch(showError); }
+      if (button.dataset.metaFormat) { state.format = button.dataset.metaFormat; container.querySelectorAll("[data-meta-format]").forEach((item) => item.setAttribute("aria-pressed", String(item === button))); renderScopeOptions(); renderView().catch(showError); }
+      if (button.dataset.metaArch) openArchetype(button.dataset.metaArch).catch(showError);
+      if (button.dataset.metaDetailTab) { state.detailTab = button.dataset.metaDetailTab; renderArchetypeDetail(); }
+      if (button.id === "meta-compare") compareSelected().catch(showError);
+      if (button.dataset.metaDeck) {
+        const deck = state.detail.decks.find((item) => item.id === button.dataset.metaDeck);
+        showDialog("Состав сборки", `<div class="meta-duel"><div><span>Винрейт</span><b>${percent(deck.winrate)}</b><small>${number(deck.games)} игр</small></div><div><span>Состав</span><b>${deck.composition_complete ? "Полный" : "Частичный"}</b><small>${deck.cards.length} позиций</small></div></div><ul class="cards-list">${deck.cards.map((card) => `<li><b>${card.count}×</b> ${escape(card.name)}${card.sideboard_owner ? " · дополнительный набор" : ""}</li>`).join("")}</ul>${deck.deck_code ? `<div class="meta-compare-bar"><span>Код колоды</span><button class="mini-action meta-primary" data-meta-copy="${escape(deck.deck_code)}">Скопировать</button></div>` : ""}`);
+      }
+      if (button.dataset.metaCopy) navigator.clipboard.writeText(button.dataset.metaCopy).then(() => { button.textContent = "Скопировано"; }).catch(() => showError(new Error("Браузер не разрешил копирование.")));
+      if (button.dataset.metaSnapshot) request(`/snapshots/${button.dataset.metaSnapshot}`).then((snapshot) => showDialog("Основание статистики", `${badge(snapshot.freshness.state)}<h3>${date(snapshot.fetched_at)}</h3><p>${escape(snapshot.format)} · ${escape(ranks[snapshot.rank] || snapshot.rank)} · ${escape(periodLabel(snapshot.period))}</p><p class="meta-note">Покрытие обязательных полей: ${percent(snapshot.coverage * 100)}<br>Источник: ${escape(snapshot.source_id)}</p>`)).catch(showError);
+      if (button.dataset.metaSignal) request(`/signals/${button.dataset.metaSignal}`).then((signal) => showDialog("Доказательства сигнала", `${badge(signal.state)}<h3>${escape(signal.archetype)}</h3><p>${escape(signal.reason)}</p><p class="meta-note">Снимков: ${signal.evidence.snapshot_ids.length} · правило ${escape(signal.rule_version)}<br>Уверенность — оценка правила, а не вероятность истинности.</p>`)).catch(showError);
+      if (button.hasAttribute("data-meta-close")) inside("#meta-dialog").close();
+    });
+    container.addEventListener("change", (event) => {
+      const input = event.target;
+      if (input.id === "meta-scope") { abortRequests(); selectScope(); renderView().catch(showError); }
+      if (input.matches("[data-meta-select-deck]")) {
+        if (input.checked && state.selectedDecks.size >= 2) { input.checked = false; return; }
+        if (input.checked) state.selectedDecks.add(input.dataset.metaSelectDeck); else state.selectedDecks.delete(input.dataset.metaSelectDeck);
+        inside("#meta-selection-count").textContent = `Выбрано ${state.selectedDecks.size} из 2`;
+        inside("#meta-compare").disabled = state.selectedDecks.size !== 2;
+      }
+      if (input.id === "meta-deck-sort" || input.id === "meta-deck-games") { state.deckSort = inside("#meta-deck-sort").value; state.minDeckGames = Number(inside("#meta-deck-games").value); state.selectedDecks.clear(); renderDetailTab().catch(showError); }
+      if (input.id === "meta-signal-state" || input.id === "meta-signal-kind") { state.signalState = inside("#meta-signal-state").value; state.signalKind = inside("#meta-signal-kind").value; abortRequests(); renderSignals().catch(showError); }
+    });
+    let searchTimer;
+    container.addEventListener("input", (event) => {
+      if (event.target.id !== "meta-search") return;
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => { if (state.view === "archetypes") renderArchetypes(); if (state.view === "cards") { abortRequests(); renderCards().catch(showError); } }, 180);
+    });
+  }
+
+  window.selectMetaLab = (button = document.getElementById("meta-lab-source")) => {
+    abortRequests();
+    activateNavigation(button);
+    document.getElementById("detail").innerHTML = shell();
+    bindEvents();
+    if (state.key) load().catch(showError); else renderLogin();
+  };
+
+  document.addEventListener("click", (event) => {
+    const source = event.target.closest(".source-btn");
+    if (!source || source.id === "meta-lab-source") return;
+    abortRequests();
+    history.replaceState(null, "", "/ui");
+    document.getElementById("meta-lab-nav")?.removeAttribute("aria-current");
+    document.querySelector('.topnav-link[href="/ui"]')?.setAttribute("aria-current", "page");
+  }, true);
+  window.addEventListener("hashchange", () => { if (window.location.hash === "#meta-lab") window.selectMetaLab?.(); });
 })();

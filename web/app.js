@@ -116,6 +116,17 @@ async function loadOverview() {
   const list = $("#source-list");
   list.innerHTML = "";
 
+  const metaLabBtn = document.createElement("button");
+  metaLabBtn.id = "meta-lab-source";
+  metaLabBtn.className = "source-btn meta-lab-source";
+  metaLabBtn.innerHTML = `
+    <span class="id"><span class="meta-lab-glyph" aria-hidden="true">✦</span> Meta Intelligence Lab</span>
+    <span class="meta">Сборки · карты · матчапы · история</span>
+    <span class="badge meta-lab-badge">private</span>
+  `;
+  metaLabBtn.onclick = () => window.selectMetaLab?.(metaLabBtn);
+  list.appendChild(metaLabBtn);
+
   // Добавляем вкладку быстрого поиска по базе SQLite сверху сайдбара
   const dbBtn = document.createElement("button");
   dbBtn.className = "source-btn";
@@ -199,6 +210,10 @@ async function loadOverview() {
       btn.onclick = () => selectSource(s.source_id, btn);
       list.appendChild(btn);
     }
+  }
+
+  if (window.location.hash === "#meta-lab") {
+    window.selectMetaLab?.(metaLabBtn);
   }
 }
 
