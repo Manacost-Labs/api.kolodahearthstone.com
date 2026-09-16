@@ -11,6 +11,7 @@ $panelQuickLinks = [
     ],
     'Аналитика и операции' => [
         ['Обзор и мета', '/?action=analytics#statistics', 'Источники, архетипы, карты, Arena и Battlegrounds'],
+        ['Meta Intelligence Lab', '/?action=meta_lab', 'Сборки, эффективность карт, матчапы, сигналы и история'],
         ['Парсеры', '/?action=parsers', 'Свежесть, расписание и история запусков'],
     ],
     'Управление' => [

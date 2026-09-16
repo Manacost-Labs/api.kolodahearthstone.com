@@ -2,7 +2,7 @@
 
 (() => {
   const state = {
-    key: "", epoch: 0, controllers: new Set(), view: "archetypes", format: "standard",
+    epoch: 0, controllers: new Set(), view: "archetypes", format: "standard",
     scope: null, health: null, budget: null, rows: [], selected: null, detail: null,
     detailTab: "decks", selectedDecks: new Set(), deckSort: "games", minDeckGames: 0,
     signalState: "", signalKind: "", requestSequence: 0,
@@ -29,59 +29,6 @@
     state.controllers.clear();
   }
 
-  function activateNavigation(button) {
-    document.querySelectorAll(".source-btn").forEach((item) => item.classList.remove("active"));
-    button?.classList.add("active");
-    document.querySelectorAll(".topnav-link").forEach((link) => link.removeAttribute("aria-current"));
-    document.getElementById("meta-lab-nav")?.setAttribute("aria-current", "page");
-    document.getElementById("placeholder")?.classList.add("hidden");
-    document.getElementById("detail")?.classList.remove("hidden");
-    history.replaceState(null, "", "/ui#meta-lab");
-  }
-
-  function shell() {
-    return `
-      <section id="meta-lab-root" aria-label="Meta Intelligence Lab">
-        <div class="meta-lab-heading">
-          <div><span class="block-eyebrow">Meta Intelligence Lab</span><h2>Глубокий анализ меты</h2><p class="meta-line">Сравнение сборок, эффективность карт, матчапы и история изменений.</p></div>
-          <div class="meta-lab-heading-actions"><button class="mini-action" id="meta-refresh" hidden>Обновить</button><button class="mini-action" id="meta-logout" hidden>Выйти</button></div>
-        </div>
-        <section class="block block--accent meta-login" id="meta-login">
-          <div><span class="block-eyebrow">Закрытый раздел</span><h3>Доступ к аналитике</h3><p class="meta-line">Используйте действующий ключ нашего API. Ключ остаётся только в памяти этой вкладки.</p></div>
-          <form id="meta-login-form" class="meta-login-form"><label for="meta-api-key">Ключ API</label><input id="meta-api-key" type="password" autocomplete="off" spellcheck="false" required><button class="mini-action meta-primary" type="submit">Открыть Meta Lab</button></form>
-        </section>
-        <div id="meta-app" hidden>
-          <nav class="meta-tabs" aria-label="Разделы Meta Lab">
-            <button class="mini-action active" data-meta-view="archetypes">Архетипы</button><button class="mini-action" data-meta-view="cards">Карты</button><button class="mini-action" data-meta-view="signals">Сигналы</button><button class="mini-action" data-meta-view="health">Качество данных</button>
-          </nav>
-          <section class="block meta-toolbar" id="meta-filters">
-            <div class="meta-format" role="group" aria-label="Формат"><button data-meta-format="standard" aria-pressed="true">Standard</button><button data-meta-format="wild" aria-pressed="false">Wild</button></div>
-            <label>Срез данных<select id="meta-scope" aria-label="Ранг, период и патч"></select></label><label>Поиск<input id="meta-search" type="search" autocomplete="off" placeholder="Архетип или карта"></label>
-          </section>
-          <div class="meta-summary" id="meta-summary"></div><div id="meta-error" class="block warn" role="alert" hidden></div><div id="meta-content" aria-busy="false"></div>
-        </div>
-        <dialog class="meta-dialog" id="meta-dialog"><div class="meta-dialog-head"><h3 id="meta-dialog-title">Подробности</h3><button class="mini-action" data-meta-close>Закрыть</button></div><div id="meta-dialog-body"></div></dialog>
-      </section>`;
-  }
-
-  function renderLogin(message = "") {
-    const login = inside("#meta-login");
-    if (!login) return;
-    login.hidden = false;
-    inside("#meta-app").hidden = true;
-    inside("#meta-refresh").hidden = true;
-    inside("#meta-logout").hidden = true;
-    if (message) login.querySelector(".meta-line").textContent = message;
-    requestAnimationFrame(() => inside("#meta-api-key")?.focus());
-  }
-
-  function showApp() {
-    inside("#meta-login").hidden = true;
-    inside("#meta-app").hidden = false;
-    inside("#meta-refresh").hidden = false;
-    inside("#meta-logout").hidden = false;
-  }
-
   function showError(error) {
     if (error?.name === "AbortError" || !root()) return;
     const box = inside("#meta-error");
@@ -89,24 +36,52 @@
     box.hidden = false;
   }
 
+  function gatewayRequest(path) {
+    const parsed = new URL(path, "https://meta-lab.internal");
+    const pathname = parsed.pathname;
+    let route = "";
+    const parameters = Object.fromEntries(parsed.searchParams.entries());
+    let match;
+    if (pathname === "/health" || pathname === "/budget" || pathname === "/archetypes" || pathname === "/cards" || pathname === "/signals") {
+      route = pathname.slice(1);
+    } else if ((match = pathname.match(/^\/archetypes\/([^/]+)\/(timeline|compare)$/))) {
+      route = match[2];
+      parameters.archetype = decodeURIComponent(match[1]);
+    } else if ((match = pathname.match(/^\/archetypes\/([^/]+)$/))) {
+      route = "archetype";
+      parameters.archetype = decodeURIComponent(match[1]);
+    } else if ((match = pathname.match(/^\/signals\/([^/]+)$/))) {
+      route = "signal";
+      parameters.signal_id = decodeURIComponent(match[1]);
+    } else if ((match = pathname.match(/^\/snapshots\/([^/]+)$/))) {
+      route = "snapshot";
+      parameters.snapshot_id = decodeURIComponent(match[1]);
+    } else {
+      throw new Error("Неизвестный запрос Meta Lab.");
+    }
+    return new URLSearchParams({module:"meta_lab", route, ...parameters});
+  }
+
   async function request(path) {
     const captured = state.epoch;
     const controller = new AbortController();
     state.controllers.add(controller);
     try {
-      const response = await fetch(`/v1/meta-intelligence${path}`, {headers:{"X-API-Key":state.key,Accept:"application/json"},cache:"no-store",signal:controller.signal});
+      const response = await fetch(`${root().dataset.endpoint}?${gatewayRequest(path)}`, {
+        headers:{Accept:"application/json"},
+        cache:"no-store",
+        credentials:"same-origin",
+        signal:controller.signal,
+      });
       if (captured !== state.epoch || !root()) throw new DOMException("Cancelled", "AbortError");
+      const payload = await response.json().catch(() => null);
       if (!response.ok) {
-        if (response.status === 401 || response.status === 403) {
-          state.key = "";
-          renderLogin("Ключ не подошёл. Введите действующий ключ API.");
-          throw new Error("Доступ не подтверждён.");
-        }
+        if (response.status === 401 || response.status === 403) throw new Error("Сессия панели не имеет доступа к Meta Lab.");
         if (response.status === 404) throw new Error("Для выбранного среза этих данных пока нет.");
         if (response.status === 503) throw new Error("Meta Lab временно выключен в API.");
-        throw new Error("API не вернул данные. Попробуйте обновить раздел.");
+        throw new Error(payload?.message || "API не вернул данные. Попробуйте обновить раздел.");
       }
-      return response.json();
+      return payload;
     } finally {
       state.controllers.delete(controller);
     }
@@ -145,7 +120,6 @@
 
   async function load() {
     abortRequests();
-    showApp();
     inside("#meta-error").hidden = true;
     inside("#meta-content").setAttribute("aria-busy", "true");
     inside("#meta-refresh").disabled = true;
@@ -276,18 +250,10 @@
 
   function bindEvents() {
     const container = root();
-    container.addEventListener("submit", (event) => {
-      if (event.target.id !== "meta-login-form") return;
-      event.preventDefault();
-      state.key = inside("#meta-api-key").value;
-      inside("#meta-api-key").value = "";
-      load().catch(showError);
-    });
     container.addEventListener("click", (event) => {
       const button = event.target.closest("button");
       if (!button) return;
       if (button.id === "meta-refresh") load().catch(showError);
-      if (button.id === "meta-logout") { abortRequests(); state.key = ""; state.health = null; state.budget = null; renderLogin("Введите ключ API, чтобы открыть аналитику."); }
       if (button.dataset.metaView) { state.view = button.dataset.metaView; abortRequests(); renderView().catch(showError); }
       if (button.dataset.metaFormat) { state.format = button.dataset.metaFormat; container.querySelectorAll("[data-meta-format]").forEach((item) => item.setAttribute("aria-pressed", String(item === button))); renderScopeOptions(); renderView().catch(showError); }
       if (button.dataset.metaArch) openArchetype(button.dataset.metaArch).catch(showError);
@@ -322,21 +288,8 @@
     });
   }
 
-  window.selectMetaLab = (button = document.getElementById("meta-lab-source")) => {
-    abortRequests();
-    activateNavigation(button);
-    document.getElementById("detail").innerHTML = shell();
-    bindEvents();
-    if (state.key) load().catch(showError); else renderLogin();
-  };
-
-  document.addEventListener("click", (event) => {
-    const source = event.target.closest(".source-btn");
-    if (!source || source.id === "meta-lab-source") return;
-    abortRequests();
-    history.replaceState(null, "", "/ui");
-    document.getElementById("meta-lab-nav")?.removeAttribute("aria-current");
-    document.querySelector('.topnav-link[href="/ui"]')?.setAttribute("aria-current", "page");
-  }, true);
-  window.addEventListener("hashchange", () => { if (window.location.hash === "#meta-lab") window.selectMetaLab?.(); });
+  const container = root();
+  if (!container) return;
+  bindEvents();
+  load().catch(showError);
 })();

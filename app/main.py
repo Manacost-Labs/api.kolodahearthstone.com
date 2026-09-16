@@ -500,7 +500,7 @@ app.include_router(meta_intelligence_router, dependencies=[Depends(require_admin
 
 @app.get("/ui/meta-intelligence", include_in_schema=False)
 def meta_intelligence_panel() -> RedirectResponse:
-    return RedirectResponse("/ui#meta-lab", headers={
+    return RedirectResponse("/?action=meta_lab", headers={
         "Cache-Control": "private, no-store",
         "Referrer-Policy": "no-referrer",
         "X-Content-Type-Options": "nosniff",

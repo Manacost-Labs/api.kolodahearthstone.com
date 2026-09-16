@@ -26,6 +26,11 @@ The import and API contracts are documented in `LIBRARY_FULL_ART.md`.
   `analytics_module_registry()` and normalized before reaching the browser.
 - `assets/analytics.js` — URL-backed statistics state and generic table
   rendering. It never receives internal API credentials or arbitrary URLs.
+- `partials/meta-intelligence.php` + `assets/meta-intelligence.js` — the Meta Lab
+  workspace inside the same navigation and theme system.
+- `lib/meta_intelligence.php` — authenticated allowlist gateway for private Meta
+  Lab routes. Its dedicated admin token stays in a server-only file and is never
+  sent to the browser.
 - `assets/panel-ui.js` — shared command palette, mobile navigation behavior and
   persistent per-table column visibility. Labels are always derived through
   `textContent`; preferences contain column indexes only.

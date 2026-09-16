@@ -1707,6 +1707,7 @@ $pageTo = min($offset + ($showHeroSkins ? count($heroSkins) : ($showPets ? count
 $pageWindowStart = max(1, $page - 2);
 $pageWindowEnd = min($totalPages, $page + 2);
 $showAnalyticsDashboard = $action === 'analytics';
+$showMetaLab = $action === 'meta_lab';
 $showApiTokens = $action === 'api_tokens';
 $showParserControl = $action === 'parsers';
 $resetUrl = $cardType !== '' ? '/?card_type=' . rawurlencode($cardType) : '/';
@@ -1797,6 +1798,8 @@ $workspaceTitle = $action === 'parsers'
     ? 'Парсеры'
     : ($action === 'api_tokens'
     ? 'API-токены'
+    : ($action === 'meta_lab'
+        ? 'Meta Intelligence Lab'
     : ($action === 'analytics'
         ? 'Обзор и мета'
     : ($action === 'wiki_terms'
@@ -1805,12 +1808,12 @@ $workspaceTitle = $action === 'parsers'
             ? 'Новая карта'
             : ($editCard
                 ? 'Редактировать карту'
-                : ($showHeroSkins ? 'Скины героев' : ($showPets ? 'Питомцы' : ($showCoins ? 'Монетки' : ($showHeroes ? 'Герои' : ($showTimewarped ? 'Хрономальные карты' : ($showConstructed ? 'Стандартные и вольные карты' : ($showLibrary ? library_type_label($libraryType) : 'Карты Полей сражений'))))))))))));
+                : ($showHeroSkins ? 'Скины героев' : ($showPets ? 'Питомцы' : ($showCoins ? 'Монетки' : ($showHeroes ? 'Герои' : ($showTimewarped ? 'Хрономальные карты' : ($showConstructed ? 'Стандартные и вольные карты' : ($showLibrary ? library_type_label($libraryType) : 'Карты Полей сражений')))))))))))));
 $workspaceSection = $showApiTokens
     ? 'Доступ'
     : ($showParserControl
         ? 'Операции'
-        : ($showAnalyticsDashboard ? 'Аналитика' : 'База данных'));
+        : (($showAnalyticsDashboard || $showMetaLab) ? 'Аналитика' : 'База данных'));
 ?>
 <!doctype html>
 <html lang="ru" data-theme="dark">
@@ -1825,6 +1828,7 @@ $workspaceSection = $showApiTokens
     <script src="/assets/panel-ui.js?v=4" defer></script>
     <script src="/assets/parsing-reliability.js?v=10" defer></script>
     <script src="/assets/analytics.js?v=14" defer></script>
+    <script src="/assets/meta-intelligence.js?v=1" defer></script>
     <script src="/assets/parser-control-view.js?v=3" defer></script>
     <script src="/assets/parser-control.js?v=3" defer></script>
 </head>
@@ -1871,6 +1875,9 @@ $workspaceSection = $showApiTokens
                 <h2>Статистика</h2>
                 <a class="side-link<?= $action === 'analytics' ? ' active' : '' ?>" href="/?action=analytics#statistics">
                     <span>Обзор и мета</span><b>Live</b>
+                </a>
+                <a class="side-link<?= $showMetaLab ? ' active' : '' ?>" href="/?action=meta_lab">
+                    <span>Meta Lab</span><b>Beta</b>
                 </a>
             </section>
 
@@ -1957,6 +1964,10 @@ $workspaceSection = $showApiTokens
 
     <?php if ($showAnalyticsDashboard): ?>
         <?php require __DIR__ . '/partials/analytics-dashboard.php'; ?>
+    <?php endif; ?>
+
+    <?php if ($showMetaLab): ?>
+        <?php require __DIR__ . '/partials/meta-intelligence.php'; ?>
     <?php endif; ?>
 
     <?php if ($showParserControl): ?>

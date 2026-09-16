@@ -7,15 +7,15 @@ No WordPress changes, public recommendations, notifications or automatic publish
 
 ## Entry points
 
-- Panel: `/ui#meta-lab`, integrated into the existing API panel and source sidebar.
-  The legacy `/ui/meta-intelligence` URL redirects to this view. Its public HTML
-  shell contains no research data.
+- Panel: `/?action=meta_lab`, integrated into the authenticated HS Data control
+  panel at the site root. The legacy `/ui/meta-intelligence` URL redirects to it.
 - Research API: `/v1/meta-intelligence/*`, protected by the existing `require_admin`
   dependency and `X-API-Key`. Missing server key fails closed.
 - API responses, including auth errors, are `private, no-store`, excluded from the
   existing public cache/ETag middleware.
-- The panel keeps the key in memory only, clears rendered data on logout, uses
-  same-origin requests and renders upstream text with HTML escaping. No third-party assets.
+- The browser never receives an API credential. The authenticated PHP gateway
+  uses a dedicated server-side admin token, allowlists every route and parameter,
+  and renders upstream text with HTML escaping. No third-party assets.
 - Disabled by default with `HS_META_LAB_ENABLED=0`.
 
 ## Implementation boundary

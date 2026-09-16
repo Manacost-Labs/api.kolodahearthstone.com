@@ -67,11 +67,11 @@ def test_feature_flag_and_empty_panel_shell(client,monkeypatch):
     monkeypatch.setenv("HS_META_LAB_ENABLED","0")
     assert client.get(PREFIX+"/health",headers=HEADERS).status_code==503
     redirect=client.get("/ui/meta-intelligence",follow_redirects=False)
-    assert redirect.status_code==307 and redirect.headers["location"]=="/ui#meta-lab"
+    assert redirect.status_code==307 and redirect.headers["location"]=="/?action=meta_lab"
     assert "no-store" in redirect.headers["cache-control"]
     shell=client.get("/ui")
     assert shell.status_code==200 and "Дракон Воин" not in shell.text
-    assert "meta-intelligence.js" in shell.text and "/ui#meta-lab" in shell.text
+    assert "meta-intelligence.js" not in shell.text and "/?action=meta_lab" in shell.text
     assert "lab-offline-test-key" not in shell.text
 
 

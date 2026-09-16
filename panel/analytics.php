@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require __DIR__ . '/lib/auth.php';
 require __DIR__ . '/lib/analytics.php';
+require __DIR__ . '/lib/meta_intelligence.php';
 
 panel_require_auth(true);
 
@@ -20,10 +21,15 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'GET') {
 $module = trim((string)($_GET['module'] ?? 'overview'));
 
 try {
-    $response = analytics_module_response($module, $_GET);
+    $response = $module === 'meta_lab'
+        ? panel_meta_intelligence_fetch(trim((string)($_GET['route'] ?? '')), $_GET)
+        : analytics_module_response($module, $_GET);
     echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
 } catch (InvalidArgumentException $exception) {
     http_response_code(422);
+    echo json_encode(['ok' => false, 'message' => $exception->getMessage()], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+} catch (PanelMetaIntelligenceHttpException $exception) {
+    http_response_code($exception->httpStatus());
     echo json_encode(['ok' => false, 'message' => $exception->getMessage()], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 } catch (Throwable $exception) {
     http_response_code(502);
