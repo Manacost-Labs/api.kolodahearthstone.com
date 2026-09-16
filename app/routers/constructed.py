@@ -1,10 +1,21 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter, HTTPException, Query
 
+from ..hsguru_deck_radar import SOURCE_ID as DECK_RADAR_SOURCE_ID
+from ..hsguru_deck_radar import list_deck_radar_events
 from ..hsguru_decks import exact_hsguru_decks
-from .models import ArchetypeRow, ApiMeta, DeckRow, Envelope, freshest_timestamp, timestamp_is_stale
-
+from .models import (
+    ApiMeta,
+    ArchetypeRow,
+    DeckRadarEventRow,
+    DeckRow,
+    Envelope,
+    freshest_timestamp,
+    timestamp_is_stale,
+)
 
 router = APIRouter(prefix="/v1/constructed", tags=["v1-constructed"])
 
@@ -17,14 +28,20 @@ router = APIRouter(prefix="/v1/constructed", tags=["v1-constructed"])
 async def hsguru_deck(
     archetype: str = Query(..., min_length=2, max_length=120),
     format_name: str = Query("standard", pattern="^(standard|wild)$"),
-    rank: str = Query("legend", pattern="^(legend|diamond_4to1|top_5k|top_legend|all)$"),
+    rank: str = Query(
+        "legend", pattern="^(legend|diamond_4to1|top_5k|top_legend|all)$"
+    ),
 ) -> Envelope[list[DeckRow]]:
     try:
         rows = await exact_hsguru_decks(archetype, format_name, rank)
     except Exception as exc:
-        raise HTTPException(status_code=502, detail="HSGuru deck lookup failed") from exc
+        raise HTTPException(
+            status_code=502, detail="HSGuru deck lookup failed"
+        ) from exc
     if not rows:
-        raise HTTPException(status_code=404, detail="Exact HSGuru archetype deck not found")
+        raise HTTPException(
+            status_code=404, detail="Exact HSGuru archetype deck not found"
+        )
     fetched_at = freshest_timestamp(rows, "updated_at")
     return Envelope(
         data=[DeckRow.model_validate(row) for row in rows],
@@ -77,7 +94,11 @@ def decks(
         if q:
             query += " AND (title LIKE ? OR archetype LIKE ? OR deck_code LIKE ?)"
             params.extend([f"%{q}%", f"%{q}%", f"%{q}%"])
-        total = int(conn.execute(query.replace("SELECT *", "SELECT COUNT(*)", 1), params).fetchone()[0])
+        total = int(
+            conn.execute(
+                query.replace("SELECT *", "SELECT COUNT(*)", 1), params
+            ).fetchone()[0]
+        )
         rows = [
             dict(row)
             for row in conn.execute(
@@ -97,6 +118,38 @@ def decks(
             fetched_at=fetched_at,
             stale=timestamp_is_stale(fetched_at),
             count=total,
+            limit=limit,
+            offset=offset,
+        ),
+    )
+
+
+@router.get(
+    "/deck-radar",
+    response_model=Envelope[list[DeckRadarEventRow]],
+    response_model_exclude_none=True,
+)
+def deck_radar(
+    status: Literal["candidate", "confirmed"] | None = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0, le=10_000),
+) -> Envelope[list[DeckRadarEventRow]]:
+    """Return exact deckstrings newly observed after the Radar baseline."""
+    try:
+        payload = list_deck_radar_events(status=status, limit=limit, offset=offset)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500, detail="Deck Radar database query failed"
+        ) from exc
+    fetched_at = payload.get("fetched_at")
+    return Envelope(
+        data=[DeckRadarEventRow.model_validate(row) for row in payload["events"]],
+        meta=ApiMeta(
+            source_id=DECK_RADAR_SOURCE_ID,
+            fetched_at=fetched_at,
+            stale=timestamp_is_stale(fetched_at, max_age_hours=2),
+            beta=True,
+            count=int(payload["total"]),
             limit=limit,
             offset=offset,
         ),

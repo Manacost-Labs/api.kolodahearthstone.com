@@ -76,6 +76,7 @@ Authorization: Bearer khs_v1_<token-id>_<secret>
 | Method | Path | Data |
 | --- | --- | --- |
 | `GET` | `/v1/constructed/decks` | SQL-backed колоды с фильтрами legacy endpoint. |
+| `GET` | `/v1/constructed/deck-radar` | Beta: новые точные deckstrings из HSGuru streamer snapshots, отфильтрованные против current HSGuru catalog; `status=candidate|confirmed`. |
 | `GET` | `/v1/constructed/archetypes` | Последние успешные snapshots архетипов. |
 | `GET` | `/v1/battlegrounds/heroes` | Solo/duos герои с пагинацией. |
 | `GET` | `/v1/battlegrounds/minions` | Последний успешный snapshot существ. |

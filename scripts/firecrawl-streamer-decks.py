@@ -40,6 +40,35 @@ def _refresh_derived_fun_decks() -> dict[str, Any]:
         }
 
 
+def _refresh_deck_radar() -> dict[str, Any]:
+    """Reconcile the already published source snapshot into Deck Radar."""
+    from app.hsguru_deck_radar import (
+        known_catalog_from_meta_matrix,
+        reconcile_streamer_snapshot,
+    )
+    from app.storage import load_dataset
+
+    try:
+        dataset = load_dataset(SOURCE_ID)
+        if not isinstance(dataset, dict):
+            return {"ok": False, "error": "streamer_dataset_unavailable"}
+        known_catalog = known_catalog_from_meta_matrix(
+            load_dataset("hsguru_meta_matrix")
+        )
+        result = reconcile_streamer_snapshot(
+            dataset,
+            known_catalog=known_catalog,
+            require_known_catalog=True,
+        )
+        return {"ok": True, **result}
+    except Exception as exc:  # noqa: BLE001 - surface derived refresh failure to systemd
+        return {
+            "ok": False,
+            "error": "deck_radar_refresh_failed",
+            "error_type": type(exc).__name__,
+        }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--schedule-id")
@@ -57,15 +86,20 @@ def main(argv: list[str] | None = None) -> int:
     if exit_code != 0:
         return exit_code
 
+    deck_radar = _refresh_deck_radar()
     fun_decks = _refresh_derived_fun_decks()
     print(
         json.dumps(
-            {"source_id": SOURCE_ID, "fun_decks": fun_decks},
+            {
+                "source_id": SOURCE_ID,
+                "deck_radar": deck_radar,
+                "fun_decks": fun_decks,
+            },
             ensure_ascii=False,
             indent=2,
         )
     )
-    return 0 if fun_decks.get("ok") else 1
+    return 0 if deck_radar.get("ok") and fun_decks.get("ok") else 1
 
 
 if __name__ == "__main__":

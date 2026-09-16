@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added HSGuru Deck Radar beta: idempotent SQLite history over the published
+  streamer-deck snapshot, candidate/confirmed exact-deck events, and the
+  public `GET /v1/constructed/deck-radar` endpoint. Established catalog decks,
+  matching archetype titles and ≥0.75-similar card variants are suppressed.
 - Updated the Trigger.dev control-plane lockfile to patched `fast-uri` and
   `qs` releases after new upstream advisories began failing the CI audit.
 - Added fail-closed freshness evidence for the four HSReplay daily meta

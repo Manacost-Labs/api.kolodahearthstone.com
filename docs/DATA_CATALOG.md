@@ -204,6 +204,7 @@ GET /v1/constructed/archetypes
 | `firestone_standard` | Firestone Standard Legend `last-patch`: `decks[]`, `archetypes[]`, выборки, core cards, games, wins и `winrate` как доля `0..1`. |
 | `metastats_decks` | Архетип, класс, winrate, games, cards, deck code. |
 | `hsguru_streamer_decks_legend_1000` | Streamer, peak/latest rank, win-loss, format, last played, links и deck code. |
+| `hsguru_deck_radar` | SQLite история точных deckstring из опубликованных streamer snapshots: baseline без событий, затем `candidate` и `confirmed` после второго независимого наблюдения. Контракт: [HSGURU_DECK_RADAR.md](HSGURU_DECK_RADAR.md). |
 | `hsguru_fun_decks` | Off-meta / fun decks: `fun_score`, `max_meta_similarity`, nearest archetype, reasons; derived from streamer candidates vs meta catalogs. |
 
 ### Прямые constructed-наборы

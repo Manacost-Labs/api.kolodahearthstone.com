@@ -22,8 +22,11 @@ def test_streamer_job_uses_shared_refresh_and_propagates_failure() -> None:
     module = _load_script()
     module.cli_main = Mock(return_value=1)
     module._load_env = Mock()
-    module._scrape_html = Mock(side_effect=AssertionError("legacy direct fetch path used"))
+    module._scrape_html = Mock(
+        side_effect=AssertionError("legacy direct fetch path used")
+    )
     module._refresh_derived_fun_decks = Mock()
+    module._refresh_deck_radar = Mock()
 
     with patch("app.resource_locks.ResourceLockSet", return_value=nullcontext()):
         result = module.main()
@@ -39,8 +42,11 @@ def test_streamer_job_refreshes_derived_data_only_after_success() -> None:
     module = _load_script()
     module.cli_main = Mock(return_value=0)
     module._load_env = Mock()
-    module._scrape_html = Mock(side_effect=AssertionError("legacy direct fetch path used"))
+    module._scrape_html = Mock(
+        side_effect=AssertionError("legacy direct fetch path used")
+    )
     module._refresh_derived_fun_decks = Mock(return_value={"ok": True})
+    module._refresh_deck_radar = Mock(return_value={"ok": True})
 
     with (
         patch("app.resource_locks.ResourceLockSet", return_value=nullcontext()),
@@ -50,6 +56,7 @@ def test_streamer_job_refreshes_derived_data_only_after_success() -> None:
 
     assert result == 0
     module._refresh_derived_fun_decks.assert_called_once_with()
+    module._refresh_deck_radar.assert_called_once_with()
 
 
 def test_streamer_job_does_not_hide_derived_refresh_failure() -> None:
@@ -58,11 +65,25 @@ def test_streamer_job_does_not_hide_derived_refresh_failure() -> None:
     module._refresh_derived_fun_decks = Mock(
         return_value={"ok": False, "error": "derived refresh failed"}
     )
+    module._refresh_deck_radar = Mock(return_value={"ok": True})
 
     with patch("builtins.print"):
         result = module.main()
 
     assert result == 1
+
+
+def test_streamer_job_reconciles_deck_radar_after_a_successful_source_refresh() -> None:
+    module = _load_script()
+    module.cli_main = Mock(return_value=0)
+    module._refresh_derived_fun_decks = Mock(return_value={"ok": True})
+    module._refresh_deck_radar = Mock(return_value={"ok": True, "events_created": 1})
+
+    with patch("builtins.print"):
+        result = module.main()
+
+    assert result == 0
+    module._refresh_deck_radar.assert_called_once_with()
 
 
 def test_streamer_job_forwards_durable_schedule_id() -> None:
