@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Meta Intelligence Lab · Исследование меты</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23122641'/%3E%3Ctext x='5' y='24' fill='white' font-size='24'%3EM%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/ui/assets/meta-intelligence.css">
+  <script src="/ui/assets/meta-intelligence.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#workspace">Перейти к данным</a>
+  <div class="layout">
+    <aside class="rail" aria-label="Разделы лаборатории">
+      <a class="brand" href="/ui/meta-intelligence"><span class="brand-mark" aria-hidden="true">M<span>│</span></span><span>Meta Intelligence<span class="brand-sub">LAB / HEARTHSTONE</span></span></a>
+      <div class="rail-label">Рабочее пространство</div>
+      <nav id="navigation">
+        <button class="nav active" data-view="archetypes" aria-current="page"><span aria-hidden="true">◈</span> Архетипы</button>
+        <button class="nav" data-view="cards"><span aria-hidden="true">▤</span> Карты</button>
+        <button class="nav" data-view="signals"><span aria-hidden="true">↗</span> Сигналы</button>
+        <button class="nav" data-view="health"><span aria-hidden="true">◷</span> Сбор данных</button>
+      </nav>
+      <div class="rail-note"><span class="status-dot"></span> Закрытая лаборатория<p>Сборки, карты и матчапы.<br>Каждый вывод — с данными.</p></div>
+      <a class="back-link" href="/ui">← Обзор сервиса</a>
+    </aside>
+    <main id="workspace" tabindex="-1">
+      <header class="topbar"><span>HEARTHSTONE <span class="slash">/</span> STANDARD & WILD</span><button id="logout" class="text-button" hidden>Выйти</button></header>
+      <section id="login" class="login-panel">
+        <span class="eyebrow">ДОСТУП ДЛЯ РЕДАКЦИИ</span>
+        <h1>Исследуйте мету<br>в деталях.</h1>
+        <p>Сравнивайте сборки, изучайте карты<br>и проверяйте изменения по истории.</p>
+        <form id="login-form">
+          <label for="api-key">Ключ доступа к сервису</label>
+          <input id="api-key" name="api-key" type="password" autocomplete="off" required spellcheck="false">
+          <button class="primary" type="submit">Открыть лабораторию <span aria-hidden="true">→</span></button>
+        </form>
+        <p class="subtle">Ключ используется только в этой вкладке.</p>
+      </section>
+      <div id="application" hidden>
+        <div class="page-heading"><div><span class="eyebrow">META INTELLIGENCE LAB</span><h1 id="page-title">Исследование меты</h1></div><button id="refresh" class="secondary">Обновить данные ↻</button></div>
+        <p id="demo-notice" class="notice" hidden>Тестовый набор · Эти цифры показывают работу панели и не описывают текущую мету.</p>
+        <div class="filterbar" id="filters">
+          <div class="format-switch" role="group" aria-label="Формат"><button data-format="standard" aria-pressed="true">Standard</button><button data-format="wild" aria-pressed="false">Wild</button></div>
+          <label>Срез данных<select id="scope-select" aria-label="Ранг, период и патч"></select></label>
+          <label class="search-label">Поиск<input type="search" id="search" placeholder="Архетип или карта…" autocomplete="off"></label>
+        </div>
+        <div id="summary" class="summary" aria-live="polite"></div>
+        <div id="content" aria-busy="false"></div>
+      </div>
+      <div id="error" role="alert" class="error" hidden></div>
+      <div id="status" role="status" class="sr-only"></div>
+      <footer>Показатели зависят от выборки. Связь между картой и винрейтом не доказывает причинный эффект.</footer>
+    </main>
+  </div>
+  <dialog id="comparison" aria-labelledby="comparison-title"><div class="dialog-heading"><h2 id="comparison-title">Сравнение сборок</h2><button id="close-comparison" class="secondary" autofocus>Закрыть</button></div><div id="comparison-content"></div></dialog>
+</body>
+</html>

@@ -61,6 +61,7 @@ from .trinket_slices import (
     TRINKET_SLICE_SOURCE_IDS,
     source_ids_for_trinket_slice,
 )
+from .routers.meta_intelligence import router as meta_intelligence_router
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 ACTIVE_TRINKET_SOURCE_IDS = {
@@ -429,7 +430,7 @@ async def no_cache_ui(request: Request, call_next):
                 headers.pop("content-length", None)
                 headers.pop("content-type", None)
                 return Response(status_code=304, headers=headers)
-    if request.url.path.startswith("/admin") or request.url.path.startswith("/v1/auth"):
+    if request.url.path.startswith(("/admin", "/v1/auth", "/v1/meta-intelligence")):
         response.headers["Cache-Control"] = "private, no-store"
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
@@ -492,6 +493,19 @@ def require_orchestrator(
         status_code=401,
         detail="Missing or invalid X-Orchestrator-Key",
     )
+
+
+app.include_router(meta_intelligence_router, dependencies=[Depends(require_admin)])
+
+
+@app.get("/ui/meta-intelligence", include_in_schema=False)
+def meta_intelligence_panel() -> FileResponse:
+    return FileResponse(WEB_DIR / "meta-intelligence.html", headers={
+        "Cache-Control": "private, no-store",
+        "Referrer-Policy": "no-referrer",
+        "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+    })
 
 
 @app.get("/")

@@ -45,6 +45,7 @@ from .scrape_do_backend import (
     ScrapeDoTransientError,
     scrape_url_sync,
 )
+from .meta_intelligence.budget import BudgetExceeded, source_scope, validate_attempt
 from .scrapers.http_resilience import is_session_blocked
 from .scrapfly_backend import scrape_url_sync as scrapfly_scrape_url_sync
 from .scrapfly_backend import scrapfly_configured
@@ -424,6 +425,7 @@ def _scrape_via_scrapfly(
     )
 
 
+@source_scope
 def _scrape_via_scrape_do(
     source: Source,
     *,
@@ -469,6 +471,7 @@ def _scrape_via_scrape_do(
                             ),
                             False,
                         )
+                    validate_attempt(scraped.acquisition_id, False)
                     errors.append(
                         f"{'super' if super_proxy else 'standard'} "
                         f"attempt {profile_attempt}: blocked_or_challenge_content"
@@ -489,6 +492,8 @@ def _scrape_via_scrape_do(
                     scraped = None
                     break
                 break
+            except BudgetExceeded:
+                raise
             except ScrapeDoContentError as exc:
                 last_failure = exc
                 if attempt_observer is not None:
@@ -625,6 +630,7 @@ def _scrape_do_result(
             "backend": ("scrape_do_super" if scraped.super_proxy else "scrape_do"),
             "creditsUsed": 0,
             "scrapeDoCreditsUsed": scraped.request_cost,
+            "labAcquisitionId": scraped.acquisition_id,
             "scrapeDoRemainingCredits": scraped.credits_remaining,
             "scrapeDoAttempts": attempts,
             "scrapeDoProfileAttempt": profile_attempt,
@@ -948,6 +954,8 @@ def _scrape_sync(
                 accept_result=accept_result,
                 attempt_observer=attempt_observer,
             )
+        except BudgetExceeded:
+            raise
         except Exception as exc:  # noqa: BLE001 - provider boundary
             errors.append(f"scrape_do: {type(exc).__name__}: {str(exc)[:300]}")
 

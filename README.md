@@ -96,6 +96,16 @@ GraphQL pagination возвращает `items` и `pageInfo`. Максимал�
 
 | Метод | Path | Query parameters | Назначение |
 | --- | --- | --- | --- |
+| GET | `/v1/meta-intelligence/health` | X-API-Key; scope filters | Meta Lab freshness |
+| GET | `/v1/meta-intelligence/budget` | X-API-Key; scope filters | Meta Lab acquisition budget |
+| GET | `/v1/meta-intelligence/archetypes` | X-API-Key; scope filters | Meta Lab archetypes |
+| GET | `/v1/meta-intelligence/archetypes/{archetype}` | X-API-Key; scope filters | Meta Lab archetype details |
+| GET | `/v1/meta-intelligence/archetypes/{archetype}/compare` | X-API-Key; scope filters | Compare builds |
+| GET | `/v1/meta-intelligence/archetypes/{archetype}/timeline` | X-API-Key; scope filters | Archetype history |
+| GET | `/v1/meta-intelligence/cards` | X-API-Key; scope filters | Card observations |
+| GET | `/v1/meta-intelligence/signals` | X-API-Key; scope filters | Research signals |
+| GET | `/v1/meta-intelligence/signals/{signal_id}` | X-API-Key; scope filters | Signal evidence |
+| GET | `/v1/meta-intelligence/snapshots/{snapshot_id}` | X-API-Key; scope filters | Immutable research snapshot |
 | GET | `/v1/hsguru/meta` | `format`, `rank`, `period`, `coin`, `min_games` | Meta Standard/Wild; `meta.current_period` указывает активное patch/named-окно |
 | GET | `/v1/hsguru/archetypes` | `format`, `q`, `min_games`, `has_decks`, `sort`, `order`, `limit`, `offset` | Текущий каталог архетипов |
 | GET | `/v1/hsguru/archetypes/history` | `archetype` (required), `format` (required), `limit` | История архетипа |

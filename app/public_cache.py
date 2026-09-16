@@ -40,7 +40,7 @@ def _cacheable_path(path: str) -> bool:
         # This report has moving time-window boundaries and generated_at even
         # without a database write. A strong shared ETag would be dishonest.
         return False
-    if path.startswith(("/ops", "/admin", "/ui", "/health")):
+    if path.startswith(("/ops", "/admin", "/ui", "/health", "/v1/meta-intelligence")):
         return False
     if path.endswith("/health"):
         return False

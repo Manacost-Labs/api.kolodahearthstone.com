@@ -23,6 +23,26 @@ for sub in datasets statuses; do
   fi
 done
 
+# SQLite WAL cannot be backed up by copying only the main file.
+if [[ -f "$DATA_DIR/meta-intelligence/lab.sqlite3" ]]; then
+  mkdir -p "$TMP/bundle/meta-intelligence"
+  python3 - "$DATA_DIR/meta-intelligence/lab.sqlite3" "$TMP/bundle/meta-intelligence/lab.sqlite3" <<'PY'
+import sqlite3
+import sys
+from pathlib import Path
+source = sqlite3.connect(Path(sys.argv[1]).resolve().as_uri() + '?mode=ro', uri=True)
+target = sqlite3.connect(sys.argv[2])
+try:
+    source.backup(target)
+    if target.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
+        raise SystemExit('Lab backup failed integrity check')
+    Path(sys.argv[2]).chmod(0o600)
+finally:
+    target.close()
+    source.close()
+PY
+fi
+
 for f in hsreplay-auth.json hearthstonejson.cards.enUS.json hearthstonejson.cards.ruRU.json; do
   [[ -f "$DATA_DIR/$f" ]] && cp "$DATA_DIR/$f" "$TMP/bundle/"
 done

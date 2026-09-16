@@ -24,6 +24,7 @@ from .storage import (
     save_dataset,
     save_status,
 )
+from .meta_intelligence.budget import validate_attempt
 
 SOURCE_ID = "hsguru_archetype_analysis"
 SCHEMA_VERSION = 2
@@ -867,6 +868,7 @@ async def _fetch_html(url: str) -> tuple[str, dict[str, Any]]:
     return result.html, {
         "backend": result.backend,
         "request_credits": result.request_credits,
+        "attempt_id": (getattr(result, "metadata", None) or {}).get("labAcquisitionId"),
         "final_url": result.final_url,
     }
 
@@ -1103,6 +1105,7 @@ async def _refresh_hsguru_archetype_analysis_unlocked(
             html, acquisition = await fetch_guarded()
 
         raw_rows = parser(html)
+        validate_attempt(acquisition.get("attempt_id"), bool(raw_rows))
         fetched_at = _now()
         rows = raw_rows
         semantic_state = "complete"

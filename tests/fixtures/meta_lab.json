@@ -1,0 +1,22 @@
+{
+  "description": "Synthetic, offline HSGuru-shaped fixtures. Not live Hearthstone statistics.",
+  "archetypes": [
+    {"archetype":"Дракон Воин","class":"Warrior","winrate":54.2,"popularity_pct":8.2,"games":12480},
+    {"archetype":"Темпо Маг","class":"Mage","winrate":52.8,"popularity_pct":6.1,"games":8930},
+    {"archetype":"Контроль Жрец","class":"Priest","winrate":51.3,"popularity_pct":4.7,"games":7240},
+    {"archetype":"Агро Охотник","class":"Hunter","winrate":53.6,"popularity_pct":7.4,"games":10150},
+    {"archetype":"Комбо Разбойник","class":"Rogue","winrate":50.9,"popularity_pct":3.8,"games":5890}
+  ],
+  "cards": [
+    {"dbf_id":1001,"card_id":"TEST_001","card_name":"Страж драконов","mulligan_impact":4.8,"mulligan_count":5234,"drawn_impact":2.1,"drawn_count":8172,"kept_impact":5.6,"kept_count":3409},
+    {"dbf_id":1002,"card_id":"TEST_002","card_name":"Огненный вестник","mulligan_impact":2.3,"mulligan_count":4105,"drawn_impact":3.7,"drawn_count":7500,"kept_impact":2.8,"kept_count":2930},
+    {"dbf_id":1003,"card_id":"TEST_003","card_name":"Древний защитник","mulligan_impact":-1.2,"mulligan_count":2940,"drawn_impact":1.6,"drawn_count":6120,"kept_impact":-0.8,"kept_count":820},
+    {"dbf_id":1004,"card_id":"TEST_004","card_name":"Хранитель пламени","mulligan_impact":0.7,"mulligan_count":76,"drawn_impact":4.1,"drawn_count":140,"kept_impact":1.3,"kept_count":49}
+  ],
+  "class_matchups": [
+    {"class_key":"mage","class_name":"Маг","winrate":56.8,"games":1870,"share_pct":15.0},
+    {"class_key":"hunter","class_name":"Охотник","winrate":58.1,"games":1510,"share_pct":12.1},
+    {"class_key":"priest","class_name":"Жрец","winrate":46.4,"games":1240,"share_pct":9.9},
+    {"class_key":"rogue","class_name":"Разбойник","winrate":52.3,"games":1090,"share_pct":8.7}
+  ]
+}

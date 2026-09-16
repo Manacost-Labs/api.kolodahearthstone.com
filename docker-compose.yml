@@ -13,6 +13,8 @@ services:
         required: false
       - path: ${HS_GRAPHQL_ENV_FILE:-/home/debian/server/secrets/hs-data-api/graphql.env}
         required: false
+      - path: ${HS_META_LAB_ENV_FILE:-/etc/hs-data-api-meta-lab.env}
+        required: false
     environment:
       HS_API_BIND_HOST: "0.0.0.0"
       HS_API_PORT: "8000"
