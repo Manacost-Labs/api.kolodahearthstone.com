@@ -28,6 +28,9 @@ from .config import (
     ai_review_confidence_threshold,
     ai_review_diagnose_failures_enabled,
     ai_review_diagnosis_max_concurrency,
+    ai_review_diagnosis_min_confidence,
+    ai_review_diagnosis_model,
+    ai_review_diagnosis_provider,
     ai_review_enabled,
     ai_review_max_failures_per_refresh,
     ai_review_max_per_refresh,
@@ -42,6 +45,14 @@ from .config import (
     openrouter_api_key,
 )
 from .sources import Source
+from .typesafe_diagnosis import (
+    PROMPT_VERSION as TYPESAFE_PROMPT_VERSION,
+)
+from .typesafe_diagnosis import (
+    SYSTEMONE_URL,
+    diagnosis_request,
+    diagnosis_response,
+)
 
 OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
 
@@ -254,6 +265,8 @@ class AIReviewResult:
     evidence_hash: str | None = None
     stage: str | None = None
     selection_reason: str | None = None
+    diagnosis_confidence: float | None = None
+    diagnosis_probabilities: dict[str, float] | None = None
 
     @property
     def should_quarantine(self) -> bool:
@@ -301,6 +314,9 @@ class AIReviewResult:
                     "reason_codes": list(self.verdict.reason_codes),
                 }
             )
+        if self.diagnosis_probabilities is not None:
+            payload["diagnosis_confidence"] = self.diagnosis_confidence
+            payload["diagnosis_probabilities"] = dict(self.diagnosis_probabilities)
         if self.diagnosis is not None:
             payload.update(
                 {
@@ -356,6 +372,7 @@ _KNOWN_OPENROUTER_PROVIDERS = {
         "Novita",
         "SiliconFlow",
         "Together",
+        "TypeSafe",
     )
 }
 _KNOWN_ROUTER_STRATEGIES = frozenset({"fallback", "latency", "price", "throughput"})
@@ -549,6 +566,7 @@ async def _post_bounded(
     *,
     headers: Mapping[str, str],
     payload: Mapping[str, Any],
+    url: str = OPENROUTER_CHAT_URL,
 ) -> httpx.Response:
     """Read at most the decoded response cap before buffering JSON."""
 
@@ -556,7 +574,7 @@ async def _post_bounded(
     if callable(stream_method):
         async with stream_method(
             "POST",
-            OPENROUTER_CHAT_URL,
+            url,
             headers=headers,
             json=payload,
         ) as streamed:
@@ -583,7 +601,7 @@ async def _post_bounded(
     # Lightweight test clients may expose only post(); production AsyncClient
     # always takes the streaming path above.
     response = await client.post(
-        OPENROUTER_CHAT_URL,
+        url,
         headers=headers,
         json=payload,
     )
@@ -595,10 +613,12 @@ async def _post_bounded(
 def _request_payload(
     evidence: Mapping[str, Any],
     review_kind: Literal["candidate", "failure_diagnosis"] = "candidate",
+    *,
+    model: str | None = None,
 ) -> dict[str, Any]:
     diagnosing = review_kind == "failure_diagnosis"
     return {
-        "model": ai_review_model(),
+        "model": model or ai_review_model(),
         "messages": [
             {
                 "role": "system",
@@ -682,7 +702,9 @@ def _safe_finish_reason(value: Any) -> str | None:
     return normalized if normalized in _SAFE_FINISH_REASONS else None
 
 
-def _response_metadata(payload: Mapping[str, Any]) -> dict[str, Any]:
+def _response_metadata(
+    payload: Mapping[str, Any], *, model: str | None = None
+) -> dict[str, Any]:
     choices = payload.get("choices")
     choice: Mapping[str, Any] = (
         cast(Mapping[str, Any], choices[0])
@@ -754,7 +776,7 @@ def _response_metadata(payload: Mapping[str, Any]) -> dict[str, Any]:
             ):
                 response_healing_applied = True
                 break
-    configured_model = ai_review_model()
+    configured_model = model or ai_review_model()
     response_model = _safe_metadata_label(payload.get("model"), limit=120)
     return {
         "model": response_model
@@ -795,12 +817,14 @@ def _provider_error_type(payload: Mapping[str, Any]) -> str | None:
 def _parse_response(
     payload: Mapping[str, Any],
     review_kind: Literal["candidate", "failure_diagnosis"] = "candidate",
+    *,
+    model: str | None = None,
 ) -> tuple[
     AIPageVerdict | AIFailureDiagnosis | None,
     dict[str, Any],
     str | None,
 ]:
-    metadata = _response_metadata(payload)
+    metadata = _response_metadata(payload, model=model)
     if "error" in payload and payload.get("error") is not None:
         return (
             None,
@@ -836,6 +860,48 @@ def _parse_response(
         result = model.model_validate(content_payload)
     except (RecursionError, TypeError, ValidationError):
         return None, metadata, "invalid_response_schema"
+    return result, metadata, None
+
+
+def _parse_typesafe_response(
+    payload: Mapping[str, Any], *, model: str, evidence: Mapping[str, Any]
+) -> tuple[AIFailureDiagnosis | None, dict[str, Any], str | None]:
+    raw_usage = payload.get("usage")
+    usage = raw_usage if isinstance(raw_usage, Mapping) else {}
+    prompt_tokens = _bounded_int(usage.get("input_tokens"))
+    completion_tokens = _bounded_int(usage.get("output_tokens"))
+    metadata = _response_metadata(
+        {
+            "model": payload.get("model"),
+            "provider": payload.get("provider"),
+            "usage": {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": prompt_tokens + completion_tokens,
+                "cost": usage.get("cost"),
+            },
+        },
+        model=model,
+    )
+    if payload.get("error") is not None:
+        return (
+            None,
+            metadata,
+            _provider_error_type(payload) or "invalid_response_error_payload",
+        )
+    try:
+        diagnosis, answer = diagnosis_response(
+            payload,
+            min_confidence=ai_review_diagnosis_min_confidence(),
+            evidence=evidence,
+        )
+        result = AIFailureDiagnosis.model_validate(diagnosis)
+    except (ValueError, TypeError, RecursionError):
+        return None, metadata, "invalid_response_schema"
+    metadata.update(
+        diagnosis_confidence=answer.confidence,
+        diagnosis_probabilities=answer.probabilities,
+    )
     return result, metadata, None
 
 
@@ -903,7 +969,10 @@ async def review_candidate(
     prepared_evidence: PreparedAIReviewEvidence | None = None,
     client: httpx.AsyncClient | None = None,
 ) -> AIReviewResult:
-    model = ai_review_model()
+    diagnosing = review_kind == "failure_diagnosis"
+    provider = ai_review_diagnosis_provider() if diagnosing else "openrouter"
+    typesafe = provider == "typesafe"
+    model = ai_review_diagnosis_model() if diagnosing else ai_review_model()
     if not ai_review_enabled():
         return AIReviewResult(state="disabled", model=model, review_kind=review_kind)
     if review_kind == "failure_diagnosis" and not ai_review_diagnose_failures_enabled():
@@ -912,6 +981,20 @@ async def review_candidate(
             model=model,
             error_type="failure_diagnosis_disabled",
             review_kind=review_kind,
+        )
+    if provider not in {"openrouter", "typesafe"}:
+        return AIReviewResult(
+            state="error",
+            model=model,
+            review_kind=review_kind,
+            error_type="invalid_diagnosis_provider",
+        )
+    if typesafe and deterministic_ok:
+        return AIReviewResult(
+            state="skipped",
+            model=model,
+            review_kind=review_kind,
+            error_type="diagnosis_requires_rejection",
         )
     if review_kind == "candidate":
         selected = ai_review_source_ids()
@@ -972,6 +1055,7 @@ async def review_candidate(
                 review_kind=review_kind,
             )
     evidence_context = {
+        "prompt_version": TYPESAFE_PROMPT_VERSION if typesafe else "quality-v2",
         "evidence_version": int(evidence.get("schema_version") or 2),
         "evidence_hash": str(evidence.get("evidence_hash") or "") or None,
         "stage": str(evidence.get("stage") or "unknown"),
@@ -994,7 +1078,11 @@ async def review_candidate(
             review_kind=review_kind,
             **evidence_context,
         )
-    request_payload = _request_payload(evidence, review_kind)
+    request_payload = (
+        diagnosis_request(evidence, model=model)
+        if typesafe
+        else _request_payload(evidence, review_kind, model=model)
+    )
     headers = {
         "Authorization": f"Bearer {key}",
         "Content-Type": "application/json",
@@ -1098,6 +1186,7 @@ async def review_candidate(
                         client,
                         headers=headers,
                         payload=request_payload,
+                        url=SYSTEMONE_URL if typesafe else OPENROUTER_CHAT_URL,
                     ),
                     timeout=max(0.001, deadline - time.monotonic()),
                 )
@@ -1204,10 +1293,14 @@ async def review_candidate(
                     request_attempts=attempt,
                     **evidence_context,
                 )
-            assessment, metadata, parse_error = _parse_response(
-                response_payload,
-                review_kind,
-            )
+            if typesafe:
+                assessment, metadata, parse_error = _parse_typesafe_response(
+                    response_payload, model=model, evidence=evidence
+                )
+            else:
+                assessment, metadata, parse_error = _parse_response(
+                    response_payload, review_kind, model=model
+                )
             if parse_error is not None or assessment is None:
                 error_type = parse_error or "invalid_response_schema"
                 if attempt < max_attempts and _retryable_review_error(error_type):

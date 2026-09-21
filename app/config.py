@@ -652,6 +652,29 @@ def ai_review_source_ids() -> set[str]:
     return {item.strip() for item in raw.split(",") if item.strip()}
 
 
+def ai_review_diagnosis_provider() -> str:
+    """Both providers use OpenRouter; TypeSafe is diagnosis-only and opt-in."""
+    value = os.environ.get("HS_AI_REVIEW_DIAGNOSIS_PROVIDER", "openrouter")
+    return value.strip().lower()
+
+
+def ai_review_diagnosis_model() -> str:
+    default = (
+        "typesafe/jev-1.13"
+        if ai_review_diagnosis_provider() == "typesafe"
+        else ai_review_model()
+    )
+    return os.environ.get("HS_AI_REVIEW_DIAGNOSIS_MODEL", "").strip() or default
+
+
+def ai_review_diagnosis_min_confidence() -> float:
+    try:
+        value = float(os.environ.get("HS_AI_REVIEW_DIAGNOSIS_MIN_CONFIDENCE", "0.95"))
+    except ValueError:
+        return 0.95
+    return value if 0.0 <= value <= 1.0 else 0.95
+
+
 def ai_review_timeout_seconds() -> float:
     try:
         value = float(os.environ.get("HS_AI_REVIEW_TIMEOUT_SECONDS", "15"))

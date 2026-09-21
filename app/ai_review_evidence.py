@@ -670,11 +670,14 @@ def _post_patch_signals(
         policy = policy_for(source.id)
     except Exception:  # noqa: BLE001 - diagnosis must remain fail-open
         policy = None
-    metadata: Mapping[str, Any] = (
-        post_patch if isinstance(post_patch, Mapping) else structured
-    )
+    # A rejected candidate often has no publication metadata yet. An empty
+    # post_patch dict must not hide phase information already on the candidate.
+    metadata: Mapping[str, Any] = {
+        **structured,
+        **(post_patch if isinstance(post_patch, Mapping) else {}),
+    }
     raw_phase = metadata.get("data_phase")
-    if raw_phase == "post_patch_early":
+    if raw_phase == "post_patch_early" or (raw_phase is None and policy is not None):
         phase = "post_patch_early"
     elif raw_phase == "stable":
         phase = "stable"
