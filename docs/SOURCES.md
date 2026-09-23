@@ -39,7 +39,7 @@ Sites: `firestone` (8), `heartharena` (1), `hearthstone-decks` (1), `hsguru` (15
 | `hsreplay_arena_legendaries` | hsreplay | arena | scrape | global | HSReplay Arena legendaries. |
 | `hsreplay_arena_winning_decks` | hsreplay | arena | scrape | global | HSReplay Arena winning decks. Fragment is client-side. |
 | `hsreplay_battlegrounds_compositions` | hsreplay | battlegrounds | scrape | global | HSReplay premium Battlegrounds compositions stats. |
-| `hsreplay_battlegrounds_compositions_screenshot` | hsreplay | battlegrounds | pipeline | 36 | Validated HSReplay Battlegrounds compositions screenshot refreshed daily; only a decoded image with a supported MIME type and valid dimensions is published as a fresh capture. |
+| `hsreplay_battlegrounds_compositions_screenshot` | hsreplay | battlegrounds | pipeline | 36 | Validated HSReplay Battlegrounds compositions screenshot checked every six hours and recaptured once the current asset is at least 23 hours old; only a decoded image with a supported MIME type and valid dimensions is published. |
 | `hsreplay_battlegrounds_comps` | hsreplay | battlegrounds | scrape | global | HSReplay Battlegrounds comps. |
 | `hsreplay_battlegrounds_hero_details` | hsreplay | battlegrounds | pipeline | 120 | BG hero detail cache built twice weekly by the systemd timer hs-data-api-docker-refresh-bg-hero-details.timer (Mon,Thu 04:35 Europe/Warsaw); stale_hours = 96h maximum gap + 24h slack. |
 | `hsreplay_battlegrounds_heroes` | hsreplay | battlegrounds | scrape | global | HSReplay premium Battlegrounds heroes tier list. |
