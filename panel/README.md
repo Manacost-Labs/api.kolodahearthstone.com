@@ -1,5 +1,12 @@
 # Web panel
 
+Battlegrounds imports recognize HearthstoneJSON `ABERRATION` as `aberration`
+(«Аберрация») in the API and panel filters. After deploying this change, run
+the existing `kolodahs-sync@cards.service` job to repair previously imported
+cards with a null creature type. The normal import updates existing rows even
+when their source payload hash is unchanged; no schema migration is needed.
+Regression check: `php panel/tests/battleground_creature_types_test.php`.
+
 This directory is the source of the authenticated database panel served at
 `https://api.kolodahearthstone.com/`. Only GitHub user `Zulut30` is allowed to
 open it. The public REST compatibility surface is under `/api/v1`, while the

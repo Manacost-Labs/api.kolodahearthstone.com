@@ -42,6 +42,7 @@ function db(array $config): PDO
 function creature_types(): array
 {
     return [
+        'aberration' => 'Аберрация',
         'all' => 'Общие',
         'undead' => 'Нежить',
         'dragon' => 'Дракон',

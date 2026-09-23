@@ -1002,6 +1002,7 @@ function map_creature_type(array $card): ?string
     }
 
     $map = [
+        'ABERRATION' => 'aberration',
         'ALL' => 'all',
         'UNDEAD' => 'undead',
         'DRAGON' => 'dragon',

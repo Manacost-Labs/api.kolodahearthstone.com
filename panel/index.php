@@ -198,6 +198,7 @@ function int_or_null($value): ?int
 function creature_types(): array
 {
     return [
+        'aberration' => 'Аберрация',
         'all' => 'Общие',
         'undead' => 'Нежить',
         'dragon' => 'Дракон',
