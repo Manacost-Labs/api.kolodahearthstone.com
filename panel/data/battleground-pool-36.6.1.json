@@ -1,0 +1,534 @@
+{
+  "patch": "36.6.1",
+  "effective_date": "2026-09-22",
+  "source": "https://hearthstone.blizzard.com/en-us/news/24302091",
+  "upstream_last_modified": "2026-09-16T11:00:45Z",
+  "source_pool_sha256": "6dbea86c582e9bfa129268a4fc4534aac82a3bc2d7d63d459711704768c66bbb",
+  "cards": {
+    "BG_TTN_401": {
+      "name": "Ancestral Automaton",
+      "in_pool": false,
+      "reason": "removed"
+    },
+    "BG32_172": {
+      "name": "Auto Assembler",
+      "in_pool": false,
+      "reason": "removed"
+    },
+    "BG36_507": {
+      "name": "Breakout Mastermind",
+      "in_pool": false,
+      "reason": "removed"
+    },
+    "BG36_760": {
+      "name": "Captain Cookie",
+      "in_pool": false,
+      "reason": "removed"
+    },
+    "BG29_503": {
+      "name": "Clunker Junker",
+      "in_pool": false,
+      "reason": "removed"
+    },
+    "BG35_142": {
+      "name": "Cousin Errgl",
+      "in_pool": false,
+      "reason": "removed"
+    },
+    "BG26_162": {
+      "name": "Dancing Barnstormer",
+      "in_pool": false,
+      "reason": "removed"
+    },
+    "BG35_143": {
+      "name": "Deepwater Chieftain",
+      "in_pool": false,
+      "reason": "removed"
+    },
+    "BGS_071": {
+      "name": "Deflect-o-Bot",
+      "in_pool": false,
+      "reason": "removed"
+    },
+    "BG31_824": {
+      "name": "Dual-Wield Corsair",
+      "in_pool": false,
+      "reason": "removed"
+    },
+    "BG33_323": {
+      "name": "Dustbone Devastator",
+      "in_pool": false,
+      "reason": "removed"
+    },
+    "BG32_822": {
+      "name": "Fire-forged Evoker",
+      "in_pool": false,
+      "reason": "removed"
+    },
+    "BG32_842": {
+      "name": "Glowing Cinder",
+      "in_pool": false,
+      "reason": "removed"
+    },
+    "BG28_595": {
+      "name": "Ignition Specialist",
+      "in_pool": false,
+      "reason": "removed"
+    },
+    "BGS_012": {
+      "name": "Kangor's Apprentice",
+      "in_pool": false,
+      "reason": "removed"
+    },
+    "BG35_140": {
+      "name": "Mama Mrrglton",
+      "in_pool": false,
+      "reason": "removed"
+    },
+    "BG32_170": {
+      "name": "Metallic Hunter",
+      "in_pool": false,
+      "reason": "removed"
+    },
+    "BG31_843": {
+      "name": "Meteorite Crasher",
+      "in_pool": false,
+      "reason": "removed"
+    },
+    "BG36_351": {
+      "name": "Moat Custodian",
+      "in_pool": false,
+      "reason": "removed"
+    },
+    "BGS_127": {
+      "name": "Molten Rock",
+      "in_pool": false,
+      "reason": "removed"
+    },
+    "BG27_080": {
+      "name": "Motley Phalanx",
+      "in_pool": false,
+      "reason": "removed"
+    },
+    "BGS_104": {
+      "name": "Nomi, Kitchen Nightmare",
+      "in_pool": false,
+      "reason": "removed"
+    },
+    "BG27_002": {
+      "name": "Oozeling Gladiator",
+      "in_pool": false,
+      "reason": "removed"
+    },
+    "BG35_141": {
+      "name": "Papa Mrrglton",
+      "in_pool": false,
+      "reason": "removed"
+    },
+    "BG33_893": {
+      "name": "Primitive Painter",
+      "in_pool": false,
+      "reason": "removed"
+    },
+    "BG36_509": {
+      "name": "Private Investigator",
+      "in_pool": false,
+      "reason": "removed"
+    },
+    "BG33_140": {
+      "name": "River Skipper",
+      "in_pool": false,
+      "reason": "removed"
+    },
+    "BG32_841": {
+      "name": "Sand Swirler",
+      "in_pool": false,
+      "reason": "removed"
+    },
+    "BG26_148": {
+      "name": "Scrap Scraper",
+      "in_pool": false,
+      "reason": "removed"
+    },
+    "BG25_806": {
+      "name": "Sly Raptor",
+      "in_pool": false,
+      "reason": "removed"
+    },
+    "BG29_810": {
+      "name": "Thousandth Paper Drake",
+      "in_pool": false,
+      "reason": "removed"
+    },
+    "BG32_846": {
+      "name": "Unleashed Mana Surge",
+      "in_pool": false,
+      "reason": "removed"
+    },
+    "BG36_510": {
+      "name": "Vigilant Bristlemane",
+      "in_pool": false,
+      "reason": "removed"
+    },
+    "BG35_152": {
+      "name": "Void Pup Trainer",
+      "in_pool": false,
+      "reason": "removed"
+    },
+    "BG24_004": {
+      "name": "Warpwing",
+      "in_pool": false,
+      "reason": "removed"
+    },
+    "BG34_170": {
+      "name": "Auto Accelerator",
+      "in_pool": true,
+      "reason": "returning"
+    },
+    "BGS_034": {
+      "name": "Bronze Warden",
+      "in_pool": true,
+      "reason": "returning"
+    },
+    "BG31_149": {
+      "name": "Bubble Gunner",
+      "in_pool": true,
+      "reason": "returning"
+    },
+    "BG34_171": {
+      "name": "Conveyor Construct",
+      "in_pool": true,
+      "reason": "returning"
+    },
+    "BG31_815": {
+      "name": "Dune Dweller",
+      "in_pool": true,
+      "reason": "returning"
+    },
+    "BG32_231": {
+      "name": "Elite Navigator",
+      "in_pool": true,
+      "reason": "returning"
+    },
+    "BG35_882": {
+      "name": "Firelands Fugitive",
+      "in_pool": true,
+      "reason": "returning"
+    },
+    "BG28_583": {
+      "name": "Geomagus Roogug",
+      "in_pool": true,
+      "reason": "returning"
+    },
+    "BGS_008": {
+      "name": "Ghastcoiler",
+      "in_pool": true,
+      "reason": "returning"
+    },
+    "BG32_336": {
+      "name": "Gormling Gourmet",
+      "in_pool": true,
+      "reason": "returning"
+    },
+    "BG31_148": {
+      "name": "Hackerfin",
+      "in_pool": true,
+      "reason": "returning"
+    },
+    "BG30_121": {
+      "name": "Hot-Air Surveyor",
+      "in_pool": true,
+      "reason": "returning"
+    },
+    "BG31_812": {
+      "name": "Ichoron the Protector",
+      "in_pool": true,
+      "reason": "returning"
+    },
+    "BG27_000": {
+      "name": "Iron Groundskeeper",
+      "in_pool": true,
+      "reason": "returning"
+    },
+    "BG35_881": {
+      "name": "Leyline Surfacer",
+      "in_pool": true,
+      "reason": "returning"
+    },
+    "BG28_707": {
+      "name": "Living Azerite",
+      "in_pool": true,
+      "reason": "returning"
+    },
+    "BG28_582": {
+      "name": "Mangled Bandit",
+      "in_pool": true,
+      "reason": "returning"
+    },
+    "BGS_040": {
+      "name": "Nadina the Red",
+      "in_pool": true,
+      "reason": "returning"
+    },
+    "BG34_405": {
+      "name": "Relentless Deflector",
+      "in_pool": true,
+      "reason": "returning"
+    },
+    "BG32_860": {
+      "name": "Shoalfin Mystic",
+      "in_pool": true,
+      "reason": "returning"
+    },
+    "BG31_810": {
+      "name": "Ultraviolet Ascendant",
+      "in_pool": true,
+      "reason": "returning"
+    },
+    "BG22_403": {
+      "name": "Young Murk-Eye",
+      "in_pool": true,
+      "reason": "returning"
+    },
+    "BG36_110": {
+      "name": "Joyous",
+      "in_pool": true,
+      "reason": "new"
+    },
+    "BG36_098": {
+      "name": "Zoatroid",
+      "in_pool": true,
+      "reason": "new"
+    },
+    "BG36_099": {
+      "name": "Brain Rotter",
+      "in_pool": true,
+      "reason": "new"
+    },
+    "BG36_116": {
+      "name": "Underrot Spawn",
+      "in_pool": true,
+      "reason": "new"
+    },
+    "BG36_101": {
+      "name": "Unwilling Slacker",
+      "in_pool": true,
+      "reason": "new"
+    },
+    "BG36_311": {
+      "name": "Abyssal Envoy",
+      "in_pool": true,
+      "reason": "new"
+    },
+    "BG36_113": {
+      "name": "Drifting Sacrifice",
+      "in_pool": true,
+      "reason": "new"
+    },
+    "BG36_112": {
+      "name": "Fetid Corroder",
+      "in_pool": true,
+      "reason": "new"
+    },
+    "BG36_108": {
+      "name": "Vicious Mindslasher",
+      "in_pool": true,
+      "reason": "new"
+    },
+    "BG36_100": {
+      "name": "Wandering Willbreaker",
+      "in_pool": true,
+      "reason": "new"
+    },
+    "BG36_106": {
+      "name": "Cutthroat K'Thir",
+      "in_pool": true,
+      "reason": "new"
+    },
+    "BG36_308": {
+      "name": "Faceless Operative",
+      "in_pool": true,
+      "reason": "new"
+    },
+    "BG36_312": {
+      "name": "Mindbending Recruiter",
+      "in_pool": true,
+      "reason": "new"
+    },
+    "BG36_115": {
+      "name": "Nightmare Corroder",
+      "in_pool": true,
+      "reason": "new"
+    },
+    "BG36_114": {
+      "name": "Parasitic Fleshling",
+      "in_pool": true,
+      "reason": "new"
+    },
+    "BG36_102": {
+      "name": "De-volition-ist",
+      "in_pool": true,
+      "reason": "new"
+    },
+    "BG36_318": {
+      "name": "Faceless Converter",
+      "in_pool": true,
+      "reason": "new"
+    },
+    "BG36_097": {
+      "name": "Mindbender Ghur'sha",
+      "in_pool": true,
+      "reason": "new"
+    },
+    "BG36_320": {
+      "name": "Mysterious K'Thir",
+      "in_pool": true,
+      "reason": "new"
+    },
+    "BG36_300": {
+      "name": "N'raqi Frostcaller",
+      "in_pool": true,
+      "reason": "new"
+    },
+    "BG36_103": {
+      "name": "N'raqi Sapper",
+      "in_pool": true,
+      "reason": "new"
+    },
+    "BGFYM_005": {
+      "name": "Harbinger Aph'lass",
+      "in_pool": true,
+      "reason": "new"
+    },
+    "BG36_104": {
+      "name": "Dark Puppeteer",
+      "in_pool": true,
+      "reason": "new"
+    },
+    "BG36_109": {
+      "name": "The Shadow of Doubt",
+      "in_pool": true,
+      "reason": "new"
+    },
+    "BG36_111": {
+      "name": "Sha of Fear",
+      "in_pool": true,
+      "reason": "new"
+    },
+    "BG36_369": {
+      "name": "Greedy Conniver",
+      "in_pool": true,
+      "reason": "new"
+    },
+    "BG36_362": {
+      "name": "Sacrificial Wrathguard",
+      "in_pool": true,
+      "reason": "new"
+    },
+    "BG36_372": {
+      "name": "Holy Vanguard",
+      "in_pool": true,
+      "reason": "new"
+    },
+    "BG36_700": {
+      "name": "Sewer Escapee",
+      "in_pool": true,
+      "reason": "new"
+    },
+    "BG36_364": {
+      "name": "Hopebringer",
+      "in_pool": true,
+      "reason": "new"
+    },
+    "BG36_848": {
+      "name": "Lichling Hoarder",
+      "in_pool": true,
+      "reason": "new"
+    },
+    "BG36_366": {
+      "name": "Resourceful Robot",
+      "in_pool": true,
+      "reason": "new"
+    },
+    "BG36_367": {
+      "name": "Auto Reveille",
+      "in_pool": true,
+      "reason": "new"
+    },
+    "BG36_849": {
+      "name": "Heroic Broodmother",
+      "in_pool": true,
+      "reason": "new"
+    },
+    "BG36_370": {
+      "name": "Victorious Geomant",
+      "in_pool": true,
+      "reason": "new"
+    },
+    "BGDUO_700": {
+      "name": "Voidpriest Cloner",
+      "in_pool": true,
+      "reason": "new"
+    },
+    "BGDUO_701": {
+      "name": "C'Thrax Wrecker",
+      "in_pool": true,
+      "reason": "new"
+    },
+    "BG36_360t3": {
+      "name": "Dark Paradox",
+      "in_pool": true,
+      "reason": "new-dark-gift-variant"
+    },
+    "BG36_360t4": {
+      "name": "Dark Paradox",
+      "in_pool": true,
+      "reason": "new-dark-gift-variant"
+    },
+    "BG36_360t5": {
+      "name": "Dark Paradox",
+      "in_pool": true,
+      "reason": "new-dark-gift-variant"
+    },
+    "BG36_360t6": {
+      "name": "Dark Paradox",
+      "in_pool": true,
+      "reason": "new-dark-gift-variant"
+    },
+    "BG36_360t9": {
+      "name": "Dark Paradox",
+      "in_pool": true,
+      "reason": "new-dark-gift-variant"
+    },
+    "BG34_170t": {
+      "name": "Red Volumizer",
+      "in_pool": false,
+      "reason": "generated-or-placeholder"
+    },
+    "BG34_170t2": {
+      "name": "Blue Volumizer",
+      "in_pool": false,
+      "reason": "generated-or-placeholder"
+    },
+    "BG34_170t3": {
+      "name": "Green Volumizer",
+      "in_pool": false,
+      "reason": "generated-or-placeholder"
+    },
+    "BGFYM_000": {
+      "name": "C'Thun",
+      "in_pool": false,
+      "reason": "generated-or-placeholder"
+    },
+    "BGFYM_011": {
+      "name": "Y'Shaarj",
+      "in_pool": false,
+      "reason": "generated-or-placeholder"
+    },
+    "BG36_360": {
+      "name": "Dark Paradox",
+      "in_pool": false,
+      "reason": "generated-or-placeholder"
+    }
+  }
+}

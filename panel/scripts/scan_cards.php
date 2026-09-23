@@ -6,6 +6,7 @@ ini_set('memory_limit', '512M');
 umask(0022);
 
 $config = require __DIR__ . '/../config.php';
+require_once __DIR__ . '/lib/battleground_pool_patch.php';
 
 const HSJ_RU_URL = 'https://api.hearthstonejson.com/v1/latest/ruRU/cards.json';
 const HSJ_EN_URL = 'https://api.hearthstonejson.com/v1/latest/enUS/cards.json';
@@ -1140,6 +1141,9 @@ function normalize_card(array $ru, array $en = []): ?array
             ])),
         ],
     ];
+    if (isset($ru['_poolCorrection'])) {
+        $payload['source_payload']['pool_correction'] = $ru['_poolCorrection'];
+    }
     $payload['source_hash'] = hash('sha256', json_encode($payload['source_payload'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
 
     return $payload;
@@ -1284,6 +1288,9 @@ function scan_hearthstonejson(PDO $pdo, bool $dryRun = false): array
 {
     $ruCards = fetch_json(HSJ_RU_URL);
     $enCards = fetch_json(HSJ_EN_URL);
+    $poolPatch = json_decode(file_get_contents(__DIR__ . '/../data/battleground-pool-36.6.1.json'), true, 512, JSON_THROW_ON_ERROR);
+    $ruCards = apply_battleground_pool_patch($ruCards, $poolPatch);
+    $enCards = apply_battleground_pool_patch($enCards, $poolPatch);
     $enById = [];
     foreach ($enCards as $card) {
         if (is_array($card) && !empty($card['id'])) {
