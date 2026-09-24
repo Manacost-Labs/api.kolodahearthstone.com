@@ -263,6 +263,25 @@ class OfficialExpansionRevealTest(unittest.TestCase):
         self.assertEqual(stats["preview"], 1)
         self.assertEqual(formats.call_args.kwargs["availability_status"], "preview")
 
+    def test_wild_sync_keeps_public_gallery_art_on_shared_card(self):
+        game_card = {"id": 130001, "name": "Shared card", "cardSetId": 1994, "collectible": 1}
+        reveal = {**game_card, "image": "https://d15f34w2p8l1cc.cloudfront.net/hearthstone/card.png"}
+
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(sync, "fetch_blizzard_cards", return_value={130001: game_card}))
+            source = stack.enter_context(patch.object(sync, "fetch_official_reveals", return_value={130001: reveal}))
+            stack.enter_context(patch.object(sync, "existing_card_id_by_dbf", return_value=None))
+            stack.enter_context(patch.object(sync, "current_hash", return_value=None))
+            save = stack.enter_context(patch.object(sync, "save_card", return_value="changed"))
+            stack.enter_context(patch.object(sync, "save_format"))
+            stack.enter_context(patch.object(sync, "mark_removed", return_value=0))
+            sync.sync_format(object(), "standard", "us", "token", {}, {}, False)
+            sync.sync_format(object(), "wild", "us", "token", {}, {}, False)
+
+        self.assertEqual(source.call_count, 4)
+        self.assertEqual(save.call_args.args[1]["image_url"], reveal["image"])
+        self.assertEqual(save.call_args_list[0].args[1]["source_hash"], save.call_args_list[1].args[1]["source_hash"])
+
     def test_two_failed_reveal_locales_abort_before_removal(self):
         with ExitStack() as stack:
             stack.enter_context(patch.object(sync, "fetch_blizzard_cards", return_value={}))

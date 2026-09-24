@@ -628,7 +628,7 @@ def sync_format(conn, format_slug: str, region: str, token: str, hsj_ru: dict[in
     en_cards = fetch_blizzard_cards(format_slug, "en_US", region, token)
     reveals: dict[str, dict[int, dict[str, Any]]] = {}
     reveal_errors: list[Exception] = []
-    if format_slug == "standard":
+    if format_slug in {"standard", "wild"}:
         for locale in ("ru_RU", "en_US"):
             try:
                 reveals[locale] = fetch_official_reveals(locale)
@@ -686,7 +686,7 @@ def sync_format(conn, format_slug: str, region: str, token: str, hsj_ru: dict[in
         if outcome == "changed":
             stats["changed"] += 1
     for dbf in sorted(set(revealed_ru) | set(revealed_en)):
-        if dbf not in preview_dbfs:
+        if dbf not in preview_dbfs or (format_slug == "wild" and dbf not in ru_cards):
             continue
         ru, en = revealed_ru.get(dbf), revealed_en.get(dbf)
         if not any(str(row.get("name") or "").strip() for row in (ru, en) if row):
