@@ -6,6 +6,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import subprocess
 import urllib.parse
 import urllib.request
@@ -15,7 +16,6 @@ from typing import Any
 
 import pymysql
 from pymysql.cursors import DictCursor
-
 
 APP_ROOT = Path(__file__).resolve().parents[1]
 HSJ_RU_URL = "https://api.hearthstonejson.com/v1/latest/ruRU/cards.json"
@@ -52,6 +52,11 @@ TEMPORARY_HSJ_FORMAT_FALLBACKS = {
 }
 TEMPORARY_HSJ_FORMAT_FALLBACK_EXPIRES_ON = date(2026, 8, 26)
 SOURCE = "blizzard"
+REVEAL_SOURCE = "blizzard_card_library"
+REVEAL_SET_SLUG = "reign-of-the-black-empire"
+REVEAL_SET_ID = 1994
+REVEAL_SET_CODE = "BE"
+REVEAL_IMAGE_HOSTS = {"d15f34w2p8l1cc.cloudfront.net", "hearthstone.blizzard.com"}
 
 
 def utc_now() -> str:
@@ -160,6 +165,126 @@ def fetch_blizzard_cards(format_slug: str, locale: str, region: str, token: str)
             break
         page += 1
     return result
+
+
+def fetch_official_reveals(locale: str) -> dict[int, dict[str, Any]]:
+    paths = {"en_US": "en-us", "ru_RU": "ru-ru"}
+    if locale not in paths:
+        raise ValueError(f"Unsupported reveal locale: {locale}")
+    result: dict[int, dict[str, Any]] = {}
+    expected_count: int | None = None
+    expected_pages: int | None = None
+    page = 1
+    while True:
+        query = urllib.parse.urlencode({
+            "class": "all",
+            "pageSize": 450,
+            "set": REVEAL_SET_SLUG,
+            "sort": "dateadded:desc,name:asc,classes:asc",
+            "locale": locale,
+            "page": page,
+        })
+        url = f"https://hearthstone.blizzard.com/{paths[locale]}/api/cards?{query}"
+        payload = http_json(url)
+        if not isinstance(payload, dict):
+            raise TypeError("Official reveal response is not an object")
+        count, pages, actual_page = (payload.get(key) for key in ("cardCount", "pageCount", "page"))
+        if (type(count) is not int or not 1 <= count <= 1000
+                or type(pages) is not int or not 1 <= pages <= 5
+                or type(actual_page) is not int or actual_page != page
+                or not isinstance(payload.get("cards"), list)
+                or expected_count is not None and count != expected_count
+                or expected_pages is not None and pages != expected_pages):
+            raise RuntimeError("Official reveal pagination is invalid")
+        expected_count, expected_pages = count, pages
+        for card in payload["cards"]:
+            if not isinstance(card, dict) or type(card.get("id")) is not int or card["id"] <= 0:
+                raise RuntimeError("Official reveal card identity is invalid")
+            if card.get("cardSetId") != REVEAL_SET_ID or card.get("collectible") != 1:
+                raise RuntimeError("Official reveal response contains a card outside the collectible expansion")
+            for field, limit in (("name", 255), ("text", 20_000), ("flavorText", 20_000)):
+                value = card.get(field)
+                if value is not None and (not isinstance(value, str) or len(value) > limit):
+                    raise RuntimeError(f"Official reveal {field} is invalid")
+            if card["id"] in result:
+                raise RuntimeError("Official reveal response contains duplicate cards")
+            result[card["id"]] = card
+        if page >= pages:
+            break
+        page += 1
+    if len(result) != expected_count:
+        raise RuntimeError("Official reveal response is incomplete")
+    return result
+
+
+def safe_reveal_image(value: Any) -> str | None:
+    if not isinstance(value, str) or len(value) > 512:
+        return None
+    parsed = urllib.parse.urlparse(value)
+    if parsed.scheme != "https" or parsed.hostname not in REVEAL_IMAGE_HOSTS or parsed.username or parsed.password:
+        return None
+    return value
+
+
+def make_reveal_card(
+    dbf: int,
+    ru: dict[str, Any] | None,
+    en: dict[str, Any] | None,
+    standard_cards: list[dict[str, Any]],
+    hsj_ru: dict[int, dict[str, Any]],
+    hsj_en: dict[int, dict[str, Any]],
+) -> dict[str, Any]:
+    if not ru and not en:
+        raise ValueError("Reveal card needs at least one locale")
+    fallback = ru or en or {}
+    ru_card = dict(ru or {**fallback, "name": None, "text": None, "flavorText": None})
+    en_card = dict(en) if en else None
+    ru_card["cardSet"] = {"id": REVEAL_SET_ID, "slug": REVEAL_SET_CODE}
+    for card in (ru_card, en_card):
+        if card:
+            for field in ("image", "imageGold", "cropImage"):
+                card[field] = safe_reveal_image(card.get(field))
+    for key in ("class", "cardType", "rarity", "minionType", "spellSchool"):
+        id_key = f"{key}Id"
+        if ru_card.get(key) or ru_card.get(id_key) is None:
+            continue
+        ru_card[key] = next((
+            value for row in standard_cards
+            if isinstance(value := row.get(key), dict) and value.get("id") == ru_card[id_key]
+        ), None)
+    for card in (ru_card, en_card):
+        if card and isinstance(card.get("text"), str):
+            card["text"] = re.sub(r"\s*~GAMEPLAY ASPROXY [A-Z]{1,5} \d+\s*$", "", card["text"])
+    # HearthstoneJSON may know unrevealed rules and art; use its ID only.
+    ids = {
+        row.get("id") for row in (hsj_ru.get(dbf), hsj_en.get(dbf))
+        if isinstance(row, dict) and isinstance(row.get("id"), str)
+    }
+    canonical_id = next(iter(ids)) if len(ids) == 1 else None
+    if not canonical_id or not re.fullmatch(r"[A-Za-z0-9_]{2,64}", canonical_id):
+        canonical_id = None
+    id_only = {"id": canonical_id} if canonical_id else None
+    normalized = normalize_card(dbf, ru_card, en_card, id_only, id_only)
+    normalized["image_url"] = localized_text(ru_card.get("image") or (en_card or {}).get("image"))
+    normalized["source"] = REVEAL_SOURCE
+    return normalized
+
+
+def preserve_preview_fields(card: dict[str, Any], previous: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(card)
+    for key, value in card.items():
+        if key in {"card_id", "dbf", "source", "source_payload", "source_hash"}:
+            continue
+        if value is None or value == "" or value == []:
+            prior = previous.get(key)
+            if key in {"multi_class_json", "mechanics_json", "referenced_tags_json", "keyword_ids_json"} and isinstance(prior, str):
+                try:
+                    prior = json.loads(prior)
+                except json.JSONDecodeError:
+                    continue
+            if prior is not None and prior != "" and prior != []:
+                merged[key] = prior
+    return merged
 
 
 def fetch_hsj(url: str) -> dict[int, dict[str, Any]]:
@@ -320,6 +445,15 @@ def existing_card_id_by_dbf(conn, dbf: int) -> str | None:
     return str(row["card_id"]) if row else None
 
 
+def load_existing_preview_row(conn, dbf: int) -> dict[str, Any] | None:
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT * FROM constructed_cards WHERE dbf = %s AND source = %s LIMIT 1",
+            (dbf, REVEAL_SOURCE),
+        )
+        return cur.fetchone()
+
+
 def migrate_fallback_card_id(conn, dbf: int, old_card_id: str, new_card_id: str, dry_run: bool) -> bool:
     if old_card_id == new_card_id:
         return False
@@ -374,7 +508,7 @@ def save_card(conn, card: dict[str, Any], dry_run: bool) -> str:
     now = utc_now()
     params = {
         **{k: v for k, v in card.items() if k != "source_payload"},
-        "source": SOURCE,
+        "source": card.get("source") or SOURCE,
         "source_payload_json": json_dump(card["source_payload"]),
         "first_seen_at": now,
         "last_seen_at": now,
@@ -426,10 +560,14 @@ def save_card(conn, card: dict[str, Any], dry_run: bool) -> str:
     return "changed" if changed else "unchanged"
 
 
-def save_format(conn, format_slug: str, card: dict[str, Any], dry_run: bool) -> None:
+def save_format(
+    conn, format_slug: str, card: dict[str, Any], dry_run: bool,
+    *, availability_status: str = "available",
+) -> None:
     if dry_run:
         return
-    payload = {"format": format_slug, "card_id": card["card_id"], "dbf": card["dbf"], "source": SOURCE}
+    source = card.get("source") or SOURCE
+    payload = {"format": format_slug, "card_id": card["card_id"], "dbf": card["dbf"], "source": source}
     now = utc_now()
     with conn.cursor() as cur:
         cur.execute(
@@ -437,15 +575,15 @@ def save_format(conn, format_slug: str, card: dict[str, Any], dry_run: bool) -> 
             INSERT INTO constructed_format_cards (
                 format_slug, card_id, dbf, in_format, availability_status, source,
                 source_payload_json, source_hash, first_seen_at, last_seen_at, changed_at
-            ) VALUES (%s, %s, %s, 1, 'available', %s, %s, %s, %s, %s, %s)
+            ) VALUES (%s, %s, %s, 1, %s, %s, %s, %s, %s, %s, %s)
             ON DUPLICATE KEY UPDATE
-                dbf = VALUES(dbf), in_format = 1, availability_status = 'available',
+                dbf = VALUES(dbf), in_format = 1, availability_status = VALUES(availability_status),
                 source = VALUES(source), source_payload_json = VALUES(source_payload_json),
                 last_seen_at = VALUES(last_seen_at),
-                changed_at = IF(constructed_format_cards.in_format <> 1 OR constructed_format_cards.availability_status <> 'available', VALUES(changed_at), changed_at),
+                changed_at = IF(constructed_format_cards.in_format <> 1 OR constructed_format_cards.availability_status <> VALUES(availability_status), VALUES(changed_at), changed_at),
                 source_hash = VALUES(source_hash)
             """,
-            (format_slug, card["card_id"], card["dbf"], SOURCE, json_dump(payload), stable_hash(payload), now, now, now),
+            (format_slug, card["card_id"], card["dbf"], availability_status, source, json_dump(payload), stable_hash(payload), now, now, now),
         )
 
 
@@ -460,7 +598,7 @@ def mark_removed(conn, format_slug: str, active_card_ids: set[str], dry_run: boo
             f"""
             UPDATE constructed_format_cards
             SET in_format = 0, availability_status = 'removed', changed_at = CURRENT_TIMESTAMP
-            WHERE format_slug = %s AND in_format = 1 AND card_id NOT IN ({placeholders})
+            WHERE format_slug = %s AND in_format = 1 AND availability_status = 'available' AND card_id NOT IN ({placeholders})
             """,
             (format_slug, *sorted(active_card_ids)),
         )
@@ -488,7 +626,17 @@ def finish_run(conn, run_id: int, stats: dict[str, int], status: str = "ok", err
 def sync_format(conn, format_slug: str, region: str, token: str, hsj_ru: dict[int, dict[str, Any]], hsj_en: dict[int, dict[str, Any]], dry_run: bool) -> dict[str, int]:
     ru_cards = fetch_blizzard_cards(format_slug, "ru_RU", region, token)
     en_cards = fetch_blizzard_cards(format_slug, "en_US", region, token)
-    stats = {"scanned": 0, "inserted": 0, "updated": 0, "changed": 0, "removed": 0, "renamed": 0}
+    reveals: dict[str, dict[int, dict[str, Any]]] = {}
+    reveal_errors: list[Exception] = []
+    if format_slug == "standard":
+        for locale in ("ru_RU", "en_US"):
+            try:
+                reveals[locale] = fetch_official_reveals(locale)
+            except Exception as exc:  # noqa: BLE001 - a failed locale must not hide a healthy one
+                reveal_errors.append(exc)
+        if not reveals:
+            raise RuntimeError("Both official expansion reveal locales are unavailable") from reveal_errors[0]
+    stats = {"scanned": 0, "inserted": 0, "updated": 0, "changed": 0, "removed": 0, "renamed": 0, "preview": 0, "preview_locale_errors": len(reveal_errors)}
     active_card_ids: set[str] = set()
     for dbf, ru in sorted(ru_cards.items()):
         card = normalize_card(dbf, ru, en_cards.get(dbf), hsj_ru.get(dbf), hsj_en.get(dbf))
@@ -517,6 +665,35 @@ def sync_format(conn, format_slug: str, region: str, token: str, hsj_ru: dict[in
         stats["inserted" if not exists else "updated"] += 1
         if outcome == "changed":
             stats["changed"] += 1
+    revealed_ru = reveals.get("ru_RU", {})
+    revealed_en = reveals.get("en_US", {})
+    standard_cards = list(ru_cards.values())
+    for dbf in sorted(set(revealed_ru) | set(revealed_en)):
+        if dbf in ru_cards:
+            continue
+        ru, en = revealed_ru.get(dbf), revealed_en.get(dbf)
+        if not any(str(row.get("name") or "").strip() for row in (ru, en) if row):
+            continue
+        card = make_reveal_card(dbf, ru, en, standard_cards, hsj_ru, hsj_en)
+        existing_card_id = existing_card_id_by_dbf(conn, dbf)
+        if existing_card_id and existing_card_id != card["card_id"]:
+            if existing_card_id.startswith("blizzard:"):
+                if migrate_fallback_card_id(conn, dbf, existing_card_id, card["card_id"], dry_run):
+                    stats["renamed"] += 1
+            else:
+                card["card_id"] = existing_card_id
+        prior = load_existing_preview_row(conn, dbf) if existing_card_id else None
+        if prior:
+            card = preserve_preview_fields(card, prior)
+        if prior or not existing_card_id:
+            outcome = save_card(conn, card, dry_run)
+            if outcome == "changed":
+                stats["changed"] += 1
+        save_format(conn, format_slug, card, dry_run, availability_status="preview")
+        active_card_ids.add(card["card_id"])
+        stats["scanned"] += 1
+        stats["inserted" if not existing_card_id else "updated"] += 1
+        stats["preview"] += 1
     stats["removed"] = mark_removed(conn, format_slug, active_card_ids, dry_run)
     return stats
 
