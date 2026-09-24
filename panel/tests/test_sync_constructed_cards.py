@@ -210,7 +210,7 @@ class OfficialExpansionRevealTest(unittest.TestCase):
         self.assertEqual(merged, {**previous, "multi_class_json": [2, 6]})
 
     def test_standard_sync_adds_new_reveal_without_overwriting_playable_card(self):
-        playable = {"id": 130001, "name": "Playable", "collectible": 1, "image": "https://example.test/playable.png"}
+        playable = {"id": 130001, "name": "Playable", "cardSetId": 1994, "collectible": 1, "image": "https://example.test/playable.png"}
         announced = {"id": 130002, "name": "Announced", "cardSetId": 1994, "collectible": 1}
 
         with ExitStack() as stack:
@@ -228,9 +228,33 @@ class OfficialExpansionRevealTest(unittest.TestCase):
             stats = sync.sync_format(object(), "standard", "us", "token", {}, {}, False)
 
         self.assertEqual([item.args[1]["dbf"] for item in save.call_args_list], [130001, 130002])
+        self.assertEqual(save.call_args_list[0].args[1]["card_set"], "BE")
         self.assertEqual(stats["preview"], 1)
         self.assertEqual(formats.call_args_list[1].kwargs["availability_status"], "preview")
         self.assertEqual(removed.call_args.args[2], {"blizzard:130001", "blizzard:130002"})
+
+    def test_revealed_card_in_standard_feed_without_expansion_set_is_still_preview(self):
+        game_card = {"id": 130001, "name": "Game Data name", "collectible": 1, "text": "Public Game Data rules"}
+        reveal = {"id": 130001, "name": "Gallery name", "cardSetId": 1994, "collectible": 1}
+
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(sync, "fetch_blizzard_cards", return_value={130001: game_card}))
+            stack.enter_context(patch.object(sync, "fetch_official_reveals", return_value={130001: reveal}))
+            stack.enter_context(patch.object(sync, "existing_card_id_by_dbf", return_value="blizzard:130001"))
+            stack.enter_context(patch.object(sync, "load_existing_preview_row", return_value=None))
+            save = stack.enter_context(patch.object(sync, "save_card", return_value="changed"))
+            formats = stack.enter_context(patch.object(sync, "save_format"))
+            stack.enter_context(patch.object(sync, "mark_removed", return_value=0))
+            stats = sync.sync_format(object(), "standard", "us", "token", {}, {}, False)
+
+        saved = save.call_args.args[1]
+        self.assertEqual(saved["card_set"], "BE")
+        self.assertEqual(saved["text_ru"], "Public Game Data rules")
+        self.assertEqual(saved["source"], sync.REVEAL_SOURCE)
+        self.assertEqual(saved["source_payload"]["game_data_ru"], game_card)
+        self.assertEqual(saved["source_hash"], sync.stable_hash(saved["source_payload"]))
+        self.assertEqual(stats["preview"], 1)
+        self.assertEqual(formats.call_args.kwargs["availability_status"], "preview")
 
     def test_two_failed_reveal_locales_abort_before_removal(self):
         with ExitStack() as stack:

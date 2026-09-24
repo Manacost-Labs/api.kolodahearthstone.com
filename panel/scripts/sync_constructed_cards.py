@@ -395,7 +395,7 @@ def normalize_card(dbf: int, ru: dict[str, Any], en: dict[str, Any] | None, hsj_
         "text_en": text_en,
         "flavor_ru": localized_text(ru.get("flavorText") or (hsj_ru or {}).get("flavor")),
         "flavor_en": localized_text((en or {}).get("flavorText") or (hsj_en or {}).get("flavor")),
-        "card_set": nested_slug(card_set) or (hsj_ru or hsj_en or {}).get("set"),
+        "card_set": REVEAL_SET_CODE if nested_id(card_set) == REVEAL_SET_ID or ru.get("cardSetId") == REVEAL_SET_ID else nested_slug(card_set) or (hsj_ru or hsj_en or {}).get("set"),
         "card_set_id": nested_id(card_set) or ru.get("cardSetId"),
         "card_type": nested_slug(card_type) or (hsj_ru or hsj_en or {}).get("type"),
         "card_type_id": nested_id(card_type) or ru.get("cardTypeId"),
@@ -636,9 +636,20 @@ def sync_format(conn, format_slug: str, region: str, token: str, hsj_ru: dict[in
                 reveal_errors.append(exc)
         if not reveals:
             raise RuntimeError("Both official expansion reveal locales are unavailable") from reveal_errors[0]
+    revealed_ru = reveals.get("ru_RU", {})
+    revealed_en = reveals.get("en_US", {})
+    preview_dbfs = {
+        dbf for dbf in set(revealed_ru) | set(revealed_en)
+        if dbf not in ru_cards or not (
+            ru_cards[dbf].get("cardSetId") == REVEAL_SET_ID
+            or nested_id(ru_cards[dbf].get("cardSet")) == REVEAL_SET_ID
+        )
+    }
     stats = {"scanned": 0, "inserted": 0, "updated": 0, "changed": 0, "removed": 0, "renamed": 0, "preview": 0, "preview_locale_errors": len(reveal_errors)}
     active_card_ids: set[str] = set()
     for dbf, ru in sorted(ru_cards.items()):
+        if dbf in preview_dbfs:
+            continue
         card = normalize_card(dbf, ru, en_cards.get(dbf), hsj_ru.get(dbf), hsj_en.get(dbf))
         existing_card_id = existing_card_id_by_dbf(conn, dbf)
         if existing_card_id and migrate_fallback_card_id(
@@ -665,16 +676,20 @@ def sync_format(conn, format_slug: str, region: str, token: str, hsj_ru: dict[in
         stats["inserted" if not exists else "updated"] += 1
         if outcome == "changed":
             stats["changed"] += 1
-    revealed_ru = reveals.get("ru_RU", {})
-    revealed_en = reveals.get("en_US", {})
     standard_cards = list(ru_cards.values())
     for dbf in sorted(set(revealed_ru) | set(revealed_en)):
-        if dbf in ru_cards:
+        if dbf not in preview_dbfs:
             continue
         ru, en = revealed_ru.get(dbf), revealed_en.get(dbf)
         if not any(str(row.get("name") or "").strip() for row in (ru, en) if row):
             continue
         card = make_reveal_card(dbf, ru, en, standard_cards, hsj_ru, hsj_en)
+        if dbf in ru_cards:
+            public_game_card = normalize_card(dbf, ru_cards[dbf], en_cards.get(dbf), None, None)
+            card = preserve_preview_fields(card, public_game_card)
+            card["source_payload"]["game_data_ru"] = ru_cards[dbf]
+            card["source_payload"]["game_data_en"] = en_cards.get(dbf)
+            card["source_hash"] = stable_hash(card["source_payload"])
         existing_card_id = existing_card_id_by_dbf(conn, dbf)
         if existing_card_id and existing_card_id != card["card_id"]:
             if existing_card_id.startswith("blizzard:"):
@@ -685,7 +700,7 @@ def sync_format(conn, format_slug: str, region: str, token: str, hsj_ru: dict[in
         prior = load_existing_preview_row(conn, dbf) if existing_card_id else None
         if prior:
             card = preserve_preview_fields(card, prior)
-        if prior or not existing_card_id:
+        if prior or not existing_card_id or dbf in ru_cards:
             outcome = save_card(conn, card, dry_run)
             if outcome == "changed":
                 stats["changed"] += 1
