@@ -210,13 +210,14 @@ class OfficialExpansionRevealTest(unittest.TestCase):
         self.assertEqual(merged, {**previous, "multi_class_json": [2, 6]})
 
     def test_standard_sync_adds_new_reveal_without_overwriting_playable_card(self):
-        playable = {"id": 130001, "name": "Playable", "cardSetId": 1994, "collectible": 1, "image": "https://example.test/playable.png"}
+        playable = {"id": 130001, "name": "Playable", "cardSetId": 1994, "collectible": 1, "text": "Game Data rules"}
         announced = {"id": 130002, "name": "Announced", "cardSetId": 1994, "collectible": 1}
+        gallery_image = "https://d15f34w2p8l1cc.cloudfront.net/hearthstone/card.png"
 
         with ExitStack() as stack:
             stack.enter_context(patch.object(sync, "fetch_blizzard_cards", return_value={130001: playable}))
             stack.enter_context(patch.object(sync, "fetch_official_reveals", side_effect=lambda locale: {
-                130001: {**playable, "cardSetId": 1994},
+                130001: {**playable, "image": gallery_image, "text": "Gallery rules"},
                 130002: announced,
             }))
             stack.enter_context(patch.object(sync, "existing_card_id_by_dbf", return_value=None))
@@ -228,7 +229,13 @@ class OfficialExpansionRevealTest(unittest.TestCase):
             stats = sync.sync_format(object(), "standard", "us", "token", {}, {}, False)
 
         self.assertEqual([item.args[1]["dbf"] for item in save.call_args_list], [130001, 130002])
-        self.assertEqual(save.call_args_list[0].args[1]["card_set"], "BE")
+        available_card = save.call_args_list[0].args[1]
+        self.assertEqual(available_card["card_set"], "BE")
+        self.assertEqual(available_card["text_ru"], "Game Data rules")
+        self.assertEqual(available_card["image_url"], gallery_image)
+        self.assertEqual(available_card.get("source", sync.SOURCE), sync.SOURCE)
+        self.assertIn("official_reveal_ru", available_card["source_payload"])
+        self.assertEqual(available_card["source_hash"], sync.stable_hash(available_card["source_payload"]))
         self.assertEqual(stats["preview"], 1)
         self.assertEqual(formats.call_args_list[1].kwargs["availability_status"], "preview")
         self.assertEqual(removed.call_args.args[2], {"blizzard:130001", "blizzard:130002"})

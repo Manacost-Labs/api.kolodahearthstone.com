@@ -645,12 +645,21 @@ def sync_format(conn, format_slug: str, region: str, token: str, hsj_ru: dict[in
             or nested_id(ru_cards[dbf].get("cardSet")) == REVEAL_SET_ID
         )
     }
+    standard_cards = list(ru_cards.values())
     stats = {"scanned": 0, "inserted": 0, "updated": 0, "changed": 0, "removed": 0, "renamed": 0, "preview": 0, "preview_locale_errors": len(reveal_errors)}
     active_card_ids: set[str] = set()
     for dbf, ru in sorted(ru_cards.items()):
         if dbf in preview_dbfs:
             continue
         card = normalize_card(dbf, ru, en_cards.get(dbf), hsj_ru.get(dbf), hsj_en.get(dbf))
+        if dbf in revealed_ru or dbf in revealed_en:
+            gallery_card = make_reveal_card(dbf, revealed_ru.get(dbf), revealed_en.get(dbf), standard_cards, hsj_ru, hsj_en)
+            card = preserve_preview_fields(card, gallery_card)
+            if not ru.get("image") and gallery_card["image_url"]:
+                card["image_url"] = gallery_card["image_url"]
+            card["source_payload"]["official_reveal_ru"] = gallery_card["source_payload"]["blizzard_ru"]
+            card["source_payload"]["official_reveal_en"] = gallery_card["source_payload"]["blizzard_en"]
+            card["source_hash"] = stable_hash(card["source_payload"])
         existing_card_id = existing_card_id_by_dbf(conn, dbf)
         if existing_card_id and migrate_fallback_card_id(
             conn, dbf, existing_card_id, card["card_id"], dry_run
@@ -676,7 +685,6 @@ def sync_format(conn, format_slug: str, region: str, token: str, hsj_ru: dict[in
         stats["inserted" if not exists else "updated"] += 1
         if outcome == "changed":
             stats["changed"] += 1
-    standard_cards = list(ru_cards.values())
     for dbf in sorted(set(revealed_ru) | set(revealed_en)):
         if dbf not in preview_dbfs:
             continue
