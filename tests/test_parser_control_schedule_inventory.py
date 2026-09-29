@@ -31,7 +31,7 @@ def test_schedule_inventory_is_versioned_and_covers_every_parser_source_and_sect
     )
 
     assert inventory["schemaVersion"] == SCHEDULE_INVENTORY_SCHEMA_VERSION == 2
-    assert inventory["inventoryVersion"] == SCHEDULE_INVENTORY_VERSION
+    assert inventory["inventoryVersion"] == SCHEDULE_INVENTORY_VERSION == "2026-08-27.1"
     assert inventory["generatedAt"] == "2026-07-21T00:00:00+00:00"
     assert inventory["timeSemantics"] == "nominal"
 
@@ -104,6 +104,14 @@ def test_schedule_inventory_calculates_nominal_next_runs_in_utc() -> None:
     assert _schedule(inventory, "refresh-hsreplay-card-periods")["nextRunAt"] == (
         "2026-07-21T00:35:00+00:00"
     )
+    screenshot = _schedule(inventory, "capture-bg-compositions-screenshot")
+    assert screenshot["onCalendar"] == [
+        "*-*-* 04:10:00 Europe/Warsaw",
+        "*-*-* 10:10:00 Europe/Warsaw",
+        "*-*-* 16:10:00 Europe/Warsaw",
+        "*-*-* 22:10:00 Europe/Warsaw",
+    ]
+    assert screenshot["nextRunAt"] == "2026-07-21T02:10:00+00:00"
     assert set(_schedule(inventory, "refresh-hsreplay-card-periods")["sourceIds"]) == set(
         HSREPLAY_CARD_PERIOD_SOURCE_IDS
     )
@@ -188,7 +196,14 @@ def test_every_inventory_unit_is_a_versioned_docker_timer() -> None:
         assert schedule["onCalendar"]
         assert schedule["sourceIds"]
         assert schedule["sectionIds"]
-        assert (Path("systemd") / schedule["systemdUnit"]).is_file()
+        timer_path = Path("systemd") / schedule["systemdUnit"]
+        assert timer_path.is_file()
+        timer_calendars = [
+            line.removeprefix("OnCalendar=")
+            for line in timer_path.read_text(encoding="utf-8").splitlines()
+            if line.startswith("OnCalendar=")
+        ]
+        assert schedule["onCalendar"] == timer_calendars, schedule["id"]
 
 
 def test_parser_control_snapshot_exposes_effective_section_and_source_schedule() -> None:

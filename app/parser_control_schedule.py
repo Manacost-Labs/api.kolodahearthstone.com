@@ -20,7 +20,7 @@ from .source_tiers import LIGHT_API_IDS, MEDIUM_API_IDS
 from .sources import SOURCE_BY_ID
 
 SCHEDULE_INVENTORY_SCHEMA_VERSION = 2
-SCHEDULE_INVENTORY_VERSION = "2026-08-20.2"
+SCHEDULE_INVENTORY_VERSION = "2026-08-27.1"
 SCHEDULE_TIMEZONE = "Europe/Warsaw"
 
 _SYSTEMCTL_SEARCH_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
@@ -153,14 +153,19 @@ _SCHEDULES: tuple[_ScheduleSpec, ...] = (
     ),
     _ScheduleSpec(
         id="capture-bg-compositions-screenshot",
-        label="Ежедневно в 04:10",
+        label="Каждые 6 часов в 04:10, 10:10, 16:10 и 22:10",
         systemd_unit="hs-data-api-docker-bg-compositions-screenshot.timer",
-        on_calendar=("*-*-* 04:10:00 Europe/Warsaw",),
+        on_calendar=(
+            "*-*-* 04:10:00 Europe/Warsaw",
+            "*-*-* 10:10:00 Europe/Warsaw",
+            "*-*-* 16:10:00 Europe/Warsaw",
+            "*-*-* 22:10:00 Europe/Warsaw",
+        ),
         source_ids=frozenset(
             {"hsreplay_battlegrounds_compositions_screenshot"}
         ),
         recurrence="daily",
-        local_times=_times((4, 10)),
+        local_times=_times((4, 10), (10, 10), (16, 10), (22, 10)),
     ),
     _ScheduleSpec(
         id="refresh-hsreplay-meta-firecrawl",

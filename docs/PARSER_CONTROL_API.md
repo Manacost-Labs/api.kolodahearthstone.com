@@ -29,8 +29,8 @@ The schedule contract is additive and versioned independently:
 {
   "generatedAt": "2026-07-21T00:00:00+00:00",
   "scheduleInventory": {
-    "schemaVersion": 1,
-    "inventoryVersion": "2026-07-21.1",
+    "schemaVersion": 2,
+    "inventoryVersion": "2026-08-27.1",
     "timeSemantics": "nominal",
     "runtimeTimerStateIncluded": false,
     "schedules": []
