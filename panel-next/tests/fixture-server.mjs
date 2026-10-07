@@ -6,7 +6,9 @@ const categories={minion:'Существа',spell:'Заклинания',hero:'�
 const tribes={murloc:'Мурлок',beast:'Зверь',dragon:'Дракон'};
 const rows=Array.from({length:24},(_,i)=>({id:i+1,card_id:'BG_FIXTURE_'+(i+1),dbf:69000+i,name:['Мурлок-разведчик','Мурлок-полководец','Болотный разведчик','Рыбный следопыт','Юный мурлок','Приливный страж','Морской охотник','Мурлок-ветеран'][i%8],name_en:'Fixture card '+(i+1),card_type:'minion',creature_type:i<16?'murloc':'beast',tavern_tier:1+i%6,attack:i%8,health:2+i%8,in_pool:i%3?1:0,art_image:'https://api.kolodahearthstone.com/uploads/art/BG26_146.jpg',card_image:'https://api.kolodahearthstone.com/uploads/cards/BG26_146.png',updated_at:'2026-10-02T12:00:00Z',notes:'Тестовая запись для проверки интерфейса.',golden_variant:{card_id:'BG_FIXTURE_'+(i+1)+'_G',dbf:79000+i}}));
 const scopes={'database:read':{label:'Чтение полной базы',description:'Collections и records'},admin:{label:'Управление API',description:'Служебные endpoints'},'tokens:manage':{label:'Управление токенами',description:'Выпуск и отзыв'}};
-let tokens=[{id:'FixtureKey01',name:'Тестовый сайт',scopes:['database:read'],expires_at:'2027-01-01T00:00:00Z',requests_used:123},{id:'FixtureMgr01',name:'Менеджер токенов',scopes:['tokens:manage'],expires_at:'2027-01-01T00:00:00Z'}];
+// Mirrors panel/lib/api_tokens.php: monthly usage is nested under `usage`.
+const usage=(request_count=0,error_count=0)=>({month:'2026-10',request_count,error_count,response_bytes:0,last_request_at:request_count?'2026-10-02T12:00:00Z':null});
+let tokens=[{id:'FixtureKey01',name:'Тестовый сайт',scopes:['database:read'],created_at:'2026-09-01T00:00:00Z',expires_at:'2027-01-01T00:00:00Z',last_used_at:'2026-10-02T12:00:00Z',revoked_at:null,rate_limit_per_minute:600,monthly_quota:1000000,usage:usage(1234,2)},{id:'FixtureMgr01',name:'Менеджер токенов',scopes:['tokens:manage'],created_at:'2026-09-01T00:00:00Z',expires_at:'2027-01-01T00:00:00Z',last_used_at:null,revoked_at:null,rate_limit_per_minute:60,monthly_quota:10000,usage:usage()}];
 let nonce=1;
 let catalogErrorTriggered=false;
 const requests=[];
@@ -49,7 +51,7 @@ export const server=http.createServer(async(req,res)=>{
    if(input.get('form_nonce')!==String(nonce))return send({ok:false,error:'Форма выпуска устарела.'},422);
    nonce++;data.issueNonce=String(nonce);data.action='api_tokens';
    if(input.get('name')==='Fixture rejected')return send({...data,ok:false,error:'Тестовая ошибка после использования формы.'},422);
-   const token={id:'FixtureNew'+String(nonce).padStart(2,'0'),name:input.get('name'),scopes:input.getAll('scopes[]'),expires_at:'2027-01-01T00:00:00Z'};
+   const token={id:'FixtureNew'+String(nonce).padStart(2,'0'),name:input.get('name'),scopes:input.getAll('scopes[]'),created_at:'2026-10-03T00:00:00Z',expires_at:'2027-01-01T00:00:00Z',last_used_at:null,revoked_at:null,rate_limit_per_minute:600,monthly_quota:1000000,usage:usage()};
    tokens=[...tokens,token];data.tokens=tokens;data.issuedToken={...token,token:'khs_v1_FixtureOnly_'+String(nonce).repeat(43)};data.message='Токен выпущен.';
   }else if(action==='revoke_api_token'){tokens=tokens.map(t=>t.id===input.get('token_id')?{...t,revoked_at:'2026-10-03T00:00:00Z'}:t);data.tokens=tokens;data.action='api_tokens';data.message='Токен отозван.';}
   else data.message='Изменения сохранены.';

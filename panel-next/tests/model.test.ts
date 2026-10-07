@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizedCard, imagesFrom, mediaUrl, queryHref, deckTile } from '../lib/model.ts';
+import { normalizedCard, imagesFrom, mediaUrl, queryHref, deckTile, tokenUsage, countLabel } from '../lib/model.ts';
 test('preserves zero stats and base/golden identities',()=>{
  const row={id:42,card_id:'BG_TEST',name:'Карта',attack:0,health:2,in_pool:1,art_image:'/uploads/art/test.jpg',golden_variant:{card_id:'BG_TEST_G',card_image:'/uploads/test_g.png'}};
  const card=normalizedCard(row,'',{}); assert.equal(card.attack,'0');assert.equal(card.id,'BG_TEST');assert.equal(card.editable,true);
@@ -44,4 +44,12 @@ test('Battlegrounds backgrounds follow tribes with safe neutral and multi-tribe 
   assert.equal(dual.color,murloc.color);
   assert.ok(deckTile({creature_type:'ALL'},'minion').background.startsWith('linear-gradient('));
   assert.equal(deckTile({race:'MECHANICAL'},'timewarped').background,deckTile({creature_type:'mech'},'minion').background);
+});
+test('token usage reads the nested PHP usage block and never guesses legacy fields',()=>{
+  assert.deepEqual(tokenUsage({usage:{month:'2026-10',request_count:1234,error_count:2}}),{requests:1234,errors:2,month:'2026-10'});
+  assert.deepEqual(tokenUsage({requests_used:99,usage:null}),{requests:0,errors:0,month:''});
+  assert.deepEqual(tokenUsage({usage:{request_count:-1,error_count:'7'}}),{requests:0,errors:0,month:''});
+  const forms={one:'запрос',few:'запроса',many:'запросов'};
+  assert.equal(countLabel(1,forms),'1 запрос');assert.equal(countLabel(3,forms),'3 запроса');assert.equal(countLabel(11,forms),'11 запросов');
+  assert.match(countLabel(1234,forms),/^1\s234 запроса$/u);
 });

@@ -98,3 +98,15 @@ export function formatDate(value: unknown) {
   const date = new Date(raw);
   return raw && Number.isFinite(date.getTime()) ? dateFormatter.format(date)+' UTC' : '—';
 }
+const countFormatter = new Intl.NumberFormat('ru-RU');
+const pluralRules = new Intl.PluralRules('ru-RU');
+export function countLabel(value: number, forms: {one: string; few: string; many: string}) {
+  const form = pluralRules.select(value);
+  return countFormatter.format(value)+' '+(form === 'one' ? forms.one : form === 'few' ? forms.few : forms.many);
+}
+// panel/lib/api_tokens.php nests monthly usage under `usage`.
+export function tokenUsage(token: Row): {requests: number; errors: number; month: string} {
+  const usage = record(token.usage);
+  const count = (value: unknown) => typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : 0;
+  return {requests: count(usage.request_count), errors: count(usage.error_count), month: text(usage.month, '')};
+}

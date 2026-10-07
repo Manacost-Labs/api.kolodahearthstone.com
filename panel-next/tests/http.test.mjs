@@ -12,7 +12,7 @@ test('mutation relay rejects foreign origins and stale CSRF',async()=>{
  const stale=await fetch(origin+'/api/panel',{method:'POST',headers:{Cookie:cookie,Origin:origin},body:form});assert.equal(stale.status,422);
 });
 test('GET token pages never repeat a previously issued secret',async()=>{
- const page=await fetch(origin+'/?action=api_tokens',{headers:{Cookie:cookie}});assert.equal(page.status,200);assert.match(page.headers.get('cache-control'),/no-store/);assert.doesNotMatch(await page.text(),/khs_v1_FixtureOnly_/);
+ const page=await fetch(origin+'/?action=api_tokens',{headers:{Cookie:cookie}});assert.equal(page.status,200);assert.match(page.headers.get('cache-control'),/no-store/);const html=await page.text();assert.doesNotMatch(html,/khs_v1_FixtureOnly_/);assert.match(html,/1\s234 запроса/u,'token usage must come from usage.request_count');
 });
 test('server registry and data remain behind the session boundary',async()=>{
  const registry=await fetch(origin+'/api/panel?action=analytics_registry',{headers:{Cookie:cookie}});assert.equal(registry.status,200);const payload=await registry.json();assert.equal(payload.modules.overview.title,'Все источники');
