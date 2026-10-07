@@ -33,8 +33,13 @@ to the new hostname first and adopt GraphQL separately.
 | `search` | One search across cards, minions, heroes, archetypes and sources |
 | `datasets` | Latest imported version and payload size for each source |
 | `dataset` | One complete raw dataset for compatibility during migration |
-| `collections` | Every table/view and its columns; requires `database:read` |
-| `records` | Paginated rows from any collection; requires `database:read` |
+| `collections` | Every public table/view and its columns; requires `database:read` |
+| `records` | Paginated rows from any public collection; requires `database:read` |
+
+Legacy application tables copied with the MariaDB catalogue (`catalog.jobs`,
+`catalog.options`, `catalog.migration`) hold user jobs and settings, not card
+data. `collections` does not list them, and `records` answers
+`collection does not exist` for them.
 
 Every collection returns `items` and `pageInfo`. `limit` defaults to 50 or 100
 and cannot exceed 200. `offset` cannot exceed 100,000.

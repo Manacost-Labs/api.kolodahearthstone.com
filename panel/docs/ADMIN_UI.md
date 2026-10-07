@@ -146,6 +146,12 @@ The import and API contracts are documented in `LIBRARY_FULL_ART.md`.
 4. Preserve `loading="lazy"` and `decoding="async"` for table media.
 5. Increment the `style.css` query version in `index.php` after visible CSS
    changes so browsers and proxies receive the new interface.
+6. In `panel-next`, text on filled controls uses `--on-accent` or `--on-bad`,
+   never a literal white: the three dark themes have light accents.
+   `tests/theme-contrast.test.ts` enforces 4.5:1 for every theme.
+7. The Next deck-tile grid uses `auto-fill` columns of at least 256 px. Do not
+   restore the shared example's fixed `min-width`; it forces sideways scrolling
+   below 1500 px.
 
 ## Verification
 

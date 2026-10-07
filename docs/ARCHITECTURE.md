@@ -131,11 +131,15 @@ scan_cards.php                    sync_*.py по областям
 
 ### Таблицы
 
-Схема целиком: `panel/sql/schema.mysql.sql` (34 таблицы, 2 представления).
+Схема целиком: `panel/sql/schema.mysql.sql` (35 таблиц, 2 представления).
 Группы:
 
 - `battlegrounds_*` — карты и герои Полей сражений. `battlegrounds_card_changes`
   хранит полный payload до и после каждой правки: по нему строится диф патча.
+  `battlegrounds_card_overrides` хранит ручные правки панели по полям вместе с
+  заменённым значением источника; `scan_cards.php` применяет их при импорте,
+  а все переходы (`manual_edit`, `manual_settled`, `manual_released`) пишет в
+  `battlegrounds_card_changes`.
 - `constructed_cards` — общая таблица Стандарта и Вольного. Представления
   `constructed_standard_cards` и `constructed_wild_cards` фильтруют её через
   `constructed_format_cards`. **Журнала правок у constructed нет** — это

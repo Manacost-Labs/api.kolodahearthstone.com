@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- Kept manual Battlegrounds card edits across HearthstoneJSON imports. Edits
+  are stored per field in `battlegrounds_card_overrides` with the upstream
+  value they replaced, audited with their author, and released automatically
+  when a newer game patch changes the field. Requires PostgreSQL migration
+  `010_battlegrounds_card_overrides` before the panel deploy.
+- Stopped constructed imports from silently removing cards: Blizzard
+  pagination is validated, one run may remove at most `max(25, 5%)` of a
+  format without `--allow-mass-removal`, and failed runs now keep their error
+  row after the rollback.
+- Hid legacy `catalog.jobs`, `catalog.options` and `catalog.migration` from
+  GraphQL `collections` and `records`.
+- Next.js panel: API token usage now reads `usage.request_count` instead of
+  always showing 0; the editor no longer offers GIF uploads the backend
+  rejects; deck tiles fit the window instead of requiring 1464 px; filled
+  buttons keep 4.5:1 text contrast in the dark, tavern and arcane themes.
+- Accepted graphql-core 3.3's wording for rejected mutations in the read-only
+  GraphQL test.
+
 - Added HSGuru Deck Radar beta: idempotent SQLite history over the published
   streamer-deck snapshot, candidate/confirmed exact-deck events, and the
   public `GET /v1/constructed/deck-radar` endpoint. Established catalog decks,

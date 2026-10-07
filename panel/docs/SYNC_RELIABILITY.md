@@ -12,6 +12,39 @@ minutes. Each retry is a new process, so it does not hold the global lock while
 waiting. The parser's oldest-first order makes completed pages recent and lets
 the next run continue with older pages after a wiki.gg rate limit.
 
+## Constructed format removal guard
+
+`sync_constructed_cards.py` decides which cards leave Standard or Wild from the
+Blizzard Game Data response, so a short response must never look like a smaller
+card pool:
+
+- every page must carry a card list and a stable `pageCount`/`cardCount`;
+  fewer collected cards than `cardCount` (beyond a small tolerance for
+  duplicates) fails the run before any write;
+- one run may mark at most `max(25, 5%)` of a format's available cards as
+  `removed`. A larger change stops the run with `MassRemovalRefused`;
+- a real rotation is applied after review with
+  `sync_constructed_cards.py --format standard --allow-mass-removal`.
+
+A failed run rolls back the whole batch and then commits a separate
+`constructed_import_runs` row with `status = 'error'` and the exception text,
+so failures stay visible instead of disappearing with the rollback.
+
+## Battlegrounds manual corrections
+
+Panel edits of Battlegrounds cards are stored per field in
+`battlegrounds_card_overrides` with the upstream value they replaced.
+`scan_cards.php` keeps a correction while HearthstoneJSON still returns that
+replaced value, removes it once upstream matches the correction, and lets a
+newer upstream value win otherwise. Every transition is written to
+`battlegrounds_card_changes` (`manual_edit`, `manual_settled`,
+`manual_released`). Regression check:
+`php panel/tests/battleground_card_overrides_test.php`.
+
+The PostgreSQL shadow sync rejects unknown stage tables. Apply
+`platform/sql/010_battlegrounds_card_overrides.sql` (via
+`platform/scripts/apply-migrations.sh`) before deploying this panel release.
+
 ## Battlegrounds framed portraits
 
 ### Base and golden variants

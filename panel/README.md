@@ -35,6 +35,12 @@ Deploy from the repository root with `sudo scripts/deploy-panel.sh`. The script
 creates a new release and switches `current` atomically. It never copies or
 deletes the persistent data directories.
 
+Before deploying a release that creates a new MariaDB table, apply its
+PostgreSQL mirror with `sudo platform/scripts/apply-migrations.sh`: the shadow
+sync stops on unknown tables. Manual card corrections need
+`010_battlegrounds_card_overrides`; see
+[SYNC_RELIABILITY.md](docs/SYNC_RELIABILITY.md#battlegrounds-manual-corrections).
+
 ## Пул Полей сражений 36.6.1
 
 `data/battleground-pool-36.6.1.json` фиксирует официальную ротацию от
