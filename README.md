@@ -18,6 +18,18 @@
 Все ответы API используют UTF‑8 и JSON, кроме endpoint изображения. Только
 HTTPS считается каноническим transport.
 
+## Веб-панель на Next.js
+
+Основной интерфейс на [api.kolodahearthstone.com](https://api.kolodahearthstone.com/)
+находится в [panel-next](panel-next/README.md): каталоги, статистика, источники,
+редактор и API-токены. Вход проходит через существующий GitHub OAuth.
+PHP/FastAPI продолжают обслуживать данные и административные операции;
+старый PHP-интерфейс доступен по `/index.php` для отката.
+
+Для локальной сборки: `npm --prefix panel-next ci`, затем
+`npm --prefix panel-next run check`. Настройка standalone-релиза описана
+в [руководстве панели](panel-next/README.md).
+
 ## Авторизация
 
 Публичные `GET` endpoints не требуют токена. Закрытые операции принимают:

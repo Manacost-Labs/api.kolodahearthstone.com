@@ -76,7 +76,7 @@ assert_contains scripts/sync-shadow.php \
   '= ANY\(authoritative_replace_tables\)' \
   'authoritative replacement must run before generic primary-key upsert'
 assert_contains scripts/verify-platform.sh \
-  "test .*public_status.* = '302'" \
+  "public_status.* == '302'.*public_status.* == '307'" \
   'the protected panel root must be monitored as a GitHub OAuth redirect'
 assert_contains scripts/verify-platform.sh \
   'https://api.kolodahearthstone.com/auth/github' \

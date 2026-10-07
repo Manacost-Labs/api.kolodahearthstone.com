@@ -67,6 +67,7 @@
             },
             apiLinks,
             type: text(dataset.recordType, 'Не указан'),
+            tribe: text(dataset.recordTribe, ''),
             tier: text(dataset.recordTier),
             attack: text(dataset.recordAttack),
             health: text(dataset.recordHealth),

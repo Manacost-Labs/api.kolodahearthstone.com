@@ -1,0 +1,98 @@
+/* Font sources: the official Hearthstone website's baseui stylesheet. */
+@font-face {
+  font-family: "Hearthstone Belwe";
+  src: url("https://d39zum0jwvcigt.cloudfront.net/fonts/Belwe-Bold-f53d10b5e1ed94ba65a88b534f1220b01c65ac758c01fff671227644cad3bec8e8bae0a34b5cb14d741a3c089bd8d63bfb0880bf40fb811bab1b682711357287.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Hearthstone Benguiat";
+  src: url("https://d39zum0jwvcigt.cloudfront.net/fonts/BLB85__W-c82373eeb7432859c1793540592442fb405afef06a6ca5ffa85f9dfd94fa3cb2a14af90682c7d1976ae3eff4c9d707d4baa3804b31a790b557822ee7bbe43be8.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+.deck-grid-viewport {
+  overflow-x: auto;
+}
+
+.deck-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 16px;
+  min-width: 1464px;
+}
+
+.deck-tile {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 36px;
+  align-items: center;
+  height: 64px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--tile-background, var(--rarity, #606367));
+  color: #fff;
+  font: 700 21px/1 "Hearthstone Belwe", Georgia, serif;
+  text-shadow: -1px 0 #18130f, 1px 0 #18130f, 0 -1px #18130f, 0 1px #18130f, 0 2px 3px #000;
+}
+
+.deck-tile:lang(ru) {
+  font-family: "Hearthstone Benguiat", "Hearthstone Belwe", Georgia, serif;
+}
+
+.deck-tile__art {
+  position: absolute;
+  z-index: -1;
+  top: 0;
+  /* Cover compressed edge pixels under the 36px quantity column. */
+  right: 34px;
+  height: 100%;
+  width: auto;
+  max-width: none;
+  pointer-events: none;
+}
+
+.deck-tile__cost,
+.deck-tile__quantity {
+  display: grid;
+  place-items: center;
+  align-self: stretch;
+  font-size: 27px;
+  font-variant-numeric: tabular-nums;
+}
+
+.deck-tile__quantity {
+  background: var(--rarity, #606367);
+}
+
+.deck-tile__cost {
+  position: relative;
+  isolation: isolate;
+  font-family: "Hearthstone Belwe", Georgia, serif;
+  font-size: 28px;
+  text-shadow: -1px 0 #102746, 1px 0 #102746, 0 -1px #102746, 0 2px 2px #061221;
+}
+
+.deck-tile__cost::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  width: 34px;
+  height: 44px;
+  background: linear-gradient(135deg, #d6f7ff 0%, #66c9ff 22%, #287fda 48%, #174b9b 72%, #103866 100%);
+  clip-path: polygon(50% 0, 100% 28%, 88% 78%, 50% 100%, 12% 78%, 0 28%);
+  box-shadow: inset 0 0 8px #1c62b8;
+}
+
+.deck-tile__name {
+  min-width: 0;
+  padding-left: 8px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}

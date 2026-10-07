@@ -1,6 +1,26 @@
 (() => {
     'use strict';
 
+    const navSidebar = document.querySelector('.sidebar');
+    const sidebarToggle = document.querySelector('[data-sidebar-toggle]');
+    const closeNavigation = () => {
+        navSidebar?.classList.remove('nav-open');
+        sidebarToggle?.setAttribute('aria-expanded', 'false');
+    };
+    sidebarToggle?.addEventListener('click', () => {
+        const expanded = navSidebar?.classList.toggle('nav-open') || false;
+        sidebarToggle.setAttribute('aria-expanded', String(expanded));
+    });
+    document.addEventListener('click', (event) => {
+        if (event.target instanceof Node && navSidebar && !navSidebar.contains(event.target)) closeNavigation();
+    });
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && navSidebar?.classList.contains('nav-open')) {
+            closeNavigation();
+            sidebarToggle?.focus();
+        }
+    });
+
     const palette = document.querySelector('[data-command-palette]');
     const commandButton = document.querySelector('[data-command-open]');
     const commandSearch = palette?.querySelector('[data-command-search]');
@@ -218,18 +238,8 @@
         updateTableNavigation();
     });
 
-    const sidebar = document.querySelector('.sidebar');
     document.querySelectorAll('.side-link').forEach((link) => {
-        link.addEventListener('click', () => {
-            sidebar?.classList.remove('nav-open');
-            document.querySelector('[data-sidebar-toggle]')?.setAttribute('aria-expanded', 'false');
-        });
-    });
-    document.addEventListener('keydown', (event) => {
-        if (event.key === 'Escape' && sidebar?.classList.contains('nav-open')) {
-            sidebar.classList.remove('nav-open');
-            document.querySelector('[data-sidebar-toggle]')?.setAttribute('aria-expanded', 'false');
-        }
+        link.addEventListener('click', closeNavigation);
     });
 
     const workspaceView = window.CatalogWorkspaceView;
@@ -267,7 +277,32 @@
 
     const inspector = document.querySelector('[data-catalog-inspector]');
     const catalogRows = Array.from(document.querySelectorAll('[data-catalog-record]'));
-    let lastSelectedRow = null;
+    let lastSelectedTrigger = null;
+    const inspectorTabs = Array.from(inspector?.querySelectorAll('[data-inspector-tab]') || []);
+    const activateInspectorTab = (name) => {
+        inspectorTabs.forEach((tab) => {
+            const active = tab.dataset.inspectorTab === name;
+            tab.setAttribute('aria-selected', String(active));
+            tab.tabIndex = active ? 0 : -1;
+        });
+        inspector?.querySelectorAll('[data-inspector-panel]').forEach((panel) => {
+            panel.hidden = panel.dataset.inspectorPanel !== name;
+        });
+    };
+    inspectorTabs.forEach((tab, index) => {
+        tab.addEventListener('click', () => activateInspectorTab(tab.dataset.inspectorTab));
+        tab.addEventListener('keydown', (event) => {
+            const moves = { ArrowRight: 1, ArrowLeft: -1, Home: -index, End: inspectorTabs.length - 1 - index };
+            if (!(event.key in moves)) return;
+            event.preventDefault();
+            const next = inspectorTabs[(index + moves[event.key] + inspectorTabs.length) % inspectorTabs.length];
+            activateInspectorTab(next.dataset.inspectorTab);
+            next.focus();
+        });
+    });
+    const imagePreview = document.querySelector('[data-inspector-preview]');
+    imagePreview?.querySelector('[data-inspector-preview-close]')?.addEventListener('click', () => imagePreview.close());
+    imagePreview?.addEventListener('click', (event) => { if (event.target === imagePreview) imagePreview.close(); });
     const inspectorFields = inspector ? Object.fromEntries(
         Array.from(inspector.querySelectorAll('[data-inspector-field]'))
             .map((field) => [field.dataset.inspectorField, field]),
@@ -276,7 +311,7 @@
         const field = inspectorFields[name];
         if (field) field.textContent = value;
     };
-    const selectCatalogRow = (row, moveFocus = false) => {
+    const selectCatalogRow = (row, trigger = row) => {
         if (!inspector || !workspaceView || !(row instanceof HTMLElement)) return;
         const record = workspaceView.recordFromDataset(row.dataset);
         catalogRows.forEach((item) => {
@@ -284,7 +319,8 @@
             item.classList.toggle('is-selected', selected);
             item.setAttribute('aria-selected', selected ? 'true' : 'false');
         });
-        lastSelectedRow = row;
+        lastSelectedTrigger = trigger;
+        activateInspectorTab('details');
         setInspectorText('name', record.name);
         setInspectorText('id', record.id);
         setInspectorText('internalId', record.identifiers.internalId);
@@ -310,8 +346,13 @@
                 figure.className = `catalog-inspector-image catalog-inspector-image-${kind}`;
                 const button = document.createElement('button');
                 button.type = 'button';
-                button.dataset.preview = url;
-                button.dataset.tooltip = `${record.name}\n${label}`;
+                button.addEventListener('click', () => {
+                    const previewImage = imagePreview?.querySelector('img');
+                    if (!previewImage) return;
+                    previewImage.src = url;
+                    previewImage.alt = `${label}: ${record.name}`;
+                    imagePreview.showModal();
+                });
                 button.setAttribute('aria-label', `Открыть изображение «${label}» для ${record.name}`);
                 const preview = document.createElement('img');
                 preview.src = url;
@@ -364,19 +405,16 @@
                 link.hidden = !href;
             }
         });
-        inspector.hidden = false;
+        if (!inspector.open) inspector.showModal();
         document.body.classList.add('catalog-inspector-open');
-        if (moveFocus) inspector.querySelector('[data-inspector-close]')?.focus();
     };
-    const closeInspector = () => {
-        if (!inspector) return;
-        inspector.hidden = true;
+    const restoreInspectorFocus = () => {
         document.body.classList.remove('catalog-inspector-open');
         catalogRows.forEach((row) => {
             row.classList.remove('is-selected');
             row.setAttribute('aria-selected', 'false');
         });
-        lastSelectedRow?.focus();
+        lastSelectedTrigger?.focus();
     };
 
     catalogRows.forEach((row) => {
@@ -388,11 +426,14 @@
             selectCatalogRow(row);
         });
         row.addEventListener('keydown', (event) => {
+            if (event.target !== row) return;
             if (event.key !== 'Enter' && event.key !== ' ') return;
             event.preventDefault();
-            selectCatalogRow(row, true);
+            selectCatalogRow(row);
         });
     });
-    inspector?.querySelector('[data-inspector-close]')?.addEventListener('click', closeInspector);
-    if (catalogRows.length && window.matchMedia('(min-width: 1121px)').matches) selectCatalogRow(catalogRows[0]);
+    inspector?.querySelector('[data-inspector-close]')?.addEventListener('click', () => inspector.close());
+    inspector?.addEventListener('close', restoreInspectorFocus);
+    inspector?.addEventListener('click', (event) => { if (event.target === inspector) inspector.close(); });
+    document.addEventListener('catalog:open', (event) => selectCatalogRow(event.detail.row, event.detail.trigger));
 })();

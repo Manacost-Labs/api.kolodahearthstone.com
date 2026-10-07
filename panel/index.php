@@ -1,11 +1,11 @@
 <?php
 declare(strict_types=1);
 
-require __DIR__ . '/lib/auth.php';
+require_once __DIR__ . '/lib/auth.php';
 require __DIR__ . '/lib/api_tokens.php';
 require __DIR__ . '/lib/parser_control.php';
 
-$panelUser = panel_require_auth();
+$panelUser = panel_require_auth(defined('KOLODA_NEXT_JSON'));
 
 $config = require __DIR__ . '/config.php';
 
@@ -1112,9 +1112,9 @@ $pool = trim((string)($_GET['pool'] ?? ''));
 $duos = trim((string)($_GET['duos'] ?? ''));
 $media = trim((string)($_GET['media'] ?? ''));
 $skinRarity = strtolower(trim((string)($_GET['rarity'] ?? '')));
-$perPage = (int)($_GET['per_page'] ?? 50);
-if (!in_array($perPage, [25, 50, 100, 150], true)) {
-    $perPage = 50;
+$perPage = (int)($_GET['per_page'] ?? ($cardType === '' ? 8 : 50));
+if (!in_array($perPage, [8, 12, 15, 25, 50, 100, 150], true)) {
+    $perPage = $cardType === '' ? 8 : 50;
 }
 $where = [];
 $params = [];
@@ -1812,9 +1812,42 @@ $workspaceSection = $showApiTokens
     : ($showParserControl
         ? 'Операции'
         : ($showAnalyticsDashboard ? 'Аналитика' : 'База данных'));
+if (defined('KOLODA_NEXT_JSON')) {
+    require_once __DIR__ . '/lib/next_panel.php';
+    $records = $showHeroes ? $heroes : ($showHeroSkins ? $heroSkins : ($showPets ? $pets : ($showCoins ? $coins : ($showTimewarped ? $timewarpedCards : ($showConstructed ? $constructedCards : ($showLibrary ? $libraryCards : $cards))))));
+    $extra = [];
+    $records = panel_next_attach_purchase_costs($pdo, $records, $cardType);
+    $records = panel_next_enrich_records($records, $cardType, $goldenVariantMap, $showConstructed ? $constructedWikiMetaMap : $wikiMetaMap);
+    if ($action === 'wiki_terms') {
+        $extra['terms'] = wiki_term_groups($pdo);
+        $extra['termLabels'] = wiki_term_type_labels();
+    }
+    if ($showApiTokens) {
+        $extra['tokens'] = $apiTokens;
+        $extra['managerId'] = $apiTokenManagerConfig['token_id'] ?? '';
+        $extra['tokenConfigured'] = $apiTokenManagerConfig !== null;
+        $extra['tokenError'] = $apiTokenLoadError;
+        $extra['issueNonce'] = $apiTokenIssueNonce;
+        $extra['scopeCatalog'] = panel_api_token_scope_catalog();
+        $extra['issuedToken'] = $issuedApiToken;
+    }
+    panel_next_json(panel_next_page([
+        'action' => $action, 'title' => $workspaceTitle, 'user' => $panelUser,
+        'csrf' => csrf(), 'logoutCsrf' => panel_logout_csrf_token(),
+        'parserCsrf' => panel_parser_control_csrf_token(),
+        'message' => $message, 'error' => $error, 'cardType' => $cardType,
+        'records' => $records, 'form' => $form,
+        'page' => $page, 'perPage' => $perPage, 'totalPages' => $totalPages,
+        'total' => $filteredTotal, 'from' => $pageFrom, 'to' => $pageTo,
+        'categories' => filter_card_types(), 'tribes' => creature_types(),
+        'mediaLabels' => $showHeroSkins ? $skinMediaLabels : ($showPets ? ['background' => 'Есть end screen', 'gallery' => 'Есть Gallery'] : ($showConstructed ? ['golden' => 'Есть Golden', 'signature' => 'Есть Signature', 'diamond' => 'Есть Diamond', 'animated_diamond' => 'Есть Animated Diamond'] : $mediaLabels)),
+        'rarities' => $skinRarityLabels, 'activeFilters' => $activeFilters,
+        'extra' => $extra,
+    ]));
+}
 ?>
 <!doctype html>
-<html lang="ru" data-theme="dark">
+<html lang="ru" data-theme="light">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -1822,8 +1855,10 @@ $workspaceSection = $showApiTokens
     <title>HS Data · Управление базой Hearthstone</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232563eb'/%3E%3Ctext x='32' y='40' text-anchor='middle' font-family='system-ui,sans-serif' font-size='25' font-weight='800' fill='white'%3EHS%3C/text%3E%3C/svg%3E">
     <link rel="stylesheet" href="/assets/style.css?v=38">
-    <script src="/assets/catalog-workspace-view.js?v=2" defer></script>
-    <script src="/assets/panel-ui.js?v=4" defer></script>
+    <link rel="stylesheet" href="/assets/gallery.css?v=1">
+    <script src="/assets/catalog-workspace-view.js?v=3" defer></script>
+    <script src="/assets/panel-ui.js?v=5" defer></script>
+    <script src="/assets/catalog-gallery.js?v=1" defer></script>
     <script src="/assets/parsing-reliability.js?v=10" defer></script>
     <script src="/assets/analytics.js?v=14" defer></script>
     <script src="/assets/parser-control-view.js?v=3" defer></script>
@@ -1842,9 +1877,10 @@ $workspaceSection = $showApiTokens
                 <strong>HS Data</strong>
                 <p>центр управления данными</p>
             </div>
+            <?php require __DIR__ . '/partials/primary-navigation.php'; ?>
             <button class="sidebar-toggle" type="button" aria-controls="sidebarNav" aria-expanded="false" data-sidebar-toggle>
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
-                <span>Меню</span>
+                <span>Разделы</span>
             </button>
         </div>
 
@@ -1914,8 +1950,6 @@ $workspaceSection = $showApiTokens
                 </a>
             </section>
 
-        </nav>
-
         <div class="sidebar-footer">
             <div class="theme-switcher" aria-label="Тема панели">
                 <button class="theme-button" type="button" data-theme-option="light">Светлая</button>
@@ -1924,6 +1958,7 @@ $workspaceSection = $showApiTokens
                 <button class="theme-button" type="button" data-theme-option="arcane">Аркана</button>
             </div>
         </div>
+        </nav>
     </aside>
 
     <section class="workspace">
@@ -2271,6 +2306,8 @@ $workspaceSection = $showApiTokens
                     </select>
                 <?php endif; ?>
                 <select name="per_page" aria-label="Карт на странице">
+                    <option value="8"<?= $perPage === 8 ? ' selected' : '' ?>>8 на странице</option>
+                    <option value="12"<?= $perPage === 12 ? ' selected' : '' ?>>12 на странице</option>
                     <option value="25"<?= $perPage === 25 ? ' selected' : '' ?>>25 на странице</option>
                     <option value="50"<?= $perPage === 50 ? ' selected' : '' ?>>50 на странице</option>
                     <option value="100"<?= $perPage === 100 ? ' selected' : '' ?>>100 на странице</option>
@@ -2403,6 +2440,7 @@ $workspaceSection = $showApiTokens
         <?php if ($showBattlegrounds): ?>
         <div class="catalog-workbench" data-catalog-workbench>
             <section class="catalog-list-pane" aria-label="Список карт">
+                <?php require __DIR__ . '/partials/catalog-gallery.php'; ?>
         <?php endif; ?>
 
         <?php $tableNavigationTarget = '.cards-table'; $tableNavigationLabel = $showBattlegrounds ? 'Список карт' : 'Широкая таблица'; require __DIR__ . '/partials/table-navigation.php'; ?>
@@ -3754,6 +3792,7 @@ $workspaceSection = $showApiTokens
                         data-record-golden-id="<?= h($goldenVariant['card_id'] ?? '') ?>"
                         data-record-golden-dbf="<?= h($goldenVariant['dbf'] ?? '') ?>"
                         data-record-type="<?= h(card_type_label($card['card_type'] ?? 'minion')) ?>"
+                        data-record-tribe="<?= h(creature_types()[$card['creature_type'] ?? ''] ?? '') ?>"
                         data-record-tier="<?= h($card['tavern_tier']) ?>"
                         data-record-attack="<?= h($card['attack']) ?>"
                         data-record-health="<?= h($card['health']) ?>"
@@ -4066,50 +4105,7 @@ $workspaceSection = $showApiTokens
         <?php endif; ?>
         <?php if ($showBattlegrounds): ?>
             </section>
-            <aside class="catalog-inspector" data-catalog-inspector aria-label="Детали выбранной карты" hidden>
-                <header class="catalog-inspector-head">
-                    <div>
-                        <span>Выбранная карта</span>
-                        <h2 data-inspector-field="name">Детали карты</h2>
-                        <code data-inspector-field="id">—</code>
-                    </div>
-                    <button class="button ghost" type="button" data-inspector-close>Закрыть</button>
-                </header>
-                <section class="catalog-inspector-section catalog-inspector-visuals">
-                    <h3>Все изображения <span data-inspector-field="imageCount">0</span></h3>
-                    <div class="catalog-inspector-gallery" data-inspector-images></div>
-                    <p class="catalog-inspector-empty" data-inspector-image-empty>Изображения отсутствуют</p>
-                </section>
-                <section class="catalog-inspector-section catalog-inspector-identifiers">
-                    <h3>Идентификаторы и API</h3>
-                    <dl class="catalog-inspector-id-grid">
-                        <div><dt>ID записи</dt><dd data-inspector-field="internalId">—</dd></div>
-                        <div><dt>card_id</dt><dd data-inspector-field="cardId">—</dd></div>
-                        <div><dt>dbf</dt><dd data-inspector-field="dbf">—</dd></div>
-                        <div><dt>Golden card_id</dt><dd data-inspector-field="goldenCardId">—</dd></div>
-                        <div><dt>Golden dbf</dt><dd data-inspector-field="goldenDbf">—</dd></div>
-                    </dl>
-                    <div class="catalog-inspector-api-links" data-inspector-api-links></div>
-                </section>
-                <dl class="catalog-inspector-facts">
-                    <div><dt>Название EN</dt><dd data-inspector-field="englishName">—</dd></div>
-                    <div><dt>Категория</dt><dd data-inspector-field="type">—</dd></div>
-                    <div><dt>Таверна</dt><dd data-inspector-field="tier">—</dd></div>
-                    <div><dt>Атака</dt><dd data-inspector-field="attack">—</dd></div>
-                    <div><dt>Здоровье</dt><dd data-inspector-field="health">—</dd></div>
-                    <div><dt>Пул</dt><dd data-inspector-field="pool">—</dd></div>
-                    <div><dt>Режим</dt><dd data-inspector-field="duo">—</dd></div>
-                    <div><dt>Обновлено</dt><dd data-inspector-field="updated">—</dd></div>
-                </dl>
-                <section class="catalog-inspector-section">
-                    <h3>Механики</h3>
-                    <div class="catalog-inspector-mechanics" data-inspector-mechanics></div>
-                </section>
-                <div class="catalog-inspector-actions">
-                    <a class="button" href="#" data-inspector-link="edit">Править</a>
-                    <a class="button ghost" href="#" data-inspector-link="stats">Статистика</a>
-                </div>
-            </aside>
+            <?php require __DIR__ . '/partials/catalog-inspector.php'; ?>
         </div>
         <?php endif; ?>
         <?php endif; ?>
@@ -4129,7 +4125,7 @@ $workspaceSection = $showApiTokens
 </div>
 <script>
 (() => {
-    const THEME_KEY = 'bgCardsTheme';
+    const THEME_KEY = 'hsDataTheme-v2';
     const themes = new Set(['light', 'dark', 'tavern', 'arcane']);
     const themeButtons = Array.from(document.querySelectorAll('[data-theme-option]'));
     const tooltip = document.getElementById('cardTooltip');
@@ -4171,9 +4167,9 @@ $workspaceSection = $showApiTokens
 
     const readTheme = () => {
         try {
-            return window.localStorage.getItem(THEME_KEY) || 'dark';
+            return window.localStorage.getItem(THEME_KEY) || 'light';
         } catch (error) {
-            return 'dark';
+            return 'light';
         }
     };
 
@@ -4192,13 +4188,6 @@ $workspaceSection = $showApiTokens
         button.addEventListener('click', () => setTheme(button.dataset.themeOption || 'light'));
     });
     setTheme(readTheme(), false);
-
-    const sidebar = document.querySelector('.sidebar');
-    const sidebarToggle = document.querySelector('[data-sidebar-toggle]');
-    sidebarToggle?.addEventListener('click', () => {
-        const expanded = sidebar?.classList.toggle('nav-open') || false;
-        sidebarToggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
-    });
 
     const termsPage = document.querySelector('[data-terms-page]');
     if (termsPage) {

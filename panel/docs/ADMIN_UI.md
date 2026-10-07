@@ -48,8 +48,17 @@ The import and API contracts are documented in `LIBRARY_FULL_ART.md`.
 - Changing a select submits immediately; search is debounced by 520 ms.
 - Pressing `/` focuses the primary catalogue search when focus is not already in
   a form control.
-- On screens up to 1120 px the navigation is collapsed behind an accessible menu
-  button.
+- The warm light theme and horizontal navigation are the default. Secondary
+  catalogues and theme choices stay reachable through “Разделы”; Escape closes
+  the menu. The new `hsDataTheme-v2` preference starts in light mode independently
+  of the former theme preference.
+- BG opens as a four-column artwork gallery (three columns on tablets, two on
+  phones). `hsDataCatalogView` stores the gallery/table choice. Both views use
+  the same server-rendered records, URL filters and real server pagination;
+  the default BG page has eight records. The table is the fallback without JS.
+- Selecting a BG card opens a native modal dialog with Data, Images and JSON
+  API tabs. Escape closes it and restores focus to the card. Image previews
+  use a second native dialog; there are no new API requests for card details.
 - Card, golden, and framed previews use the shared `data-preview` lightbox.
 - Golden variants are represented inside their base-card row, but their IDs and
   DBFs are also searchable.
@@ -163,3 +172,18 @@ keyboard-accessible. Verify the source registry, a HSGuru archetype with decks,
 a BG minion with combat rounds, and BG hero portrait dimensions. Test an empty
 card-statistics search and a known card such as `Fire Fly`; a golden ID such as
 `BG31_835_G` must still resolve to its base-card row.
+
+## Gallery browser regression
+
+`tests/catalog_gallery_browser.mjs` exercises the shared gallery and inspector
+against `tests/catalog_panel_fixture.php`, with HTTPS media requests blocked.
+Start the PHP fixture server on `127.0.0.1:18767` and an isolated Chromium with
+CDP on `127.0.0.1:18766`, then run:
+
+```sh
+node panel/tests/catalog_gallery_browser.mjs
+```
+
+It checks card identifiers and API links, modal focus restoration, nested image
+preview, saved table preference, empty results and desktop/tablet/mobile layout.
+Screenshots and results are written to `/tmp/koloda-catalog-gallery-qa`.

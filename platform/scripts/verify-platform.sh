@@ -39,7 +39,7 @@ fi
 read -r public_status public_redirect <<<"$(curl --silent --show-error --max-time 10 \
   --output /dev/null --write-out '%{http_code} %{redirect_url}' \
   https://api.kolodahearthstone.com/)"
-test "${public_status}" = '302'
+[[ "${public_status}" == '302' || "${public_status}" == '307' ]]
 test "${public_redirect}" = 'https://api.kolodahearthstone.com/auth/github'
 
 read -r github_status github_redirect <<<"$(curl --silent --show-error --max-time 10 \

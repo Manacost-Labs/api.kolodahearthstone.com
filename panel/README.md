@@ -7,8 +7,10 @@ cards with a null creature type. The normal import updates existing rows even
 when their source payload hash is unchanged; no schema migration is needed.
 Regression check: `php panel/tests/battleground_creature_types_test.php`.
 
-This directory is the source of the authenticated database panel served at
-`https://api.kolodahearthstone.com/`. Only GitHub user `Zulut30` is allowed to
+This directory owns the PHP data operations, authentication and legacy view of
+the authenticated database panel at `https://api.kolodahearthstone.com/`.
+The main interface now lives in [panel-next](../panel-next/README.md), with
+the previous PHP view available at `/index.php`. Only GitHub user `Zulut30` is allowed to
 open it. The public REST compatibility surface is under `/api/v1`, while the
 central GraphQL API is under `/v1/`.
 

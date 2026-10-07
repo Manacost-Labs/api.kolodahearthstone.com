@@ -1,7 +1,7 @@
 PYTHON := .venv/bin/python
 AI_QUALITY_BIN := /home/debian/server/tools/ai-quality/bin
 
-.PHONY: setup check test panel-check platform-check provider-check docs-check sdk-check lint-report security benchmark-smoke
+.PHONY: setup check test panel-check panel-next-check platform-check provider-check docs-check sdk-check lint-report security benchmark-smoke
 
 API_BENCHMARK_BASE_URL ?= http://127.0.0.1:8000
 
@@ -9,11 +9,13 @@ setup:
 	uv venv --python 3.12 .venv
 	uv pip install --python $(PYTHON) --requirement requirements-dev.txt
 	uv pip install --python $(PYTHON) --requirement panel/requirements.txt
+	npm --prefix panel-next ci
 
 check:
 	@test -x $(PYTHON) || { printf 'Run make setup first.\n' >&2; exit 1; }
 	$(PYTHON) -m pytest -q
 	$(MAKE) panel-check
+	$(MAKE) panel-next-check
 	$(MAKE) platform-check
 	$(MAKE) docs-check
 	$(MAKE) sdk-check
@@ -22,6 +24,9 @@ check:
 test:
 	@test -x $(PYTHON) || { printf 'Run make setup first.\n' >&2; exit 1; }
 	$(PYTHON) -m pytest -q
+
+panel-next-check:
+	npm --prefix panel-next run check
 
 panel-check:
 	$(PYTHON) -m unittest discover -s panel/tests -p 'test_*.py'

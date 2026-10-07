@@ -16,20 +16,22 @@ $framedImageUrl = 'https://api.kolodahearthstone.com/uploads/framed/BG26_146.png
 $goldenFramedImageUrl = 'https://api.kolodahearthstone.com/uploads/framed/BG26_146_G.png';
 ?>
 <!doctype html>
-<html lang="ru" data-theme="dark">
+<html lang="ru" data-theme="light">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Каталог · UI fixture</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232563eb'/%3E%3C/svg%3E">
     <link rel="stylesheet" href="/assets/style.css?v=38">
-    <script src="/assets/catalog-workspace-view.js?v=2" defer></script>
-    <script src="/assets/panel-ui.js?v=4" defer></script>
+    <link rel="stylesheet" href="/assets/gallery.css?v=1">
+    <script src="/assets/catalog-workspace-view.js?v=3" defer></script>
+    <script src="/assets/panel-ui.js?v=5" defer></script>
+    <script src="/assets/catalog-gallery.js?v=1" defer></script>
 </head>
 <body>
 <main class="shell">
     <aside class="sidebar">
-        <div class="sidebar-brand"><span class="brand-mark">HS</span><div><strong>HS Data</strong><p>центр управления данными</p></div><button class="sidebar-toggle" type="button" data-sidebar-toggle aria-expanded="false">Меню</button></div>
+        <div class="sidebar-brand"><span class="brand-mark">HS</span><div><strong>HS Data</strong><p>центр управления данными</p></div><?php require __DIR__ . '/../partials/primary-navigation.php'; ?><button class="sidebar-toggle" type="button" data-sidebar-toggle aria-expanded="false">Меню</button></div>
         <nav class="side-nav">
             <section class="side-section"><h2>Основное</h2><a class="side-link active" href="#"><span>Карты BG</span><b>1240</b></a><a class="side-link" href="#"><span>Герои</span><b>105</b></a><a class="side-link" href="#"><span>Скины героев</span><b>284</b></a></section>
             <section class="side-section"><h2>Статистика</h2><a class="side-link" href="#"><span>Обзор и мета</span><b>Live</b></a></section>
@@ -60,6 +62,7 @@ $goldenFramedImageUrl = 'https://api.kolodahearthstone.com/uploads/framed/BG26_1
             <?php else: ?>
             <div class="catalog-workbench" data-catalog-workbench>
             <section class="catalog-list-pane" aria-label="Список карт">
+            <?php require __DIR__ . '/../partials/catalog-gallery.php'; ?>
             <nav class="pagination"><span class="page-link disabled">Назад</span><span class="page-link active">1</span><a class="page-link" href="?page=2">2</a><a class="page-link" href="?page=3">3</a><a class="page-link" href="?page=2">Вперёд</a><span class="page-summary">Страница 1 из 25</span></nav>
             <div class="cards-table">
                 <table class="battlegrounds-table">
@@ -73,14 +76,7 @@ $goldenFramedImageUrl = 'https://api.kolodahearthstone.com/uploads/framed/BG26_1
                 </table>
             </div>
             </section>
-            <aside class="catalog-inspector" data-catalog-inspector aria-label="Детали выбранной карты" hidden>
-                <header class="catalog-inspector-head"><div><span>Выбранная карта</span><h2 data-inspector-field="name">Детали карты</h2><code data-inspector-field="id">—</code></div><button class="button ghost" type="button" data-inspector-close>Закрыть</button></header>
-                <section class="catalog-inspector-section catalog-inspector-visuals"><h3>Все изображения <span data-inspector-field="imageCount">0</span></h3><div class="catalog-inspector-gallery" data-inspector-images></div><p class="catalog-inspector-empty" data-inspector-image-empty>Изображения отсутствуют</p></section>
-                <section class="catalog-inspector-section catalog-inspector-identifiers"><h3>Идентификаторы и API</h3><dl class="catalog-inspector-id-grid"><div><dt>ID записи</dt><dd data-inspector-field="internalId">—</dd></div><div><dt>card_id</dt><dd data-inspector-field="cardId">—</dd></div><div><dt>dbf</dt><dd data-inspector-field="dbf">—</dd></div><div><dt>Golden card_id</dt><dd data-inspector-field="goldenCardId">—</dd></div><div><dt>Golden dbf</dt><dd data-inspector-field="goldenDbf">—</dd></div></dl><div class="catalog-inspector-api-links" data-inspector-api-links></div></section>
-                <dl class="catalog-inspector-facts"><div><dt>Название EN</dt><dd data-inspector-field="englishName">—</dd></div><div><dt>Категория</dt><dd data-inspector-field="type">—</dd></div><div><dt>Таверна</dt><dd data-inspector-field="tier">—</dd></div><div><dt>Атака</dt><dd data-inspector-field="attack">—</dd></div><div><dt>Здоровье</dt><dd data-inspector-field="health">—</dd></div><div><dt>Пул</dt><dd data-inspector-field="pool">—</dd></div><div><dt>Режим</dt><dd data-inspector-field="duo">—</dd></div><div><dt>Обновлено</dt><dd data-inspector-field="updated">—</dd></div></dl>
-                <section class="catalog-inspector-section"><h3>Механики</h3><div class="catalog-inspector-mechanics" data-inspector-mechanics></div></section>
-                <div class="catalog-inspector-actions"><a class="button" href="#" data-inspector-link="edit">Править</a><a class="button ghost" href="#" data-inspector-link="stats">Статистика</a></div>
-            </aside>
+            <?php require __DIR__ . '/../partials/catalog-inspector.php'; ?>
             </div>
             <?php endif; ?>
         </section>

@@ -1,0 +1,55 @@
+name: panel-next
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'panel-next/**'
+      - 'panel/examples/horizontal-art-tiles.css'
+      - 'panel/index.php'
+      - 'panel/nginx/**'
+      - 'scripts/deploy-panel-next.sh'
+      - 'Makefile'
+      - 'panel/assets/parser-control-view.js'
+      - 'panel/assets/parsing-reliability.js'
+      - 'panel/next-data.php'
+      - 'panel/lib/next_panel.php'
+      - 'panel/tests/next_panel_test.php'
+      - '.github/workflows/panel-next.yml'
+  pull_request:
+    paths:
+      - 'panel-next/**'
+      - 'panel/examples/horizontal-art-tiles.css'
+      - 'panel/index.php'
+      - 'panel/nginx/**'
+      - 'scripts/deploy-panel-next.sh'
+      - 'Makefile'
+      - 'panel/assets/parser-control-view.js'
+      - 'panel/assets/parsing-reliability.js'
+      - 'panel/next-data.php'
+      - 'panel/lib/next_panel.php'
+      - 'panel/tests/next_panel_test.php'
+      - '.github/workflows/panel-next.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  panel-next:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: panel-next/package-lock.json
+      - run: npm ci
+        working-directory: panel-next
+      - run: npm run check
+        working-directory: panel-next
+      - run: npm audit --audit-level=high
+        working-directory: panel-next
+      - run: php panel/tests/next_panel_test.php
