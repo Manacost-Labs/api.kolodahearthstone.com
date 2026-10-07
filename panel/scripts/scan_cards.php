@@ -7,6 +7,7 @@ umask(0022);
 
 $config = require __DIR__ . '/../config.php';
 require_once __DIR__ . '/lib/battleground_pool_patch.php';
+require_once __DIR__ . '/lib/battleground_card_overrides.php';
 
 const HSJ_RU_URL = 'https://api.hearthstonejson.com/v1/latest/ruRU/cards.json';
 const HSJ_EN_URL = 'https://api.hearthstonejson.com/v1/latest/enUS/cards.json';
@@ -90,6 +91,8 @@ function ensure_schema(PDO $pdo): void
             ADD INDEX IF NOT EXISTS idx_bg_base_card_id (base_card_id),
             ADD INDEX IF NOT EXISTS idx_bg_premium_dbf (premium_dbf)
     ");
+
+    bg_card_overrides_ensure_schema($pdo);
 }
 
 function start_run(PDO $pdo, string $source): int
@@ -1172,7 +1175,7 @@ function record_change(PDO $pdo, string $cardId, string $source, ?string $oldHas
     ]);
 }
 
-function upsert_card(PDO $pdo, array $card, bool $dryRun = false): array
+function upsert_card(PDO $pdo, array $card, bool $dryRun = false, array $overrides = []): array
 {
     $select = $pdo->prepare('SELECT * FROM battlegrounds_cards WHERE card_id = :card_id LIMIT 1');
     $select->execute(['card_id' => $card['card_id']]);
@@ -1223,6 +1226,8 @@ function upsert_card(PDO $pdo, array $card, bool $dryRun = false): array
     }
 
     $changed = ($existing['source_hash'] ?? null) !== $card['source_hash'];
+    $manual = bg_card_override_apply($card, $overrides);
+    $card = $manual['card'];
     $params = [
         'id' => (int)$existing['id'],
         'name' => $card['name'],
@@ -1279,6 +1284,16 @@ function upsert_card(PDO $pdo, array $card, bool $dryRun = false): array
         if ($changed) {
             record_change($pdo, $card['card_id'], $card['source'], $existing['source_hash'] ?? null, $card['source_hash'], 'changed', $card['source_payload']);
         }
+        $finished = array_merge($manual['settled'], array_keys($manual['released']));
+        if ($finished !== []) {
+            bg_card_overrides_delete($pdo, $card['card_id'], $finished);
+        }
+        if ($manual['settled'] !== []) {
+            bg_card_overrides_log($pdo, $card['card_id'], $card['source'], 'manual_settled', ['fields' => $manual['settled']], $card['source_hash']);
+        }
+        if ($manual['released'] !== []) {
+            bg_card_overrides_log($pdo, $card['card_id'], $card['source'], 'manual_released', ['fields' => $manual['released']], $card['source_hash']);
+        }
     }
 
     return ['inserted' => 0, 'updated' => 1, 'changed' => $changed ? 1 : 0];
@@ -1298,6 +1313,7 @@ function scan_hearthstonejson(PDO $pdo, bool $dryRun = false): array
         }
     }
 
+    $overrides = bg_card_overrides_load_all($pdo);
     $stats = ['scanned' => 0, 'inserted' => 0, 'updated' => 0, 'changed' => 0];
     foreach ($ruCards as $ru) {
         if (!is_array($ru) || empty($ru['id'])) {
@@ -1309,7 +1325,7 @@ function scan_hearthstonejson(PDO $pdo, bool $dryRun = false): array
         }
 
         $stats['scanned']++;
-        $result = upsert_card($pdo, $normalized, $dryRun);
+        $result = upsert_card($pdo, $normalized, $dryRun, $overrides[$normalized['card_id']] ?? []);
         foreach (['inserted', 'updated', 'changed'] as $key) {
             $stats[$key] += $result[$key];
         }

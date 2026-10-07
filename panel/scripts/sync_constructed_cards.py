@@ -8,6 +8,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import urllib.parse
 import urllib.request
 from datetime import date, datetime, timezone
@@ -57,6 +58,9 @@ REVEAL_SET_SLUG = "reign-of-the-black-empire"
 REVEAL_SET_ID = 1994
 REVEAL_SET_CODE = "BE"
 REVEAL_IMAGE_HOSTS = {"d15f34w2p8l1cc.cloudfront.net", "hearthstone.blizzard.com"}
+# A normal sync removes a handful of cards; only a reviewed rotation removes more.
+MASS_REMOVAL_MIN_CARDS = 25
+MASS_REMOVAL_MAX_SHARE = 0.05
 
 
 def utc_now() -> str:
@@ -143,8 +147,12 @@ def blizzard_token() -> tuple[str, str]:
 
 
 def fetch_blizzard_cards(format_slug: str, locale: str, region: str, token: str) -> dict[int, dict[str, Any]]:
+    # The result decides which cards stay in a format, so a malformed or short
+    # response must fail the run instead of looking like a smaller card pool.
     page = 1
     result: dict[int, dict[str, Any]] = {}
+    expected_count: int | None = None
+    expected_pages: int | None = None
     while True:
         url = "https://" + region + ".api.blizzard.com/hearthstone/cards?" + urllib.parse.urlencode(
             {
@@ -156,14 +164,28 @@ def fetch_blizzard_cards(format_slug: str, locale: str, region: str, token: str)
             }
         )
         data = http_json(url, headers={"Authorization": "Bearer " + token})
-        cards = data.get("cards", []) if isinstance(data, dict) else []
-        for card in cards:
+        if not isinstance(data, dict) or not isinstance(data.get("cards"), list):
+            raise RuntimeError(f"Blizzard {format_slug}/{locale} page {page} has no card list")
+        count, pages = data.get("cardCount"), data.get("pageCount")
+        if (type(pages) is not int or pages < 1
+                or count is not None and (type(count) is not int or count < 0)
+                or expected_pages is not None and pages != expected_pages
+                or expected_count is not None and count != expected_count):
+            raise RuntimeError(f"Blizzard {format_slug}/{locale} pagination is invalid on page {page}")
+        expected_count, expected_pages = count, pages
+        for card in data["cards"]:
             if isinstance(card, dict) and card.get("id") is not None:
                 result[int(card["id"])] = card
-        page_count = int(data.get("pageCount") or page) if isinstance(data, dict) else page
-        if page >= page_count:
+        if page >= pages:
             break
         page += 1
+    if expected_count is not None:
+        # Tolerate a few duplicates or hidden rows, but never a missing page.
+        tolerance = max(5, expected_count // 50)
+        if len(result) < expected_count - tolerance:
+            raise RuntimeError(
+                f"Blizzard {format_slug}/{locale} returned {len(result)} of {expected_count} cards"
+            )
     return result
 
 
@@ -587,13 +609,38 @@ def save_format(
         )
 
 
-def mark_removed(conn, format_slug: str, active_card_ids: set[str], dry_run: bool) -> int:
+class MassRemovalRefused(RuntimeError):
+    pass
+
+
+def mass_removal_limit(available: int) -> int:
+    return max(MASS_REMOVAL_MIN_CARDS, int(available * MASS_REMOVAL_MAX_SHARE))
+
+
+def mark_removed(conn, format_slug: str, active_card_ids: set[str], dry_run: bool, allow_mass_removal: bool = False) -> int:
     if dry_run:
         return 0
     if not active_card_ids:
         return 0
     placeholders = ",".join(["%s"] * len(active_card_ids))
     with conn.cursor() as cur:
+        cur.execute(
+            f"""
+            SELECT
+                COUNT(*) AS available,
+                COALESCE(SUM(card_id NOT IN ({placeholders})), 0) AS leaving
+            FROM constructed_format_cards
+            WHERE format_slug = %s AND in_format = 1 AND availability_status = 'available'
+            """,
+            (*sorted(active_card_ids), format_slug),
+        )
+        preview = cur.fetchone()  # DictCursor row
+        available, leaving = int(preview["available"] or 0), int(preview["leaving"] or 0)
+        if leaving > mass_removal_limit(available) and not allow_mass_removal:
+            raise MassRemovalRefused(
+                f"Refusing to remove {leaving} of {available} {format_slug} cards; "
+                "review the source and rerun with --allow-mass-removal for a real rotation"
+            )
         cur.execute(
             f"""
             UPDATE constructed_format_cards
@@ -623,7 +670,19 @@ def finish_run(conn, run_id: int, stats: dict[str, int], status: str = "ok", err
         )
 
 
-def sync_format(conn, format_slug: str, region: str, token: str, hsj_ru: dict[int, dict[str, Any]], hsj_en: dict[int, dict[str, Any]], dry_run: bool) -> dict[str, int]:
+def record_failed_run(conn, format_slug: str, exc: Exception) -> None:
+    # The failed batch is rolled back as a whole, so the run row written inside
+    # it is gone too. Persist a separate error row so operators can see the failure.
+    try:
+        run_id = start_run(conn, format_slug)
+        finish_run(conn, run_id, {"scanned": 0, "inserted": 0, "updated": 0, "changed": 0}, "error", f"{type(exc).__name__}: {exc}"[:2000])
+        conn.commit()
+    except Exception as log_exc:  # noqa: BLE001 - never hide the original import failure
+        conn.rollback()
+        print(json_dump({"run_log_error": str(log_exc), "format": format_slug}), file=sys.stderr)
+
+
+def sync_format(conn, format_slug: str, region: str, token: str, hsj_ru: dict[int, dict[str, Any]], hsj_en: dict[int, dict[str, Any]], dry_run: bool, allow_mass_removal: bool = False) -> dict[str, int]:
     ru_cards = fetch_blizzard_cards(format_slug, "ru_RU", region, token)
     en_cards = fetch_blizzard_cards(format_slug, "en_US", region, token)
     reveals: dict[str, dict[int, dict[str, Any]]] = {}
@@ -717,7 +776,7 @@ def sync_format(conn, format_slug: str, region: str, token: str, hsj_ru: dict[in
         stats["scanned"] += 1
         stats["inserted" if not existing_card_id else "updated"] += 1
         stats["preview"] += 1
-    stats["removed"] = mark_removed(conn, format_slug, active_card_ids, dry_run)
+    stats["removed"] = mark_removed(conn, format_slug, active_card_ids, dry_run, allow_mass_removal)
     return stats
 
 
@@ -725,6 +784,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Sync constructed Standard/Wild cards.")
     parser.add_argument("--format", choices=["all", "standard", "wild"], default="all")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--allow-mass-removal",
+        action="store_true",
+        help="apply a reviewed rotation that removes more cards than the safety limit",
+    )
     args = parser.parse_args()
 
     ensure_schema()
@@ -738,12 +802,14 @@ def main() -> int:
         for format_slug in formats:
             run_id = start_run(conn, format_slug)
             try:
-                stats = sync_format(conn, format_slug, region, token, hsj_ru, hsj_en, args.dry_run)
+                stats = sync_format(conn, format_slug, region, token, hsj_ru, hsj_en, args.dry_run, args.allow_mass_removal)
                 finish_run(conn, run_id, stats, "ok")
                 all_stats[format_slug] = stats
                 print(json_dump({format_slug: stats}))
             except Exception as exc:
-                finish_run(conn, run_id, {"scanned": 0, "inserted": 0, "updated": 0, "changed": 0}, "error", str(exc))
+                conn.rollback()
+                if not args.dry_run:
+                    record_failed_run(conn, format_slug, exc)
                 raise
         if args.dry_run:
             conn.rollback()

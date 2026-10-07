@@ -4,7 +4,7 @@
 -- см. ARCHITECTURE.md. Разовые backup-таблицы вида *_backup_YYYYMMDD
 -- в выгрузку не входят.
 --
--- Таблиц: 36, представлений: 0.
+-- Таблиц: 35, представлений: 2.
 
 SET NAMES utf8mb4;
 
@@ -37,6 +37,18 @@ CREATE TABLE `battlegrounds_card_import_runs` (
   `error` text DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `idx_source_started` (`source`,`started_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ----------------------------------------------------------------------
+CREATE TABLE `battlegrounds_card_overrides` (
+  `card_id` varchar(64) NOT NULL,
+  `field_name` varchar(32) NOT NULL,
+  `manual_value` text DEFAULT NULL,
+  `upstream_value` text DEFAULT NULL,
+  `created_by` varchar(64) NOT NULL DEFAULT '',
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`card_id`,`field_name`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ----------------------------------------------------------------------

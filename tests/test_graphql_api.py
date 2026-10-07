@@ -536,9 +536,14 @@ def test_graphql_is_read_only_and_get_is_discovery_only(monkeypatch: Any) -> Non
         "method": "POST",
     }
     assert mutation_response.status_code == 200
-    assert (
-        "Schema is not configured to execute mutation operation"
-        in mutation_response.json()["errors"][0]["message"]
+    # graphql-core 3.3 reworded the rejection; either wording means read-only.
+    message = mutation_response.json()["errors"][0]["message"]
+    assert any(
+        wording in message
+        for wording in (
+            "Schema is not configured to execute mutation operation",
+            "The mutation operation is not supported by the schema",
+        )
     )
 
 

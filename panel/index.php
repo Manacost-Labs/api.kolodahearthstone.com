@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/lib/auth.php';
 require __DIR__ . '/lib/api_tokens.php';
 require __DIR__ . '/lib/parser_control.php';
+require_once __DIR__ . '/scripts/lib/battleground_card_overrides.php';
 
 $panelUser = panel_require_auth(defined('KOLODA_NEXT_JSON'));
 
@@ -992,17 +993,34 @@ try {
                 throw new RuntimeException('Уровень таверны должен быть от 1 до 7.');
             }
 
+            // DDL commits implicitly in MySQL, so it must precede the transaction.
+            bg_card_overrides_ensure_schema($pdo);
+            $author = (string)($panelUser['login'] ?? '');
+            $protectedMessage = ' Изменённые поля не перезапишутся импортом, пока источник не обновит их сам.';
             if ($id) {
-                $stmt = $pdo->prepare(
-                    'UPDATE battlegrounds_cards
-                     SET name=:name, name_en=:name_en, card_id=:card_id, dbf=:dbf, tavern_tier=:tavern_tier,
-                         card_type=:card_type, creature_type=:creature_type, attack=:attack, health=:health,
-                         in_pool=:in_pool, duos_only=:duos_only,
-                         card_image=:card_image, golden_image=:golden_image, art_image=:art_image, framed_image=:framed_image, notes=:notes
-                     WHERE id=:id'
-                );
-                $stmt->execute($data + ['id' => $id]);
-                $message = 'Карта обновлена.';
+                $pdo->beginTransaction();
+                try {
+                    $changes = $current
+                        ? bg_card_override_changes($current, $data, bg_card_overrides_load($pdo, (string)$current['card_id']))
+                        : null;
+                    $stmt = $pdo->prepare(
+                        'UPDATE battlegrounds_cards
+                         SET name=:name, name_en=:name_en, card_id=:card_id, dbf=:dbf, tavern_tier=:tavern_tier,
+                             card_type=:card_type, creature_type=:creature_type, attack=:attack, health=:health,
+                             in_pool=:in_pool, duos_only=:duos_only,
+                             card_image=:card_image, golden_image=:golden_image, art_image=:art_image, framed_image=:framed_image, notes=:notes
+                         WHERE id=:id'
+                    );
+                    $stmt->execute($data + ['id' => $id]);
+                    if ($changes !== null) {
+                        bg_card_overrides_record_edit($pdo, (string)$current['card_id'], $data['card_id'], $changes, $author);
+                    }
+                    $pdo->commit();
+                } catch (Throwable $e) {
+                    $pdo->rollBack();
+                    throw $e;
+                }
+                $message = 'Карта обновлена.' . ($changes !== null && $changes['upsert'] !== [] ? $protectedMessage : '');
             } else {
                 $stmt = $pdo->prepare('SELECT * FROM battlegrounds_cards WHERE card_id = ? LIMIT 1');
                 $stmt->execute([$data['card_id']]);
@@ -1013,16 +1031,25 @@ try {
                     $data['golden_image'] = $data['golden_image'] ?: $existing['golden_image'];
                     $data['art_image'] = $data['art_image'] ?: $existing['art_image'];
                     $data['framed_image'] = $data['framed_image'] ?: $existing['framed_image'];
-                    $stmt = $pdo->prepare(
-                        'UPDATE battlegrounds_cards
-                         SET name=:name, name_en=:name_en, dbf=:dbf, tavern_tier=:tavern_tier,
-                             card_type=:card_type, creature_type=:creature_type, attack=:attack, health=:health,
-                             in_pool=:in_pool, duos_only=:duos_only,
-                             card_image=:card_image, golden_image=:golden_image, art_image=:art_image, framed_image=:framed_image, notes=:notes
-                         WHERE card_id=:card_id'
-                    );
-                    $stmt->execute($data);
-                    $message = 'Карта с таким card_id уже была в базе, я обновил существующую запись.';
+                    $pdo->beginTransaction();
+                    try {
+                        $changes = bg_card_override_changes($existing, $data, bg_card_overrides_load($pdo, $data['card_id']));
+                        $stmt = $pdo->prepare(
+                            'UPDATE battlegrounds_cards
+                             SET name=:name, name_en=:name_en, dbf=:dbf, tavern_tier=:tavern_tier,
+                                 card_type=:card_type, creature_type=:creature_type, attack=:attack, health=:health,
+                                 in_pool=:in_pool, duos_only=:duos_only,
+                                 card_image=:card_image, golden_image=:golden_image, art_image=:art_image, framed_image=:framed_image, notes=:notes
+                             WHERE card_id=:card_id'
+                        );
+                        $stmt->execute($data);
+                        bg_card_overrides_record_edit($pdo, $data['card_id'], $data['card_id'], $changes, $author);
+                        $pdo->commit();
+                    } catch (Throwable $e) {
+                        $pdo->rollBack();
+                        throw $e;
+                    }
+                    $message = 'Карта с таким card_id уже была в базе, я обновил существующую запись.' . ($changes['upsert'] !== [] ? $protectedMessage : '');
                 } else {
                     $stmt = $pdo->prepare(
                         'INSERT INTO battlegrounds_cards
@@ -1036,8 +1063,20 @@ try {
             $action = 'list';
         } elseif ($action === 'delete') {
             $id = (int)($_POST['id'] ?? 0);
-            $stmt = $pdo->prepare('DELETE FROM battlegrounds_cards WHERE id = ?');
-            $stmt->execute([$id]);
+            $deleted = find_card($pdo, $id);
+            bg_card_overrides_ensure_schema($pdo);
+            $pdo->beginTransaction();
+            try {
+                $stmt = $pdo->prepare('DELETE FROM battlegrounds_cards WHERE id = ?');
+                $stmt->execute([$id]);
+                if ($deleted) {
+                    $pdo->prepare('DELETE FROM battlegrounds_card_overrides WHERE card_id = ?')->execute([(string)$deleted['card_id']]);
+                }
+                $pdo->commit();
+            } catch (Throwable $e) {
+                $pdo->rollBack();
+                throw $e;
+            }
             $message = 'Карта удалена.';
             $action = 'list';
         } elseif ($action === 'save_wiki_terms') {

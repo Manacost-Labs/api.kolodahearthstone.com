@@ -3,7 +3,14 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import AsyncMock
 
-from app.graphql_api.repository import PageResult, PostgresGraphQLRepository
+import pytest
+
+from app.graphql_api.repository import (
+    PRIVATE_COLLECTIONS,
+    PageResult,
+    PostgresGraphQLRepository,
+    RepositoryValidationError,
+)
 
 
 def test_cards_cursor_uses_keyset_predicate_and_fetches_one_extra() -> None:
@@ -209,5 +216,52 @@ def test_statistic_history_queries_all_snapshots_with_keyset_cursor() -> None:
         assert "after_id" not in str(call["count_query"])
         assert call["params"]["entity_key"] == "wild:reno-priest"
         assert result.next_cursor == {"values": [True, 0, -12]}
+
+    asyncio.run(scenario())
+
+
+def test_private_legacy_tables_are_not_readable_as_records() -> None:
+    async def scenario() -> None:
+        repository = PostgresGraphQLRepository("postgresql://unused")
+        repository._collection_metadata = AsyncMock()
+        repository._fetch_page = AsyncMock()
+
+        for collection in sorted(PRIVATE_COLLECTIONS):
+            with pytest.raises(RepositoryValidationError, match="does not exist"):
+                await repository.records(
+                    collection=collection,
+                    fields=None,
+                    filters=None,
+                    order_by=None,
+                    descending=False,
+                    after=None,
+                    limit=1,
+                    offset=0,
+                )
+
+        repository._collection_metadata.assert_not_awaited()
+        repository._fetch_page.assert_not_awaited()
+        assert {"catalog.jobs", "catalog.options"} <= PRIVATE_COLLECTIONS
+        assert repository._collection_parts("catalog.battlegrounds_cards") == (
+            "catalog",
+            "battlegrounds_cards",
+        )
+
+    asyncio.run(scenario())
+
+
+def test_collection_listing_hides_private_legacy_tables() -> None:
+    async def scenario() -> None:
+        repository = PostgresGraphQLRepository("postgresql://unused")
+        repository._fetch_page = AsyncMock(return_value=PageResult(items=[], total=0))
+
+        await repository.collections(
+            schema_name="catalog", search=None, after=None, limit=10, offset=0
+        )
+
+        call = repository._fetch_page.await_args.kwargs
+        for query in (call["count_query"], call["rows_query"]):
+            assert "<> ALL(%(private_collections)s)" in str(query)
+        assert call["params"]["private_collections"] == sorted(PRIVATE_COLLECTIONS)
 
     asyncio.run(scenario())

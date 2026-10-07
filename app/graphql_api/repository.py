@@ -30,6 +30,11 @@ class PageResult:
 
 
 ALLOWED_DATABASE_SCHEMAS = frozenset({"catalog", "analytics", "raw", "platform", "hub"})
+# The shadow sync copies the whole MariaDB database into `catalog`, including
+# legacy application tables with user jobs and settings. They are not card data.
+PRIVATE_COLLECTIONS = frozenset(
+    {"catalog.jobs", "catalog.migration", "catalog.options"}
+)
 COLLECTION_RE = re.compile(r"^(?P<schema>[a-z][a-z0-9_]*)\.(?P<table>[a-z][a-z0-9_]*)$")
 
 
@@ -994,6 +999,8 @@ class PostgresGraphQLRepository:
             raise RepositoryValidationError(
                 f"collection must be schema.table in one of: {allowed}"
             )
+        if collection in PRIVATE_COLLECTIONS:
+            raise RepositoryValidationError("collection does not exist")
         return match.group("schema"), match.group("table")
 
     async def _collection_metadata(
@@ -1067,9 +1074,13 @@ class PostgresGraphQLRepository:
         limit: int,
         offset: int,
     ) -> PageResult:
-        where = ["table_schema = ANY(%(schemas)s)"]
+        where = [
+            "table_schema = ANY(%(schemas)s)",
+            "table_schema || '.' || table_name <> ALL(%(private_collections)s)",
+        ]
         params: dict[str, Any] = {
             "schemas": sorted(ALLOWED_DATABASE_SCHEMAS),
+            "private_collections": sorted(PRIVATE_COLLECTIONS),
             "limit": limit + 1,
             "offset": 0 if after else offset,
         }

@@ -141,5 +141,11 @@ assert_contains scripts/apply-migrations.sh \
 assert_contains sql/009_horizontal_art.sql \
   'horizontal_image_url' \
   'the horizontal artwork migration must publish a dedicated URL'
+assert_contains scripts/apply-migrations.sh \
+  '010_battlegrounds_card_overrides\.sql' \
+  'the shadow catalogue must know the manual card corrections table'
+assert_contains sql/010_battlegrounds_card_overrides.sql \
+  'PRIMARY KEY \(card_id, field_name\)' \
+  'manual corrections must upsert by card and field'
 
 echo 'OK: migration cutover contract'

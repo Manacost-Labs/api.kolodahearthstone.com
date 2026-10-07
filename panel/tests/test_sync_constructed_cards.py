@@ -2,6 +2,7 @@ import sys
 import unittest
 from contextlib import ExitStack
 from datetime import date
+from decimal import Decimal
 from pathlib import Path
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
@@ -293,27 +294,131 @@ class OfficialExpansionRevealTest(unittest.TestCase):
         removed.assert_not_called()
 
     def test_mark_removed_never_deactivates_preview_rows(self):
-        class Connection:
-            def __init__(self):
-                self.sql = ""
-
-            def cursor(self):
-                return self
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *args):
-                return None
-
-            def execute(self, sql, params):
-                self.sql = sql
-
-            rowcount = 0
-
-        conn = Connection()
+        conn = FormatConnection(available=100, leaving=0)
         sync.mark_removed(conn, "standard", {"KNOWN_1"}, False)
         self.assertIn("availability_status = 'available'", conn.sql)
+
+
+class FormatConnection:
+    """DictCursor double: answers the removal preview, records the UPDATE."""
+
+    def __init__(self, available, leaving):
+        # MariaDB returns SUM() as Decimal; connect_db() uses DictCursor rows.
+        self.counts = {"available": available, "leaving": Decimal(leaving)}
+        self.sql = ""
+        self.updates = 0
+        self.rowcount = leaving
+
+    def cursor(self):
+        return self
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return None
+
+    def execute(self, sql, params):
+        self.sql = sql
+        if sql.lstrip().startswith("UPDATE"):
+            self.updates += 1
+
+    def fetchone(self):
+        return self.counts
+
+
+class MassRemovalGuardTest(unittest.TestCase):
+    def test_test_double_matches_the_production_cursor(self):
+        with patch.object(sync.pymysql, "connect") as connect:
+            sync.connect_db({"db": {"dsn": "mysql:host=db;dbname=generator", "user": "u", "password": "p"}})
+        self.assertIs(connect.call_args.kwargs["cursorclass"], sync.DictCursor)
+
+    def test_refuses_to_remove_a_large_share_of_a_format(self):
+        conn = FormatConnection(available=1000, leaving=400)
+        with self.assertRaises(sync.MassRemovalRefused):
+            sync.mark_removed(conn, "standard", {"KNOWN_1"}, False)
+        self.assertEqual(conn.updates, 0)
+
+    def test_reviewed_rotation_can_remove_many_cards(self):
+        conn = FormatConnection(available=1000, leaving=400)
+        self.assertEqual(sync.mark_removed(conn, "standard", {"KNOWN_1"}, False, allow_mass_removal=True), 400)
+        self.assertEqual(conn.updates, 1)
+
+    def test_routine_removals_stay_automatic(self):
+        conn = FormatConnection(available=1000, leaving=sync.mass_removal_limit(1000))
+        sync.mark_removed(conn, "wild", {"KNOWN_1"}, False)
+        self.assertEqual(conn.updates, 1)
+        self.assertEqual(sync.mass_removal_limit(100), sync.MASS_REMOVAL_MIN_CARDS)
+
+    def test_sync_format_passes_the_operator_override(self):
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(sync, "fetch_blizzard_cards", return_value={}))
+            stack.enter_context(patch.object(sync, "fetch_official_reveals", return_value={}))
+            removed = stack.enter_context(patch.object(sync, "mark_removed", return_value=0))
+            sync.sync_format(object(), "standard", "us", "token", {}, {}, False, allow_mass_removal=True)
+        self.assertTrue(removed.call_args.args[4])
+
+
+class BlizzardPaginationTest(unittest.TestCase):
+    @staticmethod
+    def page(page, pages=2, count=4, ids=None):
+        ids = ids if ids is not None else [page * 10 + 1, page * 10 + 2]
+        return {"cardCount": count, "pageCount": pages, "page": page, "cards": [{"id": card_id} for card_id in ids]}
+
+    def fetch(self, responses):
+        def fake_http_json(url, headers=None, data=None):
+            page = int(parse_qs(urlparse(url).query)["page"][0])
+            return responses[page - 1]
+
+        with patch.object(sync, "http_json", side_effect=fake_http_json):
+            return sync.fetch_blizzard_cards("standard", "ru_RU", "us", "token")
+
+    def test_collects_every_page(self):
+        self.assertEqual(sorted(self.fetch([self.page(1), self.page(2)])), [11, 12, 21, 22])
+
+    def test_rejects_responses_without_pagination(self):
+        for broken in ({"cards": [{"id": 1}]}, {"pageCount": 1}, ["not", "an", "object"], {"pageCount": "1", "cards": []}):
+            with self.subTest(broken=broken), self.assertRaises(RuntimeError):
+                self.fetch([broken])
+
+    def test_rejects_a_missing_page_of_cards(self):
+        with self.assertRaises(RuntimeError):
+            self.fetch([self.page(1, count=600), self.page(2, count=600)])
+
+    def test_rejects_pagination_that_changes_between_pages(self):
+        with self.assertRaises(RuntimeError):
+            self.fetch([self.page(1), self.page(2, pages=3)])
+
+
+class FailedRunLogTest(unittest.TestCase):
+    def test_failed_import_keeps_an_error_run_after_rollback(self):
+        events = []
+
+        class Connection:
+            def rollback(self):
+                events.append("rollback")
+
+            def commit(self):
+                events.append("commit")
+
+            def close(self):
+                events.append("close")
+
+        def finish_run(conn, run_id, stats, status="ok", error=None):
+            events.append(("finish", run_id, status, error))
+
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(sys, "argv", ["sync_constructed_cards.py", "--format", "standard"]))
+            for name, value in (("ensure_schema", None), ("blizzard_token", ("us", "token")), ("fetch_hsj", {}), ("load_php_config", {})):
+                stack.enter_context(patch.object(sync, name, return_value=value))
+            stack.enter_context(patch.object(sync, "connect_db", return_value=Connection()))
+            stack.enter_context(patch.object(sync, "start_run", side_effect=[1, 2]))
+            stack.enter_context(patch.object(sync, "finish_run", side_effect=finish_run))
+            stack.enter_context(patch.object(sync, "sync_format", side_effect=sync.MassRemovalRefused("too many")))
+            with self.assertRaises(sync.MassRemovalRefused):
+                sync.main()
+
+        self.assertEqual(events, ["rollback", ("finish", 2, "error", "MassRemovalRefused: too many"), "commit", "close"])
 
 
 if __name__ == "__main__":
