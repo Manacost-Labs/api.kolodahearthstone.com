@@ -167,6 +167,26 @@ The import and API contracts are documented in `LIBRARY_FULL_ART.md`.
     used instead of ESLint because `eslint-config-next` pulls a dependency with
     an unpatched high advisory and typescript-eslint cannot load TypeScript 7.
     A deliberate exception carries a `biome-ignore` comment with its reason.
+12. The open catalogue record lives in `?card=<id>` (`lib/card-detail.ts`:
+    `cardKey`, `matchesCard`, `cardHref`). `Catalog` writes it with
+    `history.pushState`, which Next syncs into `useSearchParams` without a
+    server round trip; arrows use `replaceState`, and closing goes back when
+    the card was opened in this tab. Keep one inspector dialog mounted while
+    flipping, or the dialog closes, reopens and drops focus. `app/page.tsx`
+    strips `card` before calling PHP and resolves a card outside the current
+    page with `q=<id>&per_page=150` plus an exact identifier match, because
+    PHP search is a LIKE match.
+13. Table columns come from `lib/catalog-columns.ts`, one list per category,
+    with field names from `panel/sql/schema.mysql.sql`. A new category adds
+    its columns and a case in `tests/catalog-columns.test.ts`. Do not add a
+    client-side column sort: `next-data.php` has no sort parameter, and
+    sorting one page of a paginated list misleads.
+14. Ctrl+K is `components/CommandPalette.tsx`, a WAI-ARIA combobox with
+    `aria-activedescendant`. Card search goes through
+    `GET /api/panel?view=panel&action=list&q=…&per_page=8` for the current
+    category, debounced, and aborts stale requests.
+15. `.table-scroll` is `position: relative`, so `.sr-only` text inside cells
+    scrolls with the table instead of widening the page on phones.
 
 ## Verification
 

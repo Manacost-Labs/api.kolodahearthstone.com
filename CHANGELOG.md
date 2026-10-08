@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Next.js panel catalogue: artwork tiles with a loading shimmer, tier and pool
+  badges and a golden marker; labelled filters, category pills, active-filter
+  chips with a reset, and a filter sheet on phones.
+- Next.js panel card inspector: opening a record writes `?card=<id>` to the
+  URL, so it survives reloads, can be shared and closes with Back; links to
+  cards beyond the current page resolve on the server. It shows curated text,
+  mechanics, stats, badges, copyable IDs and the golden version; arrows flip
+  through the page.
+- Next.js panel tables use columns per category (heroes, skins, pets, coins,
+  timewarped, Standard/Wild, libraries) with a pinned thumbnail and name.
+- Ctrl+K in the Next.js panel searches cards of the current category as well
+  as sections, with thumbnails and keyboard selection.
+
 - Next.js panel design foundation: shared spacing, radius, type and z-index
   scales; separate warning and info colours; a darker light-theme accent so
   accent text passes 4.5:1; a "Как в системе" theme that follows the device.
