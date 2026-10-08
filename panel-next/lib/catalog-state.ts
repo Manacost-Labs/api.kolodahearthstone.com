@@ -10,15 +10,16 @@ export function catalogHref(query: string, changes: Record<string, string | numb
   const next = new URLSearchParams(queryHref(query, { page: null, ...changes }).slice(2));
   const type = next.get('card_type') || '';
   next.delete('action');
-  if (['hero','hero_skin','coin','constructed','anomaly','quest','reward','trinket'].includes(type)) next.delete('tier');
-  if (!['','minion','spell'].includes(type)) {
+  if (['hero', 'hero_skin', 'coin', 'constructed', 'anomaly', 'quest', 'reward', 'trinket'].includes(type))
+    next.delete('tier');
+  if (!['', 'minion', 'spell'].includes(type)) {
     next.delete('creature_type');
     next.delete('duos');
   }
-  if (['hero','hero_skin','pet','coin','timewarped','constructed'].includes(type)) next.delete('pool');
+  if (['hero', 'hero_skin', 'pet', 'coin', 'timewarped', 'constructed'].includes(type)) next.delete('pool');
   if (type !== 'constructed') next.delete('constructed_format');
   if (type !== 'hero_skin') next.delete('rarity');
-  if (!['hero','hero_skin','pet','constructed'].includes(type)) next.delete('media');
+  if (!['hero', 'hero_skin', 'pet', 'constructed'].includes(type)) next.delete('media');
   if (next.get('view') === 'tiles') next.set('per_page', '15');
   return '/' + (next.size ? '?' + next.toString() : '');
 }

@@ -10,17 +10,28 @@ export function bridgeTarget(view: string, query: URLSearchParams): string {
 }
 export function backendOrigin(value: string): string {
   const url = new URL(value);
-  if (url.username || url.password || url.pathname !== '/' || url.search || url.hash) throw new Error('Некорректный адрес серверного адаптера.');
+  if (url.username || url.password || url.pathname !== '/' || url.search || url.hash)
+    throw new Error('Некорректный адрес серверного адаптера.');
   const loopback = ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname);
-  if (!(url.protocol === 'https:' || (loopback && url.protocol === 'http:'))) throw new Error('Серверный адаптер требует HTTPS.');
+  if (!(url.protocol === 'https:' || (loopback && url.protocol === 'http:')))
+    throw new Error('Серверный адаптер требует HTTPS.');
   return url.origin;
 }
 export function sessionCookie(cookie: string): string {
-  const item = cookie.split(';').map(s => s.trim()).find(s => s.startsWith('koloda_admin='));
+  const item = cookie
+    .split(';')
+    .map(s => s.trim())
+    .find(s => s.startsWith('koloda_admin='));
   if (!item || !/^koloda_admin=[A-Za-z0-9,-]{1,256}$/.test(item)) return '';
   return item;
 }
 export function sameOrigin(origin: string | null, requestUrl: string): boolean {
   return origin !== null && origin === new URL(requestUrl).origin;
 }
-export const mutationActions = new Set(['save', 'delete', 'issue_api_token', 'revoke_api_token', 'save_wiki_terms']);
+export const mutationActions = new Set([
+  'save',
+  'delete',
+  'issue_api_token',
+  'revoke_api_token',
+  'save_wiki_terms',
+]);

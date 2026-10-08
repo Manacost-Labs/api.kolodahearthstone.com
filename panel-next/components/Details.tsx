@@ -5,42 +5,197 @@ import { Modal } from './Modal';
 import { decode, imagesFrom, label, mediaUrl, record, text } from '@/lib/model';
 import type { Row } from '@/lib/types';
 import { Artwork } from './Artwork';
-const isVideo=(url:string)=>/\.(mp4|webm)(\?|$)/i.test(url);
+const isVideo = (url: string) => /\.(mp4|webm)(\?|$)/i.test(url);
 
-export function Value({value}:{value:unknown}) {
-  const decoded=decode(value);
-  if (decoded!==null && typeof decoded==='object') return <details className="nested-data"><summary>{Array.isArray(decoded)?`${decoded.length} записей`:'Объект'}</summary><pre>{JSON.stringify(decoded,null,2)}</pre></details>;
-  const url=mediaUrl(decoded);
-  if(url && /\.(mp3|ogg|wav)(\?|$)/i.test(url)) return <audio aria-label="Аудиозапись" controls preload="none" src={url}/>;
-  if(url) return <a href={url} target="_blank" rel="noopener noreferrer">{text(decoded)}</a>;
-  if(typeof decoded==='boolean') return <span>{decoded?'Да':'Нет'}</span>;
+export function Value({ value }: { value: unknown }) {
+  const decoded = decode(value);
+  if (decoded !== null && typeof decoded === 'object')
+    return (
+      <details className="nested-data">
+        <summary>{Array.isArray(decoded) ? `${decoded.length} записей` : 'Объект'}</summary>
+        <pre>{JSON.stringify(decoded, null, 2)}</pre>
+      </details>
+    );
+  const url = mediaUrl(decoded);
+  if (url && /\.(mp3|ogg|wav)(\?|$)/i.test(url))
+    // biome-ignore lint/a11y/useMediaCaption: card sound effects have no speech to caption
+    return <audio aria-label="Аудиозапись" controls preload="none" src={url} />;
+  if (url)
+    return (
+      <a href={url} target="_blank" rel="noopener noreferrer">
+        {text(decoded)}
+      </a>
+    );
+  if (typeof decoded === 'boolean') return <span>{decoded ? 'Да' : 'Нет'}</span>;
   return <span>{text(decoded)}</span>;
 }
-export function RecordDetails({row,title,onClose,editable=false,apiBase}:{row:Row;title:string;onClose:()=>void;editable?:boolean;apiBase?:string}) {
-  const [tab,setTab]=useState('data');
-  const [preview,setPreview]=useState<{label:string;url:string}|null>(null);
-  const images=imagesFrom(row);
-  const golden=record(row.golden_variant);
-  const ids=[row.card_id||row.hero_card_id||row.skin_id||row.pet_id||row.id,golden.card_id].filter(v=>v!==null&&v!==undefined&&v!=='');
-  const dbfs=[row.dbf,golden.dbf].filter(v=>v!==null&&v!==undefined&&v!=='');
-  return <Modal title={title} onClose={onClose}>
-    <div className="tabs" role="tablist" aria-label="Детали записи">
-      {([['data','Данные'],['images',`Изображения · ${images.length}`],['json','JSON API']] as const).map(([id,name])=><button key={id} type="button" role="tab" id={'detail-tab-'+id} aria-controls={'detail-panel-'+id} aria-selected={tab===id} tabIndex={tab===id?0:-1} onClick={()=>setTab(id)} onKeyDown={e=>{
-        const keys=['data','images','json']; const i=keys.indexOf(id); const delta=e.key==='ArrowRight'?1:e.key==='ArrowLeft'?-1:0;
-        if(delta){e.preventDefault();const next=keys[(i+delta+3)%3];setTab(next);document.getElementById('detail-tab-'+next)?.focus();}
-      }}>{name}</button>)}
-    </div>
-    <section role="tabpanel" id="detail-panel-data" aria-labelledby="detail-tab-data" hidden={tab!=='data'}><dl className="facts">
-      {Object.entries(row).map(([key,value])=><div key={key}><dt>{label(key)}</dt><dd><Value value={value}/></dd></div>)}
-    </dl></section>
-    <section role="tabpanel" id="detail-panel-images" aria-labelledby="detail-tab-images" hidden={tab!=='images'}>
-      {images.length?<div className="image-grid">{images.map(image=><button key={image.url} type="button" onClick={()=>setPreview(image)}>{isVideo(image.url)?<video src={image.url} preload="metadata" muted aria-label={image.label}/>:<Artwork urls={[image.url]}/>}<span>{image.label}</span></button>)}</div>:<p className="empty">Изображения отсутствуют</p>}
-    </section>
-    <section role="tabpanel" id="detail-panel-json" aria-labelledby="detail-tab-json" hidden={tab!=='json'}>
-      <div className="api-links">{(apiBase?ids:[]).map(id=><a key={String(id)} href={apiBase+'/'+encodeURIComponent(String(id))} target="_blank" rel="noopener noreferrer"><code>{apiBase}/{String(id)}</code></a>)}{(apiBase?dbfs:[]).map(dbf=><a key={'dbf-'+String(dbf)} href={apiBase+'/by-dbf/'+encodeURIComponent(String(dbf))} target="_blank" rel="noopener noreferrer"><code>{apiBase}/by-dbf/{String(dbf)}</code></a>)}</div>
-      <pre>{JSON.stringify(row,null,2)}</pre>
-    </section>
-    <footer className="modal-actions">{editable&&<Link className="button" prefetch={false} href={'/?action=edit&id='+encodeURIComponent(text(row.id))}>Редактировать</Link>}<Link className="button secondary" prefetch={false} href={'/?action=analytics&stats=card&q='+encodeURIComponent(text(row.name_en||row.name||row.name_ru,''))}>Статистика</Link></footer>
-    {preview&&<Modal title={preview.label} onClose={()=>setPreview(null)}>{isVideo(preview.url)?<video className="image-full" controls preload="metadata" src={preview.url} aria-label={preview.label}/>:<img className="image-full" src={preview.url} alt={preview.label}/>}</Modal>}
-  </Modal>;
+export function RecordDetails({
+  row,
+  title,
+  onClose,
+  editable = false,
+  apiBase,
+}: {
+  row: Row;
+  title: string;
+  onClose: () => void;
+  editable?: boolean;
+  apiBase?: string;
+}) {
+  const [tab, setTab] = useState('data');
+  const [preview, setPreview] = useState<{ label: string; url: string } | null>(null);
+  const images = imagesFrom(row);
+  const golden = record(row.golden_variant);
+  const ids = [row.card_id || row.hero_card_id || row.skin_id || row.pet_id || row.id, golden.card_id].filter(
+    v => v !== null && v !== undefined && v !== '',
+  );
+  const dbfs = [row.dbf, golden.dbf].filter(v => v !== null && v !== undefined && v !== '');
+  return (
+    <Modal title={title} onClose={onClose}>
+      <div className="tabs" role="tablist" aria-label="Детали записи">
+        {(
+          [
+            ['data', 'Данные'],
+            ['images', `Изображения · ${images.length}`],
+            ['json', 'JSON API'],
+          ] as const
+        ).map(([id, name]) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            id={'detail-tab-' + id}
+            aria-controls={'detail-panel-' + id}
+            aria-selected={tab === id}
+            tabIndex={tab === id ? 0 : -1}
+            onClick={() => setTab(id)}
+            onKeyDown={e => {
+              const keys = ['data', 'images', 'json'];
+              const i = keys.indexOf(id);
+              const delta = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+              if (delta) {
+                e.preventDefault();
+                const next = keys[(i + delta + 3) % 3];
+                setTab(next);
+                document.getElementById('detail-tab-' + next)?.focus();
+              }
+            }}
+          >
+            {name}
+          </button>
+        ))}
+      </div>
+      <section
+        role="tabpanel"
+        id="detail-panel-data"
+        aria-labelledby="detail-tab-data"
+        hidden={tab !== 'data'}
+      >
+        <dl className="facts">
+          {Object.entries(row).map(([key, value]) => (
+            <div key={key}>
+              <dt>{label(key)}</dt>
+              <dd>
+                <Value value={value} />
+              </dd>
+            </div>
+          ))}
+        </dl>
+      </section>
+      <section
+        role="tabpanel"
+        id="detail-panel-images"
+        aria-labelledby="detail-tab-images"
+        hidden={tab !== 'images'}
+      >
+        {images.length ? (
+          <div className="image-grid">
+            {images.map(image => (
+              <button key={image.url} type="button" onClick={() => setPreview(image)}>
+                {isVideo(image.url) ? (
+                  <video src={image.url} preload="metadata" muted aria-label={image.label} />
+                ) : (
+                  <Artwork urls={[image.url]} />
+                )}
+                <span>{image.label}</span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <p className="empty">Изображения отсутствуют</p>
+        )}
+      </section>
+      <section
+        role="tabpanel"
+        id="detail-panel-json"
+        aria-labelledby="detail-tab-json"
+        hidden={tab !== 'json'}
+      >
+        <div className="api-links">
+          {(apiBase ? ids : []).map(id => (
+            <a
+              key={String(id)}
+              href={apiBase + '/' + encodeURIComponent(String(id))}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <code>
+                {apiBase}/{String(id)}
+              </code>
+            </a>
+          ))}
+          {(apiBase ? dbfs : []).map(dbf => (
+            <a
+              key={'dbf-' + String(dbf)}
+              href={apiBase + '/by-dbf/' + encodeURIComponent(String(dbf))}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <code>
+                {apiBase}/by-dbf/{String(dbf)}
+              </code>
+            </a>
+          ))}
+        </div>
+        <pre>{JSON.stringify(row, null, 2)}</pre>
+      </section>
+      <footer className="modal-actions">
+        {editable && (
+          <Link
+            className="button"
+            prefetch={false}
+            href={'/?action=edit&id=' + encodeURIComponent(text(row.id))}
+          >
+            Редактировать
+          </Link>
+        )}
+        <Link
+          className="button secondary"
+          prefetch={false}
+          href={
+            '/?action=analytics&stats=card&q=' +
+            encodeURIComponent(text(row.name_en || row.name || row.name_ru, ''))
+          }
+        >
+          Статистика
+        </Link>
+      </footer>
+      {preview && (
+        <Modal title={preview.label} onClose={() => setPreview(null)}>
+          {isVideo(preview.url) ? (
+            <video
+              className="image-full"
+              controls
+              muted
+              preload="metadata"
+              src={preview.url}
+              aria-label={preview.label}
+            />
+          ) : (
+            <img className="image-full" src={preview.url} alt={preview.label} />
+          )}
+        </Modal>
+      )}
+    </Modal>
+  );
 }

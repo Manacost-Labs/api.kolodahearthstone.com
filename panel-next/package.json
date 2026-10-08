@@ -9,10 +9,13 @@
     "start": "HOSTNAME=127.0.0.1 PORT=4180 node .next/standalone/server.js",
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
-    "check": "npm run typecheck && npm test && npm run build && npm run test:http",
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm test && npm run build && npm run test:http",
     "prebuild": "node scripts/sync-models.mjs",
     "postbuild": "node scripts/prepare-standalone.mjs",
-    "test:http": "node tests/integration.mjs"
+    "test:http": "node tests/integration.mjs",
+    "lint": "biome lint --error-on-warnings .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "engines": {
     "node": ">=22.13.0"
@@ -25,9 +28,11 @@
     "server-only": "0.0.1"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.5.15",
     "@types/node": "22.20.5",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
+    "prettier": "3.9.9",
     "typescript": "7.0.2"
   }
 }

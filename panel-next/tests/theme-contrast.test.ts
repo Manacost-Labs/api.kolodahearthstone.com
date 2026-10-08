@@ -4,11 +4,25 @@ import { readFileSync } from 'node:fs';
 
 const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
 
-function themeTokens(selector: string): Record<string, string> {
-  const start = css.indexOf(selector + '{');
-  assert.notEqual(start, -1, `theme block ${selector} is missing`);
-  const body = css.slice(start + selector.length + 1, css.indexOf('}', start));
-  return Object.fromEntries([...body.matchAll(/--([a-z-]+):(#[0-9a-f]{3,8})/gi)].map(match => [match[1], match[2]]));
+// Minimal rule reader: enough for flat theme blocks and control rules, independent of formatting.
+const rules = [...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(match => ({
+  selectors: match[1].split(',').map(selector => selector.replace(/\s+/g, '').replace(/['"]/g, '')),
+  declarations: Object.fromEntries(
+    match[2]
+      .split(';')
+      .map(part => part.split(':').map(piece => piece.trim()))
+      .filter(([name, value]) => name && value)
+      .map(([name, ...value]) => [name, value.join(':')]),
+  ) as Record<string, string>,
+}));
+
+function declarations(selector: string): Record<string, string> {
+  const merged = Object.assign(
+    {},
+    ...rules.filter(rule => rule.selectors.includes(selector)).map(rule => rule.declarations),
+  );
+  assert.ok(Object.keys(merged).length, `rule ${selector} is missing`);
+  return merged;
 }
 
 function luminance(hex: string): number {
@@ -26,26 +40,30 @@ function contrast(a: string, b: string): number {
   return (light + 0.05) / (dark + 0.05);
 }
 
-const light = themeTokens('html');
+const base = declarations('html');
 const themes: Record<string, Record<string, string>> = {
-  light,
-  dark: { ...light, ...themeTokens('html[data-theme=dark]') },
-  tavern: { ...light, ...themeTokens('html[data-theme=tavern]') },
-  arcane: { ...light, ...themeTokens('html[data-theme=arcane]') },
+  light: base,
+  dark: { ...base, ...declarations('html[data-theme=dark]') },
+  tavern: { ...base, ...declarations('html[data-theme=tavern]') },
+  arcane: { ...base, ...declarations('html[data-theme=arcane]') },
 };
 
 test('filled buttons keep WCAG AA text contrast in every theme', () => {
   for (const [name, tokens] of Object.entries(themes)) {
-    for (const [ink, fill] of [['on-accent', 'accent'], ['on-bad', 'bad']]) {
-      assert.ok(tokens[ink] && tokens[fill], `${name}: --${ink} and --${fill} must be defined`);
-      const ratio = contrast(tokens[ink], tokens[fill]);
+    for (const [ink, fill] of [
+      ['on-accent', 'accent'],
+      ['on-bad', 'bad'],
+    ]) {
+      const [inkColor, fillColor] = [tokens['--' + ink], tokens['--' + fill]];
+      assert.ok(inkColor && fillColor, `${name}: --${ink} and --${fill} must be defined`);
+      const ratio = contrast(inkColor, fillColor);
       assert.ok(ratio >= 4.5, `${name}: --${ink} on --${fill} is ${ratio.toFixed(2)}:1`);
     }
   }
 });
 
 test('filled controls use the theme ink instead of hard-coded white', () => {
-  assert.match(css, /\.button\{[^}]*color:var\(--on-accent\)/);
-  assert.match(css, /\.button\.danger\{[^}]*color:var\(--on-bad\)/);
-  assert.match(css, /\.page-link\[aria-current\]\{[^}]*color:var\(--on-accent\)/);
+  assert.equal(declarations('.button').color, 'var(--on-accent)');
+  assert.equal(declarations('.button.danger').color, 'var(--on-bad)');
+  assert.equal(declarations('.page-link[aria-current]').color, 'var(--on-accent)');
 });

@@ -1,14 +1,53 @@
-@import "./generated/deck-tiles-base.css";
+@import './generated/deck-tiles-base.css';
 
-.deck-tile, .deck-tile__cost { font-family: var(--font-hearthstone-belwe), Georgia, serif; }
-.deck-tile:lang(ru) { font-family: var(--font-hearthstone-benguiat), var(--font-hearthstone-belwe), Georgia, serif; }
-.deck-grid-viewport { padding: 4px; }
+.deck-tile,
+.deck-tile__cost {
+  font-family: var(--font-hearthstone-belwe), Georgia, serif;
+}
+.deck-tile:lang(ru) {
+  font-family: var(--font-hearthstone-benguiat), var(--font-hearthstone-belwe), Georgia, serif;
+}
+.deck-grid-viewport {
+  padding: 4px;
+}
 /* The shared example keeps five fixed deck columns; the panel fits its workspace instead of scrolling sideways. */
-.deck-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 256px), 1fr)); min-width: 0; }
-button.deck-tile { width: 100%; border: 0; padding: 0; text-align: left; cursor: pointer; }
-button.deck-tile:focus-visible { outline: 2px solid #66c9ff; outline-offset: 2px; }
-button.deck-tile:hover { box-shadow: inset 0 0 0 1px #ffffff70; }
-.deck-tile__cost--unknown::before { display: none; }
-.deck-tile__cost::before { background: url('./assets/mana-crystal.png') center / contain no-repeat; clip-path: none; box-shadow: none; width: 40px; height: 42px; }
-.deck-tile__cost--tavern::before { display: none; }
-.deck-tile__cost--tavern, .deck-tile__quantity--gold { color: #ffe2a0; text-shadow: -1px 0 #392008, 1px 0 #392008, 0 -1px #392008, 0 2px 2px #120b03; }
+.deck-grid {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 256px), 1fr));
+  min-width: 0;
+}
+button.deck-tile {
+  width: 100%;
+  border: 0;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+}
+button.deck-tile:focus-visible {
+  outline: 2px solid #66c9ff;
+  outline-offset: 2px;
+}
+button.deck-tile:hover {
+  box-shadow: inset 0 0 0 1px #ffffff70;
+}
+.deck-tile__cost--unknown::before {
+  display: none;
+}
+.deck-tile__cost::before {
+  background: url('./assets/mana-crystal.png') center / contain no-repeat;
+  clip-path: none;
+  box-shadow: none;
+  width: 40px;
+  height: 42px;
+}
+.deck-tile__cost--tavern::before {
+  display: none;
+}
+.deck-tile__cost--tavern,
+.deck-tile__quantity--gold {
+  color: #ffe2a0;
+  text-shadow:
+    -1px 0 #392008,
+    1px 0 #392008,
+    0 -1px #392008,
+    0 2px 2px #120b03;
+}

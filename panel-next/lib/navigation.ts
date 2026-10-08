@@ -1,1 +1,15 @@
-export const categories:Record<string,string>={minion:'Существа',spell:'Заклинания',hero:'Герои',hero_skin:'Скины героев',pet:'Питомцы',coin:'Монетки',timewarped:'Хрономальные карты',constructed:'Стандарт / Вольный',anomaly:'Аномалии',quest:'Квесты',reward:'Награды',darkmoon_prize:'Призы',trinket:'Аксессуары'};
+export const categories: Record<string, string> = {
+  minion: 'Существа',
+  spell: 'Заклинания',
+  hero: 'Герои',
+  hero_skin: 'Скины героев',
+  pet: 'Питомцы',
+  coin: 'Монетки',
+  timewarped: 'Хрономальные карты',
+  constructed: 'Стандарт / Вольный',
+  anomaly: 'Аномалии',
+  quest: 'Квесты',
+  reward: 'Награды',
+  darkmoon_prize: 'Призы',
+  trinket: 'Аксессуары',
+};

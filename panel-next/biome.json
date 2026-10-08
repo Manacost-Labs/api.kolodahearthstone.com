@@ -1,0 +1,30 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "files": {
+    "includes": [
+      "**",
+      "!.next",
+      "!node_modules",
+      "!public",
+      "!lib/vendor",
+      "!app/generated",
+      "!next-env.d.ts"
+    ]
+  },
+  "formatter": { "enabled": false },
+  "assist": { "enabled": false },
+  "linter": {
+    "enabled": true,
+    "domains": { "next": "recommended", "react": "recommended" },
+    "rules": {
+      "preset": "recommended",
+      "style": {
+        "useTemplate": "off",
+        "noDescendingSpecificity": "info"
+      },
+      "complexity": { "noImportantStyles": "info" },
+      "a11y": { "useSemanticElements": "off" },
+      "performance": { "noImgElement": "off" }
+    }
+  }
+}
