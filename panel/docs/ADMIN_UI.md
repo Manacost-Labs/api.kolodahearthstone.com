@@ -152,6 +152,21 @@ The import and API contracts are documented in `LIBRARY_FULL_ART.md`.
 7. The Next deck-tile grid uses `auto-fill` columns of at least 256 px. Do not
    restore the shared example's fixed `min-width`; it forces sideways scrolling
    below 1500 px.
+8. `panel-next/app/globals.css` defines the scales once: `--space-*`,
+   `--radius-*`, `--text-*`, `--z-*`, and per-theme `--good`, `--bad`,
+   `--warn`, `--info` with their `-soft` fills. Use them instead of raw px or
+   colours; the contrast test covers every text/fill pair.
+9. Format values only through `panel-next/lib/format.ts` (dates, relative
+   times, numbers, percents, statuses, slugs, field and filter labels) and
+   render them through `components/ui.tsx` (`Value`, `StatusBadge`, `Time`,
+   `KpiCard`, `EmptyState`). Do not print raw ISO dates, status codes or
+   slugs; the parser run history JSON is the one remaining exception.
+10. Icons come from `@phosphor-icons/react` with `aria-hidden`; the control
+    keeps a text label or an `aria-label`.
+11. `npm run check` starts with `prettier --check` and `biome lint`. Biome is
+    used instead of ESLint because `eslint-config-next` pulls a dependency with
+    an unpatched high advisory and typescript-eslint cannot load TypeScript 7.
+    A deliberate exception carries a `biome-ignore` comment with its reason.
 
 ## Verification
 

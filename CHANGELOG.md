@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- Next.js panel design foundation: shared spacing, radius, type and z-index
+  scales; separate warning and info colours; a darker light-theme accent so
+  accent text passes 4.5:1; a "Как в системе" theme that follows the device.
+- One formatting module for the Next.js panel: relative and exact UTC dates,
+  Russian numbers and percents, status labels with tones, readable card types,
+  tribes, scopes and statistics filters. Tables, record details, statistics,
+  sources and tokens no longer print raw ISO dates, status codes or slugs.
+- Next.js panel accessibility: deck tiles and catalogue cards announce tier,
+  stats and price; the wide table area is a labelled region; icons replace
+  text glyphs; empty results offer a reset.
+- Inter now ships as a 206 KB woff2 subset instead of an 876 KB TTF, with its
+  variable weight range declared.
+- `npm run check` for the Next.js panel runs Prettier and Biome first.
+
 - Kept manual Battlegrounds card edits across HearthstoneJSON imports. Edits
   are stored per field in `battlegrounds_card_overrides` with the upstream
   value they replaced, audited with their author, and released automatically
