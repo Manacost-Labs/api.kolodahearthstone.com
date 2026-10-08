@@ -90,10 +90,38 @@ await waitFor('!!document.querySelector("dialog[open]")');
 checks.details = await evaluate(
   '({name:document.querySelector("dialog h2").textContent,focus:document.activeElement.getAttribute("aria-label")})',
 );
+checks.cardUrl = await evaluate('new URLSearchParams(location.search).get("card")');
+assert.equal(checks.cardUrl, 'BG_FIXTURE_1');
+await click('.inspector-more summary');
 await click('#detail-tab-json');
 checks.api = await evaluate('[...document.querySelectorAll(".api-links a")].map(a=>a.getAttribute("href"))');
+assert.equal(
+  await evaluate('document.querySelector("#detail-tab-json").getAttribute("aria-selected")'),
+  'true',
+);
 assert.ok(checks.api.includes('/api/v1/cards/BG_FIXTURE_1_G'));
 assert.ok(checks.api.includes('/api/v1/cards/by-dbf/79000'));
+// Flipping cards keeps one dialog open (no close/reopen flash) and keeps focus on the control.
+await evaluate('document.querySelector("dialog[open]").dataset.qa = "inspector"');
+await click('.inspector-nav button[aria-label="Следующая запись"]');
+await waitFor('new URLSearchParams(location.search).get("card")==="BG_FIXTURE_2"');
+await call('Input.dispatchKeyEvent', {
+  type: 'keyDown',
+  key: 'ArrowRight',
+  code: 'ArrowRight',
+  windowsVirtualKeyCode: 39,
+});
+await call('Input.dispatchKeyEvent', {
+  type: 'keyUp',
+  key: 'ArrowRight',
+  code: 'ArrowRight',
+  windowsVirtualKeyCode: 39,
+});
+await waitFor('new URLSearchParams(location.search).get("card")==="BG_FIXTURE_3"');
+checks.flip = await evaluate(
+  '({same:document.querySelector("dialog[open]").dataset.qa==="inspector",position:document.querySelector(".inspector-nav span").textContent,focus:document.activeElement.getAttribute("aria-label")})',
+);
+assert.deepEqual(checks.flip, { same: true, position: '3 из 8', focus: 'Следующая запись' });
 async function pressEscape() {
   await call('Input.dispatchKeyEvent', {
     type: 'keyDown',
@@ -112,7 +140,14 @@ async function pressEscape() {
   await waitFor('!document.querySelector("dialog[data-closing]")');
 }
 await pressEscape();
+await waitFor('!new URLSearchParams(location.search).has("card")');
 checks.focusRestored = await evaluate('document.activeElement.classList.contains("card-tile")');
+// A shared ?card= link opens the record even when it is not on the current page.
+await navigate(root + '?card=BG_FIXTURE_20', '!!document.querySelector("dialog[open] .inspector")');
+checks.deepLink = await evaluate('document.querySelector("dialog h2").textContent.length>0');
+await pressEscape();
+await waitFor('!document.querySelector("dialog[open]") && !new URLSearchParams(location.search).has("card")');
+await navigate(root, 'document.querySelectorAll(".card-tile").length===8');
 await call('Input.dispatchKeyEvent', {
   type: 'keyDown',
   key: '/',
@@ -226,6 +261,7 @@ checks.errors = errors;
 assert.deepEqual(checks.catalog, { cards: 8, overflow: false });
 assert.equal(checks.details.focus, 'Закрыть');
 assert.equal(checks.focusRestored, true);
+assert.equal(checks.deepLink, true);
 assert.equal(checks.pagination, true);
 assert.equal(checks.search, true);
 assert.equal(checks.empty, true);

@@ -389,3 +389,29 @@ export function windowLabel(value: string): string {
     ? countLabel(amount, { one: 'час', few: 'часа', many: 'часов' })
     : countLabel(amount, { one: 'день', few: 'дня', many: 'дней' });
 }
+
+// Blizzard slugs ("demon-hunter") and HearthstoneJSON codes ("DEMONHUNTER") both map here.
+const classLabels: Record<string, string> = {
+  deathknight: 'Рыцарь смерти',
+  demonhunter: 'Охотник на демонов',
+  druid: 'Друид',
+  hunter: 'Охотник',
+  mage: 'Маг',
+  paladin: 'Паладин',
+  priest: 'Жрец',
+  rogue: 'Разбойник',
+  shaman: 'Шаман',
+  warlock: 'Чернокнижник',
+  warrior: 'Воин',
+  neutral: 'Нейтральная',
+};
+export function classLabel(value: unknown): string {
+  if (isBlank(value)) return '—';
+  return (
+    classLabels[
+      String(value)
+        .toLowerCase()
+        .replace(/[^a-z]/g, '')
+    ] ?? String(value)
+  );
+}

@@ -78,6 +78,7 @@ export function normalizedCard(row: Row, cardType: string, tribes: Record<string
     attack: text(row.attack, ''),
     health: text(row.health, ''),
     inPool: Number(row.in_pool) === 1,
+    golden: Boolean(record(row.golden_variant).card_id),
     editable:
       ['', 'minion', 'spell'].includes(cardType) && row.id !== undefined && Number.isFinite(Number(row.id)),
   };

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  classLabel,
   countLabel,
   fieldLabel,
   formatDateTime,
@@ -121,4 +122,11 @@ test('reliability windows read as durations', () => {
   assert.equal(windowLabel('7d'), '7 дней');
   assert.equal(windowLabel('1d'), '1 день');
   assert.equal(windowLabel('custom'), 'custom');
+});
+
+test('classes read in Russian from Blizzard slugs and HearthstoneJSON codes', () => {
+  assert.equal(classLabel('demon-hunter'), 'Охотник на демонов');
+  assert.equal(classLabel('DEMONHUNTER'), 'Охотник на демонов');
+  assert.equal(classLabel('mage'), 'Маг');
+  assert.equal(classLabel('unknown'), 'unknown');
 });

@@ -1,6 +1,7 @@
 import { getPage, getSession, serverData } from '@/lib/backend';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
+import { matchesCard } from '@/lib/card-detail';
 import { catalogView } from '@/lib/catalog-state';
 import { Catalog } from '@/components/Catalog';
 import { Analytics } from '@/components/Analytics';
@@ -63,7 +64,18 @@ export default async function Page({
   }
   const allowed = ['list', 'edit', 'new', 'api_tokens', 'wiki_terms'];
   if (!allowed.includes(action)) query.set('action', 'list');
+  // ?card= is client state for the inspector; PHP does not need it.
+  const cardParam = query.get('card') || '';
+  query.delete('card');
   const data = await getPage(query);
+  let focus: Row | null = null;
+  if (cardParam && data.action === 'list' && !data.records.some(row => matchesCard(row, cardParam))) {
+    // PHP search is a LIKE match, so look the card up and keep only the exact identifier.
+    const lookup = await getPage(
+      new URLSearchParams({ action: 'list', card_type: data.cardType || '', q: cardParam, per_page: '150' }),
+    );
+    focus = lookup.records.find(row => matchesCard(row, cardParam)) ?? null;
+  }
   return (
     <>
       {data.error && (
@@ -83,7 +95,7 @@ export default async function Page({
       ) : data.action === 'wiki_terms' ? (
         <Terms data={data} />
       ) : (
-        <Catalog data={data} query={query.toString()} />
+        <Catalog data={data} query={query.toString()} focus={focus} />
       )}
     </>
   );

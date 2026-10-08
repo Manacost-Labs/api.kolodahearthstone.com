@@ -7,10 +7,12 @@ export function Modal({
   title,
   children,
   onClose,
+  wide = false,
 }: {
   title: string;
   children: ReactNode;
   onClose: () => void;
+  wide?: boolean;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -42,7 +44,7 @@ export function Modal({
     // biome-ignore lint/a11y/useKeyWithClickEvents: Escape is handled by the native dialog cancel event
     <dialog
       ref={dialog}
-      className="modal"
+      className={wide ? 'modal modal--wide' : 'modal'}
       data-closing={closing || undefined}
       aria-label={title}
       onClose={onClose}

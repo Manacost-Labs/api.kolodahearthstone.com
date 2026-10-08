@@ -9,19 +9,7 @@ import { Artwork } from './Artwork';
 import { Value } from './ui';
 const isVideo = (url: string) => /\.(mp4|webm)(\?|$)/i.test(url);
 
-export function RecordDetails({
-  row,
-  title,
-  onClose,
-  editable = false,
-  apiBase,
-}: {
-  row: Row;
-  title: string;
-  onClose: () => void;
-  editable?: boolean;
-  apiBase?: string;
-}) {
+export function RecordTabs({ row, apiBase }: { row: Row; apiBase?: string }) {
   const [tab, setTab] = useState('data');
   const [preview, setPreview] = useState<{ label: string; url: string } | null>(null);
   const images = imagesFrom(row);
@@ -31,7 +19,7 @@ export function RecordDetails({
   );
   const dbfs = [row.dbf, golden.dbf].filter(v => v !== null && v !== undefined && v !== '');
   return (
-    <Modal title={title} onClose={onClose}>
+    <>
       <div className="tabs" role="tablist" aria-label="Детали записи">
         {(
           [
@@ -139,6 +127,42 @@ export function RecordDetails({
         </div>
         <pre>{JSON.stringify(row, null, 2)}</pre>
       </section>
+      {preview && (
+        <Modal title={preview.label} onClose={() => setPreview(null)}>
+          {isVideo(preview.url) ? (
+            <video
+              className="image-full"
+              controls
+              muted
+              preload="metadata"
+              src={preview.url}
+              aria-label={preview.label}
+            />
+          ) : (
+            <img className="image-full" src={preview.url} alt={preview.label} />
+          )}
+        </Modal>
+      )}
+    </>
+  );
+}
+
+export function RecordDetails({
+  row,
+  title,
+  onClose,
+  editable = false,
+  apiBase,
+}: {
+  row: Row;
+  title: string;
+  onClose: () => void;
+  editable?: boolean;
+  apiBase?: string;
+}) {
+  return (
+    <Modal title={title} onClose={onClose}>
+      <RecordTabs row={row} apiBase={apiBase} />
       <footer className="modal-actions">
         {editable && (
           <Link
@@ -160,22 +184,6 @@ export function RecordDetails({
           Статистика
         </Link>
       </footer>
-      {preview && (
-        <Modal title={preview.label} onClose={() => setPreview(null)}>
-          {isVideo(preview.url) ? (
-            <video
-              className="image-full"
-              controls
-              muted
-              preload="metadata"
-              src={preview.url}
-              aria-label={preview.label}
-            />
-          ) : (
-            <img className="image-full" src={preview.url} alt={preview.label} />
-          )}
-        </Modal>
-      )}
     </Modal>
   );
 }

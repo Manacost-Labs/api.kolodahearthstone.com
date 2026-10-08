@@ -39,8 +39,8 @@ export default async function verify(page, root, output) {
   ensure(new URL(page.url()).searchParams.get('q') === 'BG_FIXTURE_2', 'Latest search did not win');
   checks.searchAndStaleResponses = true;
   await load('view=grid');
-  await page.getByRole('combobox', { name: 'Все уровни' }).selectOption('2');
-  await page.getByRole('combobox', { name: 'Все типы' }).selectOption('beast');
+  await page.getByRole('combobox', { name: 'Уровень таверны' }).selectOption('2');
+  await page.getByRole('combobox', { name: 'Тип существа' }).selectOption('beast');
   await settled();
   ensure(
     new URL(page.url()).searchParams.get('tier') === '2' &&

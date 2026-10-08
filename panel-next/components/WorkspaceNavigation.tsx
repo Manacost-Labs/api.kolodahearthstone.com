@@ -25,7 +25,9 @@ const Context = createContext<Navigation | null>(null);
 export function WorkspaceNavigation({ children }: { children: ReactNode }) {
   const router = useRouter();
   const params = useSearchParams();
-  const query = params.toString();
+  const catalogParams = new URLSearchParams(params);
+  catalogParams.delete('card');
+  const query = catalogParams.toString();
   const isCatalog = !params.get('action') || params.get('action') === 'list';
   const [pending, startTransition] = useTransition();
   const [catalogUrl, setCatalogUrl] = useState(isCatalog ? '/' + (query ? '?' + query : '') : '/');
