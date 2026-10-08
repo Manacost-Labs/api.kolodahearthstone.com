@@ -211,7 +211,8 @@ checks.revoke = true;
 await navigate(root + '?action=edit&id=1', '!!document.querySelector(".editor-form")');
 await screenshot('editor-desktop.png');
 await click('.editor-form button[type=submit]');
-await waitFor('location.search===""');
+// Back in the catalogue; a saved hs_catalog_view cookie may add ?view=… to "/".
+await waitFor('location.pathname==="/" && !new URLSearchParams(location.search).has("action")');
 checks.save = true;
 await navigate(root + '?action=wiki_terms');
 checks.terms = await evaluate('!!document.querySelector("input[name*=terms]")');
