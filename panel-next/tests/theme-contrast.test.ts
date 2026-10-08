@@ -40,6 +40,21 @@ function contrast(a: string, b: string): number {
   return (light + 0.05) / (dark + 0.05);
 }
 
+// Soft fills are translucent (#rrggbbaa); badges sit on the theme surface.
+function over(fill: string, backdrop: string): string {
+  const value = fill.replace('#', '');
+  const alpha = value.length === 8 ? parseInt(value.slice(6), 16) / 255 : 1;
+  const channel = (hex: string, offset: number) =>
+    parseInt(hex.replace('#', '').slice(offset, offset + 2), 16);
+  return (
+    '#' +
+    [0, 2, 4]
+      .map(offset => Math.round(alpha * channel(fill, offset) + (1 - alpha) * channel(backdrop, offset)))
+      .map(part => part.toString(16).padStart(2, '0'))
+      .join('')
+  );
+}
+
 const base = declarations('html');
 const themes: Record<string, Record<string, string>> = {
   light: base,
@@ -66,4 +81,29 @@ test('filled controls use the theme ink instead of hard-coded white', () => {
   assert.equal(declarations('.button').color, 'var(--on-accent)');
   assert.equal(declarations('.button.danger').color, 'var(--on-bad)');
   assert.equal(declarations('.page-link[aria-current]').color, 'var(--on-accent)');
+});
+
+test('text tokens keep WCAG AA contrast on their backgrounds in every theme', () => {
+  for (const [name, tokens] of Object.entries(themes)) {
+    const pairs: [string, string][] = [
+      ['--text', tokens['--bg']],
+      ['--muted', tokens['--surface']],
+      ['--accent', tokens['--bg']],
+      ['--accent', tokens['--surface']],
+      ['--accent', over(tokens['--accent-soft'], tokens['--surface'])],
+    ];
+    for (const status of ['good', 'bad', 'warn', 'info']) {
+      assert.ok(tokens[`--${status}`] && tokens[`--${status}-soft`], `${name}: --${status} must be defined`);
+      pairs.push([`--${status}`, over(tokens[`--${status}-soft`], tokens['--surface'])]);
+    }
+    for (const [ink, backdrop] of pairs) {
+      const ratio = contrast(tokens[ink], backdrop);
+      assert.ok(ratio >= 4.5, `${name}: ${ink} on ${backdrop} is ${ratio.toFixed(2)}:1`);
+    }
+  }
+});
+
+test('warning and info badges no longer borrow the accent colour', () => {
+  assert.equal(declarations('.badge.warning').color, 'var(--warn)');
+  assert.equal(declarations('.badge.info').color, 'var(--info)');
 });

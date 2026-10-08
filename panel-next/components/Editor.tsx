@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { mutate } from '@/lib/client';
+import { ArrowLeftIcon } from '@phosphor-icons/react/dist/ssr/ArrowLeft';
 import { text } from '@/lib/model';
 import type { PageData } from '@/lib/types';
 import { Modal } from './Modal';
@@ -41,7 +42,7 @@ export function Editor({ data }: { data: PageData }) {
           <h1>{data.title}</h1>
         </div>
         <Link href="/" className="button secondary" prefetch={false}>
-          ← К каталогу
+          <ArrowLeftIcon size={16} aria-hidden="true" /> К каталогу
         </Link>
       </header>
       {error && (

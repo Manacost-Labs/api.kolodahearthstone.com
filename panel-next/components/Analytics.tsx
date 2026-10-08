@@ -1,11 +1,13 @@
 'use client';
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { queryHref, text, formatDate } from '@/lib/model';
+import { countLabel, fieldLabel, formatNumber, optionLabel, paramLabel, toneOf } from '@/lib/format';
+import { queryHref, text } from '@/lib/model';
 import type { AnalyticsData, AnalyticsModule, Row } from '@/lib/types';
 import { DataTable } from './DataTable';
-import { RecordDetails, Value } from './Details';
+import { RecordDetails } from './Details';
 import { Reliability } from './Reliability';
+import { EmptyState, KpiCard, StatusBadge, Time, Value } from './ui';
 export function Analytics({
   data,
   modules,
@@ -64,23 +66,24 @@ export function Analytics({
             {Object.entries(definition?.params || {}).map(([key, param]) =>
               param.type === 'enum' ? (
                 <label key={key}>
-                  <span>{key}</span>
+                  <span>{paramLabel(key)}</span>
                   <select
                     name={key}
                     defaultValue={params.get(key) || String(param.default || '')}
                     onChange={e => go({ [key]: e.target.value })}
                   >
                     {(param.values || []).map(value => (
-                      <option key={value}>{value}</option>
+                      <option key={value} value={value}>
+                        {optionLabel(key, value)}
+                      </option>
                     ))}
                   </select>
                 </label>
               ) : (
                 <label key={key}>
-                  <span>{key}</span>
+                  <span>{paramLabel(key)}</span>
                   <input
                     name={key}
-                    aria-label={key}
                     type={param.type === 'int' ? 'number' : 'search'}
                     min={param.min}
                     max={param.max}
@@ -97,34 +100,48 @@ export function Analytics({
           </form>
           <div className="summary-grid">
             {(data.summary || []).map(item => (
-              <article key={item.label}>
-                <span>{item.label}</span>
-                <strong>{text(item.value)}</strong>
-              </article>
+              <KpiCard
+                key={item.label}
+                label={item.label}
+                value={typeof item.value === 'number' ? formatNumber(item.value) : text(item.value)}
+                tone={toneOf(item.tone)}
+              />
             ))}
           </div>
           <div className="data-status">
-            <span className={'badge ' + (data.meta?.stale || data.meta?.stale_cache ? 'warning' : 'good')}>
-              {data.meta?.stale || data.meta?.stale_cache ? 'Резервные данные' : 'Актуальный набор'}
+            {data.meta?.stale || data.meta?.stale_cache ? (
+              <StatusBadge tone="warning" label="Резервные данные" />
+            ) : (
+              <StatusBadge tone="good" label="Актуальный набор" />
+            )}
+            <span>
+              Обновлено: <Time value={data.meta?.updated_at} />
             </span>
-            <span>Обновлено: {formatDate(data.meta?.updated_at)}</span>
-            {Boolean(data.meta?.cached) && <span>Из кеша · {text(data.meta?.cache_age)} сек.</span>}
+            {Boolean(data.meta?.cached) && (
+              <span>
+                Из кэша ·{' '}
+                {countLabel(Number(data.meta?.cache_age) || 0, {
+                  one: 'секунда',
+                  few: 'секунды',
+                  many: 'секунд',
+                })}
+              </span>
+            )}
           </div>
           {data.rows?.length ? (
             <DataTable key={module} rows={data.rows} columns={data.columns} onDetail={setSelected} />
           ) : (
-            <div className="empty">
-              <h2>По этим условиям данных нет</h2>
-              <p>Измените фильтры или выберите другой набор.</p>
-            </div>
+            <EmptyState title="По этим условиям данных нет">
+              Измените фильтры или выберите другой набор.
+            </EmptyState>
           )}
           {extras.map(([key, value]) =>
             key === 'parsing_reliability' ? (
               <Reliability key={key} data={value} />
             ) : (
               <details key={key} className="extra-data">
-                <summary>{key}</summary>
-                <Value value={value} />
+                <summary>{fieldLabel(key)}</summary>
+                <Value value={value} name={key} />
               </details>
             ),
           )}

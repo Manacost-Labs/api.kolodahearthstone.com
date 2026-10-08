@@ -6,11 +6,20 @@ import { catalogView } from '@/lib/catalog-state';
 import { SquaresFourIcon } from '@phosphor-icons/react/dist/ssr/SquaresFour';
 import { RowsIcon } from '@phosphor-icons/react/dist/ssr/Rows';
 import { MagnifyingGlassIcon } from '@phosphor-icons/react/dist/ssr/MagnifyingGlass';
+import { ArrowRightIcon } from '@phosphor-icons/react/dist/ssr/ArrowRight';
+import { CaretLeftIcon } from '@phosphor-icons/react/dist/ssr/CaretLeft';
+import { CaretRightIcon } from '@phosphor-icons/react/dist/ssr/CaretRight';
+import { HeartIcon } from '@phosphor-icons/react/dist/ssr/Heart';
+import { StarIcon } from '@phosphor-icons/react/dist/ssr/Star';
+import { SwordIcon } from '@phosphor-icons/react/dist/ssr/Sword';
+import { TableIcon } from '@phosphor-icons/react/dist/ssr/Table';
+import { XIcon } from '@phosphor-icons/react/dist/ssr/X';
 import { normalizedCard, queryHref, entityApiBase } from '@/lib/model';
 import type { PageData, Row } from '@/lib/types';
 import { RecordDetails } from './Details';
 import { Artwork } from './Artwork';
 import { DeckTiles } from './DeckTiles';
+import { EmptyState } from './ui';
 
 export function Catalog({ data, query }: { data: PageData; query: string }) {
   const { pending, params, search, changeSearch, go, mode, view } = useCatalogQuery(query);
@@ -21,6 +30,11 @@ export function Catalog({ data, query }: { data: PageData; query: string }) {
   const type = data.cardType;
   const filterType = params.get('card_type') || '';
   const resultView = catalogView(new URLSearchParams(query).get('view'));
+  const resetHref = queryHref('', {
+    card_type: filterType,
+    view,
+    per_page: resultView === 'tiles' ? 15 : data.perPage,
+  });
   const select = (name: string, caption: string, options: Record<string, string>) => (
     <select
       name={name}
@@ -116,17 +130,7 @@ export function Catalog({ data, query }: { data: PageData; query: string }) {
           <button className="button" type="submit">
             Найти
           </button>
-          <PanelLink
-            className="button secondary"
-            prefetch={false}
-            replace
-            scroll={false}
-            href={queryHref('', {
-              card_type: filterType,
-              view,
-              per_page: resultView === 'tiles' ? 15 : data.perPage,
-            })}
-          >
+          <PanelLink className="button secondary" prefetch={false} replace scroll={false} href={resetHref}>
             Сбросить
           </PanelLink>
         </div>
@@ -135,6 +139,7 @@ export function Catalog({ data, query }: { data: PageData; query: string }) {
         {data.activeFilters.map(filter => (
           <PanelLink
             key={filter.label}
+            aria-label={`Убрать фильтр «${filter.label}»`}
             prefetch={false}
             replace
             scroll={false}
@@ -143,7 +148,7 @@ export function Catalog({ data, query }: { data: PageData; query: string }) {
               per_page: resultView === 'tiles' ? 15 : data.perPage,
             })}
           >
-            {filter.label} ×
+            {filter.label} <XIcon size={12} aria-hidden="true" />
           </PanelLink>
         ))}
       </div>
@@ -164,16 +169,28 @@ export function Catalog({ data, query }: { data: PageData; query: string }) {
             <SquaresFourIcon size={18} /> Карточки
           </button>
           <button type="button" aria-pressed={view === 'list'} onClick={() => mode('list')}>
-            <RowsIcon size={18} /> Таблица
+            <TableIcon size={18} /> Таблица
           </button>
         </div>
       </div>
       <div className="catalog-results" aria-busy={pending}>
         {!cards.length ? (
-          <div className="empty">
-            <h2>Ничего не найдено</h2>
-            <p>Измените запрос или сбросьте фильтры.</p>
-          </div>
+          <EmptyState
+            title="Ничего не найдено"
+            action={
+              <PanelLink
+                className="button secondary"
+                prefetch={false}
+                replace
+                scroll={false}
+                href={resetHref}
+              >
+                Сбросить фильтры
+              </PanelLink>
+            }
+          >
+            Измените запрос или сбросьте фильтры.
+          </EmptyState>
         ) : resultView === 'tiles' ? (
           <DeckTiles cards={cards.slice(0, 15)} cardType={type} onSelect={setSelected} />
         ) : resultView === 'grid' ? (
@@ -185,11 +202,24 @@ export function Catalog({ data, query }: { data: PageData; query: string }) {
                 // biome-ignore lint/suspicious/noArrayIndexKey: imported rows can repeat a card_id
                 key={card.id + '-' + index}
                 onClick={() => setSelected(card.row)}
-                aria-label={card.name + '. Открыть детали'}
+                aria-label={
+                  [
+                    card.name,
+                    card.tier && `уровень ${card.tier}`,
+                    card.attack !== '' && `атака ${card.attack}`,
+                    card.health !== '' && `здоровье ${card.health}`,
+                  ]
+                    .filter(Boolean)
+                    .join(', ') + '. Открыть детали'
+                }
               >
                 <span className="card-art">
                   <Artwork urls={card.images} />
-                  {card.tier && <span className="tier">★ {card.tier}</span>}
+                  {card.tier && (
+                    <span className="tier" title="Уровень таверны">
+                      <StarIcon size={14} weight="fill" aria-hidden="true" /> {card.tier}
+                    </span>
+                  )}
                 </span>
                 <span className="card-copy">
                   <strong>{card.name}</strong>
@@ -201,10 +231,20 @@ export function Catalog({ data, query }: { data: PageData; query: string }) {
                 </span>
                 <span className="card-footer">
                   <span className="card-stats">
-                    {card.attack !== '' && <span className="attack">⚔ {card.attack}</span>}
-                    {card.health !== '' && <span className="health">♥ {card.health}</span>}
+                    {card.attack !== '' && (
+                      <span className="attack" title="Атака">
+                        <SwordIcon size={16} weight="fill" aria-hidden="true" /> {card.attack}
+                      </span>
+                    )}
+                    {card.health !== '' && (
+                      <span className="health" title="Здоровье">
+                        <HeartIcon size={16} weight="fill" aria-hidden="true" /> {card.health}
+                      </span>
+                    )}
                   </span>
-                  <span className="more">Подробнее →</span>
+                  <span className="more">
+                    Подробнее <ArrowRightIcon size={14} aria-hidden="true" />
+                  </span>
                 </span>
               </button>
             ))}
@@ -253,7 +293,7 @@ export function Catalog({ data, query }: { data: PageData; query: string }) {
           disabled={pending || data.page === 1}
           onClick={() => go({ page: data.page - 1 })}
         >
-          ← Назад
+          <CaretLeftIcon size={16} aria-hidden="true" /> Назад
         </button>
         {Array.from(
           { length: Math.min(5, data.totalPages) },
@@ -276,7 +316,7 @@ export function Catalog({ data, query }: { data: PageData; query: string }) {
           disabled={pending || data.page === data.totalPages}
           onClick={() => go({ page: data.page + 1 })}
         >
-          Вперёд →
+          Вперёд <CaretRightIcon size={16} aria-hidden="true" />
         </button>
         <span>
           Страница {data.page} из {data.totalPages}

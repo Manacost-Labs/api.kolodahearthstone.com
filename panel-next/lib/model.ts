@@ -1,3 +1,4 @@
+import { cardTypeLabels, slugLabel, tribeLabels } from './format.ts';
 import type { Row } from './types.ts';
 export const text = (value: unknown, fallback = '—'): string =>
   value === null || value === undefined || value === ''
@@ -34,32 +35,6 @@ export function queryHref(query: string, changes: Record<string, string | number
   }
   return '/' + (next.size ? '?' + next.toString() : '');
 }
-export const fieldLabels: Record<string, string> = {
-  name: 'Название',
-  name_ru: 'Название RU',
-  name_en: 'Название EN',
-  id: 'ID записи',
-  card_id: 'Card ID',
-  dbf: 'DBF',
-  tavern_tier: 'Таверна',
-  attack: 'Атака',
-  health: 'Здоровье',
-  creature_type: 'Тип существа',
-  card_type: 'Категория',
-  in_pool: 'В пуле',
-  duos_only: 'Только дуо',
-  updated_at: 'Обновлено',
-  notes: 'Описание',
-  mana_cost: 'Мана',
-  status: 'Состояние',
-  card_set: 'Набор',
-  artist: 'Художник',
-  name_russian: 'Название RU',
-  text_ru: 'Текст RU',
-};
-export function label(key: string) {
-  return fieldLabels[key] || key;
-}
 export function normalizedCard(row: Row, cardType: string, tribes: Record<string, string>) {
   const name = text(
     row.name_ru ||
@@ -86,8 +61,9 @@ export function normalizedCard(row: Row, cardType: string, tribes: Record<string
       row.image_url ||
       row.portrait_url,
   );
-  const tribe =
-    tribes[text(row.creature_type, '')] || text(row.creature_type || row.card_type || cardType, 'Существо');
+  const tribe = row.creature_type
+    ? tribes[text(row.creature_type, '')] || slugLabel(tribeLabels, row.creature_type)
+    : slugLabel(cardTypeLabels, row.card_type || cardType || 'minion');
   const images = [art, mediaUrl(row.card_image || row.local_image_url || row.image_url || row.wiki_image_url)]
     .filter(Boolean)
     .filter((url, i, all) => all.indexOf(url) === i);
@@ -235,29 +211,6 @@ export function imagesFrom(row: Row): { label: string; url: string }[] {
   }
   visit(row, '', 0);
   return images;
-}
-const dateFormatter = new Intl.DateTimeFormat('ru-RU', {
-  day: '2-digit',
-  month: 'short',
-  year: 'numeric',
-  hour: '2-digit',
-  minute: '2-digit',
-  timeZone: 'UTC',
-});
-export function formatDate(value: unknown) {
-  const raw = text(value, '');
-  const date = new Date(raw);
-  return raw && Number.isFinite(date.getTime()) ? dateFormatter.format(date) + ' UTC' : '—';
-}
-const countFormatter = new Intl.NumberFormat('ru-RU');
-const pluralRules = new Intl.PluralRules('ru-RU');
-export function countLabel(value: number, forms: { one: string; few: string; many: string }) {
-  const form = pluralRules.select(value);
-  return (
-    countFormatter.format(value) +
-    ' ' +
-    (form === 'one' ? forms.one : form === 'few' ? forms.few : forms.many)
-  );
 }
 // panel/lib/api_tokens.php nests monthly usage under `usage`.
 export function tokenUsage(token: Row): { requests: number; errors: number; month: string } {

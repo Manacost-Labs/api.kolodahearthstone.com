@@ -1,8 +1,9 @@
 'use client';
 import { useState } from 'react';
 import view from '@/lib/vendor/parsing-reliability.cjs';
+import { windowLabel } from '@/lib/format';
 import { record, text } from '@/lib/model';
-import { Value } from './Details';
+import { Value } from './ui';
 export function Reliability({ data }: { data: unknown }) {
   const [window, setWindow] = useState('24h');
   const model = view.buildReliabilityViewModel(data, window);
@@ -15,7 +16,9 @@ export function Reliability({ data }: { data: unknown }) {
         <span className="badge info">{text(model.badge)}</span>
         <select aria-label="Окно надёжности" value={window} onChange={e => setWindow(e.target.value)}>
           {(windows.length ? windows : ['24h']).map(w => (
-            <option key={w}>{w}</option>
+            <option key={w} value={w}>
+              {windowLabel(w)}
+            </option>
           ))}
         </select>
       </div>

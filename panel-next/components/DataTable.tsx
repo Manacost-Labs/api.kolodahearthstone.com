@@ -1,7 +1,12 @@
 'use client';
 import { useMemo, useState } from 'react';
-import { Value } from './Details';
+import { CaretDownIcon } from '@phosphor-icons/react/dist/ssr/CaretDown';
+import { CaretLeftIcon } from '@phosphor-icons/react/dist/ssr/CaretLeft';
+import { CaretRightIcon } from '@phosphor-icons/react/dist/ssr/CaretRight';
+import { CaretUpIcon } from '@phosphor-icons/react/dist/ssr/CaretUp';
+import { countLabel } from '@/lib/format';
 import type { Row } from '@/lib/types';
+import { Value } from './ui';
 export function DataTable({
   rows,
   columns,
@@ -42,7 +47,7 @@ export function DataTable({
   return (
     <>
       <div className="table-tools">
-        <span>{rows.length} записей</span>
+        <span>{countLabel(rows.length, { one: 'запись', few: 'записи', many: 'записей' })}</span>
         <details>
           <summary>Колонки</summary>
           <div className="column-options">
@@ -80,7 +85,12 @@ export function DataTable({
                     }}
                   >
                     {col.label}
-                    {sort?.key === col.key ? (sort.desc ? ' ↓' : ' ↑') : ''}
+                    {sort?.key === col.key &&
+                      (sort.desc ? (
+                        <CaretDownIcon size={12} aria-hidden="true" />
+                      ) : (
+                        <CaretUpIcon size={12} aria-hidden="true" />
+                      ))}
                   </button>
                 </th>
               ))}
@@ -92,7 +102,7 @@ export function DataTable({
               <tr key={rowKeys.get(row)}>
                 {visible.map(col => (
                   <td key={col.key}>
-                    <Value value={row[col.key]} />
+                    <Value value={row[col.key]} name={col.key} kind={col.type} />
                   </td>
                 ))}
                 {onDetail && (
@@ -114,7 +124,7 @@ export function DataTable({
           disabled={current === 1}
           onClick={() => setPage(current - 1)}
         >
-          ← Назад
+          <CaretLeftIcon size={16} aria-hidden="true" /> Назад
         </button>
         <span>
           {current} / {totalPages}
@@ -125,7 +135,7 @@ export function DataTable({
           disabled={current === totalPages}
           onClick={() => setPage(current + 1)}
         >
-          Вперёд →
+          Вперёд <CaretRightIcon size={16} aria-hidden="true" />
         </button>
       </div>
     </>

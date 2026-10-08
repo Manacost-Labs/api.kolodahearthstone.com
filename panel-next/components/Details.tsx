@@ -2,33 +2,13 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { Modal } from './Modal';
-import { decode, imagesFrom, label, mediaUrl, record, text } from '@/lib/model';
+import { fieldLabel } from '@/lib/format';
+import { imagesFrom, record, text } from '@/lib/model';
 import type { Row } from '@/lib/types';
 import { Artwork } from './Artwork';
+import { Value } from './ui';
 const isVideo = (url: string) => /\.(mp4|webm)(\?|$)/i.test(url);
 
-export function Value({ value }: { value: unknown }) {
-  const decoded = decode(value);
-  if (decoded !== null && typeof decoded === 'object')
-    return (
-      <details className="nested-data">
-        <summary>{Array.isArray(decoded) ? `${decoded.length} записей` : 'Объект'}</summary>
-        <pre>{JSON.stringify(decoded, null, 2)}</pre>
-      </details>
-    );
-  const url = mediaUrl(decoded);
-  if (url && /\.(mp3|ogg|wav)(\?|$)/i.test(url))
-    // biome-ignore lint/a11y/useMediaCaption: card sound effects have no speech to caption
-    return <audio aria-label="Аудиозапись" controls preload="none" src={url} />;
-  if (url)
-    return (
-      <a href={url} target="_blank" rel="noopener noreferrer">
-        {text(decoded)}
-      </a>
-    );
-  if (typeof decoded === 'boolean') return <span>{decoded ? 'Да' : 'Нет'}</span>;
-  return <span>{text(decoded)}</span>;
-}
 export function RecordDetails({
   row,
   title,
@@ -94,9 +74,9 @@ export function RecordDetails({
         <dl className="facts">
           {Object.entries(row).map(([key, value]) => (
             <div key={key}>
-              <dt>{label(key)}</dt>
+              <dt>{fieldLabel(key)}</dt>
               <dd>
-                <Value value={value} />
+                <Value value={value} name={key} />
               </dd>
             </div>
           ))}

@@ -1,9 +1,11 @@
 'use client';
 import { useState } from 'react';
-import { countLabel, formatDate, text, tokenUsage } from '@/lib/model';
+import { countLabel, scopeLabels } from '@/lib/format';
+import { text, tokenUsage } from '@/lib/model';
 import { mutate, MutationError } from '@/lib/client';
 import type { PageData, Row } from '@/lib/types';
 import { Modal } from './Modal';
+import { Time } from './ui';
 export function Tokens({ data }: { data: PageData }) {
   const [issued, setIssued] = useState<Row | null>(null);
   const [nonce, setNonce] = useState(data.issueNonce || '');
@@ -127,8 +129,14 @@ export function Tokens({ data }: { data: PageData }) {
                     <code>{text(token.id)}</code>
                     {Boolean(token.revoked_at) && <span className="badge bad">Отозван</span>}
                   </td>
-                  <td>{Array.isArray(token.scopes) ? token.scopes.join(', ') : text(token.scopes)}</td>
-                  <td>{formatDate(token.expires_at)}</td>
+                  <td>
+                    {(Array.isArray(token.scopes) ? token.scopes.map(String) : [text(token.scopes)])
+                      .map(scope => data.scopeCatalog?.[scope]?.label ?? scopeLabels[scope] ?? scope)
+                      .join(', ')}
+                  </td>
+                  <td>
+                    <Time value={token.expires_at} />
+                  </td>
                   <td>
                     {(() => {
                       const usage = tokenUsage(token);

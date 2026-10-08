@@ -1,11 +1,13 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiPath } from '@/lib/client';
-import { formatDate, record, text } from '@/lib/model';
+import { formatDateTime } from '@/lib/format';
+import { record, text } from '@/lib/model';
 import type { Row } from '@/lib/types';
 import parserView from '@/lib/vendor/parser-control-view.cjs';
 import { Modal } from './Modal';
 import { RecordDetails } from './Details';
+import { KpiCard, Time } from './ui';
 export function Parsers({ initial, csrf }: { initial: Row; csrf: string }) {
   const [snapshot, setSnapshot] = useState(initial);
   const [query, setQuery] = useState('');
@@ -90,17 +92,22 @@ export function Parsers({ initial, csrf }: { initial: Row; csrf: string }) {
         </p>
       )}
       <div className="summary-grid">
-        {[
-          ['Свежие наборы', summary.fresh],
-          ['На резерве', summary.fallback],
-          ['Без данных', summary.unavailable],
-          ['Следующий запуск', formatDate(summary.nextRunAt)],
-        ].map(([name, value]) => (
-          <article key={name}>
-            <span>{name}</span>
-            <strong>{value}</strong>
-          </article>
-        ))}
+        <KpiCard label="Свежие наборы" value={summary.fresh} tone="good" />
+        <KpiCard
+          label="На резерве"
+          value={summary.fallback}
+          tone={Number(summary.fallback) > 0 ? 'warning' : undefined}
+        />
+        <KpiCard
+          label="Без данных"
+          value={summary.unavailable}
+          tone={Number(summary.unavailable) > 0 ? 'bad' : undefined}
+        />
+        <KpiCard
+          label="Следующий запуск"
+          value={<Time value={summary.nextRunAt} relative />}
+          hint={summary.nextRunAt ? formatDateTime(summary.nextRunAt) : undefined}
+        />
       </div>
       {summary.activeRun && (
         <div className="notice" role="status">
@@ -208,8 +215,12 @@ export function Parsers({ initial, csrf }: { initial: Row; csrf: string }) {
                     <small>{presentation.description}</small>
                   </td>
                   <td>{text(source.rowsTotal)}</td>
-                  <td>{formatDate(source.lastSuccessAt)}</td>
-                  <td>{formatDate(source.nextRunAt)}</td>
+                  <td>
+                    <Time value={source.lastSuccessAt} relative />
+                  </td>
+                  <td>
+                    <Time value={source.nextRunAt} relative />
+                  </td>
                   <td>
                     <div className="row-actions">
                       <button type="button" className="link-button" onClick={() => setDetail(source)}>

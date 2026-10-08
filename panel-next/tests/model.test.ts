@@ -1,14 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  normalizedCard,
-  imagesFrom,
-  mediaUrl,
-  queryHref,
-  deckTile,
-  tokenUsage,
-  countLabel,
-} from '../lib/model.ts';
+import { normalizedCard, imagesFrom, mediaUrl, queryHref, deckTile, tokenUsage } from '../lib/model.ts';
+import { countLabel } from '../lib/format.ts';
 test('preserves zero stats and base/golden identities', () => {
   const row = {
     id: 42,
@@ -114,4 +107,11 @@ test('token usage reads the nested PHP usage block and never guesses legacy fiel
   assert.equal(countLabel(3, forms), '3 запроса');
   assert.equal(countLabel(11, forms), '11 запросов');
   assert.match(countLabel(1234, forms), /^1\s234 запроса$/u);
+});
+
+test('catalogue tags show readable tribe or category names instead of slugs', () => {
+  assert.equal(normalizedCard({ creature_type: 'murloc' }, '', {}).tribe, 'Мурлок');
+  assert.equal(normalizedCard({ creature_type: 'murloc' }, '', { murloc: 'Мурлоки' }).tribe, 'Мурлоки');
+  assert.equal(normalizedCard({ card_type: 'hero' }, 'hero', {}).tribe, 'Герой');
+  assert.equal(normalizedCard({}, '', {}).tribe, 'Существо');
 });
