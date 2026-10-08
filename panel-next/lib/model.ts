@@ -50,21 +50,22 @@ export function normalizedCard(row: Row, cardType: string, tribes: Record<string
     'Без названия',
   );
   const id = text(row.card_id || row.hero_card_id || row.skin_id || row.pet_id || row.id);
-  // Each category stores art under its own column (see panel/sql/schema.mysql.sql).
+  // Each category stores art under its own column (see panel/sql/schema.mysql.sql); the curated
+  // horizontal art keeps priority, the hero, timewarped and pet columns only fill a missing thumbnail.
   const art = mediaUrl(
     row.art_image ||
       row.full_art_url ||
-      row.hero_full_art_url ||
-      row.art_image_url ||
       row.local_crop_image_url ||
       row.crop_image_url ||
       row.horizontal_image_url ||
       row.local_image_url ||
       row.static_image_url ||
-      row.hero_image_url ||
       row.card_image ||
-      row.card_image_url ||
       row.image_url ||
+      row.hero_full_art_url ||
+      row.art_image_url ||
+      row.hero_image_url ||
+      row.card_image_url ||
       row.portrait_url,
   );
   const tribe = row.creature_type

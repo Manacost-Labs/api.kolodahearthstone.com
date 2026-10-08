@@ -83,4 +83,16 @@ test('heroes, pets and coins get thumbnails and names from their own columns', (
     '/uploads/pets/1.png',
   );
   assert.equal(normalizedCard({ card_name_ru: 'Монетка', coin_name_en: 'Coin' }, 'coin', {}).name, 'Монетка');
+  // Curated horizontal art still wins over the per-category fallbacks.
+  assert.equal(
+    normalizedCard(
+      {
+        horizontal_image_url: '/uploads/horizontal-art/H.webp',
+        hero_full_art_url: 'https://example.test/full.png',
+      },
+      'hero',
+      {},
+    ).art,
+    '/uploads/horizontal-art/H.webp',
+  );
 });
