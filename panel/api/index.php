@@ -2,9 +2,14 @@
 declare(strict_types=1);
 
 $config = require __DIR__ . '/../config.php';
+require_once __DIR__ . '/../lib/card_tile_assets.php';
+require_once __DIR__ . '/../lib/card_tile_layout.php';
+require_once __DIR__ . '/../lib/catalog_http_cache.php';
+require_once __DIR__ . '/../lib/catalog_queries.php';
+require_once __DIR__ . '/../lib/next_panel.php';
 
 const API_BASE_URL = 'https://api.kolodahearthstone.com';
-const API_VERSION = '1.14.0';
+const API_VERSION = '1.16.0';
 const DEFAULT_PER_PAGE = 50;
 const MAX_PER_PAGE = 200;
 
@@ -154,7 +159,7 @@ function is_head_request(): bool
 
 function encode_json(array $payload): string
 {
-    $json = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+    $json = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     if (!is_string($json)) {
         respond_error('internal_error', 'Не удалось сериализовать JSON.', 500);
     }
@@ -187,27 +192,12 @@ function timestamp_from_http_date(?string $httpDate): ?int
     return $timestamp === false ? null : $timestamp;
 }
 
-function request_etag_matches(string $etag): bool
-{
-    $header = $_SERVER['HTTP_IF_NONE_MATCH'] ?? '';
-    if (!is_string($header) || trim($header) === '') {
-        return false;
-    }
-    foreach (explode(',', $header) as $candidate) {
-        $candidate = trim($candidate);
-        if ($candidate === '*' || $candidate === $etag || $candidate === 'W/' . $etag) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
 function respond_cached(array $payload, ?string $lastModified = null, int $maxAge = 300): void
 {
     $json = encode_json($payload);
     $etag = '"' . hash('sha256', $json) . '"';
-    $lastModifiedHttp = http_date($lastModified);
+    $assetTimestamp = max((int)filemtime(__FILE__), card_tile_response_mtime());
+    $lastModifiedHttp = http_date(max_timestamp($lastModified, gmdate('Y-m-d H:i:s', $assetTimestamp)));
 
     header('Cache-Control: public, max-age=' . $maxAge . ', stale-while-revalidate=60');
     header('ETag: ' . $etag);
@@ -215,12 +205,7 @@ function respond_cached(array $payload, ?string $lastModified = null, int $maxAg
         header('Last-Modified: ' . $lastModifiedHttp);
     }
 
-    $notModified = request_etag_matches($etag);
-    if (!$notModified && $lastModifiedHttp !== null) {
-        $clientTimestamp = timestamp_from_http_date($_SERVER['HTTP_IF_MODIFIED_SINCE'] ?? null);
-        $serverTimestamp = timestamp_from_http_date($lastModifiedHttp);
-        $notModified = $clientTimestamp !== null && $serverTimestamp !== null && $clientTimestamp >= $serverTimestamp;
-    }
+    $notModified = catalog_not_modified($etag, $lastModifiedHttp, $_SERVER);
 
     if ($notModified) {
         http_response_code(304);
@@ -319,6 +304,20 @@ function attach_horizontal_art(PDO $pdo, array $rows, string $entityType, callab
         return [];
     }
 
+    if ($entityType === 'battleground_card') {
+        $spells = array_filter($rows, static fn(array $row): bool => ($row['card_type'] ?? '') === 'spell');
+        if ($spells) {
+            $prices = [];
+            foreach (panel_next_attach_purchase_costs($pdo, $spells, 'spell') as $spell) {
+                $prices[(string)$spell['card_id']] = $spell['cost'] ?? null;
+            }
+            foreach ($rows as &$row) {
+                if (($row['card_type'] ?? '') === 'spell') $row['cost'] = $prices[(string)$row['card_id']] ?? null;
+            }
+            unset($row);
+        }
+    }
+
     $ids = [];
     foreach ($rows as $row) {
         $id = trim((string)$entityId($row));
@@ -348,10 +347,7 @@ function attach_horizontal_art(PDO $pdo, array $rows, string $entityType, callab
         $stmt->execute($params);
         $assets = [];
         foreach ($stmt->fetchAll() as $asset) {
-            $assets[(string)$asset['entity_id']] = absolute_url(
-                (string)$asset['local_image_url'],
-                $asset['generated_at'] ?? null
-            );
+            $assets[(string)$asset['entity_id']] = $asset;
         }
     } catch (Throwable $e) {
         $assets = [];
@@ -359,7 +355,10 @@ function attach_horizontal_art(PDO $pdo, array $rows, string $entityType, callab
 
     foreach ($rows as &$row) {
         $id = trim((string)$entityId($row));
-        $row['horizontal_image_url'] = $assets[$id] ?? null;
+        $art = $assets[$id] ?? [];
+        $row['horizontal_image_url'] = absolute_url($art['local_image_url'] ?? null, $art['generated_at'] ?? null);
+        $row['tile_image_url'] = card_tile_asset_url($row, $entityType, $id, $art);
+        $row['tile_layout'] = card_tile_layout($row, $entityType);
     }
     unset($row);
 
@@ -573,11 +572,14 @@ function golden_variant_to_api(array $card): array
         'health' => $card['health'] !== null ? (int)$card['health'] : null,
         'mechanics' => mechanics_from_notes($card['notes'] ?? null),
         'text_ru' => $card['notes'] !== null && $card['notes'] !== '' ? (string)$card['notes'] : null,
+        'tile_image_url' => $card['tile_image_url'] ?? null,
+        'tile_layout' => $card['tile_layout'] ?? null,
         'images' => [
             'card' => absolute_url($card['card_image'] ?? null, $imageVersion),
             'art' => absolute_url($card['art_image'] ?? null, $imageVersion),
             'framed' => absolute_url($card['framed_image'] ?? null, $imageVersion),
             'horizontal' => $card['horizontal_image_url'] ?? null,
+            'tile' => $card['tile_image_url'] ?? null,
         ],
         'updated_at' => (string)$card['updated_at'],
     ];
@@ -655,12 +657,15 @@ function card_to_api(
         'duos_only' => (bool)$card['duos_only'],
         'mechanics' => mechanics_from_notes($card['notes'] ?? null),
         'text_ru' => $card['notes'] !== null && $card['notes'] !== '' ? (string)$card['notes'] : null,
+        'tile_image_url' => $card['tile_image_url'] ?? null,
+        'tile_layout' => $card['tile_layout'] ?? null,
         'images' => [
             'card' => absolute_url($card['card_image'] ?? null, $imageVersion),
             'golden' => absolute_url($card['golden_image'] ?? null, $imageVersion),
             'art' => absolute_url($card['art_image'] ?? null, $imageVersion),
             'framed' => absolute_url($card['framed_image'] ?? null, $imageVersion),
             'horizontal' => $card['horizontal_image_url'] ?? null,
+            'tile' => $card['tile_image_url'] ?? null,
         ],
         'wiki_page' => $wikiMeta ? [
             'title' => $wikiMeta['wiki_page_title'] !== null && $wikiMeta['wiki_page_title'] !== '' ? (string)$wikiMeta['wiki_page_title'] : null,
@@ -808,6 +813,8 @@ function constructed_card_to_api(
         'durability' => $card['durability'] !== null ? (int)$card['durability'] : null,
         'armor' => $card['armor'] !== null ? (int)$card['armor'] : null,
         'artist' => $card['artist'] !== null && $card['artist'] !== '' ? (string)$card['artist'] : null,
+        'tile_image_url' => $card['tile_image_url'] ?? null,
+        'tile_layout' => $card['tile_layout'] ?? null,
         'images' => [
             'card' => $card['local_image_url'] !== null && $card['local_image_url'] !== '' ? absolute_url($card['local_image_url'], $card['updated_at'] ?? null) : ($card['image_url'] !== null && $card['image_url'] !== '' ? (string)$card['image_url'] : null),
             'art' => $wikiFullArt,
@@ -826,6 +833,7 @@ function constructed_card_to_api(
             'diamond' => $card['image_diamond_url'] !== null && $card['image_diamond_url'] !== '' ? (string)$card['image_diamond_url'] : null,
             'crop' => $cropImage,
             'horizontal' => $card['horizontal_image_url'] ?? null,
+            'tile' => $card['tile_image_url'] ?? null,
             'animated' => [
                 'golden' => $card['animated_gold_url'] !== null && $card['animated_gold_url'] !== '' ? (string)$card['animated_gold_url'] : null,
                 'signature' => $card['animated_signature_url'] !== null && $card['animated_signature_url'] !== '' ? (string)$card['animated_signature_url'] : null,
@@ -1129,10 +1137,13 @@ function hero_to_api(array $hero): array
             'as_hero' => $hero['as_hero'] !== null && $hero['as_hero'] !== '' ? (string)$hero['as_hero'] : null,
             'description' => $hero['hero_description'] !== null && $hero['hero_description'] !== '' ? (string)$hero['hero_description'] : null,
         ],
+        'tile_image_url' => $hero['tile_image_url'] ?? null,
+        'tile_layout' => $hero['tile_layout'] ?? null,
         'images' => [
             'hero' => $hero['hero_image_url'] !== null && $hero['hero_image_url'] !== '' ? (string)$hero['hero_image_url'] : null,
             'full_art' => $hero['hero_full_art_url'] !== null && $hero['hero_full_art_url'] !== '' ? (string)$hero['hero_full_art_url'] : null,
             'horizontal' => $hero['horizontal_image_url'] ?? null,
+            'tile' => $hero['tile_image_url'] ?? null,
         ],
         'hero_power' => [
             'dbf' => $hero['hero_power_dbf'] !== null ? (int)$hero['hero_power_dbf'] : null,
@@ -1193,12 +1204,15 @@ function hero_skin_to_api(array $skin): array
         ],
         'categories' => json_field($skin['categories_json'] ?? null),
         'tags' => json_field($skin['tags_json'] ?? null),
+        'tile_image_url' => $skin['tile_image_url'] ?? null,
+        'tile_layout' => $skin['tile_layout'] ?? null,
         'images' => [
             'static' => $skin['static_image_url'] !== null && $skin['static_image_url'] !== '' ? (string)$skin['static_image_url'] : null,
             'animated' => $skin['animated_image_url'] !== null && $skin['animated_image_url'] !== '' ? (string)$skin['animated_image_url'] : null,
             'animated_assets' => json_field($skin['animated_asset_json'] ?? null),
             'full_art' => $skin['full_art_url'] !== null && $skin['full_art_url'] !== '' ? (string)$skin['full_art_url'] : null,
             'horizontal' => $skin['horizontal_image_url'] ?? null,
+            'tile' => $skin['tile_image_url'] ?? null,
         ],
         'gallery' => json_field($skin['gallery_json'] ?? null),
         'sounds' => json_field($skin['sounds_json'] ?? null),
@@ -1251,10 +1265,13 @@ function pet_to_api(array $pet): array
         'card_id' => $pet['card_id'] !== null && $pet['card_id'] !== '' ? (string)$pet['card_id'] : null,
         'dbf' => $pet['dbf'] !== null ? (int)$pet['dbf'] : null,
         'release_date' => $pet['release_date'] !== null && $pet['release_date'] !== '' ? (string)$pet['release_date'] : null,
+        'tile_image_url' => $pet['tile_image_url'] ?? null,
+        'tile_layout' => $pet['tile_layout'] ?? null,
         'images' => [
             'card' => $pet['card_image_url'] !== null && $pet['card_image_url'] !== '' ? (string)$pet['card_image_url'] : null,
             'end_screen_background' => $pet['end_screen_background_url'] !== null && $pet['end_screen_background_url'] !== '' ? (string)$pet['end_screen_background_url'] : null,
             'horizontal' => $pet['horizontal_image_url'] ?? null,
+            'tile' => $pet['tile_image_url'] ?? null,
         ],
         'gallery' => json_field($pet['gallery_json'] ?? null),
         'wiki_page' => [
@@ -1333,11 +1350,14 @@ function timewarped_card_to_api(array $card, array $termTranslations = []): arra
         'minion_type' => $card['minion_type'] !== null && $card['minion_type'] !== '' ? (string)$card['minion_type'] : null,
         'race' => $card['race'] !== null && $card['race'] !== '' ? (string)$card['race'] : null,
         'artist' => $card['artist'] !== null && $card['artist'] !== '' ? (string)$card['artist'] : null,
+        'tile_image_url' => $card['tile_image_url'] ?? null,
+        'tile_layout' => $card['tile_layout'] ?? null,
         'images' => [
             'card' => $card['card_image_url'] !== null && $card['card_image_url'] !== '' ? (string)$card['card_image_url'] : null,
             'golden' => $card['golden_image_url'] !== null && $card['golden_image_url'] !== '' ? (string)$card['golden_image_url'] : null,
             'art' => $card['art_image_url'] !== null && $card['art_image_url'] !== '' ? (string)$card['art_image_url'] : null,
             'horizontal' => $card['horizontal_image_url'] ?? null,
+            'tile' => $card['tile_image_url'] ?? null,
         ],
         'golden' => [
             'card_id' => $card['golden_card_id'] !== null && $card['golden_card_id'] !== '' ? (string)$card['golden_card_id'] : null,
@@ -1438,6 +1458,8 @@ function library_card_to_api(array $card): array
             'ru' => $card['text_ru'] !== null && $card['text_ru'] !== '' ? (string)$card['text_ru'] : null,
             'en' => $card['text_en'] !== null && $card['text_en'] !== '' ? (string)$card['text_en'] : null,
         ],
+        'tile_image_url' => $card['tile_image_url'] ?? null,
+        'tile_layout' => $card['tile_layout'] ?? null,
         'images' => [
             'card' => $card['image_url'] !== null && $card['image_url'] !== '' ? (string)$card['image_url'] : null,
             'golden' => $card['image_gold_url'] !== null && $card['image_gold_url'] !== '' ? (string)$card['image_gold_url'] : null,
@@ -1449,6 +1471,7 @@ function library_card_to_api(array $card): array
                 ? (string)$card['full_art_source_url']
                 : null,
             'horizontal' => $card['horizontal_image_url'] ?? null,
+            'tile' => $card['tile_image_url'] ?? null,
         ],
         'full_art' => [
             'source' => isset($card['full_art_source']) && $card['full_art_source'] !== null && $card['full_art_source'] !== '' ? (string)$card['full_art_source'] : null,
@@ -1505,12 +1528,15 @@ function coin_to_api(array $coin): array
         ],
         'flavor' => $coin['flavor_text'] !== null && $coin['flavor_text'] !== '' ? (string)$coin['flavor_text'] : null,
         'artist' => $coin['artist'] !== null && $coin['artist'] !== '' ? (string)$coin['artist'] : null,
+        'tile_image_url' => $coin['tile_image_url'] ?? null,
+        'tile_layout' => $coin['tile_layout'] ?? null,
         'images' => [
             'card' => $coin['image_url'] !== null && $coin['image_url'] !== '' ? (string)$coin['image_url'] : null,
             'golden' => $coin['image_gold_url'] !== null && $coin['image_gold_url'] !== '' ? (string)$coin['image_gold_url'] : null,
             'crop' => $coin['crop_image_url'] !== null && $coin['crop_image_url'] !== '' ? (string)$coin['crop_image_url'] : null,
             'wiki' => $coin['wiki_image_url'] !== null && $coin['wiki_image_url'] !== '' ? (string)$coin['wiki_image_url'] : null,
             'horizontal' => $coin['horizontal_image_url'] ?? null,
+            'tile' => $coin['tile_image_url'] ?? null,
         ],
         'cosmetic_sort_order' => $coin['cosmetic_sort_order'] !== null ? (int)$coin['cosmetic_sort_order'] : null,
         'generated_by_card_ids' => json_field($coin['generated_by_card_ids_json'] ?? null),
@@ -1999,8 +2025,9 @@ function api_constructed_cards(PDO $pdo): void
         $params['format'] = $format;
     }
     if ($q !== '') {
-        $where[] = '(c.name_ru LIKE :q OR c.name_en LIKE :q OR c.card_id LIKE :q OR c.dbf LIKE :q OR c.text_ru LIKE :q OR c.text_en LIKE :q OR c.flavor_ru LIKE :q OR c.flavor_en LIKE :q)';
-        $params['q'] = '%' . $q . '%';
+        $search = constructed_search_filter($q);
+        $where[] = $search['where'];
+        $params += $search['parameters'];
     }
     if ($dbf !== null) {
         $where[] = 'c.dbf = :dbf';

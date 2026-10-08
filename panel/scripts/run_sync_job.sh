@@ -123,6 +123,7 @@ case "$JOB" in
     ;;
   horizontal-art)
     CMD=("$PYTHON" "$APP_ROOT/scripts/sync_horizontal_art.py")
+    AFTER_CMD=("$PYTHON" "$APP_ROOT/scripts/sync_card_tiles.py")
     SMOKE_URLS=("$API_BASE/cards?per_page=1" "$API_BASE/constructed-cards?per_page=1" "$API_BASE/heroes?per_page=1")
     ;;
   *)

@@ -64,3 +64,11 @@ HearthstoneJSON от 16 сентября уже содержит новые ка
 запустить `kolodahs-sync@cards.service` и проверить 304 обычных существа в
 актуальном пуле, включая 27 аберраций. Общий аудит изображений может отдельно
 сообщать о внешних картинках золотых Dark Paradox; это не отменяет импорт.
+
+The public compatibility API's Nginx cache needs both
+`nginx/api.kolodahearthstone.com.conf` (server configuration) and
+`nginx/koloda-rest-cache.conf` (install as
+`/etc/nginx/conf.d/31-koloda-rest-cache.conf` in the HTTP context). Validate with
+`nginx -t` before reloading. Keep the cache key's API version synchronized with
+`api/index.php`. The cache applies only to public `/api/v1`, not auth, token
+issuance or the panel bridge. See `../docs/card-tiles.md` for client layers.
