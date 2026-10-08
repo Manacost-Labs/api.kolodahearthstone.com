@@ -45,26 +45,42 @@ export function normalizedCard(row: Row, cardType: string, tribes: Record<string
       row.variant_name ||
       row.pet_name ||
       row.coin_name_ru ||
+      row.card_name_ru ||
       row.coin_name_en,
     'Без названия',
   );
   const id = text(row.card_id || row.hero_card_id || row.skin_id || row.pet_id || row.id);
+  // Each category stores art under its own column (see panel/sql/schema.mysql.sql).
   const art = mediaUrl(
     row.art_image ||
       row.full_art_url ||
+      row.hero_full_art_url ||
+      row.art_image_url ||
       row.local_crop_image_url ||
       row.crop_image_url ||
       row.horizontal_image_url ||
       row.local_image_url ||
       row.static_image_url ||
+      row.hero_image_url ||
       row.card_image ||
+      row.card_image_url ||
       row.image_url ||
       row.portrait_url,
   );
   const tribe = row.creature_type
     ? tribes[text(row.creature_type, '')] || slugLabel(tribeLabels, row.creature_type)
     : slugLabel(cardTypeLabels, row.card_type || cardType || 'minion');
-  const images = [art, mediaUrl(row.card_image || row.local_image_url || row.image_url || row.wiki_image_url)]
+  const images = [
+    art,
+    mediaUrl(
+      row.card_image ||
+        row.local_image_url ||
+        row.image_url ||
+        row.card_image_url ||
+        row.hero_image_url ||
+        row.wiki_image_url,
+    ),
+  ]
     .filter(Boolean)
     .filter((url, i, all) => all.indexOf(url) === i);
   return {

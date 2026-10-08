@@ -6,11 +6,12 @@ import { SlidersHorizontalIcon } from '@phosphor-icons/react/dist/ssr/SlidersHor
 import { PanelLink } from './WorkspaceNavigation';
 import { useCatalogQuery } from './useCatalogQuery';
 import { catalogHref, catalogView } from '@/lib/catalog-state';
-import { countLabel } from '@/lib/format';
+import { countLabel, formatDay } from '@/lib/format';
 import { SquaresFourIcon } from '@phosphor-icons/react/dist/ssr/SquaresFour';
 import { RowsIcon } from '@phosphor-icons/react/dist/ssr/Rows';
 import { MagnifyingGlassIcon } from '@phosphor-icons/react/dist/ssr/MagnifyingGlass';
 import { ArrowRightIcon } from '@phosphor-icons/react/dist/ssr/ArrowRight';
+import { CheckIcon } from '@phosphor-icons/react/dist/ssr/Check';
 import { CaretLeftIcon } from '@phosphor-icons/react/dist/ssr/CaretLeft';
 import { CaretRightIcon } from '@phosphor-icons/react/dist/ssr/CaretRight';
 import { HeartIcon } from '@phosphor-icons/react/dist/ssr/Heart';
@@ -20,12 +21,13 @@ import { SwordIcon } from '@phosphor-icons/react/dist/ssr/Sword';
 import { TableIcon } from '@phosphor-icons/react/dist/ssr/Table';
 import { XIcon } from '@phosphor-icons/react/dist/ssr/X';
 import { cardKey, matchesCard } from '@/lib/card-detail';
-import { normalizedCard, queryHref, entityApiBase } from '@/lib/model';
+import { catalogColumns, type Cell } from '@/lib/catalog-columns';
+import { normalizedCard, queryHref, entityApiBase, text } from '@/lib/model';
 import type { PageData, Row } from '@/lib/types';
 import { CardInspector } from './CardInspector';
 import { Artwork } from './Artwork';
 import { DeckTiles } from './DeckTiles';
-import { EmptyState } from './ui';
+import { EmptyState, StatusBadge, Time } from './ui';
 
 export function Catalog({
   data,
@@ -83,6 +85,7 @@ export function Catalog({
   const filterKeys = ['tier', 'creature_type', 'pool', 'duos', 'constructed_format', 'rarity', 'media'];
   const activeCount = Math.max(data.activeFilters.length, filterKeys.filter(key => params.get(key)).length);
   const cards = data.records.map(row => normalizedCard(row, type, data.tribes));
+  const columns = catalogColumns(type, data.tribes);
   const selectedIndex = cardParam ? cards.findIndex(card => matchesCard(card.row, cardParam)) : -1;
   const selected =
     selectedIndex >= 0 ? cards[selectedIndex].row : focus && matchesCard(focus, cardParam) ? focus : null;
@@ -343,37 +346,52 @@ export function Catalog({
             ))}
           </div>
         ) : (
-          <div className="table-scroll">
+          <div className="table-scroll catalog-table" role="region" aria-label="Таблица записей">
             <table>
               <thead>
                 <tr>
-                  {['Карта', 'Card ID', 'Тип', 'Уровень', 'Атака', 'Здоровье', 'Пул', 'Просмотр'].map(h => (
-                    <th key={h}>{h}</th>
+                  <th scope="col" className="sticky-col">
+                    Запись
+                  </th>
+                  {columns.map(column => (
+                    <th key={column.key} scope="col" className={column.numeric ? 'num' : undefined}>
+                      {column.label}
+                    </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {cards.map((card, i) => (
-                  // biome-ignore lint/suspicious/noArrayIndexKey: imported rows can repeat a card_id
-                  <tr key={card.id + '-' + i}>
-                    <td>
-                      <strong>{card.name}</strong>
-                    </td>
-                    <td>
-                      <code>{card.id}</code>
-                    </td>
-                    <td>{card.tribe}</td>
-                    <td>{card.tier || '—'}</td>
-                    <td>{card.attack || '—'}</td>
-                    <td>{card.health || '—'}</td>
-                    <td>{card.inPool ? 'В пуле' : '—'}</td>
-                    <td>
-                      <button type="button" className="link-button" onClick={() => setSelected(card.row)}>
-                        Подробнее
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {cards.map((card, i) => {
+                  const nameEn = text(card.row.name_en || card.row.card_name_en || card.row.coin_name_en, '');
+                  return (
+                    // The name button is the keyboard path; a click anywhere on the row is a mouse shortcut.
+                    <tr
+                      // biome-ignore lint/suspicious/noArrayIndexKey: imported rows can repeat a card_id
+                      key={card.id + '-' + i}
+                      data-selected={selected === card.row || undefined}
+                      onClick={event => {
+                        if (!(event.target as HTMLElement).closest('a,button')) setSelected(card.row);
+                      }}
+                    >
+                      <th scope="row" className="sticky-col">
+                        <button type="button" className="row-title" onClick={() => setSelected(card.row)}>
+                          <span className="row-thumb">
+                            <Artwork urls={card.images} />
+                          </span>
+                          <span className="row-name">
+                            <strong>{card.name}</strong>
+                            {nameEn && nameEn !== card.name && <small lang="en">{nameEn}</small>}
+                          </span>
+                        </button>
+                      </th>
+                      {columns.map(column => (
+                        <td key={column.key} className={column.numeric ? 'num' : undefined}>
+                          <CellValue cell={column.cell(card.row)} />
+                        </td>
+                      ))}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -435,4 +453,40 @@ export function Catalog({
       )}
     </section>
   );
+}
+
+const emptyCell = <span className="value-empty">—</span>;
+
+function CellValue({ cell }: { cell: Cell }) {
+  switch (cell.kind) {
+    case 'badge':
+      return <StatusBadge label={cell.value} tone={cell.tone} />;
+    case 'check':
+      return cell.value ? (
+        <span className="cell-check">
+          <CheckIcon size={16} weight="bold" aria-hidden="true" />
+          <span className="sr-only">Да</span>
+        </span>
+      ) : (
+        emptyCell
+      );
+    case 'time':
+      return <Time value={cell.value} relative />;
+    case 'pills':
+      return cell.value.length ? (
+        <span className="cell-pills">
+          {cell.value.map(value => (
+            <StatusBadge key={value} label={value} tone="info" />
+          ))}
+        </span>
+      ) : (
+        emptyCell
+      );
+    case 'day':
+      return cell.value ? formatDay(cell.value) : emptyCell;
+    case 'code':
+      return cell.value ? <code>{cell.value}</code> : emptyCell;
+    default:
+      return cell.value || emptyCell;
+  }
 }

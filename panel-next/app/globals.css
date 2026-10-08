@@ -1266,6 +1266,8 @@ audio {
   height: 36px;
 }
 .table-scroll {
+  /* Containing block for .sr-only cells, so they scroll with the table instead of widening the page. */
+  position: relative;
   width: 100%;
   min-width: 0;
   overflow: auto;
@@ -1312,6 +1314,138 @@ td .nested-data pre {
 }
 tr:hover td {
   background: var(--soft);
+}
+/* Catalogue table: columns per category, the record column stays pinned while the rest scrolls. */
+.catalog-table td,
+.catalog-table th {
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.catalog-table td {
+  min-width: 0;
+}
+.catalog-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.catalog-table td code {
+  display: inline;
+  margin: 0;
+}
+.catalog-table .sticky-col {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  min-width: 220px;
+  max-width: 320px;
+  padding-block: 8px;
+  box-shadow: inset -1px 0 0 var(--line);
+}
+.catalog-table thead .sticky-col {
+  z-index: 2;
+}
+.catalog-table tbody .sticky-col {
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+  font-size: inherit;
+  font-weight: inherit;
+  color: inherit;
+}
+.catalog-table tbody tr {
+  cursor: pointer;
+}
+.catalog-table tbody tr:hover > * {
+  background: var(--soft);
+}
+.catalog-table tbody tr[data-selected] > * {
+  background: var(--accent-soft);
+}
+.row-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.row-title:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+  border-radius: var(--radius-sm);
+}
+.row-thumb {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.row-thumb .artwork {
+  width: 100%;
+  height: 100%;
+}
+.row-thumb .art-empty {
+  min-height: 0;
+  font-size: 0;
+  color: var(--muted);
+}
+.row-thumb .art-empty svg {
+  width: 16px;
+  height: 16px;
+}
+.row-name {
+  display: grid;
+  min-width: 0;
+}
+.row-name strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 600;
+}
+.row-title:hover .row-name strong {
+  color: var(--accent);
+}
+.row-name small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+.cell-check {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-full);
+  background: var(--good-soft);
+  color: var(--good);
+}
+.cell-pills {
+  display: inline-flex;
+  gap: var(--space-1);
+}
+@media (max-width: 700px) {
+  .catalog-table .sticky-col {
+    min-width: 168px;
+    max-width: 180px;
+    padding-inline: 10px;
+  }
+  .row-title {
+    gap: var(--space-2);
+  }
+  .row-thumb {
+    width: 32px;
+    height: 32px;
+  }
+  .row-name small {
+    display: none;
+  }
 }
 .table-tools,
 .table-pagination {

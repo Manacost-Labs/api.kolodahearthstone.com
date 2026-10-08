@@ -190,6 +190,24 @@ await navigate(root);
 await click('.view-switch button:nth-child(3)');
 await waitFor('document.querySelectorAll("tbody tr").length===8');
 checks.list = await evaluate('document.querySelectorAll("tbody tr").length===8');
+checks.tableColumns = await evaluate(
+  '[...document.querySelectorAll(".catalog-table thead th")].map(th=>th.textContent).join("|")',
+);
+assert.equal(checks.tableColumns, 'Запись|Card ID|Тип|Уровень|Атака|Здоровье|Пул|Режим|Золотая|Обновлено');
+// A click anywhere on a row opens the inspector and marks the row.
+await click('.catalog-table tbody tr:nth-child(2) td.num');
+await waitFor('new URLSearchParams(location.search).get("card")==="BG_FIXTURE_2"');
+checks.rowSelected = await evaluate(
+  '!!document.querySelector(".catalog-table tbody tr:nth-child(2)[data-selected]")',
+);
+assert.equal(checks.rowSelected, true);
+await pressEscape();
+await waitFor('!new URLSearchParams(location.search).has("card")');
+await viewport(390, 844);
+await navigate(root);
+checks.tableMobileOverflow = await evaluate('document.documentElement.scrollWidth>innerWidth');
+assert.equal(checks.tableMobileOverflow, false);
+await viewport(1487, 1058);
 await navigate(root);
 checks.savedView = await evaluate('document.querySelectorAll("tbody tr").length===8');
 await click('.view-switch button:nth-child(2)');
