@@ -26,6 +26,7 @@ test:
 	$(PYTHON) -m pytest -q
 
 panel-next-check:
+	npm --prefix panel-next ci
 	npm --prefix panel-next run check
 
 panel-check:
