@@ -6,7 +6,7 @@ target_root=/srv/api-kolodahearthstone/panel-next
 release_id="${KOLODAHS_NEXT_RELEASE_ID:-$(date -u +%Y%m%dT%H%M%SZ)}"
 [[ "$EUID" -eq 0 ]] || { echo 'deploy-panel-next: run as root' >&2; exit 1; }
 [[ "$release_id" =~ ^[A-Za-z0-9._-]+$ ]] || exit 1
-[[ -f "$artifact/server.js" && -d "$artifact/.next/static" && -f "$artifact/public/fonts/inter.ttf" ]] || {
+[[ -f "$artifact/server.js" && -d "$artifact/.next/static" && -f "$artifact/public/fonts/inter.woff2" ]] || {
   echo 'deploy-panel-next: build the standalone artifact first' >&2; exit 1;
 }
 release_root="$target_root/releases/$release_id"

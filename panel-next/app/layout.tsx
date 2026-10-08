@@ -6,7 +6,13 @@ import { Shell } from '@/components/Shell';
 import { themeBootScript } from '@/lib/theme';
 import './globals.css';
 import './deck-tiles.css';
-const inter = localFont({ src: '../public/fonts/inter.ttf', display: 'swap', variable: '--font-inter' });
+// Inter 4 variable font subset to Latin, Cyrillic and punctuation; rebuild with scripts/subset-inter.sh.
+const inter = localFont({
+  src: '../public/fonts/inter.woff2',
+  weight: '100 900',
+  display: 'swap',
+  variable: '--font-inter',
+});
 const belwe = localFont({
   src: '../public/fonts/hearthstone-belwe.ttf',
   weight: '700',
