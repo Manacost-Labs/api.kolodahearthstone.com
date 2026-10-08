@@ -5,6 +5,7 @@ import { catalogHref } from '@/lib/catalog-state';
 import { useSearchParams } from 'next/navigation';
 import { DatabaseIcon } from '@phosphor-icons/react/dist/ssr/Database';
 import { ListIcon } from '@phosphor-icons/react/dist/ssr/List';
+import { MagnifyingGlassIcon } from '@phosphor-icons/react/dist/ssr/MagnifyingGlass';
 import { SignOutIcon } from '@phosphor-icons/react/dist/ssr/SignOut';
 import type { User } from '@/lib/types';
 import {
@@ -14,7 +15,7 @@ import {
   subscribeThemePreference,
   themeOptions,
 } from '@/lib/theme';
-import { Modal } from './Modal';
+import { CommandPalette } from './CommandPalette';
 type ShellProps = { user: User; logoutCsrf: string; categories: Record<string, string>; children: ReactNode };
 export function Shell(props: ShellProps) {
   return (
@@ -31,21 +32,19 @@ function ShellContent({ user, logoutCsrf, categories, children }: ShellProps) {
   const { pending, catalogUrl, navigate } = useWorkspaceNavigation();
   const collectionUrl = (key: string) => catalogHref(catalogUrl.split('?')[1] || '', { card_type: key });
   const [quick, setQuick] = useState(false);
-  const [search, setSearch] = useState('');
-  const shortcuts = [
+  const shortcuts: [string, string][] = [
     [catalogUrl, 'Каталог'],
     ['/?action=analytics', 'Статистика'],
     ['/?action=parsers', 'Источники'],
     ['/?action=api_tokens', 'API-токены'],
     ['/?action=wiki_terms', 'Переводы Wiki'],
-    ...Object.entries(categories).map(([key, name]) => [collectionUrl(key), name]),
+    ...Object.entries(categories).map(([key, name]): [string, string] => [collectionUrl(key), name]),
   ];
   const menu = useRef<HTMLDetailsElement>(null);
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
-        setSearch('');
         setQuick(true);
         return;
       }
@@ -112,13 +111,12 @@ function ShellContent({ user, logoutCsrf, categories, children }: ShellProps) {
             <button
               type="button"
               className="quick-trigger"
-              aria-label="Быстрый переход, Ctrl K"
-              onClick={() => {
-                setSearch('');
-                setQuick(true);
-              }}
+              aria-keyshortcuts="Control+K Meta+K"
+              onClick={() => setQuick(true)}
             >
-              ⌘ K
+              <MagnifyingGlassIcon size={16} aria-hidden="true" />
+              <span>Поиск</span>
+              <kbd>Ctrl K</kbd>
             </button>
             <span className="account-name">
               <i /> {user.login}
@@ -201,46 +199,14 @@ function ShellContent({ user, logoutCsrf, categories, children }: ShellProps) {
       </header>
       <main className="workspace">{children}</main>
       {quick && (
-        <Modal title="Быстрый переход" onClose={() => setQuick(false)}>
-          <form
-            onSubmit={event => {
-              event.preventDefault();
-              const first = shortcuts.find(([, name]) => name.toLowerCase().includes(search.toLowerCase()));
-              if (first) {
-                setQuick(false);
-                navigate(first[0], { restoreCatalog: first[0] === catalogUrl });
-              }
-            }}
-          >
-            <label className="search">
-              <input
-                type="search"
-                aria-label="Найти раздел"
-                placeholder="Название раздела…"
-                value={search}
-                onChange={event => setSearch(event.target.value)}
-                ref={input => {
-                  input?.focus();
-                }}
-              />
-            </label>
-          </form>
-          <nav className="quick-links" aria-label="Результаты быстрого перехода">
-            {shortcuts
-              .filter(([, name]) => name.toLowerCase().includes(search.toLowerCase()))
-              .map(([href, name]) => (
-                <PanelLink
-                  key={href}
-                  prefetch={false}
-                  href={href}
-                  restoreCatalog={href === catalogUrl}
-                  onClick={() => setQuick(false)}
-                >
-                  {name}
-                </PanelLink>
-              ))}
-          </nav>
-        </Modal>
+        <CommandPalette
+          sections={shortcuts}
+          catalogUrl={catalogUrl}
+          cardType={type}
+          categoryName={categories[type] || 'Поля сражений'}
+          onNavigate={(href, restoreCatalog) => navigate(href, { restoreCatalog })}
+          onClose={() => setQuick(false)}
+        />
       )}
     </>
   );

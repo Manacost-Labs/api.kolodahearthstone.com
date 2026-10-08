@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cardDetail, cardKey, matchesCard, parseBattlegroundNotes } from '../lib/card-detail.ts';
+import { cardDetail, cardHref, cardKey, matchesCard, parseBattlegroundNotes } from '../lib/card-detail.ts';
 
 test('battlegrounds notes split into Russian text, mechanics and English text', () => {
   assert.deepEqual(
@@ -98,4 +98,10 @@ test('?card= finds a record by card id, internal id or DBF', () => {
   for (const key of ['BG_1', '7', '101']) assert.equal(matchesCard(row, key), true);
   assert.equal(matchesCard(row, 'BG_10'), false);
   assert.equal(matchesCard(row, ''), false);
+});
+
+test('palette links open a card inside its own category', () => {
+  assert.equal(cardHref('', 'BG_1'), '/?card=BG_1');
+  assert.equal(cardHref('hero', 'TB_BaconShop_HERO_01'), '/?card_type=hero&card=TB_BaconShop_HERO_01');
+  assert.equal(cardHref('pet', 'variant:7&x'), '/?card_type=pet&card=variant%3A7%26x');
 });

@@ -48,6 +48,14 @@ export function matchesCard(row: Row, key: string): boolean {
   );
 }
 
+/** Link that opens a card in its category, e.g. from the command palette. */
+export function cardHref(cardType: string, key: string): string {
+  const query = new URLSearchParams();
+  if (cardType) query.set('card_type', cardType);
+  query.set('card', key);
+  return `/?${query}`;
+}
+
 const statFields: [string[], string][] = [
   [['tavern_tier', 'tier_value'], 'Уровень'],
   [['level'], 'Уровень'],

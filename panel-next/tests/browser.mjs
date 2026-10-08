@@ -171,9 +171,49 @@ await call('Input.dispatchKeyEvent', {
   modifiers: 2,
   windowsVirtualKeyCode: 75,
 });
-await waitFor('!!document.querySelector("dialog[open] .quick-links")');
+await waitFor(
+  '!!document.querySelector("dialog[open] .palette") && document.activeElement.getAttribute("role")==="combobox"',
+);
 checks.quickNavigation = true;
+// Ctrl+K also searches cards of the current category; Enter opens the highlighted one.
+await call('Input.insertText', { text: 'рыбн' });
+await waitFor('document.querySelectorAll("dialog[open] .palette-option .palette-thumb").length===3');
+checks.paletteCards = await evaluate(
+  '({active:document.querySelector("[role=combobox]").getAttribute("aria-activedescendant")===document.querySelector(".palette-option[aria-selected=true]").id,first:document.querySelector(".palette-option[aria-selected=true] strong").textContent})',
+);
+assert.deepEqual(checks.paletteCards, { active: true, first: 'Рыбный следопыт' });
+await call('Input.dispatchKeyEvent', {
+  type: 'keyDown',
+  key: 'ArrowDown',
+  code: 'ArrowDown',
+  windowsVirtualKeyCode: 40,
+});
+await call('Input.dispatchKeyEvent', {
+  type: 'keyUp',
+  key: 'ArrowDown',
+  code: 'ArrowDown',
+  windowsVirtualKeyCode: 40,
+});
+await call('Input.dispatchKeyEvent', {
+  type: 'keyDown',
+  key: 'Enter',
+  code: 'Enter',
+  windowsVirtualKeyCode: 13,
+  text: '\r',
+});
+await call('Input.dispatchKeyEvent', {
+  type: 'keyUp',
+  key: 'Enter',
+  code: 'Enter',
+  windowsVirtualKeyCode: 13,
+});
+await waitFor(
+  'new URLSearchParams(location.search).get("card")==="BG_FIXTURE_12" && !!document.querySelector("dialog[open] .inspector")',
+);
+checks.paletteOpensCard = true;
 await pressEscape();
+await waitFor('!document.querySelector("dialog[open]")');
+await navigate(root, 'document.querySelectorAll(".card-tile").length===8');
 await click('.pagination button:nth-child(3)');
 await waitFor(
   'location.search.includes("page=2") && document.querySelector(".card-copy code").textContent==="BG_FIXTURE_9"',
