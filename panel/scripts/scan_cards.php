@@ -8,6 +8,7 @@ umask(0022);
 $config = require __DIR__ . '/../config.php';
 require_once __DIR__ . '/lib/battleground_pool_patch.php';
 require_once __DIR__ . '/lib/battleground_card_overrides.php';
+require_once __DIR__ . '/../lib/battleground_creature_types.php';
 
 const HSJ_RU_URL = 'https://api.hearthstonejson.com/v1/latest/ruRU/cards.json';
 const HSJ_EN_URL = 'https://api.hearthstonejson.com/v1/latest/enUS/cards.json';
@@ -997,38 +998,7 @@ function int_or_null($value): ?int
 
 function map_creature_type(array $card): ?string
 {
-    $races = [];
-    if (!empty($card['race'])) {
-        $races[] = $card['race'];
-    }
-    if (!empty($card['races']) && is_array($card['races'])) {
-        $races = array_merge($races, $card['races']);
-    }
-
-    $map = [
-        'ABERRATION' => 'aberration',
-        'ALL' => 'all',
-        'UNDEAD' => 'undead',
-        'DRAGON' => 'dragon',
-        'MECHANICAL' => 'mech',
-        'MECH' => 'mech',
-        'MURLOC' => 'murloc',
-        'DEMON' => 'demon',
-        'QUILBOAR' => 'quilboar',
-        'NAGA' => 'naga',
-        'PIRATE' => 'pirate',
-        'BEAST' => 'beast',
-        'ELEMENTAL' => 'elemental',
-    ];
-
-    foreach ($races as $race) {
-        $race = strtoupper((string)$race);
-        if (isset($map[$race])) {
-            return $map[$race];
-        }
-    }
-
-    return null;
+    return battleground_creature_type($card);
 }
 
 function build_notes(array $ru, array $en): ?string

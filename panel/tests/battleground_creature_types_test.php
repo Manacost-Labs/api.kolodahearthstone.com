@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+require_once __DIR__ . '/../lib/battleground_creature_types.php';
 
 // Load only the pure functions: the entrypoints otherwise open production DB connections.
 foreach ([
@@ -38,3 +39,19 @@ if (creature_types()['aberration'] !== 'Аберрация') {
     throw new RuntimeException('Missing Russian aberration label');
 }
 echo "Battleground creature type tests passed\n";
+function same($actual, $expected): void {
+    if ($actual !== $expected) throw new RuntimeException(json_encode([$actual, $expected]));
+}
+same(battleground_creature_type(['race'=>'ABERRATION']), 'aberration');
+same(battleground_creature_type(['races'=>['ABERRATION','UNDEAD']]), 'aberration');
+same(battleground_creature_type(['race'=>'MECHANICAL']), 'mech');
+same(battleground_creature_type(['race'=>'ALL']), 'all');
+same(battleground_creature_type(['race'=>'FUTURE_UNKNOWN']), null);
+same(battleground_creature_type(['text'=>'Your Aberrations gain +1/+1']), null);
+same(battleground_creature_type_labels()['aberration'], 'Аберрация');
+same(battleground_aberration_repair(['creature_type'=>null,'card_type'=>'minion'], ['ru'=>['race'=>'ABERRATION'], 'en'=>['race'=>'ABERRATION']]), true);
+same(battleground_aberration_repair(['creature_type'=>'beast','card_type'=>'minion'], ['ru'=>['race'=>'ABERRATION']]), false);
+same(battleground_aberration_repair(['creature_type'=>null,'card_type'=>'spell'], ['ru'=>['race'=>'ABERRATION']]), false);
+same(battleground_aberration_repair(['creature_type'=>null,'card_type'=>'minion'], ['ru'=>['race'=>'ABERRATION'],'en'=>['race'=>'BEAST']]), false);
+same(battleground_aberration_repair(['creature_type'=>null,'card_type'=>'minion'], ['ru'=>['race'=>'ABERRATION'],'en'=>['race'=>'FUTURE_UNKNOWN']]), false);
+echo "OK: upstream Aberration classification and conservative repair\n";

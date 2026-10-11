@@ -64,3 +64,20 @@ HearthstoneJSON от 16 сентября уже содержит новые ка
 запустить `kolodahs-sync@cards.service` и проверить 304 обычных существа в
 актуальном пуле, включая 27 аберраций. Общий аудит изображений может отдельно
 сообщать о внешних картинках золотых Dark Paradox; это не отменяет импорт.
+
+## Aberration classification repair
+
+The scanner and REST vocabulary share `lib/battleground_creature_types.php`.
+`ABERRATION` maps to `aberration` / `Аберрация`. Repair existing unclassified
+minions from their latest stored upstream snapshot with:
+
+```bash
+php panel/scripts/repair_aberration_types.php          # read-only plan
+php panel/scripts/repair_aberration_types.php --apply  # transaction after backup
+```
+
+Run against the approved runtime release with its private configuration, never
+copy credentials into the repository. The repair requires agreement between
+available source locales. It does not change stats, pool membership or source
+hashes. Publish the API vocabulary and scanner together; then verify
+`/api/v1/cards?creature_type=aberration&in_pool=1` and the library's client filters.

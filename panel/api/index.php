@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 $config = require __DIR__ . '/../config.php';
+require_once __DIR__ . '/../lib/battleground_creature_types.php';
 
 const API_BASE_URL = 'https://api.kolodahearthstone.com';
 const API_VERSION = '1.14.0';
@@ -41,20 +42,7 @@ function db(array $config): PDO
 
 function creature_types(): array
 {
-    return [
-        'aberration' => 'Аберрация',
-        'all' => 'Общие',
-        'undead' => 'Нежить',
-        'dragon' => 'Дракон',
-        'mech' => 'Механизм',
-        'murloc' => 'Мурлок',
-        'demon' => 'Демон',
-        'quilboar' => 'Свинобраз',
-        'naga' => 'Нага',
-        'pirate' => 'Пират',
-        'beast' => 'Зверь',
-        'elemental' => 'Элементаль',
-    ];
+    return battleground_creature_type_labels();
 }
 
 function card_types(): array
