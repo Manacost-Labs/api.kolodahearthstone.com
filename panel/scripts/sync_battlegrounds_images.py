@@ -58,14 +58,24 @@ def save_state(path: Path, state: dict[str, Any]) -> None:
     tmp.replace(path)
 
 
-def active_cards(conn, limit: int | None) -> list[dict[str, Any]]:
+def active_cards(conn, limit: int | None, include_archived: bool = False, card_ids: list[str] | None = None) -> list[dict[str, Any]]:
     sql = """
-        SELECT card_id, dbf, card_type, card_image, golden_image
-        FROM battlegrounds_cards
-        WHERE in_pool = 1
-        ORDER BY card_id ASC
+        SELECT base.card_id, base.dbf, base.card_type, base.card_image, base.golden_image,
+               premium.card_id AS premium_card_id
+        FROM battlegrounds_cards AS base
+        LEFT JOIN battlegrounds_cards AS premium
+            ON premium.dbf = base.premium_dbf AND premium.variant_kind = 'golden'
+        WHERE base.variant_kind = 'base'
     """
     params: list[Any] = []
+    if not include_archived:
+        sql += " AND base.in_pool = 1"
+    if card_ids:
+        if any(not SAFE_CARD_ID_RE.fullmatch(card_id) for card_id in card_ids):
+            raise ValueError("Invalid card id")
+        sql += " AND base.card_id IN (" + ",".join(["%s"] * len(card_ids)) + ")"
+        params.extend(card_ids)
+    sql += " ORDER BY base.card_id ASC"
     if limit is not None:
         sql += " LIMIT %s"
         params.append(limit)
@@ -154,9 +164,15 @@ def refresh_reason(metadata: dict[str, Any], previous: dict[str, Any] | None, fo
     if not target.is_file() or target.stat().st_size <= 0:
         return "missing_local"
     current_signature = signature(metadata)
+    if metadata.get("kind") == "golden" and previous and previous.get("local_sha256") != sha256_file(target):
+        return "local_golden_changed"
     if previous:
         previous_signature = {key: str(previous.get(key) or "") for key in current_signature}
         return "remote_changed" if current_signature != previous_signature else None
+    if metadata.get("kind") == "golden":
+        # An old on-disk render can have the wrong frame despite a newer mtime.
+        # Only a successful download saved in state validates its provenance.
+        return "bootstrap_unverified_golden"
     remote_timestamp = metadata.get("remote_timestamp")
     if remote_timestamp is None:
         return "bootstrap_without_timestamp"
@@ -240,8 +256,18 @@ def replace_golden_card(metadata: dict[str, Any]) -> str:
         )
         identify_png(output, (512, 776))
         os.chmod(output, 0o644)
-        os.replace(output, target)
-        return sha256_file(target)
+        digest = sha256_file(output)
+        # Keep older renders available to snapshots and rollback. Content hashes
+        # also invalidate application/CDN caches without relying on timestamps.
+        versioned = target.with_name(str(metadata["card_id"]) + "-" + digest + ".png")
+        if versioned.exists():
+            if sha256_file(versioned) != digest:
+                raise RuntimeError("Immutable golden asset collision")
+        else:
+            os.replace(output, versioned)
+        metadata["target"] = str(versioned)
+        metadata["public_path"] = "/uploads/golden/" + versioned.name
+        return digest
     finally:
         source.unlink(missing_ok=True)
         output.unlink(missing_ok=True)
@@ -337,13 +363,16 @@ def golden_assets(rows: list[dict[str, Any]], urls: dict[int, str]) -> list[dict
         # triple render under this stable path. Prefer it so new patch cards do
         # not inherit an English image from Blizzard's slower collection feed.
         # The other sources remain ordered fallbacks for propagation gaps.
-        hsj_url = HSJ_BGS_RENDER_BASE + urllib.parse.quote(card_id) + "_G_triple.png"
+        premium_id = str(row.get("premium_card_id") or card_id + "_G")
+        if not SAFE_CARD_ID_RE.fullmatch(premium_id):
+            continue
+        hsj_url = HSJ_BGS_RENDER_BASE + urllib.parse.quote(premium_id) + "_triple.png"
         candidates = [{"url": hsj_url, "kind": "hearthstonejson_ruRU_triple"}]
         if blizzard_url:
             candidates.append({"url": blizzard_url, "kind": "blizzard_fallback"})
         candidates.append(
             {
-                "url": HEARTHPWN_GOLDEN_BASE + urllib.parse.quote(card_id + "_G") + ".png",
+                "url": HEARTHPWN_GOLDEN_BASE + urllib.parse.quote(premium_id) + ".png",
                 "kind": "hearthpwn_fallback",
             }
         )
@@ -375,9 +404,22 @@ def persist_golden_paths(conn, assets: list[dict[str, Any]]) -> int:
                 UPDATE battlegrounds_cards
                 SET golden_image = %s,
                     updated_at = CURRENT_TIMESTAMP
-                WHERE card_id = %s
+                WHERE card_id = %s AND (NOT (golden_image <=> %s) OR %s)
                 """,
-                (asset["public_path"], asset["card_id"]),
+                (asset["public_path"], asset["card_id"], asset["public_path"], bool(asset.get("bytes_refreshed"))),
+            )
+            # The standalone golden record must use the same verified BG frame.
+            # HSJ upsert preserves existing local images, so subsequent scans
+            # retain this link rather than falling back to a constructed frame.
+            updated += cur.execute(
+                """
+                UPDATE battlegrounds_cards AS premium
+                INNER JOIN battlegrounds_cards AS base ON premium.dbf = base.premium_dbf
+                SET premium.card_image = %s, premium.updated_at = CURRENT_TIMESTAMP
+                WHERE base.card_id = %s AND premium.variant_kind = 'golden'
+                  AND (NOT (premium.card_image <=> %s) OR %s)
+                """,
+                (asset["public_path"], asset["card_id"], asset["public_path"], bool(asset.get("bytes_refreshed"))),
             )
     conn.commit()
     return updated
@@ -399,6 +441,7 @@ def sync_assets(
         # Kept internal so callers can update cache-busting timestamps only
         # for files that were actually replaced during this run.
         "_refreshed_assets": [],
+        "_verified_assets": [],
     }
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, workers)) as executor:
         checked = list(executor.map(remote_metadata, assets))
@@ -416,6 +459,9 @@ def sync_assets(
         reason = refresh_reason(metadata, previous if isinstance(previous, dict) else None, force)
         entry = {**signature(metadata), "checked_at": utc_now()}
         if reason is None:
+            if (metadata["kind"] == "golden" and isinstance(previous, dict)
+                    and previous.get("local_sha256") == sha256_file(Path(metadata["target"]))):
+                stats["_verified_assets"].append(metadata)
             stats["unchanged"] += 1
             entry["local_sha256"] = sha256_file(Path(metadata["target"]))
             state["assets"][key] = entry
@@ -436,6 +482,7 @@ def sync_assets(
             state["assets"][key] = entry
             stats["refreshed"] += 1
             stats["_refreshed_assets"].append(metadata)
+            stats["_verified_assets"].append({**metadata, "bytes_refreshed": True})
             print(json.dumps({"card_id": metadata["card_id"], "kind": metadata["kind"], "action": "refreshed", "reason": reason}, ensure_ascii=False))
         except Exception as exc:
             stats["errors"].append({"card_id": metadata["card_id"], "kind": metadata["kind"], "error": str(exc)})
@@ -447,6 +494,9 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--limit", type=int)
+    parser.add_argument("--card-id", action="append", help="Refresh selected base cards only; repeatable")
+    parser.add_argument("--include-archived", action="store_true", help="Include retired cards without changing pool membership")
+    parser.add_argument("--golden-only", action="store_true", help="Do not request normal images")
     parser.add_argument("--workers", type=int, default=16)
     parser.add_argument("--state-file", type=Path, default=STATE_FILE)
     args = parser.parse_args()
@@ -461,10 +511,10 @@ def main() -> int:
 
         conn = connect_db(load_php_config())
         try:
-            rows = active_cards(conn, args.limit)
+            rows = active_cards(conn, args.limit, args.include_archived, args.card_id)
 
             state = load_state(args.state_file)
-            normal_stats = sync_assets(normal_assets(rows), state, args.dry_run, args.force, args.workers)
+            normal_stats = sync_assets([] if args.golden_only else normal_assets(rows), state, args.dry_run, args.force, args.workers)
             golden_asset_list: list[dict[str, Any]] = []
             try:
                 golden_urls, golden_skip_reason = fetch_blizzard_golden_urls()
@@ -474,9 +524,11 @@ def main() -> int:
                 golden_urls = {}
                 golden_skip_reason = None
                 golden_stats = {"checked": 0, "refreshed": 0, "unchanged": 0, "errors": [{"kind": "golden", "error": str(exc)}]}
-            refreshed_golden_assets = golden_stats.pop("_refreshed_assets", [])
+            golden_stats.pop("_refreshed_assets", None)
+            verified_golden_assets = golden_stats.pop("_verified_assets", [])
             normal_stats.pop("_refreshed_assets", None)
-            persisted_golden = 0 if args.dry_run else persist_golden_paths(conn, refreshed_golden_assets)
+            normal_stats.pop("_verified_assets", None)
+            persisted_golden = 0 if args.dry_run else persist_golden_paths(conn, verified_golden_assets)
             if not args.dry_run:
                 save_state(args.state_file, state)
             errors = list(normal_stats["errors"]) + list(golden_stats["errors"])

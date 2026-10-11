@@ -1315,6 +1315,7 @@ function scan_hearthstonejson(PDO $pdo, bool $dryRun = false): array
                AND premium.variant_kind = 'golden'
             SET base_card.golden_image = premium.card_image
             WHERE premium.card_image IS NOT NULL AND premium.card_image <> ''
+              AND (base_card.golden_image IS NULL OR base_card.golden_image NOT LIKE '/uploads/golden/%')
         ");
     }
 

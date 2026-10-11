@@ -101,6 +101,20 @@ assert.equal(
 );
 assert.ok(checks.api.includes('/api/v1/cards/BG_FIXTURE_1_G'));
 assert.ok(checks.api.includes('/api/v1/cards/by-dbf/79000'));
+await click('.inspector-mode button:nth-child(2)');
+await waitFor('document.querySelector(".history-timeline")?.children.length===2');
+assert.equal(await evaluate('document.querySelectorAll(".history-diff tbody tr").length'), 3);
+await evaluate(
+  `(() => {const select=document.querySelector('.history-source select'); select.value='BG_FIXTURE_1_G'; select.dispatchEvent(new Event('change',{bubbles:true}));})()`,
+);
+await waitFor('document.querySelector(".history-timeline pre")?.textContent.includes("BG_FIXTURE_1_G")');
+await evaluate('document.querySelector(".history-diff").scrollIntoView({block:"center"})');
+await screenshot('card-history-desktop.png');
+await viewport(390, 844);
+assert.equal(await evaluate('document.documentElement.scrollWidth>innerWidth'), false);
+await screenshot('card-history-mobile.png');
+await viewport(1440, 1000);
+await click('.inspector-mode button:first-child');
 // Flipping cards keeps one dialog open (no close/reopen flash) and keeps focus on the control.
 await evaluate('document.querySelector("dialog[open]").dataset.qa = "inspector"');
 await click('.inspector-nav button[aria-label="Следующая запись"]');

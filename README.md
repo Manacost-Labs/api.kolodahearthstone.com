@@ -255,6 +255,10 @@ URL детерминированного crop `320×64` в WebP. Исходно�
 
 | Метод | Path | Query parameters | Назначение |
 | --- | --- | --- | --- |
+| GET | `/api/v1/bartender-skins` | `page`, `per_page` | Справочник проверенных скинов бармена |
+| GET | `/api/v1/bartender-skins/{card_id}` | — | Скин бармена |
+| GET | `/api/v1/card-history/{entity}/{card_id}` | `page`, `per_page` | Сохранённые полные версии карты, новые сначала |
+| GET | `/api/v1/card-history/card/{card_id}/legacy` | `page`, `per_page` | Старый журнал BG с исходными payload |
 | GET | `/api/v1/constructed-cards` | `q`, `format`, `dbf`, `collectible`, `card_type`, `class`, `set`, `include`, `updated_since`, `page`, `per_page` | Карты Standard/Wild |
 | GET | `/api/v1/constructed-cards/{card_id}` | — | Карта по `card_id` |
 | GET | `/api/v1/constructed-cards/{card_id}/wiki` | — | Wiki‑метаданные карты |
@@ -462,3 +466,45 @@ curl -fsS https://api.kolodahearthstone.com/v1/graphql \
   -H 'Content-Type: application/json' \
   --data '{"query":"query { collections(schemaName: \"catalog\", limit: 20) { items { collection estimatedRowCount } pageInfo { total } } }"}'
 ```
+
+### История наблюдённых версий карт
+
+`panel/scripts/install_card_history.py` без флага показывает план. `--apply`
+устанавливает транзакционные триггеры и начальные снимки текущих записей.
+Перед активацией нужны резервная копия каталога/триггеров, общий sync-lock и
+PostgreSQL migrations `platform/sql/011_card_versions.sql` и `platform/sql/012_bartender_catalog.sql`. Старые релизы API
+сохраняются; откат API не удаляет журнал. TRUNCATE и замена таблиц обходят
+строчные триггеры: такие операции запрещены для каталога после установки.
+При добавлении столбцов нужна явная миграция триггеров; установщик проверяет
+совпадение их определения и отказывается молча сохранять старую схему.
+
+`entity`: `constructed_card`, `card`, `hero`, `hero_skin`, `library_card`,
+`timewarped_card`, `pet`, `coin`, `bartender_skin`. Для библиотек идентификатор
+составной: `library:card_id` (например `reward:BG_EXAMPLE`). Золотые BG-карты
+имеют собственный `card_id` и отдельную историю. Стандарт/Вольный используют
+одну историю Constructed, независимо от текущей доступности в формате.
+
+Полные снимки записываются при добавлении, изменении, удалении и смене ID.
+Обновления дат проверки и повторный raw payload без изменения нормализованных
+данных не создают версий. Дата `observed_at` — UTC-момент наблюдения;
+`coverage.before_first_observation=unknown` явно обозначает неизвестное прошлое.
+Старый BG-журнал доступен отдельно и не выдаётся за полные нормализованные снимки.
+Изображения пока остаются ссылками, архивирование их байтов не заявляется.
+
+Панель: карточка → «История изменений». Можно выбрать обычную/золотую карту,
+сравнить две версии и загрузить ранние снимки. История загружается отдельно от
+каталога, приватный relay сохраняет обязательную авторизацию и no-store.
+
+Золотые изображения: `sync_battlegrounds_images.py --golden-only --card-id ID`
+ремонтирует выбранную карту; `--include-archived` включает архив без изменения
+пула. Непроверенный локальный золотой файл перезагружается даже с новой mtime.
+Сканер не заменяет опубликованный `/uploads/golden/` устаревшим `/uploads/cards/`.
+
+`install_card_history.py --catalog-schema --apply` сначала создаёт справочник
+барменов, затем устанавливает захват всех девяти каталогов.
+`reconcile_card_catalog.py` без `--apply` возвращает проверенный план дополнения
+скинов, архивных связей, библиотек и текстов; не меняет актуальные форматы/пул.
+При применении требует уже установленный журнал и сохраняет каждую правку.
+Золотые рендеры записываются в отдельные файлы с SHA-256 в URL; прежние файлы
+остаются доступными, а обычная запись и её golden variant используют один
+проверенный BG-рендер. Это не означает архивирование всех остальных медиа.

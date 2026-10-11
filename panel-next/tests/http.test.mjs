@@ -72,3 +72,16 @@ test('remembered tile view redirects to an explicit URL without bypassing authen
   });
   assert.equal(explicit.status, 200);
 });
+
+test('history relay is private and carries the selected card identity', async () => {
+  const response = await fetch(origin + '/api/panel?action=card_history&entity=card&card_id=BG_FIXTURE_1', {
+    headers: { Cookie: cookie },
+  });
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('cache-control'), /no-store/);
+  const history = (await response.json()).data;
+  assert.equal(history.card_id, 'BG_FIXTURE_1');
+  assert.equal(history.versions[0].snapshot.attack, 4);
+  const anonymous = await fetch(origin + '/api/panel?action=card_history&entity=card&card_id=BG_FIXTURE_1');
+  assert.equal(anonymous.status, 401);
+});

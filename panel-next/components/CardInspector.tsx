@@ -39,6 +39,7 @@ export function CardInspector({
   onNext,
   onClose,
 }: Props) {
+  const [section, setSection] = useState<'card' | 'history'>('card');
   const detail = cardDetail(row, cardType, tribes);
   const [golden, setGolden] = useState(false);
   const showGolden = golden && detail.images.golden.length > 0;
@@ -61,147 +62,161 @@ export function CardInspector({
 
   return (
     <Modal title={detail.name} onClose={onClose} wide>
-      <div className="inspector">
-        <div className="inspector-media">
-          <div className="inspector-art" data-golden={showGolden || undefined}>
-            <Artwork key={images.join('|')} urls={images} alt={detail.name} />
-          </div>
-          {detail.images.golden.length > 0 && (
-            <fieldset className="segmented">
-              <legend className="sr-only">Версия карты</legend>
-              <button type="button" aria-pressed={!showGolden} onClick={() => setGolden(false)}>
-                Обычная
-              </button>
-              <button type="button" aria-pressed={showGolden} onClick={() => setGolden(true)}>
-                <SparkleIcon size={14} weight="fill" aria-hidden="true" /> Золотая
-              </button>
-            </fieldset>
-          )}
-        </div>
-        <div className="inspector-body">
-          {detail.nameEn && detail.nameEn !== detail.name && (
-            <p className="inspector-subtitle" lang="en">
-              {detail.nameEn}
-            </p>
-          )}
-          <div className="inspector-badges">
-            {detail.badges.map(badge => (
-              <StatusBadge key={badge.label} label={badge.label} tone={badge.tone ?? 'neutral'} />
-            ))}
-          </div>
-          {detail.stats.length > 0 && (
-            <dl className="inspector-stats">
-              {detail.stats.map(stat => (
-                <div key={stat.key} data-stat={stat.key}>
-                  <dt>{stat.label}</dt>
-                  <dd>{stat.value}</dd>
-                </div>
-              ))}
-            </dl>
-          )}
-          {(detail.text.ru || detail.mechanics.length > 0 || detail.text.en) && (
-            <section className="inspector-text" aria-label="Текст карты">
-              {detail.text.ru && <p>{detail.text.ru}</p>}
-              {detail.mechanics.length > 0 && (
-                <ul className="mechanics" aria-label="Механики">
-                  {detail.mechanics.map(mechanic => (
-                    <li key={mechanic}>{mechanic}</li>
-                  ))}
-                </ul>
+      <div className="segmented inspector-mode" role="group" aria-label="Раздел карточки">
+        <button type="button" aria-pressed={section === 'card'} onClick={() => setSection('card')}>
+          Карточка
+        </button>
+        <button type="button" aria-pressed={section === 'history'} onClick={() => setSection('history')}>
+          История изменений
+        </button>
+      </div>
+      {section === 'card' ? (
+        <>
+          <div className="inspector">
+            <div className="inspector-media">
+              <div className="inspector-art" data-golden={showGolden || undefined}>
+                <Artwork key={images.join('|')} urls={images} alt={detail.name} />
+              </div>
+              {detail.images.golden.length > 0 && (
+                <fieldset className="segmented">
+                  <legend className="sr-only">Версия карты</legend>
+                  <button type="button" aria-pressed={!showGolden} onClick={() => setGolden(false)}>
+                    Обычная
+                  </button>
+                  <button type="button" aria-pressed={showGolden} onClick={() => setGolden(true)}>
+                    <SparkleIcon size={14} weight="fill" aria-hidden="true" /> Золотая
+                  </button>
+                </fieldset>
               )}
-              {detail.text.en && (
-                <p className="inspector-text__en" lang="en">
-                  {detail.text.en}
+            </div>
+            <div className="inspector-body">
+              {detail.nameEn && detail.nameEn !== detail.name && (
+                <p className="inspector-subtitle" lang="en">
+                  {detail.nameEn}
                 </p>
               )}
-              {detail.text.flavor && <p className="inspector-flavor">{detail.text.flavor}</p>}
-            </section>
-          )}
-          {detail.ids.length > 0 && (
-            <dl className="inspector-ids">
-              {detail.ids.map(id => (
-                <div key={id.label}>
-                  <dt>{id.label}</dt>
-                  <dd>
-                    <code>{id.value}</code>
-                    <CopyButton value={id.value} label={id.label} />
-                  </dd>
-                </div>
-              ))}
-            </dl>
-          )}
-          <p className="inspector-meta">
-            {Boolean(detail.updatedAt) && (
-              <span>
-                Обновлено <Time value={detail.updatedAt} relative />
-              </span>
-            )}
-            {detail.artist && <span>Художник: {detail.artist}</span>}
-            {detail.wikiUrl && (
-              <a href={detail.wikiUrl} target="_blank" rel="noopener noreferrer">
-                Wiki <ArrowSquareOutIcon size={13} aria-hidden="true" />
-              </a>
-            )}
-          </p>
-        </div>
-      </div>
-      <details className="inspector-more">
-        <summary>Изображения, все поля и JSON API</summary>
-        <RecordTabs row={row} apiBase={apiBase} />
-      </details>
-      <footer className="inspector-footer">
-        {(onPrev || onNext) && (
-          <div className="inspector-nav">
-            <button
-              type="button"
-              className="icon-button"
-              onClick={onPrev}
-              disabled={!onPrev}
-              aria-label="Предыдущая запись"
-            >
-              <CaretLeftIcon size={18} aria-hidden="true" />
-            </button>
-            {position && <span>{position}</span>}
-            <button
-              type="button"
-              className="icon-button"
-              onClick={onNext}
-              disabled={!onNext}
-              aria-label="Следующая запись"
-            >
-              <CaretRightIcon size={18} aria-hidden="true" />
-            </button>
+              <div className="inspector-badges">
+                {detail.badges.map(badge => (
+                  <StatusBadge key={badge.label} label={badge.label} tone={badge.tone ?? 'neutral'} />
+                ))}
+              </div>
+              {detail.stats.length > 0 && (
+                <dl className="inspector-stats">
+                  {detail.stats.map(stat => (
+                    <div key={stat.key} data-stat={stat.key}>
+                      <dt>{stat.label}</dt>
+                      <dd>{stat.value}</dd>
+                    </div>
+                  ))}
+                </dl>
+              )}
+              {(detail.text.ru || detail.mechanics.length > 0 || detail.text.en) && (
+                <section className="inspector-text" aria-label="Текст карты">
+                  {detail.text.ru && <p>{detail.text.ru}</p>}
+                  {detail.mechanics.length > 0 && (
+                    <ul className="mechanics" aria-label="Механики">
+                      {detail.mechanics.map(mechanic => (
+                        <li key={mechanic}>{mechanic}</li>
+                      ))}
+                    </ul>
+                  )}
+                  {detail.text.en && (
+                    <p className="inspector-text__en" lang="en">
+                      {detail.text.en}
+                    </p>
+                  )}
+                  {detail.text.flavor && <p className="inspector-flavor">{detail.text.flavor}</p>}
+                </section>
+              )}
+              {detail.ids.length > 0 && (
+                <dl className="inspector-ids">
+                  {detail.ids.map(id => (
+                    <div key={id.label}>
+                      <dt>{id.label}</dt>
+                      <dd>
+                        <code>{id.value}</code>
+                        <CopyButton value={id.value} label={id.label} />
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              )}
+              <p className="inspector-meta">
+                {Boolean(detail.updatedAt) && (
+                  <span>
+                    Обновлено <Time value={detail.updatedAt} relative />
+                  </span>
+                )}
+                {detail.artist && <span>Художник: {detail.artist}</span>}
+                {detail.wikiUrl && (
+                  <a href={detail.wikiUrl} target="_blank" rel="noopener noreferrer">
+                    Wiki <ArrowSquareOutIcon size={13} aria-hidden="true" />
+                  </a>
+                )}
+              </p>
+            </div>
           </div>
-        )}
-        <div className="modal-actions">
-          {apiId && (
-            <a
-              className="button secondary"
-              href={`${apiBase}/${encodeURIComponent(apiId)}`}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <ArrowSquareOutIcon size={16} aria-hidden="true" /> API
-            </a>
-          )}
-          <Link
-            className="button secondary"
-            prefetch={false}
-            href={`/?action=analytics&stats=card&q=${encodeURIComponent(text(row.name_en || row.name || row.name_ru, ''))}`}
-          >
-            <ChartBarIcon size={16} aria-hidden="true" /> Статистика
-          </Link>
-          {editable && (
-            <Link
-              className="button"
-              prefetch={false}
-              href={`/?action=edit&id=${encodeURIComponent(text(row.id))}`}
-            >
-              <PencilSimpleIcon size={16} aria-hidden="true" /> Редактировать
-            </Link>
-          )}
-        </div>
-      </footer>
+          <details className="inspector-more">
+            <summary>История, изображения и все данные</summary>
+            <RecordTabs row={row} apiBase={apiBase} />
+          </details>
+          <footer className="inspector-footer">
+            {(onPrev || onNext) && (
+              <div className="inspector-nav">
+                <button
+                  type="button"
+                  className="icon-button"
+                  onClick={onPrev}
+                  disabled={!onPrev}
+                  aria-label="Предыдущая запись"
+                >
+                  <CaretLeftIcon size={18} aria-hidden="true" />
+                </button>
+                {position && <span>{position}</span>}
+                <button
+                  type="button"
+                  className="icon-button"
+                  onClick={onNext}
+                  disabled={!onNext}
+                  aria-label="Следующая запись"
+                >
+                  <CaretRightIcon size={18} aria-hidden="true" />
+                </button>
+              </div>
+            )}
+            <div className="modal-actions">
+              {apiId && (
+                <a
+                  className="button secondary"
+                  href={`${apiBase}/${encodeURIComponent(apiId)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <ArrowSquareOutIcon size={16} aria-hidden="true" /> API
+                </a>
+              )}
+              <Link
+                className="button secondary"
+                prefetch={false}
+                href={`/?action=analytics&stats=card&q=${encodeURIComponent(text(row.name_en || row.name || row.name_ru, ''))}`}
+              >
+                <ChartBarIcon size={16} aria-hidden="true" /> Статистика
+              </Link>
+              {editable && (
+                <Link
+                  className="button"
+                  prefetch={false}
+                  href={`/?action=edit&id=${encodeURIComponent(text(row.id))}`}
+                >
+                  <PencilSimpleIcon size={16} aria-hidden="true" /> Редактировать
+                </Link>
+              )}
+            </div>
+          </footer>
+        </>
+      ) : (
+        <RecordTabs key={String(row.card_id)} row={row} apiBase={apiBase} initialTab="history" />
+      )}
     </Modal>
   );
 }

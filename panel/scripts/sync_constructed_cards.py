@@ -17,6 +17,7 @@ from typing import Any
 
 import pymysql
 from pymysql.cursors import DictCursor
+from catalog_card_text import repair_texts
 from blizzard_card_metadata import reference_cards
 
 APP_ROOT = Path(__file__).resolve().parents[1]
@@ -395,6 +396,9 @@ def normalize_card(dbf: int, ru: dict[str, Any], en: dict[str, Any] | None, hsj_
     card_id = str((hsj_ru or hsj_en or {}).get("id") or f"blizzard:{dbf}")
     text_ru, patch_ru = patch_text(card_id, "ru", ru.get("text") or (hsj_ru or {}).get("text"))
     text_en, patch_en = patch_text(card_id, "en", (en or {}).get("text") or (hsj_en or {}).get("text"))
+    text_ru, text_en, text_repair = repair_texts(
+        card_id, text_ru, text_en, (hsj_ru or {}).get("text"), (hsj_en or {}).get("text"),
+    )
     fallback_render = (
         f"https://art.hearthstonejson.com/v1/render/latest/ruRU/512x/{urllib.parse.quote(card_id, safe='')}.png"
         if hsj_ru or hsj_en
@@ -413,6 +417,7 @@ def normalize_card(dbf: int, ru: dict[str, Any], en: dict[str, Any] | None, hsj_
         "hsj_ru": hsj_ru,
         "hsj_en": hsj_en,
         "patch_text_override": {key: value for key, value in (("ru", patch_ru), ("en", patch_en)) if value},
+        **({"text_repair": text_repair} if text_repair else {}),
         "patch_image_override": patch_image_override,
     }
     return {

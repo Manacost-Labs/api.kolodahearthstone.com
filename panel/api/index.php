@@ -1,5 +1,7 @@
 <?php
 declare(strict_types=1);
+require_once __DIR__ . '/../lib/card_history.php';
+require_once __DIR__ . '/../lib/bartender_catalog.php';
 
 $config = require __DIR__ . '/../config.php';
 require_once __DIR__ . '/../lib/battleground_creature_types.php';
@@ -1614,6 +1616,10 @@ function api_index(PDO $pdo): void
         'pets_total' => $petsTotal,
         'coins_total' => $coinsTotal,
         'endpoints' => [
+            'GET /api/v1/bartender-skins' => 'Скины бармена.',
+            'GET /api/v1/bartender-skins/{card_id}' => 'Скин бармена по card_id.',
+            'GET /api/v1/card-history/{entity}/{card_id}' => 'Сохранённые версии карты.',
+            'GET /api/v1/card-history/card/{card_id}/legacy' => 'Исходный журнал Полей сражений.',
             'GET /api/v1' => 'Описание API.',
             'GET /api/v1/cards' => 'Список карт с фильтрами и пагинацией.',
             'GET /api/v1/cards?card_type=spell' => 'Список заклинаний Полей сражений.',
@@ -3090,6 +3096,40 @@ try {
     }
     if ($path === '/api/v1/meta') {
         api_meta($pdo);
+    }
+    if (preg_match('~^/api/v1/card-history/card/([^/]+)/legacy$~', $path, $matches)) {
+        try {
+            $history = catalog_legacy_bg_history($pdo, rawurldecode($matches[1]),
+                (int)($_GET['page'] ?? 1), (int)($_GET['per_page'] ?? DEFAULT_PER_PAGE));
+        } catch (InvalidArgumentException $e) {
+            respond_error('invalid_parameter', 'Некорректный идентификатор карты.', 400);
+        }
+        respond_cached(['data' => $history], $history['coverage']['last_observed_at'], 60);
+    }
+    if (preg_match('~^/api/v1/card-history/([^/]+)/([^/]+)$~', $path, $matches)) {
+        try {
+            $history = catalog_card_history($pdo, rawurldecode($matches[1]), rawurldecode($matches[2]),
+                (int)($_GET['page'] ?? 1), (int)($_GET['per_page'] ?? DEFAULT_PER_PAGE));
+        } catch (InvalidArgumentException $e) {
+            respond_error('invalid_parameter', 'Некорректный тип или идентификатор карты.', 400);
+        } catch (PDOException $e) {
+            if (($e->errorInfo[0] ?? '') !== '42S02') throw $e;
+            respond_error('history_not_ready', 'История версий ещё не установлена.', 503);
+        }
+        respond_cached(['data' => $history], $history['coverage']['last_observed_at'], 60);
+    }
+    if ($path === '/api/v1/bartender-skins') {
+        $result = bartender_skin_listing($pdo, (int)($_GET['page'] ?? 1), (int)($_GET['per_page'] ?? DEFAULT_PER_PAGE));
+        $modified = $result['last_updated'];
+        unset($result['last_updated']);
+        respond_cached($result, $modified);
+    }
+    if (preg_match('~^/api/v1/bartender-skins/([^/]+)$~', $path, $matches)) {
+        $stmt = $pdo->prepare('SELECT * FROM battlegrounds_bartender_skins WHERE card_id = :card_id');
+        $stmt->execute(['card_id'=>rawurldecode($matches[1])]);
+        $skin = $stmt->fetch();
+        if (!$skin) respond_error('not_found', 'Скин бармена не найден.', 404);
+        respond_cached(['data'=>bartender_skin_to_api($skin)], $skin['updated_at']);
     }
     if ($path === '/api/v1/cards') {
         api_cards($pdo);

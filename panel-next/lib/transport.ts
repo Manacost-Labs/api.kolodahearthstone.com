@@ -1,5 +1,14 @@
 // Pure boundary checks, shared by the server transport and its regression tests.
-const actions = new Set(['session', 'list', 'edit', 'new', 'api_tokens', 'wiki_terms', 'analytics_registry']);
+const actions = new Set([
+  'session',
+  'list',
+  'edit',
+  'new',
+  'api_tokens',
+  'wiki_terms',
+  'analytics_registry',
+  'card_history',
+]);
 export function bridgeTarget(view: string, query: URLSearchParams): string {
   if (view === 'analytics') return '/analytics.php?' + query.toString();
   if (view === 'parsers') return '/parser-control.php';

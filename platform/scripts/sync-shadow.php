@@ -107,6 +107,7 @@ DECLARE
     source_count bigint;
     target_count bigint;
     append_only_tables text[] := ARRAY[
+        'catalog.catalog_card_versions',
         'analytics.archetype_deck_cards',
         'analytics.archetype_decks',
         'analytics.archetype_matchups',
@@ -119,6 +120,7 @@ DECLARE
         'analytics.hsguru_archetype_history'
     ];
     monotonic_id_tables text[] := ARRAY[
+        'catalog.catalog_card_versions',
         'analytics.archetype_decks',
         'analytics.archetype_snapshots',
         'analytics.bg_minion_snapshots',

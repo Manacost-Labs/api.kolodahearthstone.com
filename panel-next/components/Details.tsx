@@ -7,12 +7,29 @@ import { imagesFrom, record, text } from '@/lib/model';
 import type { Row } from '@/lib/types';
 import { Artwork } from './Artwork';
 import { Value } from './ui';
+import { CardHistoryFamily } from './CardHistory';
+import { historyIdentity } from '@/lib/card-history';
 const isVideo = (url: string) => /\.(mp4|webm)(\?|$)/i.test(url);
 
-export function RecordTabs({ row, apiBase }: { row: Row; apiBase?: string }) {
-  const [tab, setTab] = useState('data');
+export function RecordTabs({
+  row,
+  apiBase,
+  initialTab = 'data',
+}: {
+  row: Row;
+  apiBase?: string;
+  initialTab?: string;
+}) {
+  const [tab, setTab] = useState(initialTab);
   const [preview, setPreview] = useState<{ label: string; url: string } | null>(null);
   const images = imagesFrom(row);
+  const identity = historyIdentity(row, apiBase);
+  const tabs = [
+    ['data', 'Данные'],
+    ['images', `Изображения · ${images.length}`],
+    ['json', 'JSON API'],
+    ...(identity ? [['history', 'История']] : []),
+  ];
   const golden = record(row.golden_variant);
   const ids = [row.card_id || row.hero_card_id || row.skin_id || row.pet_id || row.id, golden.card_id].filter(
     v => v !== null && v !== undefined && v !== '',
@@ -21,13 +38,7 @@ export function RecordTabs({ row, apiBase }: { row: Row; apiBase?: string }) {
   return (
     <>
       <div className="tabs" role="tablist" aria-label="Детали записи">
-        {(
-          [
-            ['data', 'Данные'],
-            ['images', `Изображения · ${images.length}`],
-            ['json', 'JSON API'],
-          ] as const
-        ).map(([id, name]) => (
+        {tabs.map(([id, name]) => (
           <button
             key={id}
             type="button"
@@ -38,12 +49,12 @@ export function RecordTabs({ row, apiBase }: { row: Row; apiBase?: string }) {
             tabIndex={tab === id ? 0 : -1}
             onClick={() => setTab(id)}
             onKeyDown={e => {
-              const keys = ['data', 'images', 'json'];
+              const keys = tabs.map(([key]) => key);
               const i = keys.indexOf(id);
               const delta = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
               if (delta) {
                 e.preventDefault();
-                const next = keys[(i + delta + 3) % 3];
+                const next = keys[(i + delta + keys.length) % keys.length];
                 setTab(next);
                 document.getElementById('detail-tab-' + next)?.focus();
               }
@@ -127,6 +138,22 @@ export function RecordTabs({ row, apiBase }: { row: Row; apiBase?: string }) {
         </div>
         <pre>{JSON.stringify(row, null, 2)}</pre>
       </section>
+      {identity && (
+        <section
+          role="tabpanel"
+          id="detail-panel-history"
+          aria-labelledby="detail-tab-history"
+          hidden={tab !== 'history'}
+        >
+          {tab === 'history' && (
+            <CardHistoryFamily
+              goldenId={identity.entity === 'card' && golden.card_id ? String(golden.card_id) : undefined}
+              key={identity.entity + ':' + identity.cardId}
+              {...identity}
+            />
+          )}
+        </section>
+      )}
       {preview && (
         <Modal title={preview.label} onClose={() => setPreview(null)}>
           {isVideo(preview.url) ? (

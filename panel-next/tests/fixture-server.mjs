@@ -189,6 +189,32 @@ export const server = http.createServer(async (req, res) => {
       return send({ ok: false, error: 'Сессия формы устарела.' }, 422);
   } else input = url.searchParams;
   const action = input.get('action') || 'list';
+  if (action === 'card_history') {
+    const legacy = input.get('legacy') === '1';
+    return send({
+      ok: true,
+      data: {
+        entity: input.get('entity'),
+        card_id: input.get('card_id'),
+        versions: [
+          {
+            version_id: 12,
+            event: 'changed',
+            observed_at: '2026-10-11 12:00:00',
+            snapshot: { card_id: input.get('card_id'), attack: 4, health: 4, text_ru: 'Даёт +2/+2.' },
+          },
+          {
+            version_id: 11,
+            event: 'baseline',
+            observed_at: '2026-10-10 12:00:00',
+            snapshot: { card_id: input.get('card_id'), attack: 2, health: 2, text_ru: 'Даёт +1/+1.' },
+          },
+        ],
+        coverage: { before_first_observation: 'unknown', image_bytes_archived: false, legacy },
+        pagination: { page: 1, total: 2, total_pages: 1 },
+      },
+    });
+  }
   if (action === 'session')
     return send({ ok: true, user, logoutCsrf: 'fixture-logout-csrf', parserCsrf: 'fixture-parser-csrf' });
   if (action === 'list' && input.get('q') === '__fixture_error__' && !catalogErrorTriggered) {
