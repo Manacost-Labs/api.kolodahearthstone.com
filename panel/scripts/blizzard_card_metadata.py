@@ -19,7 +19,8 @@ def reference_cards(metadata: dict) -> list[dict]:
                 continue
             identity, slug = row.get("id"), row.get("slug")
             if type(identity) is int and identity > 0 and isinstance(slug, str) and slug.strip():
-                valid.append({field: {"id": identity, "slug": slug.strip()}})
+                canonical = slug.strip().replace(" ", "_").replace("-", "_") if field == "cardType" else slug.strip()
+                valid.append({field: {"id": identity, "slug": canonical}})
         if field in {"class", "cardType", "rarity"} and not valid:
             raise ValueError(f"Empty Blizzard metadata group: {group}")
         references.extend(valid)

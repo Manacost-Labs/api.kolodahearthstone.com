@@ -41,6 +41,12 @@ class BlizzardMetadataTest(unittest.TestCase):
                 card = sync.make_reveal_card(130001, raw, raw, reference_cards(self.metadata), {}, {})
                 self.assertEqual(card["collectible"], 0)
 
+    def test_hero_power_metadata_uses_existing_api_type_slug(self):
+        metadata = {**self.metadata, "types": [{"id": 10, "slug": "hero power"}]}
+        card = sync.make_reveal_card(130001, {"name": "Ability", "cardTypeId": 10}, None,
+                                     reference_cards(metadata), {}, {})
+        self.assertEqual(card["card_type"], "hero_power")
+
     def test_missing_or_empty_required_metadata_is_rejected(self):
         for key in ["classes", "types", "rarities"]:
             with self.subTest(key=key), self.assertRaises(ValueError):
