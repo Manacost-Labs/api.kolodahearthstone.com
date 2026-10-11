@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import time
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import numpy as np
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -12,6 +14,15 @@ from app.material_embeddings import DIMENSIONS, EmbeddingsUnavailable
 from app.material_search import search_materials
 from app.material_search_mcp import material_api_lifespan, mcp_app
 from app.routers.material_search import router
+
+
+@pytest.fixture(autouse=True)
+def clean_result_cache():
+    from app.material_search import _results
+
+    _results.clear()
+    yield
+    _results.clear()
 
 
 def row(id="constructed:CARD", name="Тестовая карта"):
@@ -169,3 +180,55 @@ def test_mcp_protocol_tools_and_repeated_lifespan(monkeypatch):
                 json={"jsonrpc": "2.0", "id": 4, "method": "tools/list"},
             )
             assert rejected.status_code == 403
+
+
+def test_repeated_and_concurrent_searches_share_database_work(monkeypatch):
+    monkeypatch.setenv("HS_SEARCH_ENABLED", "false")
+    lexical = AsyncMock(return_value=[row()])
+    documents = AsyncMock(return_value=[row()])
+    monkeypatch.setattr("app.material_search.material_repository.lexical", lexical)
+    monkeypatch.setattr("app.material_search.material_repository.documents", documents)
+
+    async def scenario():
+        results = await asyncio.gather(
+            *(search_materials("кэшируемый поиск") for _ in range(8))
+        )
+        results[0]["items"][0]["title"] = "client mutation"
+        cached = await search_materials("кэшируемый поиск")
+        assert cached["meta"]["cache"] == "hit"
+        assert cached["items"][0]["title"] == "Тестовая карта"
+        lexical.assert_awaited_once()
+        documents.assert_awaited_once()
+
+    asyncio.run(scenario())
+
+
+def test_result_cache_expires_and_new_index_invalidates_it(tmp_path, monkeypatch):
+    monkeypatch.setenv("HS_SEARCH_ENABLED", "false")
+    path = tmp_path / "snapshot"
+    monkeypatch.setattr("app.material_search.index_path", lambda: path)
+    clock = [100.0]
+    monkeypatch.setattr(
+        "app.material_search.time",
+        SimpleNamespace(monotonic=lambda: clock[0], time=time.time),
+    )
+    documents = AsyncMock(return_value=[row(name="Старое название")])
+    monkeypatch.setattr(
+        "app.material_search.material_repository.lexical",
+        AsyncMock(return_value=[row()]),
+    )
+    monkeypatch.setattr("app.material_search.material_repository.documents", documents)
+
+    async def scenario():
+        await search_materials("проверка свежести")
+        documents.return_value = [row(name="Новое название")]
+        clock[0] += 6
+        refreshed = await search_materials("проверка свежести")
+        assert refreshed["items"][0]["title"] == "Новое название"
+        documents.return_value = [row(name="После перестройки индекса")]
+        path.write_bytes(b"new snapshot")
+        updated = await search_materials("проверка свежести")
+        assert updated["items"][0]["title"] == "После перестройки индекса"
+        assert updated["meta"]["cache"] == "miss"
+
+    asyncio.run(scenario())

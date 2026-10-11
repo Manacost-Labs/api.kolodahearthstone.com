@@ -32,6 +32,8 @@ class SearchMeta(BaseModel):
     indexed_at: str | None = None
     elapsed_ms: float
     count: int
+    cache: str = "miss"
+    cache_age_ms: float = 0
 
 
 class SearchResponse(BaseModel):

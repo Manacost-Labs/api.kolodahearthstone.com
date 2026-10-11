@@ -13,7 +13,7 @@ from mcp.types import ToolAnnotations
 from .config import cors_allowed_origins
 from .graphql_api.repository import RepositoryUnavailable
 from .material_embeddings import embedding_client
-from .material_search import fetch_material, search_materials
+from .material_search import close_search_cache, fetch_material, search_materials
 
 
 def create_mcp() -> FastMCP:
@@ -95,6 +95,7 @@ async def material_api_lifespan(app):
             yield
     finally:
         mcp_app.application = None
+        await close_search_cache()
         await embedding_client.close()
         for handler in app.router.on_shutdown:
             result = handler()

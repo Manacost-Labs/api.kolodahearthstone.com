@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import os
 import time
+from collections import OrderedDict
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote
 
 from .material_embeddings import MODEL, EmbeddingsUnavailable, embedding_client
 from .material_repository import KINDS, material_repository
-from .material_search_index import document_key, material_index
+from .material_search_index import document_key, index_path, material_index
+
+_results: OrderedDict[tuple, tuple[float, dict[str, Any]]] = OrderedDict()
+_pending_searches: dict[tuple, asyncio.Task[dict[str, Any]]] = {}
 
 
 def validate_search(
@@ -41,7 +46,7 @@ def material_payload(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-async def search_materials(
+async def _search_materials(
     query: str, kinds: list[str] | None = None, limit: int = 10, mode: str = "hybrid"
 ) -> dict[str, Any]:
     query, kinds = validate_search(query, kinds, limit)
@@ -116,6 +121,75 @@ async def search_materials(
             "count": len(items),
         },
     }
+
+
+async def _run_search(
+    key: tuple, query: str, kinds: list[str] | None, limit: int, mode: str
+) -> dict[str, Any]:
+    try:
+        result = await _search_materials(query, kinds, limit, mode)
+        _results[key] = (time.monotonic(), result)
+        _results.move_to_end(key)
+        while len(_results) > 256:
+            _results.popitem(last=False)
+        return result
+    finally:
+        _pending_searches.pop(key, None)
+
+
+async def search_materials(
+    query: str, kinds: list[str] | None = None, limit: int = 10, mode: str = "hybrid"
+) -> dict[str, Any]:
+    started = time.monotonic()
+    query, kinds = validate_search(query, kinds, limit)
+    if mode not in {"hybrid", "lexical"}:
+        raise ValueError("mode must be hybrid or lexical")
+    try:
+        stat = index_path().stat()
+        revision = (stat.st_mtime_ns, stat.st_size)
+    except OSError:
+        revision = None
+    key = (
+        query,
+        tuple(kinds or []),
+        limit,
+        mode,
+        os.environ.get("HS_SEARCH_ENABLED", "false"),
+        str(index_path()),
+        revision,
+    )
+    cached = _results.get(key)
+    hit = bool(cached and started - cached[0] < 5)
+    if hit:
+        _results.move_to_end(key)
+        result = copy.deepcopy(cached[1])
+        age = started - cached[0]
+    else:
+        task = _pending_searches.get(key)
+        if task is None:
+            task = asyncio.create_task(_run_search(key, query, kinds, limit, mode))
+            task.add_done_callback(
+                lambda done: None if done.cancelled() else done.exception()
+            )
+            _pending_searches[key] = task
+        result = copy.deepcopy(await asyncio.shield(task))
+        age = 0
+    result["meta"].update(
+        {
+            "cache": "hit" if hit else "miss",
+            "cache_age_ms": round(age * 1000, 1),
+            "elapsed_ms": round((time.monotonic() - started) * 1000, 1),
+        }
+    )
+    return result
+
+
+async def close_search_cache() -> None:
+    tasks = tuple(_pending_searches.values())
+    for task in tasks:
+        task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
+    _results.clear()
 
 
 async def fetch_material(material_id: str) -> dict[str, Any] | None:
