@@ -17,6 +17,7 @@ from typing import Any
 
 import pymysql
 from pymysql.cursors import DictCursor
+from blizzard_card_metadata import reference_cards
 
 APP_ROOT = Path(__file__).resolve().parents[1]
 HSJ_RU_URL = "https://api.hearthstonejson.com/v1/latest/ruRU/cards.json"
@@ -239,6 +240,14 @@ def fetch_official_reveals(locale: str) -> dict[int, dict[str, Any]]:
     return result
 
 
+def fetch_metadata_reference_cards(region: str, token: str) -> list[dict[str, Any]]:
+    url = f"https://{region}.api.blizzard.com/hearthstone/metadata?locale=en_US"
+    metadata = http_json(url, headers={"Authorization": "Bearer " + token})
+    if not isinstance(metadata, dict):
+        raise ValueError("Invalid Blizzard metadata response")
+    return reference_cards(metadata)
+
+
 def safe_reveal_image(value: Any) -> str | None:
     if not isinstance(value, str) or len(value) > 512:
         return None
@@ -410,7 +419,7 @@ def normalize_card(dbf: int, ru: dict[str, Any], en: dict[str, Any] | None, hsj_
         "card_id": card_id,
         "dbf": dbf,
         "slug": ru.get("slug") or (en or {}).get("slug"),
-        "collectible": 1 if (ru.get("collectible") is not False and (hsj_ru or {}).get("collectible") is not False) else 0,
+        "collectible": 1 if (ru.get("collectible") not in (False, 0) and (hsj_ru or {}).get("collectible") not in (False, 0)) else 0,
         "name_ru": localized_text(ru.get("name") or (hsj_ru or {}).get("name")),
         "name_en": localized_text((en or {}).get("name") or (hsj_en or {}).get("name")),
         "text_ru": text_ru,
@@ -705,6 +714,8 @@ def sync_format(conn, format_slug: str, region: str, token: str, hsj_ru: dict[in
         )
     }
     standard_cards = list(ru_cards.values())
+    if revealed_ru or revealed_en:
+        standard_cards.extend(fetch_metadata_reference_cards(region, token))
     stats = {"scanned": 0, "inserted": 0, "updated": 0, "changed": 0, "removed": 0, "renamed": 0, "preview": 0, "preview_locale_errors": len(reveal_errors)}
     active_card_ids: set[str] = set()
     for dbf, ru in sorted(ru_cards.items()):

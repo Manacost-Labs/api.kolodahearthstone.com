@@ -65,6 +65,13 @@ HearthstoneJSON от 16 сентября уже содержит новые ка
 актуальном пуле, включая 27 аберраций. Общий аудит изображений может отдельно
 сообщать о внешних картинках золотых Dark Paradox; это не отменяет импорт.
 
+## Constructed preview metadata
+
+Constructed previews resolve class, card type and rarity IDs through Blizzard's
+metadata endpoint, including cards not yet published in HearthstoneJSON. A missing
+metadata dictionary stops publication. Constructed Wiki sync uses the newest of
+its default index and the shared Wiki index; an explicit custom index is preserved.
+
 ## Aberration classification repair
 
 The scanner and REST vocabulary share `lib/battleground_creature_types.php`.

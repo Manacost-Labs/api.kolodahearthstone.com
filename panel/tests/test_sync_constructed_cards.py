@@ -109,6 +109,11 @@ class HearthstoneJsonFormatFallbackTest(unittest.TestCase):
 
 
 class OfficialExpansionRevealTest(unittest.TestCase):
+    def setUp(self):
+        metadata = patch.object(sync, "fetch_metadata_reference_cards", return_value=[])
+        metadata.start()
+        self.addCleanup(metadata.stop)
+
     def test_fetches_all_revealed_pages_with_optional_fields_missing(self):
         def fake_http_json(url, headers=None, data=None):
             self.assertEqual(urlparse(url).path, "/en-us/api/cards")

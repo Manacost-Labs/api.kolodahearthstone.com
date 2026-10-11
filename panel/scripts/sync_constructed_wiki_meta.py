@@ -173,10 +173,14 @@ def is_rate_limited(exc: Exception) -> bool:
 
 
 def load_index(lookup, index_path: Path, refresh_index: bool) -> tuple[dict[str, Any], bool, str]:
-    if not refresh_index and index_path.exists():
-        return json.loads(index_path.read_text(encoding="utf-8")), False, str(index_path)
-    if not refresh_index and index_path == DEFAULT_INDEX_PATH and SHARED_INDEX_PATH.exists():
-        return json.loads(SHARED_INDEX_PATH.read_text(encoding="utf-8")), False, str(SHARED_INDEX_PATH)
+    if not refresh_index:
+        candidates = [index_path]
+        if index_path == DEFAULT_INDEX_PATH:
+            candidates.append(SHARED_INDEX_PATH)
+        available = [path for path in candidates if path.exists()]
+        if available:
+            newest = max(available, key=lambda path: path.stat().st_mtime_ns)
+            return json.loads(newest.read_text(encoding="utf-8")), False, str(newest)
     index, refreshed = lookup.load_or_refresh_index(index_path, "card", refresh_index)
     return index, bool(refreshed), str(index_path)
 
