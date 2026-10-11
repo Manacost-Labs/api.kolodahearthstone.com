@@ -49,6 +49,8 @@ from .routers.bg import canonical_router as canonical_bg_v1_router
 from .routers.bg import router as bg_v1_router
 from .routers.constructed import router as constructed_v1_router
 from .routers.hsguru_meta import router as hsguru_meta_v1_router
+from .routers.material_search import router as material_search_router
+from .material_search_mcp import material_api_lifespan, mcp_app
 from .routers.system import canonical_router as canonical_system_v1_router
 from .routers.system import router as system_v1_router
 from .source_contracts import HSREPLAY_META_FRESHNESS_GATED_SOURCE_IDS
@@ -159,6 +161,7 @@ app = FastAPI(
     title="Hearthstone Data API",
     version="0.1.0",
     description="Cached API for configured Hearthstone public data sources.",
+    lifespan=material_api_lifespan,
 )
 
 app.add_middleware(ApiTokenLimitsMiddleware)
@@ -174,6 +177,7 @@ app.add_middleware(
         "Content-Type",
         "X-API-Key",
         "X-Request-ID",
+        "MCP-Protocol-Version",
     ],
     expose_headers=[
         "X-Request-ID",
@@ -201,6 +205,8 @@ app.include_router(system_v1_router)
 app.include_router(canonical_system_v1_router)
 app.include_router(hsguru_meta_v1_router)
 app.include_router(api_tokens_router)
+app.include_router(material_search_router)
+app.mount("/v1/mcp", mcp_app)
 
 
 @app.on_event("shutdown")

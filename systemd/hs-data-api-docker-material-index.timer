@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh Koloda material embeddings every six hours
+
+[Timer]
+OnCalendar=*-*-* 00,06,12,18:40:00 Europe/Warsaw
+AccuracySec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

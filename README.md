@@ -18,6 +18,19 @@
 Все ответы API используют UTF‑8 и JSON, кроме endpoint изображения. Только
 HTTPS считается каноническим transport.
 
+## Быстрый поиск и MCP
+
+| Метод | Path | Доступ | Назначение |
+| --- | --- | --- | --- |
+| GET | `/v1/search` | Public | Поиск по названиям и смыслу; `q`, `kind`, `limit`, `mode` |
+| GET | `/v1/materials/{material_id}` | Public | Актуальный текст, metadata и изображения материала |
+| POST | `/v1/mcp/` | Public | Streamable HTTP MCP: инструменты `search` и `fetch` |
+
+Модель OpenRouter: `perplexity/pplx-embed-v1-0.6b`. Semantic-поиск включается
+через `HS_SEARCH_ENABLED=true` после сборки индекса. По умолчанию доступен поиск
+по названиям. Контракт, кэширование и инструкция включения:
+[Поиск материалов и MCP](docs/material-search-mcp.md).
+
 ## Авторизация
 
 Публичные `GET` endpoints не требуют токена. Закрытые операции принимают:
