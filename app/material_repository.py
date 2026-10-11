@@ -36,10 +36,12 @@ class MaterialRepository:
     async def documents(
         self, *, after: str = "", limit: int = 500, keys: list[str] | None = None
     ) -> list[dict[str, Any]]:
-        conditions = "(searched.kind || ':' || searched.entity_id) > %(after)s"
+        # Match Python's ID ordering even when the database uses a locale collation.
+        key_expression = "(searched.kind || ':' || searched.entity_id) COLLATE \"C\""
+        conditions = f"{key_expression} > %(after)s"
         params: dict[str, Any] = {"after": after, "limit": limit}
         if keys is not None:
-            conditions = "(searched.kind || ':' || searched.entity_id) = ANY(%(keys)s)"
+            conditions = f"{key_expression} = ANY(%(keys)s)"
             params["keys"] = keys
         try:
             repository = get_graphql_repository()
@@ -47,7 +49,7 @@ class MaterialRepository:
             async with pool.connection() as connection, connection.cursor() as cursor:
                 await cursor.execute(
                     PUBLIC_DOCUMENTS
-                    + f" WHERE {conditions} ORDER BY searched.kind || ':' || searched.entity_id LIMIT %(limit)s",
+                    + f" WHERE {conditions} ORDER BY {key_expression} LIMIT %(limit)s",
                     params,
                 )
                 rows = await cursor.fetchall()
