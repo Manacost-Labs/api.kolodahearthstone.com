@@ -7,7 +7,7 @@ import time
 from collections import OrderedDict
 from datetime import UTC, datetime
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urljoin
 
 from .material_embeddings import MODEL, EmbeddingsUnavailable, embedding_client
 from .material_repository import KINDS, material_repository
@@ -32,13 +32,18 @@ def validate_search(
 
 def material_payload(row: dict[str, Any]) -> dict[str, Any]:
     key = document_key(row)
+    image_url = row.get("image_url")
     return {
         "id": key,
         "kind": row["kind"],
         "title": row["name"],
         "subtitle": row.get("subtitle"),
         "text": row.get("content") or row.get("subtitle") or row["name"],
-        "image_url": row.get("image_url"),
+        "image_url": (
+            urljoin("https://api.kolodahearthstone.com/", image_url)
+            if image_url
+            else None
+        ),
         "source_id": row.get("source_id"),
         "updated_at": row.get("updated_at"),
         "metadata": row.get("metadata") or {},

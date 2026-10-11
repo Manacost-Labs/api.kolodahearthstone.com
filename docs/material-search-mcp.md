@@ -17,6 +17,7 @@
 (`card`, `hero`, `minion`, `archetype`, `source`), `limit` (1–50),
 `mode` (`hybrid` или `lexical`). `items` содержат стабильный `id`, `title`, `text`,
 `image_url`, `url`, `source_id`, `updated_at` и `metadata`.
+Ссылки `image_url` абсолютные; при отсутствии изображения поле равно `null`.
 `GET /v1/materials/{material_id}` получает актуальный материал по возвращённому ID.
 Для ID с двоеточиями применяйте URL encoding. Отсутствующий материал возвращает 404.
 Схемы REST опубликованы в `/openapi.json`.

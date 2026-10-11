@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.material_embeddings import DIMENSIONS, EmbeddingsUnavailable
-from app.material_search import search_materials
+from app.material_search import material_payload, search_materials
 from app.material_search_mcp import material_api_lifespan, mcp_app
 from app.routers.material_search import router
 
@@ -34,6 +34,21 @@ def row(id="constructed:CARD", name="Тестовая карта"):
         "metadata": {"cardId": id.split(":")[-1]},
         "image_url": "https://example.test/card.png",
     }
+
+
+@pytest.mark.parametrize(
+    ("image_url", "expected"),
+    [
+        ("/uploads/card.png", "https://api.kolodahearthstone.com/uploads/card.png"),
+        ("uploads/card.png", "https://api.kolodahearthstone.com/uploads/card.png"),
+        ("https://example.test/card.png", "https://example.test/card.png"),
+        (None, None),
+    ],
+)
+def test_material_image_urls_work_outside_api_origin(image_url, expected):
+    material = row()
+    material["image_url"] = image_url
+    assert material_payload(material)["image_url"] == expected
 
 
 def test_exact_name_uses_no_openrouter_call(monkeypatch):
