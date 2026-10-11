@@ -90,9 +90,17 @@ def archival_bg_bases(existing, upstream_ru, upstream_en):
         if card.get('type') != 'MINION' or not ru.get('name'):
             unresolved.append(dbf)
             continue
+        linked_premiums = {row['dbf'] for row in existing
+                           if row.get('variant_kind') == 'golden' and row.get('base_dbf') == dbf}
+        premium_dbf = card.get('battlegroundsPremiumDbfId')
+        if premium_dbf is None and len(linked_premiums) == 1:
+            premium_dbf = next(iter(linked_premiums))
+        if premium_dbf not in linked_premiums:
+            unresolved.append(dbf)
+            continue
         notes = (clean_text(ru.get('text')) or '') + '\nEN: ' + (clean_text(card.get('text')) or '')
         result.append(provenance({'card_id':card['id'], 'dbf':dbf, 'name':ru['name'], 'name_en':card['name'],
-            'card_type':'minion', 'variant_kind':'normal', 'tavern_tier':card.get('techLevel'),
+            'card_type':'minion', 'variant_kind':'normal', 'premium_dbf':premium_dbf, 'tavern_tier':card.get('techLevel'),
             'creature_type':str(card.get('race') or 'all').lower(), 'attack':card.get('attack'),
             'health':card.get('health'), 'in_pool':False, 'duos_only':False,
             'notes':notes, 'source':'hearthstonejson', 'card_image':None, 'art_image':None},

@@ -14,7 +14,13 @@ class CatalogIntegrityTest(unittest.TestCase):
         rows, unresolved = integrity.archival_bg_bases(old, [{'id':'BASE','name':'Старая'}], en)
         self.assertFalse(unresolved)
         self.assertFalse(rows[0]['in_pool'])
+        self.assertEqual(rows[0]['premium_dbf'], 2)
         self.assertEqual(integrity.archival_bg_bases(old+rows, [{'id':'BASE','name':'Старая'}], en), ([], []))
+
+    def test_archival_base_rejects_conflicting_premium_identity(self):
+        old = [{'dbf':2, 'variant_kind':'golden', 'base_dbf':1}]
+        en = [{'id':'BASE', 'dbfId':1, 'type':'MINION', 'name':'Old', 'battlegroundsPremiumDbfId':3}]
+        self.assertEqual(integrity.archival_bg_bases(old, [{'id':'BASE','name':'Старая'}], en), ([], [1]))
 
     def test_class_variant_preserves_canonical_media_and_observation_date(self):
         existing = [{"card_id": "HERO_02ax", "name_en": "Ragnaros", "static_image_url": "/rag.png", "fetched_at": "2026-10-01"}]
