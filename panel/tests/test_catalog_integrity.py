@@ -14,6 +14,7 @@ class CatalogIntegrityTest(unittest.TestCase):
         rows, unresolved = integrity.archival_bg_bases(old, [{'id':'BASE','name':'Старая'}], en)
         self.assertFalse(unresolved)
         self.assertFalse(rows[0]['in_pool'])
+        self.assertEqual(rows[0]['variant_kind'], 'base')
         self.assertEqual(rows[0]['premium_dbf'], 2)
         self.assertEqual(integrity.archival_bg_bases(old+rows, [{'id':'BASE','name':'Старая'}], en), ([], []))
 
