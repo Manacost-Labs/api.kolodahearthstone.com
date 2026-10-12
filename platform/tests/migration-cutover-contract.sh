@@ -151,8 +151,10 @@ assert_contains sql/010_battlegrounds_card_overrides.sql \
 echo 'OK: migration cutover contract'
 
 assert_contains sql/011_card_versions.sql 'catalog.catalog_card_versions' 'card history needs a mirror table before source activation'
+assert_contains sql/011_card_versions.sql 'snapshot_json jsonb NOT NULL' 'card snapshot JSON must match the shadow loader JSONB conversion'
 assert_contains scripts/apply-migrations.sh '011_card_versions\.sql' 'the migration runner must install card history'
 assert_contains scripts/sync-shadow.php "'catalog.catalog_card_versions'" 'card history must use append-only shadow merge'
 
 assert_contains sql/012_bartender_catalog.sql 'catalog.battlegrounds_bartender_skins' 'bartender catalog must be mirrored before activation'
+assert_contains sql/012_bartender_catalog.sql 'source_payload_json jsonb' 'bartender JSON must match the shadow loader JSONB conversion'
 assert_contains scripts/apply-migrations.sh '012_bartender_catalog\.sql' 'the migration runner must install bartender catalog'

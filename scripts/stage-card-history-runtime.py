@@ -2,6 +2,7 @@
 """Stage a narrow history overlay from the active PHP release; never activate it."""
 import argparse
 import json
+import os
 from pathlib import Path
 import shutil
 
@@ -32,7 +33,7 @@ def stage(source, runtime, target):
                     ignore=shutil.ignore_patterns('.env', '.env.*', '__pycache__', '*.pyc'))
     for name in FILES:
         (target / name).parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(source / name, target / name)
+        shutil.copy2(source / name, target / name)
 
     path = target / 'api/index.php'
     text = path.read_text()
@@ -69,8 +70,24 @@ def stage(source, runtime, target):
     text = once(text, '        "patch_image_override": patch_image_override,',
                 '        **({"text_repair": text_repair} if text_repair else {}),\n        "patch_image_override": patch_image_override,')
     path.write_text(text)
+    preserve_runtime_ownership(runtime, target)
     return {'runtime': str(runtime), 'candidate': str(target), 'activated': False,
             'changed_files': FILES + ['api/index.php', 'next-data.php', 'scripts/scan_cards.php', 'scripts/sync_constructed_cards.py']}
+
+
+def preserve_runtime_ownership(runtime, target):
+    """copytree preserves modes, but deployment as root must also restore owners.
+
+    Do not follow or modify private config, upload and session symlink targets.
+    New source files use the owner of the existing API entry point.
+    """
+    default = (runtime / 'api/index.php').stat()
+    for path in [target, *target.rglob('*')]:
+        if path.is_symlink():
+            continue
+        original = runtime / path.relative_to(target)
+        owner = original.stat() if original.exists() and not original.is_symlink() else default
+        os.chown(path, owner.st_uid, owner.st_gid)
 
 
 if __name__ == '__main__':

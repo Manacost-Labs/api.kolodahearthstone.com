@@ -9,7 +9,9 @@ staging = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(staging)
 
 
-def test_candidate_preserves_newer_runtime_and_private_symlinks(tmp_path):
+def test_candidate_preserves_newer_runtime_and_private_symlinks(tmp_path, monkeypatch):
+    ownership = []
+    monkeypatch.setattr(staging.os, 'chown', lambda path, uid, gid: ownership.append((Path(path), uid, gid)))
     runtime = tmp_path / "releases" / "current-release"
     runtime.mkdir(parents=True)
     for name in ["config.php", "uploads", "var"]:
@@ -32,5 +34,10 @@ def test_candidate_preserves_newer_runtime_and_private_symlinks(tmp_path):
     assert "card-history" in (target / "api/index.php").read_text()
     assert "bartender-skins" in (target / "api/index.php").read_text()
     assert "card_history" not in (runtime / "next-data.php").read_text()
+    old_owner = (runtime / 'api/index.php').stat()
+    assert (target / 'api/index.php', old_owner.st_uid, old_owner.st_gid) in ownership
+    assert (target / 'lib/card_history.php', old_owner.st_uid, old_owner.st_gid) in ownership
+    assert all(not path.is_symlink() for path, _, _ in ownership)
+    assert (target / 'scripts/sync_battlegrounds_images.py').stat().st_mode == (ROOT / 'panel/scripts/sync_battlegrounds_images.py').stat().st_mode
     with pytest.raises(ValueError, match="new release"):
         staging.stage(ROOT / "panel", runtime, target)
