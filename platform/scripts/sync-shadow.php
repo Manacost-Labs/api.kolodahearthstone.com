@@ -311,7 +311,10 @@ COMMIT;
 SQL;
     // Keep radar import inside the same transaction as the catalogue and history.
     $radarSql = runProcess(['/usr/bin/python3', __DIR__ . '/radar-shadow.py']);
-    $mergeSql = str_replace("\nCOMMIT;\n", "\n" . $radarSql . "\nCOMMIT;\n", $mergeSql);
+    $mergeSql = str_replace("\nCOMMIT;", "\n" . $radarSql . "\nCOMMIT;", $mergeSql, $radarInsertions);
+    if ($radarInsertions !== 1) {
+        throw new RuntimeException('Expected exactly one radar transaction boundary');
+    }
     $mergeOutput = runProcess(
         [
             '/usr/bin/sudo', '-n', 'docker', 'compose',
