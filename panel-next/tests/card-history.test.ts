@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { historyChanges, historyIdentity } from '../lib/card-history.ts';
+import { archivedHistoryImage, historyChanges, historyIdentity } from '../lib/card-history.ts';
 
 test('comparison preserves zero, distinguishes missing from null and ignores polling bookkeeping', () => {
   const changes = historyChanges(
@@ -24,6 +24,52 @@ test('comparison preserves zero, distinguishes missing from null and ignores pol
   assert.deepEqual(
     historyChanges({ stats: { attack: 1, health: 2 } }, { stats: { health: 2, attack: 1 } }),
     [],
+  );
+});
+
+test('historical preview requires archived bytes, matching digest and a local archive path', () => {
+  const hash = 'a'.repeat(64);
+  const version = {
+    version_id: 1,
+    observed_at: 'now',
+    event: 'changed',
+    snapshot: {},
+    media: {
+      card_image: {
+        status: 'archived',
+        archive_url: `/uploads/card-history-media/${hash}.png`,
+        sha256: hash,
+        captured_at: 'now',
+      },
+    },
+  };
+  assert.equal(
+    archivedHistoryImage(version)?.url,
+    `https://api.kolodahearthstone.com/uploads/card-history-media/${hash}.png`,
+  );
+  assert.equal(archivedHistoryImage({ ...version, media: {} }), null);
+  assert.equal(
+    archivedHistoryImage({
+      ...version,
+      media: { card_image: { ...version.media.card_image, status: 'unverified' } },
+    }),
+    null,
+  );
+  assert.equal(
+    archivedHistoryImage({
+      ...version,
+      media: { card_image: { ...version.media.card_image, sha256: 'b'.repeat(64) } },
+    }),
+    null,
+  );
+  assert.equal(
+    archivedHistoryImage({
+      ...version,
+      media: {
+        card_image: { ...version.media.card_image, archive_url: 'https://untrusted.example/image.png' },
+      },
+    }),
+    null,
   );
 });
 test('history identity isolates constructed, BG, golden and same-id library records', () => {

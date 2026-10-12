@@ -40,7 +40,7 @@ WINDOWS = (
     ("30d", timedelta(days=30)),
 )
 METHODOLOGY_VERSION = "logical-source-observed-v15"
-SLO_TARGET_RATE_PCT = 99.0
+SLO_TARGET_RATE_PCT = 99.9
 PIPELINE_SCHEDULE_LEDGER_READY = False
 COVERAGE_BUCKET_SECONDS = 24 * 60 * 60
 COVERAGE_MAX_GAP_SECONDS = 25 * 60 * 60
@@ -2586,7 +2586,7 @@ def _slo_budget(
     remaining = allowed_bad - bad_attempts
     if not measurement_complete or eligible_attempts <= 0:
         objective_status = "collecting"
-    elif good_attempts / eligible_attempts >= SLO_TARGET_RATE_PCT / 100.0:
+    elif _ratio_meets_target(good_attempts, eligible_attempts):
         objective_status = "meeting"
     else:
         objective_status = "breached"
@@ -2595,9 +2595,9 @@ def _slo_budget(
         "objective_status": objective_status,
         "good_attempts": good_attempts,
         "bad_attempts": bad_attempts,
-        "allowed_bad_attempts": round(allowed_bad, 2),
+        "allowed_bad_attempts": round(allowed_bad, 6),
         "bad_attempts_over_budget": max(0, math.ceil(bad_attempts - allowed_bad)),
-        "error_budget_remaining_attempts": round(remaining, 2),
+        "error_budget_remaining_attempts": round(remaining, 6),
         "error_budget_consumed_pct": (
             round((bad_attempts / allowed_bad) * 100.0, 2) if allowed_bad > 0 else None
         ),

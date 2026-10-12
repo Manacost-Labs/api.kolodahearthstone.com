@@ -210,6 +210,8 @@ export default async function verify(page, root, output) {
   await page.keyboard.press('Escape');
   await page.waitForFunction(() => !document.querySelector('dialog[open]'));
   checks.reducedMotion = true;
+  // Closing a shared card uses asynchronous Back; wait for its URL before navigating again.
+  await page.waitForFunction(() => !new URLSearchParams(location.search).has('card'));
   await page.goto(root + '/?view=tiles&q=__fixture_error__');
   await page.getByRole('heading', { name: 'Не удалось загрузить панель' }).waitFor();
   ensure(await page.locator('.site-header').isVisible(), 'Server error removed the workspace header');

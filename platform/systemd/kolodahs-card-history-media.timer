@@ -1,0 +1,11 @@
+[Unit]
+Description=Capture newly observed card images in bounded batches
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=1min
+Persistent=true
+Unit=kolodahs-card-history-media.service
+
+[Install]
+WantedBy=timers.target
