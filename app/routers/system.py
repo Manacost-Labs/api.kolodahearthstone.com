@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, Query, Response
@@ -15,6 +15,7 @@ from ..source_contracts import (
     HSREPLAY_FRESHNESS_GATED_SOURCE_IDS,
     HSREPLAY_META_FRESHNESS_GATED_SOURCE_IDS,
 )
+from ..source_catalog import next_source_runs, public_catalog_metadata, source_summary
 from ..sources import SOURCES
 from ..storage import load_status
 from .models import ApiMeta, Envelope, freshest_timestamp, timestamp_is_stale
@@ -98,7 +99,21 @@ def _reset_reliability_report_cache_for_tests() -> None:
         _reliability_report_refresh_in_progress = False
 
 
-class SourceSummary(BaseModel):
+class SourceFreshnessSummary(BaseModel):
+    enabled: bool = True
+    freshness_state: str = "unknown"
+    stale: bool = True
+    age_hours: float | None = None
+    stale_after_hours: float | None = None
+    last_success_at: str | None = None
+    last_attempt_at: str | None = None
+    next_run_at: str | None = None
+    next_run_basis: str = "nominal"
+    completeness: dict[str, Any] | None = None
+    diagnostics: dict[str, Any] | None = None
+
+
+class SourceSummary(SourceFreshnessSummary):
     model_config = ConfigDict(extra="allow")
 
     id: str
@@ -111,7 +126,7 @@ class SourceSummary(BaseModel):
     fresh_only_eligible: bool | None = None
 
 
-class DatasetSummary(BaseModel):
+class DatasetSummary(SourceFreshnessSummary):
     model_config = ConfigDict(extra="allow")
 
     source_id: str
@@ -568,8 +583,10 @@ def sources(
         and (not category or source.category == category)
     ]
     rows: list[dict[str, Any]] = []
+    now = datetime.now(UTC)
+    next_runs = next_source_runs(now)
     for source in selected:
-        dataset = load_resolved_public_dataset(source.id)
+        dataset = public_catalog_metadata(source.id)
         upstream_freshness, fresh_only_eligible = _public_upstream_freshness(
             source.id,
             dataset,
@@ -582,6 +599,7 @@ def sources(
                 "url": source.url,
                 "has_dataset": dataset is not None,
                 "dataset_fetched_at": dataset.get("fetched_at") if dataset else None,
+                **source_summary(source, now=now, next_runs=next_runs, projection=dataset),
                 "upstream_freshness": upstream_freshness,
                 "fresh_only_eligible": fresh_only_eligible,
             }
@@ -606,8 +624,10 @@ def sources(
 )
 def datasets() -> Envelope[list[DatasetSummary]]:
     rows: list[dict[str, Any]] = []
+    now = datetime.now(UTC)
+    next_runs = next_source_runs(now)
     for source in SOURCES:
-        dataset = load_resolved_public_dataset(source.id)
+        dataset = public_catalog_metadata(source.id)
         status = load_status(source.id) or {}
         upstream_freshness, fresh_only_eligible = _public_upstream_freshness(
             source.id,
@@ -619,6 +639,7 @@ def datasets() -> Envelope[list[DatasetSummary]]:
                 "has_dataset": dataset is not None,
                 "fetched_at": dataset.get("fetched_at") if dataset else None,
                 "state": status.get("state"),
+                **source_summary(source, now=now, next_runs=next_runs, projection=dataset),
                 "upstream_freshness": upstream_freshness,
                 "fresh_only_eligible": fresh_only_eligible,
             }

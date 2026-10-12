@@ -1048,9 +1048,21 @@ function is_duos_only_battleground_card(array $card): int
     return 0;
 }
 
+/** HSJ retains the original expansion on several retired BG base/triple cards. */
+function is_battlegrounds_catalog_card(array $ru, array $en = []): bool
+{
+    if (($ru['set'] ?? $en['set'] ?? null) === 'BATTLEGROUNDS') return true;
+    if (($ru['type'] ?? $en['type'] ?? null) !== 'MINION') return false;
+    foreach (['battlegroundsNormalDbfId', 'battlegroundsPremiumDbfId'] as $field) {
+        $value = $ru[$field] ?? $en[$field] ?? null;
+        if ((is_int($value) || (is_string($value) && ctype_digit($value))) && (int)$value > 0) return true;
+    }
+    return false;
+}
+
 function normalize_card(array $ru, array $en = []): ?array
 {
-    if (($ru['set'] ?? null) !== 'BATTLEGROUNDS') {
+    if (!is_battlegrounds_catalog_card($ru, $en)) {
         return null;
     }
 
@@ -1145,8 +1157,20 @@ function record_change(PDO $pdo, string $cardId, string $source, ?string $oldHas
     ]);
 }
 
+function resolve_bg_base_card_id(PDO $pdo, array $card): ?string
+{
+    if (!empty($card['base_card_id'])) return (string)$card['base_card_id'];
+    if (($card['variant_kind'] ?? null) !== 'golden' || empty($card['base_dbf'])) return null;
+    $query = $pdo->prepare("SELECT card_id FROM battlegrounds_cards WHERE dbf = :dbf AND variant_kind = 'base'");
+    $query->execute(['dbf'=>$card['base_dbf']]);
+    $id = $query->fetchColumn();
+    return $id === false ? null : (string)$id;
+}
+
 function upsert_card(PDO $pdo, array $card, bool $dryRun = false, array $overrides = []): array
 {
+    // Resolve before writing: recurring scans must not journal a temporary NULL link.
+    $card['base_card_id'] = resolve_bg_base_card_id($pdo, $card);
     $select = $pdo->prepare('SELECT * FROM battlegrounds_cards WHERE card_id = :card_id LIMIT 1');
     $select->execute(['card_id' => $card['card_id']]);
     $existing = $select->fetch();
@@ -1542,6 +1566,8 @@ function run_framing_self_test(): void
     imagedestroy($sample);
     echo "framing-self-test: ok\n";
 }
+
+if (defined('KOLODA_SCAN_LIBRARY_ONLY') && KOLODA_SCAN_LIBRARY_ONLY) return;
 
 $source = cli_option('source', 'all');
 $dryRun = cli_option('dry-run', '0') === '1';

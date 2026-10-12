@@ -3,6 +3,28 @@ declare(strict_types=1);
 
 const CARD_HISTORY_ENTITIES = ['constructed_card', 'card', 'hero', 'hero_skin', 'library_card', 'timewarped_card', 'pet', 'coin', 'bartender_skin'];
 
+/** One bounded query per history page; older deployments have no media ledger. */
+function catalog_history_media(PDO $pdo, array $ids): array
+{
+    if (!$ids) return [];
+    try {
+        $stmt = $pdo->prepare('SELECT version_id, field_name, status, reason, archive_url, sha256, byte_size, mime_type, evidence, captured_at FROM catalog_card_version_media WHERE field_name <> \'_scan\' AND version_id IN (' . implode(',', array_fill(0, count($ids), '?')) . ')');
+        $stmt->execute($ids);
+        $result = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $id = (int)$row['version_id'];
+            $field = $row['field_name'];
+            unset($row['version_id'], $row['field_name']);
+            if ($row['byte_size'] !== null) $row['byte_size'] = (int)$row['byte_size'];
+            $result[$id][$field] = $row;
+        }
+        return $result;
+    } catch (PDOException $error) {
+        if ($error->getCode() === '42S02') return [];
+        throw $error;
+    }
+}
+
 /** Full normalized snapshots from the moment version capture was installed. */
 function catalog_card_history(PDO $pdo, string $entity, string $cardId, int $page = 1, int $perPage = 50): array
 {
@@ -33,11 +55,21 @@ function catalog_card_history(PDO $pdo, string $entity, string $cardId, int $pag
             'snapshot_hash' => $row['snapshot_hash'], 'snapshot' => $snapshot,
         ];
     }
+    $media = catalog_history_media($pdo, array_column($versions, 'version_id'));
+    $archived = 0;
+    foreach ($versions as &$version) {
+        $version['media'] = $media[$version['version_id']] ?? (object)[];
+        foreach ($media[$version['version_id']] ?? [] as $image) {
+            if ($image['status'] === 'archived') $archived++;
+        }
+    }
+    unset($version);
     return ['entity' => $entity, 'card_id' => $cardId, 'versions' => $versions,
         'coverage' => ['first_observed_at' => $summary['first_observed_at'],
             'last_observed_at' => $summary['last_observed_at'],
             'before_first_observation' => 'unknown', 'timestamps' => 'observed_at',
-            'image_bytes_archived' => false, 'legacy_bg_changes_included' => false],
+            'image_bytes_archived' => false, 'archived_images_on_page' => $archived,
+            'image_capture_basis' => 'per_image_evidence', 'legacy_bg_changes_included' => false],
         'pagination' => ['page' => $page, 'per_page' => $perPage, 'total' => (int)$summary['total'],
             'total_pages' => (int)ceil((int)$summary['total'] / $perPage)],
     ];

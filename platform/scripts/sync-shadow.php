@@ -297,6 +297,9 @@ DROP SCHEMA catalog_stage CASCADE;
 DROP SCHEMA analytics_stage CASCADE;
 COMMIT;
 SQL;
+    // Keep radar import inside the same transaction as the catalogue and history.
+    $radarSql = runProcess(['/usr/bin/python3', __DIR__ . '/radar-shadow.py']);
+    $mergeSql = str_replace("\nCOMMIT;\n", "\n" . $radarSql . "\nCOMMIT;\n", $mergeSql);
     $mergeOutput = runProcess(
         [
             '/usr/bin/sudo', '-n', 'docker', 'compose',

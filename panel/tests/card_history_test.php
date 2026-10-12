@@ -15,14 +15,15 @@ class HistoryTestPDO extends PDO
 {
     public array $queries = [];
     public array $statements = [];
+    public array $mediaRows = [];
     public function __construct() {}
     public function prepare(string $query, array $options = []): PDOStatement|false
     {
         $this->queries[] = $query;
-        $rows = strpos($query, 'COUNT(*)') !== false
+        $rows = strpos($query, 'catalog_card_version_media') !== false ? $this->mediaRows : (strpos($query, 'COUNT(*)') !== false
             ? [['total'=>1, 'first_observed_at'=>'2026-10-11 10:00:00', 'last_observed_at'=>'2026-10-11 11:00:00']]
             : [['id'=>10, 'observed_at'=>'2026-10-11 10:00:00', 'event_kind'=>'baseline', 'previous_hash'=>null, 'snapshot_hash'=>'abc',
-                'snapshot_json'=>'{"card_id":"A","mana_cost":3,"source_payload_json":"{\"identity\":1}"}']];
+                'snapshot_json'=>'{"card_id":"A","mana_cost":3,"source_payload_json":"{\"identity\":1}"}']]);
         $stmt = new HistoryTestStatement($rows);
         $this->statements[] = $stmt;
         return $stmt;
@@ -38,6 +39,14 @@ foreach ($pdo->queries as $query) {
     if (strpos($query, "quote'") !== false) throw new RuntimeException('Card ID interpolated into SQL');
 }
 if ($pdo->statements[0]->bindings['card_id'] !== "quote' OR 1=1 --") throw new RuntimeException('Missing native PDO binding');
+$pdoWithMedia = new HistoryTestPDO();
+$pdoWithMedia->mediaRows = [['version_id'=>10, 'field_name'=>'card_image', 'status'=>'archived', 'reason'=>null,
+    'archive_url'=>'/uploads/card-history-media/' . str_repeat('a', 64) . '.png', 'sha256'=>str_repeat('a', 64),
+    'byte_size'=>'100', 'mime_type'=>'image/png', 'evidence'=>'captured_after_observation', 'captured_at'=>'2026-10-12 10:00:00']];
+$withMedia = catalog_card_history($pdoWithMedia, 'card', 'A');
+if ($withMedia['versions'][0]['media']['card_image']['byte_size'] !== 100 || $withMedia['coverage']['archived_images_on_page'] !== 1) throw new RuntimeException('Archived media contract must retain per-image evidence and numeric size');
+if ($withMedia['coverage']['image_bytes_archived']) throw new RuntimeException('One archived image must not imply complete historical coverage');
+if ($pdoWithMedia->statements[2]->bindings !== [10]) throw new RuntimeException('Media lookup must use bounded version bindings');
 try {
     catalog_card_history($pdo, 'bad_entity', 'A');
     throw new RuntimeException('Invalid entity accepted');

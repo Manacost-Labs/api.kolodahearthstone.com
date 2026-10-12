@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { type CardHistoryData, historyChanges, historyDate } from '@/lib/card-history';
 import { fieldLabel } from '@/lib/format';
 import { Value } from './ui';
+import { HistoryImage } from './HistoryImage';
 
 const eventNames: Record<string, string> = {
   baseline: 'Начальный снимок',
@@ -88,7 +89,8 @@ export function CardHistory({ entity, cardId }: { entity: string; cardId: string
     <div className="card-history">
       <p className="muted">
         Сохраняем наблюдённые изменения. Даты показывают момент записи, а не дату выхода патча. До начала
-        записи история может быть неполной. Изображения сохранены ссылками.
+        записи история может быть неполной. Архивные изображения показываются с датой захвата; старые ссылки
+        могут измениться у источника.
       </p>
       {entity === 'card' && (
         <label className="history-source">
@@ -127,6 +129,10 @@ export function CardHistory({ entity, cardId }: { entity: string; cardId: string
           </div>
           {oldVersion && newVersion && (
             <section aria-label="Различия версий">
+              <div className="history-image-comparison">
+                <HistoryImage version={oldVersion} label="До" />
+                <HistoryImage version={newVersion} label="После" />
+              </div>
               <p>
                 {versionLabel(oldVersion)} → {versionLabel(newVersion)}
               </p>
