@@ -2,6 +2,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/../lib/card_history.php';
 require_once __DIR__ . '/../lib/bartender_catalog.php';
+require_once __DIR__ . '/../lib/full_card_catalog.php';
 
 $config = require __DIR__ . '/../config.php';
 require_once __DIR__ . '/../lib/battleground_creature_types.php';
@@ -1642,6 +1643,9 @@ function api_index(PDO $pdo): void
             'GET /api/v1/timewarped-cards' => 'Список хрономальных карт Timewarped Tavern.',
             'GET /api/v1/timewarped-cards/{card_id}' => 'Одна хрономальная карта по card_id.',
             'GET /api/v1/timewarped-cards/by-dbf/{dbf}' => 'Одна хрономальная карта по dbf.',
+            'GET /api/v1/card-catalog' => 'Полный каталог HSJSON: все режимы, токены и неколлекционные карты.',
+            'GET /api/v1/card-catalog/{card_id}' => 'Любая карта полного каталога по card_id.',
+            'GET /api/v1/card-catalog/dbf/{dbf}' => 'Любая карта полного каталога по dbf.',
             'GET /api/v1/constructed-cards?format=standard' => 'Список карт стандартного формата.',
             'GET /api/v1/constructed-cards?format=wild&include=wiki' => 'Список карт вольного формата с wiki-метаданными.',
             'GET /api/v1/constructed-cards/{card_id}' => 'Карта Standard/Wild или её сопутствующая карта по card_id; images.art — оригинальный Wiki full art, images.crop — игровой crop.',
@@ -2116,6 +2120,8 @@ function api_constructed_card(PDO $pdo, string $cardId): void
 
     $card = load_constructed_card($pdo, 'c.card_id = :card_id', ['card_id' => $cardId]);
     if (!$card) {
+        $catalogCard = full_catalog_find($pdo, 'card_id', $cardId);
+        if ($catalogCard) respond_cached(['data' => $catalogCard], $catalogCard['updated_at']);
         respond_error('not_found', 'Карта Standard/Wild не найдена.', 404);
     }
 
@@ -2148,6 +2154,8 @@ function api_constructed_card_by_dbf(PDO $pdo, string $dbf): void
 
     $card = load_constructed_card($pdo, 'c.dbf = :dbf', ['dbf' => (int)$dbf]);
     if (!$card) {
+        $catalogCard = full_catalog_find($pdo, 'dbf', $dbf);
+        if ($catalogCard) respond_cached(['data' => $catalogCard], $catalogCard['updated_at']);
         respond_error('not_found', 'Карта Standard/Wild с таким dbf не найдена.', 404);
     }
 
@@ -3131,6 +3139,7 @@ try {
         if (!$skin) respond_error('not_found', 'Скин бармена не найден.', 404);
         respond_cached(['data'=>bartender_skin_to_api($skin)], $skin['updated_at']);
     }
+    api_full_card_catalog($pdo, $path);
     if ($path === '/api/v1/cards') {
         api_cards($pdo);
     }

@@ -1,0 +1,14 @@
+[Unit]
+Description=Refresh the complete HearthstoneJSON card catalog
+Wants=network-online.target
+After=network-online.target mariadb.service
+
+[Service]
+Type=oneshot
+User=koloda
+Group=koloda
+WorkingDirectory=/srv/api-kolodahearthstone/panel/current
+ExecStart=/usr/bin/flock -w 300 /run/lock/kolodahs-sync/global.lock /opt/wiki-hs-parser/.venv/bin/python scripts/sync_full_card_catalog.py --apply --refresh
+TimeoutStartSec=10min
+Nice=10
+UMask=0022
