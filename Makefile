@@ -42,6 +42,7 @@ platform-check:
 	platform/tests/migration-cutover-contract.sh
 	php platform/tests/statistics-normalizer.test.php
 	php platform/tests/index-media-assets.test.php
+	python3 platform/tests/api-uploads-offload.test.py
 	@find platform/scripts -type f -name '*.php' -print0 | xargs -0 -n1 php -l >/dev/null
 	@find platform/scripts -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n
 

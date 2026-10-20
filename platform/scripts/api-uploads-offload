@@ -20,6 +20,12 @@ RC=['/opt/wordpress-s3/bin/rclone','rc','--unix-socket','/run/api-uploads-s3/rc.
 # Only published media moves to S3; JSON records, manifests and markers are read
 # on every API request and must stay on local disk.
 MEDIA_SUFFIXES={'.png','.jpg','.jpeg','.webp','.gif','.svg','.avif','.mp4','.webm','.mp3','.ogg','.wav'}
+OFFLOAD_LOCK='/run/lock/api-uploads-offload.lock'
+# Shared with the platform scheduler and catalogue publishers. Copy and
+# verification only read files, so the lock is needed just for the atomic
+# exchange; waiting there gives this job a fair turn between other holders.
+SYNC_LOCK='/run/hs-data-platform-sync/sync.lock'
+SYNC_LOCK_WAIT_SECONDS=600
 
 def rc(method):return json.loads(subprocess.check_output([*RC,method],text=True))
 def fingerprint(path):
@@ -41,14 +47,21 @@ def active_writes():
 def acquire(path):
     fd=os.open(path,os.O_RDWR|os.O_CREAT|os.O_NOFOLLOW,0o600)
     fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB);return fd
+def acquire_wait(path,seconds):
+    fd=os.open(path,os.O_RDWR|os.O_CREAT|os.O_NOFOLLOW,0o600)
+    until=time.monotonic()+seconds
+    while True:
+        try:fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB);return fd
+        except BlockingIOError:
+            if time.monotonic()>=until:os.close(fd);raise
+            time.sleep(0.5)
 
 def execute(args):
     if os.geteuid()!=0:raise RuntimeError('root required')
     if SOURCE.is_symlink() or not SOURCE.is_dir():raise RuntimeError('unexpected API staging root')
     if subprocess.run(['mountpoint','-q',str(MOUNT)]).returncode:raise RuntimeError('API S3 mount missing')
     STATE.mkdir(mode=0o700,exist_ok=True)
-    locks=[acquire('/run/lock/api-uploads-offload.lock')]
-    locks.append(acquire('/run/hs-data-platform-sync/sync.lock'))
+    locks=[acquire(OFFLOAD_LOCK)]
     cache=rc('vfs/stats')['diskCache']
     if cache['uploadsQueued'] or cache['uploadsInProgress'] or cache['erroredFiles'] or cache['outOfSpace']:
         raise RuntimeError('pending/failed S3 write-back; preserving local files for retry')
@@ -93,6 +106,10 @@ def execute(args):
         subprocess.run([CLIENT,'check',str(SOURCE),REMOTE,*common,'--one-way','--download','--checkers','64','--combined',str(checks)],check=True,stdout=output,stderr=output)
     matched={os.fsdecode(line[2:]) for line in checks.read_bytes().splitlines() if line.startswith(b'= ')}
     assert matched==set(files),'not all selected source files have verified S3 content'
+    try:locks.append(acquire_wait(SYNC_LOCK,args.sync_lock_wait_seconds))
+    except BlockingIOError:
+        # Verified copies stay in S3; the next run re-checks them cheaply.
+        report.update(finished=time.time(),deferred_exchange='shared sync lock busy');save();return report
     rc('vfs/forget')
     libc=ctypes.CDLL(None,use_errno=True)
     libc.renameat2.argtypes=[ctypes.c_int,ctypes.c_char_p,ctypes.c_int,ctypes.c_char_p,ctypes.c_uint]
@@ -124,6 +141,7 @@ def execute(args):
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser();parser.add_argument('--min-age-seconds',type=int,default=60);parser.add_argument('--only-file')
+    parser.add_argument('--sync-lock-wait-seconds',type=int,default=SYNC_LOCK_WAIT_SECONDS)
     options=parser.parse_args()
     try:print(json.dumps(execute(options),indent=2))
-    except BlockingIOError:print(json.dumps({'deferred':'publisher or another offload holds its lock'}))
+    except BlockingIOError:print(json.dumps({'deferred':'another offload holds its lock'}))
