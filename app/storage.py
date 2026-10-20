@@ -121,8 +121,12 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     _match_parent_permissions(tmp)
+    written = tmp.stat()
     tmp.replace(path)
     _match_parent_permissions(path)
+    from .catalog_metadata import record_catalog_metadata
+
+    record_catalog_metadata(path, payload, expected_file=(written.st_ino, written.st_size, written.st_mtime_ns))
 
 
 def read_json(path: Path) -> dict[str, Any] | None:

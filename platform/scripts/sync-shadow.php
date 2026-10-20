@@ -61,6 +61,18 @@ SET LOCAL session_replication_role = replica;
 SET LOCAL lock_timeout = '5s';
 SET LOCAL statement_timeout = '15min';
 
+-- MySQL's unsigned foreign key becomes numeric in pgloader. Version identifiers
+-- use the same signed bigint contract as the mirrored parent table; an overflow
+-- must abort the transaction rather than silently truncate an identifier.
+DO $media_columns$
+BEGIN
+    IF to_regclass('catalog_stage.catalog_card_version_media') IS NOT NULL THEN
+        ALTER TABLE catalog_stage.catalog_card_version_media
+            ALTER COLUMN version_id TYPE bigint USING version_id::bigint;
+    END IF;
+END
+$media_columns$;
+
 DO $json_columns$
 DECLARE
     column_record record;
@@ -297,6 +309,12 @@ DROP SCHEMA catalog_stage CASCADE;
 DROP SCHEMA analytics_stage CASCADE;
 COMMIT;
 SQL;
+    // Keep radar import inside the same transaction as the catalogue and history.
+    $radarSql = runProcess(['/usr/bin/python3', __DIR__ . '/radar-shadow.py']);
+    $mergeSql = str_replace("\nCOMMIT;", "\n" . $radarSql . "\nCOMMIT;", $mergeSql, $radarInsertions);
+    if ($radarInsertions !== 1) {
+        throw new RuntimeException('Expected exactly one radar transaction boundary');
+    }
     $mergeOutput = runProcess(
         [
             '/usr/bin/sudo', '-n', 'docker', 'compose',

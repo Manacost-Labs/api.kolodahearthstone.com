@@ -1,0 +1,22 @@
+[Unit]
+Description=Archive observed card image bytes without changing card snapshots
+After=network-online.target mariadb.service
+ConditionPathIsDirectory=/run/hs-data-platform-sync
+
+[Service]
+Type=oneshot
+# Acquire the root-owned platform lock, then drop privileges for every worker.
+User=root
+Group=root
+ExecStart=/usr/bin/flock -w 900 /run/hs-data-platform-sync/sync.lock /usr/sbin/runuser -u koloda -- /bin/bash /srv/api-kolodahearthstone/panel/current/scripts/archive_card_history_media_job.sh
+TimeoutStartSec=30min
+Nice=10
+UMask=0022
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/srv/api-kolodahearthstone/panel-data/uploads /srv/api-kolodahearthstone/panel-data/var /run/hs-data-platform-sync
+
+[Install]
+WantedBy=multi-user.target

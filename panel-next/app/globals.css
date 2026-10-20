@@ -1432,6 +1432,23 @@ tr:hover td {
   display: inline-flex;
   gap: var(--space-1);
 }
+@media (max-width: 900px) {
+  .header-main {
+    padding: 10px 16px 0;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+  .primary-nav {
+    order: 2;
+    width: 100%;
+    min-height: 42px;
+    overflow-x: auto;
+    gap: var(--space-1);
+  }
+  .primary-nav a {
+    flex: 0 0 auto;
+  }
+}
 @media (max-width: 700px) {
   .catalog-table .sticky-col {
     min-width: 168px;
@@ -2465,6 +2482,42 @@ textarea {
   display: grid;
   gap: 0.75rem;
 }
+.history-image-comparison {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-block: 1rem;
+}
+.history-image {
+  margin: 0;
+  min-width: 0;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  background: var(--surface);
+  display: grid;
+  grid-template-rows: 240px auto;
+}
+.history-image > .muted {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  margin: 0;
+  text-align: center;
+}
+.history-image img {
+  display: block;
+  width: 100%;
+  height: 240px;
+  object-fit: contain;
+}
+.history-image figcaption {
+  display: grid;
+  gap: 0.25rem;
+  margin-top: 0.5rem;
+  overflow-wrap: anywhere;
+  font-size: 0.85rem;
+}
 .history-timeline li {
   border: 1px solid var(--line);
   border-radius: 0.75rem;
@@ -2497,6 +2550,16 @@ textarea {
 @media (max-width: 600px) {
   .history-comparison-controls {
     grid-template-columns: 1fr;
+  }
+  .history-image-comparison {
+    gap: 0.5rem;
+  }
+  .history-image {
+    padding: 0.5rem;
+    grid-template-rows: 180px auto;
+  }
+  .history-image img {
+    height: 180px;
   }
 }
 
