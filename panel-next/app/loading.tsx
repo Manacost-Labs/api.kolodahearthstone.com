@@ -1,6 +1,7 @@
 'use client';
 import { useSearchParams } from 'next/navigation';
 import { catalogView } from '@/lib/catalog-state';
+import { Skeleton } from '@/components/varylo-ui/basic/Skeleton';
 export default function Loading() {
   const params = useSearchParams();
   const action = params.get('action') || 'list';
@@ -9,9 +10,9 @@ export default function Loading() {
   const count = catalog ? (view === 'tiles' ? 15 : Math.min(Number(params.get('per_page')) || 8, 150)) : 4;
   return (
     <section className="page-loading" role="status" aria-label="Загрузка данных" aria-busy="true">
-      <div className="loading-heading" />
-      <div className="loading-caption" />
-      {catalog && <div className="loading-filters" />}
+      <Skeleton className="loading-heading" />
+      <Skeleton className="loading-caption" />
+      {catalog && <Skeleton className="loading-filters" />}
       <div className={catalog && view === 'tiles' ? 'deck-grid-viewport' : undefined}>
         <div
           className={
@@ -27,7 +28,7 @@ export default function Loading() {
         >
           {Array.from({ length: count }, (_, i) => (
             // biome-ignore lint/suspicious/noArrayIndexKey: static placeholders never reorder
-            <div className="skeleton" key={i} />
+            <Skeleton className="skeleton" key={i} />
           ))}
         </div>
       </div>

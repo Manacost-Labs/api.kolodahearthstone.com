@@ -2,6 +2,14 @@
 // Pure functions only, so every section formats the same way and tests run without React.
 
 export type Tone = 'good' | 'bad' | 'warning' | 'info' | 'neutral';
+/** VaryloUI badge hue for each tone; warnings and info keep their own hues, never the accent. */
+export const toneColor = {
+  good: 'green',
+  bad: 'red',
+  warning: 'amber',
+  info: 'blue',
+  neutral: 'gray',
+} as const satisfies Record<Tone, string>;
 export type ValueKind =
   | 'text'
   | 'number'

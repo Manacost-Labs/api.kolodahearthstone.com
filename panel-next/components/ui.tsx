@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react';
 import { ArrowSquareOutIcon } from '@phosphor-icons/react/dist/ssr/ArrowSquareOut';
 import { TrayIcon } from '@phosphor-icons/react/dist/ssr/Tray';
+import { Badge } from './varylo-ui/basic/Badge';
+import { EmptyState as VaryloEmptyState } from './varylo-ui/data-display/EmptyState';
 import {
   fieldLabel,
   formatDateTime,
@@ -9,6 +11,7 @@ import {
   inferKind,
   parseDate,
   statusMeta,
+  toneColor,
   type Tone,
   type ValueKind,
 } from '@/lib/format';
@@ -34,7 +37,11 @@ const isValueKind = (value: unknown): value is ValueKind =>
 
 export function StatusBadge({ value, label, tone }: { value?: unknown; label?: string; tone?: Tone }) {
   const meta = statusMeta(value);
-  return <span className={`badge ${tone ?? meta.tone}`}>{label ?? meta.label}</span>;
+  return (
+    <Badge className="status-badge" size="sm" color={toneColor[tone ?? meta.tone]}>
+      {label ?? meta.label}
+    </Badge>
+  );
 }
 
 // Exact UTC time in the tooltip; relative wording ("5 минут назад") when asked.
@@ -60,12 +67,13 @@ export function EmptyState({
   action?: ReactNode;
 }) {
   return (
-    <div className="empty">
-      <TrayIcon className="empty-icon" size={28} aria-hidden="true" />
-      <h2>{title}</h2>
-      {children && <p>{children}</p>}
-      {action}
-    </div>
+    <VaryloEmptyState
+      className="empty"
+      icon={<TrayIcon size={24} aria-hidden="true" />}
+      title={title}
+      description={children}
+      primaryAction={action}
+    />
   );
 }
 

@@ -8,6 +8,8 @@ import { DataTable } from './DataTable';
 import { RecordDetails } from './Details';
 import { Reliability } from './Reliability';
 import { EmptyState, KpiCard, StatusBadge, Time, Value } from './ui';
+import { ArrowClockwiseIcon } from '@phosphor-icons/react/dist/ssr/ArrowClockwise';
+import { Select } from './varylo-ui/forms/Select';
 export function Analytics({
   data,
   modules,
@@ -33,12 +35,11 @@ export function Analytics({
     <section aria-busy={pending}>
       <header className="page-head">
         <div>
-          <span className="eyebrow">Аналитика</span>
           <h1>{data.title}</h1>
           <p>{data.description}</p>
         </div>
         <button className="button secondary" type="button" onClick={() => start(() => router.refresh())}>
-          Обновить
+          <ArrowClockwiseIcon size={16} aria-hidden="true" /> Обновить
         </button>
       </header>
       <div className="analytics-layout">
@@ -65,22 +66,22 @@ export function Analytics({
           >
             {Object.entries(definition?.params || {}).map(([key, param]) =>
               param.type === 'enum' ? (
-                <label key={key}>
-                  <span>{paramLabel(key)}</span>
-                  <select
+                <div className="filter-field" key={key}>
+                  <span aria-hidden="true">{paramLabel(key)}</span>
+                  <Select
                     name={key}
+                    size="sm"
+                    aria-label={paramLabel(key)}
                     defaultValue={params.get(key) || String(param.default || '')}
-                    onChange={e => go({ [key]: e.target.value })}
-                  >
-                    {(param.values || []).map(value => (
-                      <option key={value} value={value}>
-                        {optionLabel(key, value)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                    onValueChange={value => go({ [key]: value })}
+                    options={(param.values || []).map(value => ({
+                      value: String(value),
+                      label: optionLabel(key, value),
+                    }))}
+                  />
+                </div>
               ) : (
-                <label key={key}>
+                <label className="filter-field" key={key}>
                   <span>{paramLabel(key)}</span>
                   <input
                     name={key}
@@ -93,7 +94,7 @@ export function Analytics({
               ),
             )}
             {!!Object.keys(definition?.params || {}).length && (
-              <button className="button" type="submit">
+              <button className="button secondary" type="submit">
                 Применить
               </button>
             )}
@@ -114,9 +115,11 @@ export function Analytics({
             ) : (
               <StatusBadge tone="good" label="Актуальный набор" />
             )}
-            <span>
-              Обновлено: <Time value={data.meta?.updated_at} />
-            </span>
+            {Boolean(data.meta?.updated_at) && (
+              <span>
+                Обновлено: <Time value={data.meta?.updated_at} />
+              </span>
+            )}
             {Boolean(data.meta?.cached) && (
               <span>
                 Из кэша ·{' '}

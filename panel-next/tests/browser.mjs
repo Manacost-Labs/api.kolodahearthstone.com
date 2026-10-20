@@ -101,7 +101,7 @@ assert.equal(
 );
 assert.ok(checks.api.includes('/api/v1/cards/BG_FIXTURE_1_G'));
 assert.ok(checks.api.includes('/api/v1/cards/by-dbf/79000'));
-await click('.inspector-mode button:nth-child(2)');
+await click('.inspector-mode [role="tab"]:nth-child(2)');
 await waitFor('document.querySelector(".history-timeline")?.children.length===2');
 assert.equal(await evaluate('document.querySelectorAll(".history-diff tbody tr").length'), 3);
 await evaluate(
@@ -114,7 +114,7 @@ await viewport(390, 844);
 assert.equal(await evaluate('document.documentElement.scrollWidth>innerWidth'), false);
 await screenshot('card-history-mobile.png');
 await viewport(1440, 1000);
-await click('.inspector-mode button:first-child');
+await click('.inspector-mode [role="tab"]:first-child');
 // Flipping cards keeps one dialog open (no close/reopen flash) and keeps focus on the control.
 await evaluate('document.querySelector("dialog[open]").dataset.qa = "inspector"');
 await click('.inspector-nav button[aria-label="Следующая запись"]');
@@ -193,7 +193,7 @@ checks.quickNavigation = true;
 await call('Input.insertText', { text: 'рыбн' });
 await waitFor('document.querySelectorAll("dialog[open] .palette-option .palette-thumb").length===3');
 checks.paletteCards = await evaluate(
-  '({active:document.querySelector("[role=combobox]").getAttribute("aria-activedescendant")===document.querySelector(".palette-option[aria-selected=true]").id,first:document.querySelector(".palette-option[aria-selected=true] strong").textContent})',
+  '({active:document.querySelector("dialog[open] [role=combobox]").getAttribute("aria-activedescendant")===document.querySelector(".palette-option[aria-selected=true]").id,first:document.querySelector(".palette-option[aria-selected=true] strong").textContent})',
 );
 assert.deepEqual(checks.paletteCards, { active: true, first: 'Рыбный следопыт' });
 await call('Input.dispatchKeyEvent', {
@@ -228,7 +228,7 @@ checks.paletteOpensCard = true;
 await pressEscape();
 await waitFor('!document.querySelector("dialog[open]")');
 await navigate(root, 'document.querySelectorAll(".card-tile").length===8');
-await click('.pagination button:nth-child(3)');
+await click('.pagination [aria-label="Страница 2"]');
 await waitFor(
   'location.search.includes("page=2") && document.querySelector(".card-copy code").textContent==="BG_FIXTURE_9"',
 );
@@ -241,7 +241,7 @@ checks.search = true;
 await navigate(root + '?q=NOT_FOUND');
 checks.empty = await evaluate('!!document.querySelector(".empty")&&!document.querySelector(".card-tile")');
 await navigate(root);
-await click('.view-switch button:nth-child(3)');
+await click('.view-switch [role="radio"]:nth-child(3)');
 await waitFor('document.querySelectorAll("tbody tr").length===8');
 checks.list = await evaluate('document.querySelectorAll("tbody tr").length===8');
 checks.tableColumns = await evaluate(
@@ -264,7 +264,7 @@ assert.equal(checks.tableMobileOverflow, false);
 await viewport(1487, 1058);
 await navigate(root);
 checks.savedView = await evaluate('document.querySelectorAll("tbody tr").length===8');
-await click('.view-switch button:nth-child(2)');
+await click('.view-switch [role="radio"]:nth-child(2)');
 await waitFor('document.querySelectorAll(".card-tile").length===8');
 await viewport(390, 844);
 await navigate(root);
@@ -290,7 +290,7 @@ await click('tbody tr:first-child .row-actions button:last-child');
 checks.runConfirm = await evaluate('!!document.querySelector("dialog[open]")');
 await click('dialog .form-actions button:last-child');
 await waitFor('!document.querySelector("dialog[open]")');
-await click('.section-tabs button:nth-child(2)');
+await click('.section-tabs [role="tab"]:nth-child(2)');
 await click('.form-actions button:nth-child(2)');
 await click('dialog .form-actions button:last-child');
 await waitFor('!document.querySelector("dialog[open]")');
