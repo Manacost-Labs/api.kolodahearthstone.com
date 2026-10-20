@@ -537,6 +537,41 @@ def migrate_fallback_card_id(conn, dbf: int, old_card_id: str, new_card_id: str,
     return True
 
 
+def reconcile_fallback_card_ids(
+    conn,
+    hsj_ru: dict[int, dict[str, Any]],
+    hsj_en: dict[int, dict[str, Any]],
+    dry_run: bool,
+) -> dict[str, Any]:
+    """Rename leftover ``blizzard:<dbf>`` rows once HearthstoneJSON has the real ID.
+
+    The format and reveal passes only migrate cards they meet again. Tokens and
+    hero powers stored before release never return through them, and the
+    related-card sync then updates the fallback row through the unique dbf, so
+    the API can never resolve the real card_id or its localized relations.
+    """
+    with conn.cursor() as cur:
+        cur.execute("SELECT card_id, dbf FROM constructed_cards WHERE card_id LIKE %s", ("blizzard:%",))
+        rows = cur.fetchall()
+    result: dict[str, Any] = {"renamed": 0, "conflicts": []}
+    for row in rows:
+        dbf = int(row["dbf"])
+        ids = {
+            card.get("id") for card in (hsj_ru.get(dbf), hsj_en.get(dbf))
+            if isinstance(card, dict)
+        }
+        new_card_id = next(iter(ids)) if len(ids) == 1 else None
+        if not isinstance(new_card_id, str) or not re.fullmatch(r"[A-Za-z0-9_]{2,64}", new_card_id):
+            continue
+        try:
+            if migrate_fallback_card_id(conn, dbf, str(row["card_id"]), new_card_id, dry_run):
+                result["renamed"] += 1
+        except RuntimeError as exc:
+            # A real card already owns the ID; keep both rows for a reviewed merge.
+            result["conflicts"].append(str(exc))
+    return result
+
+
 def save_card(conn, card: dict[str, Any], dry_run: bool) -> str:
     changed = current_hash(conn, card["card_id"]) != card["source_hash"]
     if dry_run:
@@ -827,6 +862,7 @@ def main() -> int:
                 if not args.dry_run:
                     record_failed_run(conn, format_slug, exc)
                 raise
+        all_stats["fallback_ids"] = reconcile_fallback_card_ids(conn, hsj_ru, hsj_en, args.dry_run)
         if args.dry_run:
             conn.rollback()
         else:

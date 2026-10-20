@@ -30,6 +30,22 @@ A failed run rolls back the whole batch and then commits a separate
 `constructed_import_runs` row with `status = 'error'` and the exception text,
 so failures stay visible instead of disappearing with the rollback.
 
+## Pre-release fallback card IDs
+
+Before HearthstoneJSON knows a new expansion, a card can only be stored as
+`blizzard:<dbf>`. Format and reveal passes rename such a row when they meet the
+card again, but tokens and hero powers never come back through them. Without a
+rename, `sync_constructed_related_cards.py` updates the fallback row through the
+unique `dbf`, and the API cannot resolve the real `card_id` or its localized
+relations.
+
+At the end of each run, `sync_constructed_cards.py` renames every remaining
+`blizzard:<dbf>` row once the Russian and English HearthstoneJSON builds agree
+on a single ID for that `dbf`. The `cv1` triggers record each rename as
+`removed` on the old history trail and `renamed` on the new one. If another row
+already owns the real ID, both rows stay and the conflict is listed under
+`fallback_ids.conflicts` in the run output for a reviewed merge.
+
 ## Battlegrounds manual corrections
 
 Panel edits of Battlegrounds cards are stored per field in

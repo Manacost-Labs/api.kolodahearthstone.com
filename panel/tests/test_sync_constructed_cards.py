@@ -395,6 +395,82 @@ class BlizzardPaginationTest(unittest.TestCase):
             self.fetch([self.page(1), self.page(2, pages=3)])
 
 
+class FallbackIdConnection:
+    """DictCursor double for the fallback-ID reconcile pass and its rename."""
+
+    def __init__(self, rows, existing_ids=()):
+        self.rows = [dict(row) for row in rows]
+        self.existing_ids = set(existing_ids)
+        self.renames = []
+        self.rowcount = 0
+        self._result = []
+
+    def cursor(self):
+        return self
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return None
+
+    def execute(self, sql, params=()):
+        statement = " ".join(sql.split())
+        if statement.startswith("SELECT card_id, dbf FROM constructed_cards WHERE card_id LIKE"):
+            self._result = [row for row in self.rows if row["card_id"].startswith("blizzard:")]
+        elif statement.startswith("SELECT dbf FROM constructed_cards WHERE card_id ="):
+            self._result = [{"dbf": 1}] if params[0] in self.existing_ids else []
+        elif statement.startswith("SELECT base_card_id FROM constructed_diamond_cards"):
+            self._result = []
+        elif statement.startswith("UPDATE constructed_cards SET card_id"):
+            new_id, old_id, dbf = params
+            matched = [row for row in self.rows if row["card_id"] == old_id and row["dbf"] == dbf]
+            for row in matched:
+                row["card_id"] = new_id
+            self.renames.append((old_id, new_id))
+            self.rowcount = len(matched)
+        else:
+            raise AssertionError(f"unexpected SQL: {statement}")
+
+    def fetchall(self):
+        return self._result
+
+    def fetchone(self):
+        return self._result[0] if self._result else None
+
+
+class FallbackIdReconcileTest(unittest.TestCase):
+    hsj = {129205: {"id": "BE_017t5", "dbfId": 129205}}
+
+    def test_renames_a_released_token_kept_under_its_fallback_id(self):
+        conn = FallbackIdConnection([{"card_id": "blizzard:129205", "dbf": 129205}])
+        result = sync.reconcile_fallback_card_ids(conn, self.hsj, self.hsj, False)
+        self.assertEqual(result, {"renamed": 1, "conflicts": []})
+        self.assertEqual(conn.renames, [("blizzard:129205", "BE_017t5")])
+        self.assertEqual(conn.rows[0]["card_id"], "BE_017t5")
+
+    def test_keeps_the_fallback_until_both_locales_agree_on_one_id(self):
+        rows = [{"card_id": "blizzard:129205", "dbf": 129205}, {"card_id": "blizzard:7", "dbf": 7}]
+        conn = FallbackIdConnection(rows)
+        english = {129205: {"id": "BE_017t9", "dbfId": 129205}}
+        result = sync.reconcile_fallback_card_ids(conn, self.hsj, english, False)
+        self.assertEqual(result["renamed"], 0)
+        self.assertEqual(conn.renames, [])
+
+    def test_never_overwrites_a_card_that_already_owns_the_real_id(self):
+        conn = FallbackIdConnection([{"card_id": "blizzard:129205", "dbf": 129205}], existing_ids={"BE_017t5"})
+        result = sync.reconcile_fallback_card_ids(conn, self.hsj, self.hsj, False)
+        self.assertEqual(result["renamed"], 0)
+        self.assertEqual(len(result["conflicts"]), 1)
+        self.assertEqual(conn.renames, [])
+
+    def test_dry_run_reports_without_renaming(self):
+        conn = FallbackIdConnection([{"card_id": "blizzard:129205", "dbf": 129205}])
+        result = sync.reconcile_fallback_card_ids(conn, self.hsj, self.hsj, True)
+        self.assertEqual(result["renamed"], 1)
+        self.assertEqual(conn.renames, [])
+
+
 class FailedRunLogTest(unittest.TestCase):
     def test_failed_import_keeps_an_error_run_after_rollback(self):
         events = []
