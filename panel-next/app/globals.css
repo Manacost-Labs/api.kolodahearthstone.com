@@ -2233,9 +2233,6 @@ textarea {
   text-align: center;
 }
 @media (max-width: 680px) {
-  .quick-trigger {
-    display: none;
-  }
   .modal:has(.palette) {
     margin-top: 16px;
   }
@@ -2595,4 +2592,7 @@ textarea:focus-visible,
 .filter-row label > span {
   margin-bottom: 4px;
   font-size: var(--text-xs);
+}
+.history-source + .card-history {
+  margin-top: var(--space-4);
 }
