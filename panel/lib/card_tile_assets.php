@@ -65,7 +65,9 @@ function card_tile_asset_url(array $row, string $entityType, string $id, array $
     if (strpos($path, $prefix) !== 0 || !preg_match('/^[A-Za-z0-9_.-]+-[a-f0-9]{16}\.png$/D', $filename)) {
         return null;
     }
-    if (!is_file($root . $path)) return null;
+    // Offloaded tiles are links into the S3 mount; lstat avoids a remote stat
+    // per card on every API response.
+    if (!is_link($root . $path) && !is_file($root . $path)) return null;
     card_tile_response_mtime((int)@filemtime(is_file($recordPath) ? $recordPath : $manifestPath));
     return 'https://api.kolodahearthstone.com' . $path;
 }
