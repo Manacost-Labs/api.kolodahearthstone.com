@@ -391,3 +391,25 @@ def test_health_freshness_is_bounded_like_the_diagnostics_outside_tests() -> Non
 
     assert first == second == "2026-10-20T10:00:00+00:00"
     assert compute.call_count == 1
+
+
+def test_same_size_rewrite_within_timestamp_granularity_changes_the_revision() -> None:
+    import os
+
+    from app.config import data_dir
+
+    source_id = "hsreplay_arena"
+    first_time = "2026-10-20T10:00:00.000000+00:00"
+    second_time = "2026-10-20T16:00:00.000000+00:00"
+    save_dataset(source_id, {"source_id": source_id, "fetched_at": first_time, "data": {}})
+    path = data_dir() / "datasets" / f"{source_id}.json"
+    pinned = path.stat()
+    first = cache_revision(f"/datasets/{source_id}", b"")
+    save_dataset(source_id, {"source_id": source_id, "fetched_at": second_time, "data": {}})
+    # A coarse clock gives the rewrite the same timestamps and size.
+    os.utime(path, ns=(pinned.st_atime_ns, pinned.st_mtime_ns))
+    assert path.stat().st_size == pinned.st_size
+    second = cache_revision(f"/datasets/{source_id}", b"")
+
+    assert first.startswith(first_time)
+    assert second.startswith(second_time)

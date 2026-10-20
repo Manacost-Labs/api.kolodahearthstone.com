@@ -49,30 +49,33 @@ def _cacheable_path(path: str) -> bool:
     return path == "/datasets" or path.startswith(("/datasets/", "/api/", "/v1/"))
 
 
-# source_id -> ((st_mtime_ns, st_size), fetched_at). Revisions run inside the
-# async middleware, and the global fallback covers every source: parsing all
+# path -> (file identity, fetched_at). Revisions run inside the async
+# middleware, and the global fallback covers every source: parsing all
 # published datasets (~260 MB) on each request held the event loop for about
-# a second. Datasets are replaced atomically, so an unchanged file signature
-# means an unchanged ``fetched_at``.
-_FETCHED_AT: dict[str, tuple[tuple[int, int], Any]] = {}
+# a second. Datasets are replaced atomically (tmp file + os.replace), so every
+# write gets a new inode; mtime and size alone repeat for same-size rewrites
+# within the filesystem's timestamp granularity.
+_FETCHED_AT: dict[str, tuple[tuple[int, int, int, int], Any]] = {}
 _FETCHED_AT_LOCK = threading.Lock()
 
 
 def _dataset_fetched_at(source_id: str) -> Any:
     # The path of storage.dataset_path, without its directory creation: this
     # only reads metadata. Without a file, read through storage as before.
+    path = data_dir() / "datasets" / f"{source_id}.json"
     try:
-        stat = (data_dir() / "datasets" / f"{source_id}.json").stat()
+        stat = path.stat()
     except OSError:
         return (load_dataset(source_id) or {}).get("fetched_at")
-    signature = (stat.st_mtime_ns, stat.st_size)
+    identity = (stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+    key = str(path)
     with _FETCHED_AT_LOCK:
-        cached = _FETCHED_AT.get(source_id)
-    if cached and cached[0] == signature:
+        cached = _FETCHED_AT.get(key)
+    if cached and cached[0] == identity:
         return cached[1]
     value = (load_dataset(source_id) or {}).get("fetched_at")
     with _FETCHED_AT_LOCK:
-        _FETCHED_AT[source_id] = (signature, value)
+        _FETCHED_AT[key] = (identity, value)
     return value
 
 
