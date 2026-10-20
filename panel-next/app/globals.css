@@ -2596,3 +2596,6 @@ textarea:focus-visible,
 .history-source + .card-history {
   margin-top: var(--space-4);
 }
+.analytics-main > .filter-row {
+  margin-bottom: var(--space-4);
+}
