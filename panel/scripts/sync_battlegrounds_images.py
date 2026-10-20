@@ -88,7 +88,12 @@ def local_path(public_path: str, expected_dir: str) -> Path:
     prefix = f"/uploads/{expected_dir}/"
     if not public_path.startswith(prefix):
         raise ValueError(f"Unexpected local image path: {public_path}")
-    path = (APP_ROOT / public_path.lstrip("/")).resolve()
+    candidate = APP_ROOT / public_path.lstrip("/")
+    if candidate.name in ("", ".", ".."):
+        raise ValueError(f"Image path escapes uploads/{expected_dir}: {public_path}")
+    # Keep the final link: offload replaces staged images with links into the
+    # S3 mount, and the resolved remote path is outside this directory.
+    path = candidate.parent.resolve() / candidate.name
     allowed = (APP_ROOT / "uploads" / expected_dir).resolve()
     if path.parent != allowed:
         raise ValueError(f"Image path escapes {allowed}: {public_path}")
