@@ -354,7 +354,7 @@ legend {
 }
 .workspace {
   width: 100%;
-  max-width: 1440px;
+  max-width: 1760px;
   margin: 0 auto;
   padding: 28px 32px 48px;
 }
@@ -2233,9 +2233,6 @@ textarea {
   text-align: center;
 }
 @media (max-width: 680px) {
-  .quick-trigger {
-    display: none;
-  }
   .modal:has(.palette) {
     margin-top: 16px;
   }
@@ -2573,4 +2570,32 @@ textarea:focus-visible,
 .palette-search input[type='search']:focus-visible {
   border: 0;
   box-shadow: none;
+}
+/* The sidebar lists the categories on wide screens; the strip is the mobile shortcut. */
+@media (min-width: 900px) {
+  .category-tabs {
+    display: none;
+  }
+}
+/* Statistics tables carry long source descriptions: let them use the width instead of tall rows. */
+.analytics-main td {
+  max-width: 480px;
+}
+.analytics-main td:has(> span:only-child) {
+  min-width: 120px;
+}
+/* Filter bars: text fields and buttons match the 32px VaryloUI selects. */
+.filter-row input:not([type='checkbox']):not([type='hidden']),
+.filter-row .button {
+  min-height: 32px;
+}
+.filter-row label > span {
+  margin-bottom: 4px;
+  font-size: var(--text-xs);
+}
+.history-source + .card-history {
+  margin-top: var(--space-4);
+}
+.analytics-main > .filter-row {
+  margin-bottom: var(--space-4);
 }

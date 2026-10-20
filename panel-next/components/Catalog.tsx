@@ -24,6 +24,7 @@ import { SegmentedControl } from './varylo-ui/navigation/SegmentedControl';
 import { Pagination } from './varylo-ui/navigation/Pagination';
 import { cardKey, matchesCard } from '@/lib/card-detail';
 import { catalogColumns, type Cell } from '@/lib/catalog-columns';
+import { categories as navigationCategories } from '@/lib/navigation';
 import { normalizedCard, queryHref, entityApiBase, text } from '@/lib/model';
 import type { PageData, Row } from '@/lib/types';
 import { CardInspector } from './CardInspector';
@@ -152,7 +153,7 @@ export function Catalog({
               href={catalogHref(query, { card_type: key, view })}
               aria-current={filterType === key ? 'page' : undefined}
             >
-              {label}
+              {navigationCategories[key] || label}
             </PanelLink>
           ))}
         </nav>

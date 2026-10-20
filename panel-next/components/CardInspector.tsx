@@ -12,7 +12,7 @@ import { text } from '@/lib/model';
 import type { Row } from '@/lib/types';
 import { Artwork } from './Artwork';
 import { CopyButton } from './CopyButton';
-import { RecordTabs } from './Details';
+import { RecordHistory, RecordTabs } from './Details';
 import { Modal } from './Modal';
 import { StatusBadge, Time } from './ui';
 import { Tabs } from './varylo-ui/navigation/Tabs';
@@ -172,7 +172,7 @@ export function CardInspector({
           </div>
           <details className="inspector-more">
             <summary>Все поля, изображения и JSON API</summary>
-            <RecordTabs row={row} apiBase={apiBase} />
+            <RecordTabs row={row} apiBase={apiBase} withHistory={false} />
           </details>
           <footer className="inspector-footer">
             {(onPrev || onNext) && (
@@ -229,7 +229,7 @@ export function CardInspector({
           </footer>
         </>
       ) : (
-        <RecordTabs key={String(row.card_id)} row={row} apiBase={apiBase} initialTab="history" />
+        <RecordHistory key={String(row.card_id)} row={row} apiBase={apiBase} />
       )}
     </Modal>
   );

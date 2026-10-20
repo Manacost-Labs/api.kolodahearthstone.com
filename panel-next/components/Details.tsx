@@ -11,19 +11,36 @@ import { CardHistoryFamily } from './CardHistory';
 import { historyIdentity } from '@/lib/card-history';
 const isVideo = (url: string) => /\.(mp4|webm)(\?|$)/i.test(url);
 
+/** The change history of one record, without the surrounding data tabs. */
+export function RecordHistory({ row, apiBase }: { row: Row; apiBase?: string }) {
+  const identity = historyIdentity(row, apiBase);
+  if (!identity) return <p className="empty">Для этой записи история не ведётся.</p>;
+  const golden = record(row.golden_variant);
+  return (
+    <CardHistoryFamily
+      goldenId={identity.entity === 'card' && golden.card_id ? String(golden.card_id) : undefined}
+      key={identity.entity + ':' + identity.cardId}
+      {...identity}
+    />
+  );
+}
+
 export function RecordTabs({
   row,
   apiBase,
   initialTab = 'data',
+  withHistory = true,
 }: {
   row: Row;
   apiBase?: string;
   initialTab?: string;
+  /** False where the change history already has its own place (the card inspector). */
+  withHistory?: boolean;
 }) {
   const [tab, setTab] = useState(initialTab);
   const [preview, setPreview] = useState<{ label: string; url: string } | null>(null);
   const images = imagesFrom(row);
-  const identity = historyIdentity(row, apiBase);
+  const identity = withHistory ? historyIdentity(row, apiBase) : null;
   const tabs = [
     ['data', 'Данные'],
     ['images', `Изображения · ${images.length}`],
