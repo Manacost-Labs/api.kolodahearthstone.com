@@ -88,3 +88,11 @@ copy credentials into the repository. The repair requires agreement between
 available source locales. It does not change stats, pool membership or source
 hashes. Publish the API vocabulary and scanner together; then verify
 `/api/v1/cards?creature_type=aberration&in_pool=1` and the library's client filters.
+
+The public compatibility API's Nginx cache needs both
+`nginx/api.kolodahearthstone.com.conf` (server configuration) and
+`nginx/koloda-rest-cache.conf` (install as
+`/etc/nginx/conf.d/31-koloda-rest-cache.conf` in the HTTP context). Validate with
+`nginx -t` before reloading. Keep the cache key's API version synchronized with
+`api/index.php`. The cache applies only to public `/api/v1`, not auth, token
+issuance or the panel bridge. See `../docs/card-tiles.md` for client layers.
