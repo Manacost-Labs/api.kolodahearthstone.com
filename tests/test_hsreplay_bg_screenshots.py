@@ -592,10 +592,24 @@ def test_screenshot_timer_retries_without_recapturing_fresh_asset() -> None:
         project_root / "systemd/hs-data-api-docker-bg-compositions-screenshot.service"
     ).read_text(encoding="utf-8")
 
-    assert timer.count("OnCalendar=") == 4
-    for hour in ("04", "10", "16", "22"):
-        assert f"OnCalendar=*-*-* {hour}:10:00 Europe/Warsaw" in timer
+    retry_timer = (
+        project_root
+        / "systemd/hs-data-api-docker-retry-bg-compositions-screenshot.timer"
+    ).read_text(encoding="utf-8")
+    retry_service = (
+        project_root
+        / "systemd/hs-data-api-docker-retry-bg-compositions-screenshot.service"
+    ).read_text(encoding="utf-8")
+
+    assert timer.count("OnCalendar=") == 1
+    assert "OnCalendar=*-*-* 04:10:00 Europe/Warsaw" in timer
     assert "--scheduled --stale-only" in service
+    assert "--schedule-id capture-bg-compositions-screenshot" in service
+    assert retry_timer.count("OnCalendar=") == 3
+    for hour in ("10", "16", "22"):
+        assert f"OnCalendar=*-*-* {hour}:10:00 Europe/Warsaw" in retry_timer
+    assert "--scheduled --stale-only" in retry_service
+    assert "--schedule-id" not in retry_service
 
 
 def test_latest_rejects_a_text_artifact_marked_as_success(tmp_path: Path) -> None:

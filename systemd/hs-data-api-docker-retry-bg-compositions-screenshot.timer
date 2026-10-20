@@ -1,0 +1,12 @@
+[Unit]
+Description=Retry a stale HSReplay Battlegrounds compositions screenshot every six hours
+
+[Timer]
+OnCalendar=*-*-* 10:10:00 Europe/Warsaw
+OnCalendar=*-*-* 16:10:00 Europe/Warsaw
+OnCalendar=*-*-* 22:10:00 Europe/Warsaw
+AccuracySec=10min
+Persistent=false
+
+[Install]
+WantedBy=timers.target

@@ -182,10 +182,12 @@ Production refresh schedule:
   `03:20 Europe/Warsaw`. An incomplete checkpoint younger than 12 hours is
   resumed at `:45` by a non-persistent recovery timer in batches of at most 20
   targets with a strict four-provider-failure budget per recovery run.
-- `hs-data-api-docker-bg-compositions-screenshot.timer`: checks at
-  `04:10`, `10:10`, `16:10` and `22:10 Europe/Warsaw`. It skips provider calls
-  while the latest validated image is younger than 23 hours, then retries every
-  six hours until a fresh capture succeeds. A capture is published only after
+- `hs-data-api-docker-bg-compositions-screenshot.timer`: ledger-tracked
+  primary run at `04:10 Europe/Warsaw` (`--schedule-id`). The separate
+  `hs-data-api-docker-retry-bg-compositions-screenshot.timer` retries at
+  `10:10`, `16:10` and `22:10` without claiming a ledger occurrence. Both skip
+  provider calls while the latest validated image is younger than 23 hours, so
+  retries run every six hours until a fresh capture succeeds. A capture is published only after
   MIME, image decoder, dimensions, redaction and crop checks; the last valid
   image remains available after a failed or concurrent capture. Failure status
   stores only a bounded error code; provider URLs, cookies and raw errors are
