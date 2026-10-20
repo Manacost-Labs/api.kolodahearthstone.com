@@ -26,7 +26,14 @@ UPLOAD_URL = "/uploads/constructed-related-wiki-full-art"
 USER_AGENT = "db.kolodahs.ru-wiki-full-art-sync/1.0 (admin@kolodahs.ru)"
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 MEDIAWIKI_TITLE_BATCH_SIZE = 50
+# A few cards whose Wiki originals fail validation should not fail the whole
+# job; more than this suggests a systemic CDN or proxy problem.
+MAX_REJECTED = 5
 EXCLUDED_VARIANT_RE = re.compile(r"\b(?:signature|golden|diamond|premium|animated)\b", re.IGNORECASE)
+
+
+class PayloadRejected(RuntimeError):
+    """A downloaded original failed validation; existing local art is kept."""
 
 
 class ScrapeDoFetchError(RuntimeError):
@@ -410,17 +417,17 @@ def download_original(
     )
     expected_size = int(info.get("size") or 0)
     if expected_size and len(content) < expected_size * 0.5:
-        raise RuntimeError(
+        raise PayloadRejected(
             f"Wiki full-art payload is unexpectedly small for {card['card_id']}: "
             f"{len(content)} < {expected_size}"
         )
     mime = str(info.get("mime") or "")
     if not valid_image(content, mime):
-        raise RuntimeError(f"Unexpected Wiki full-art payload for {card['card_id']} ({mime})")
+        raise PayloadRejected(f"Unexpected Wiki full-art payload for {card['card_id']} ({mime})")
     expected_sha1 = str(info.get("sha1") or "")
     actual_sha1 = hashlib.sha1(content).hexdigest()
     if expected_sha1 and len(content) == expected_size and actual_sha1 != expected_sha1:
-        raise RuntimeError(
+        raise PayloadRejected(
             f"Wiki full-art SHA-1 mismatch for {card['card_id']}: {actual_sha1} != {expected_sha1}"
         )
     temporary = destination.with_suffix(destination.suffix + ".tmp")
@@ -529,6 +536,7 @@ def main() -> int:
             "already_local": len(already_local),
             "missing": missing,
             "errors": [],
+            "rejected": [],
             "dry_run": args.dry_run,
         }
         for card_id, file_title in sorted(selected.items()):
@@ -551,6 +559,8 @@ def main() -> int:
                 )
                 stats["discovered"] += 1
                 stats["downloaded" if downloaded else "already_local"] += 1
+            except PayloadRejected as exc:
+                stats["rejected"].append({"card_id": card_id, "error": str(exc)})
             except Exception as exc:
                 stats["errors"].append({"card_id": card_id, "error": str(exc)})
 
@@ -564,7 +574,13 @@ def main() -> int:
         raise
     finally:
         conn.close()
-    return 0 if not stats["errors"] else 1
+    return exit_code(stats)
+
+
+def exit_code(stats: dict[str, Any]) -> int:
+    if stats["errors"] or len(stats.get("rejected") or []) > MAX_REJECTED:
+        return 1
+    return 0
 
 
 if __name__ == "__main__":

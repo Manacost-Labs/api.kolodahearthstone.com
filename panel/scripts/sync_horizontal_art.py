@@ -808,7 +808,12 @@ def output_public_path(candidate: Candidate) -> str:
 def local_upload_path(public_path: str) -> Path:
     if not public_path.startswith("/uploads/"):
         raise ValueError(f"Unexpected local upload path: {public_path}")
-    resolved = (APP_ROOT / public_path.lstrip("/")).resolve()
+    candidate = APP_ROOT / public_path.lstrip("/")
+    if candidate.name in ("", ".", ".."):
+        raise ValueError(f"Upload path escapes media root: {public_path}")
+    # Keep the final link: offload replaces staged files with links into the
+    # S3 mount, and renaming onto the resolved remote file fails with EXDEV.
+    resolved = candidate.parent.resolve() / candidate.name
     allowed = UPLOAD_ROOT.resolve()
     if allowed not in resolved.parents:
         raise ValueError(f"Upload path escapes media root: {public_path}")

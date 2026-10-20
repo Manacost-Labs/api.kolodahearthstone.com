@@ -937,6 +937,13 @@ def save_payload(conn, payload: dict[str, Any], dry_run: bool) -> str:
 def save_error(conn, entry: dict[str, Any], status: str, error: str, dry_run: bool) -> None:
     if dry_run:
         return
+    with conn.cursor() as cur:
+        cur.execute("SELECT status FROM battlegrounds_heroes WHERE card_id = %s", (entry.get("card_id"),))
+        existing = cur.fetchone()
+    # A failed fetch (e.g. HTTP 429) must not replace a published hero with an
+    # empty error payload; the job log and exit code still report the failure.
+    if existing and existing.get("status") == "ok":
+        return
     now = utc_now()
     payload = {
         "source": SOURCE,

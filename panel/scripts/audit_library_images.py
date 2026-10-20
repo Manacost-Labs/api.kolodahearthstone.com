@@ -7,7 +7,7 @@ import subprocess
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import pymysql
 from pymysql.cursors import DictCursor
@@ -88,23 +88,36 @@ def main() -> int:
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT library, card_id, dbf, name_ru, image_url, local_full_art_url FROM battlegrounds_library_cards" + where,
+                "SELECT library, card_id, dbf, name_ru, image_url, local_full_art_url, in_pool FROM battlegrounds_library_cards" + where,
                 params,
             )
             rows = cur.fetchall()
     finally:
         conn.close()
 
+    result, code = audit_rows(rows, url_ok, workers=args.workers)
+    result = {"library": args.library} | result
+    print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+    return code
+
+
+def audit_rows(
+    rows: list[dict[str, Any]], check: Callable[[str | None], bool], workers: int = 16
+) -> tuple[dict[str, Any], int]:
     broken: list[dict[str, Any]] = []
     broken_full_art: list[dict[str, Any]] = []
-    with ThreadPoolExecutor(max_workers=max(1, args.workers)) as executor:
-        futures = {executor.submit(url_ok, row.get("image_url")): row for row in rows}
+    # Archived cards outside the pool may never have had an image; that is
+    # reported, but only a live card's missing image or a dead URL fails.
+    archived_without_image = [row for row in rows if not row.get("image_url") and not row.get("in_pool")]
+    broken.extend(row for row in rows if not row.get("image_url") and row.get("in_pool"))
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as executor:
+        futures = {executor.submit(check, row["image_url"]): row for row in rows if row.get("image_url")}
         for future in as_completed(futures):
             row = futures[future]
             if not future.result():
                 broken.append(row)
         full_art_futures = {
-            executor.submit(url_ok, row.get("local_full_art_url")): row
+            executor.submit(check, row.get("local_full_art_url")): row
             for row in rows
             if row.get("library") == "trinket"
         }
@@ -124,16 +137,15 @@ def main() -> int:
             counts[library]["with_full_art"] += 1
 
     result = {
-        "library": args.library,
         "counts": counts,
         "broken_count": len(broken),
         "broken": broken[:50],
         "broken_full_art_count": len(broken_full_art),
         "broken_full_art": broken_full_art[:50],
+        "archived_without_image_count": len(archived_without_image),
+        "archived_without_image": [row.get("card_id") for row in archived_without_image],
     }
-    print(json.dumps(result, ensure_ascii=False, sort_keys=True))
-
-    return 1 if broken or broken_full_art else 0
+    return result, 1 if broken or broken_full_art else 0
 
 
 if __name__ == "__main__":
