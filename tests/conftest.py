@@ -25,9 +25,16 @@ def pytest_sessionfinish(session, exitstatus) -> None:  # type: ignore[no-untype
 
 @pytest.fixture(autouse=True)
 def _fresh_public_cache_revisions():  # type: ignore[no-untyped-def]
-    """Tests replace dataset readers; a memoized revision must not leak between them."""
-    from app.public_cache import _FETCHED_AT
+    """Tests replace dataset readers; a memoized revision must not leak between them.
 
-    _FETCHED_AT.clear()
+    Only a loaded module can hold revisions: minimal jobs run without starlette.
+    """
+    _clear_public_cache_revisions()
     yield
-    _FETCHED_AT.clear()
+    _clear_public_cache_revisions()
+
+
+def _clear_public_cache_revisions() -> None:
+    module = sys.modules.get("app.public_cache")
+    if module is not None:
+        module._FETCHED_AT.clear()
