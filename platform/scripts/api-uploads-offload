@@ -1,0 +1,147 @@
+#!/usr/bin/python3
+"""Verify API media in S3 and atomically retain its original paths as links."""
+import argparse
+import ctypes
+import fcntl
+import json
+import os
+from pathlib import Path
+import stat
+import subprocess
+import time
+import uuid
+
+SOURCE=Path('/srv/api-kolodahearthstone/panel-data/uploads')
+MOUNT=SOURCE/'.s3-storage'
+REMOTE='ovh:hs-media-ns3010276-par/api.kolodahearthstone.com/uploads'
+STATE=Path('/var/lib/api-uploads-s3')
+CLIENT='/usr/local/sbin/wordpress-s3-rclone'
+RC=['/opt/wordpress-s3/bin/rclone','rc','--unix-socket','/run/api-uploads-s3/rc.sock']
+# Only published media moves to S3; JSON records, manifests and markers are read
+# on every API request and must stay on local disk.
+MEDIA_SUFFIXES={'.png','.jpg','.jpeg','.webp','.gif','.svg','.avif','.mp4','.webm','.mp3','.ogg','.wav'}
+OFFLOAD_LOCK='/run/lock/api-uploads-offload.lock'
+# Shared with the platform scheduler and catalogue publishers. Copy and
+# verification only read files, so the lock is needed just for the atomic
+# exchange; waiting there gives this job a fair turn between other holders.
+SYNC_LOCK='/run/hs-data-platform-sync/sync.lock'
+SYNC_LOCK_WAIT_SECONDS=600
+
+def rc(method):return json.loads(subprocess.check_output([*RC,method],text=True))
+def fingerprint(path):
+    s=path.lstat();return (s.st_dev,s.st_ino,s.st_size,s.st_mtime_ns,s.st_mode,s.st_nlink)
+def active_writes():
+    result=set()
+    for proc in Path('/proc').iterdir():
+        if not proc.name.isdigit():continue
+        try:
+            for fd in (proc/'fd').iterdir():
+                try:
+                    name=os.readlink(fd).removesuffix(' (deleted)')
+                    if not name.startswith(str(SOURCE)+'/'):continue
+                    flags=next(int(x.split()[1],8) for x in (proc/'fdinfo'/fd.name).read_text().splitlines() if x.startswith('flags:'))
+                    if flags&os.O_ACCMODE:result.add(name)
+                except (OSError,StopIteration):pass
+        except OSError:pass
+    return result
+def acquire(path):
+    fd=os.open(path,os.O_RDWR|os.O_CREAT|os.O_NOFOLLOW,0o600)
+    fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB);return fd
+def acquire_wait(path,seconds):
+    fd=os.open(path,os.O_RDWR|os.O_CREAT|os.O_NOFOLLOW,0o600)
+    until=time.monotonic()+seconds
+    while True:
+        try:fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB);return fd
+        except BlockingIOError:
+            if time.monotonic()>=until:os.close(fd);raise
+            time.sleep(0.5)
+
+def execute(args):
+    if os.geteuid()!=0:raise RuntimeError('root required')
+    if SOURCE.is_symlink() or not SOURCE.is_dir():raise RuntimeError('unexpected API staging root')
+    if subprocess.run(['mountpoint','-q',str(MOUNT)]).returncode:raise RuntimeError('API S3 mount missing')
+    STATE.mkdir(mode=0o700,exist_ok=True)
+    locks=[acquire(OFFLOAD_LOCK)]
+    cache=rc('vfs/stats')['diskCache']
+    if cache['uploadsQueued'] or cache['uploadsInProgress'] or cache['erroredFiles'] or cache['outOfSpace']:
+        raise RuntimeError('pending/failed S3 write-back; preserving local files for retry')
+    now=time.time();opened=active_writes();files={};skipped=[]
+    # Do not follow migrated links even for directory classification: that would
+    # issue S3 metadata requests for every existing image on each timer run.
+    pending=[SOURCE]
+    while pending:
+        parent=pending.pop()
+        with os.scandir(parent) as entries:
+            local_files=[]
+            for entry in entries:
+                p=Path(entry.path)
+                if p==MOUNT or entry.is_symlink():continue
+                if entry.is_dir(follow_symlinks=False):pending.append(p)
+                else:local_files.append(p)
+        for p in local_files:
+            name=p.name
+            if p.is_symlink():continue
+            s=p.lstat();rel=str(p.relative_to(SOURCE))
+            if args.only_file and rel!=args.only_file:continue
+            if not stat.S_ISREG(s.st_mode) or name.startswith(('.capture-','.s3-switch-','.tmp-')):continue
+            if p.suffix.lower() not in MEDIA_SUFFIXES:continue
+            if s.st_nlink!=1 or not s.st_mode&0o004 or s.st_mtime>now-args.min_age_seconds or str(p) in opened:
+                skipped.append(rel);continue
+            if '\n' in rel or '\r' in rel:skipped.append(rel);continue
+            files[rel]=fingerprint(p)
+    stamp=time.strftime('%Y%m%dT%H%M%SZ',time.gmtime())+'-'+uuid.uuid4().hex[:8]
+    report={'started':now,'selected_files':len(files),'min_age_seconds':args.min_age_seconds,'skipped_before_copy':len(skipped),
+            'replaced_files':0,'freed_allocated_bytes':0,'changed_or_busy_files':0,'finished':None}
+    report_path=STATE/(stamp+'.json')
+    def save():report_path.write_text(json.dumps(report,indent=2))
+    save()
+    if not files:
+        report['finished']=time.time();save();return report
+    listing=STATE/(stamp+'.files');listing.write_bytes(b'\n'.join(os.fsencode(p) for p in files)+b'\n')
+    checks=STATE/(stamp+'.check');log=STATE/(stamp+'.log')
+    with log.open('w') as output:
+        # The explicit file list excludes the backing mount; rclone forbids mixing it with filters.
+        common=['--no-unicode-normalization','--files-from-raw',str(listing),'--fast-list','--one-file-system','--log-level','NOTICE']
+        subprocess.run([CLIENT,'copy',str(SOURCE),REMOTE,*common,'--checksum','--transfers','96','--checkers','64','--buffer-size','1M','--s3-acl','private'],check=True,stdout=output,stderr=output)
+        subprocess.run([CLIENT,'check',str(SOURCE),REMOTE,*common,'--one-way','--download','--checkers','64','--combined',str(checks)],check=True,stdout=output,stderr=output)
+    matched={os.fsdecode(line[2:]) for line in checks.read_bytes().splitlines() if line.startswith(b'= ')}
+    assert matched==set(files),'not all selected source files have verified S3 content'
+    try:locks.append(acquire_wait(SYNC_LOCK,args.sync_lock_wait_seconds))
+    except BlockingIOError:
+        # Verified copies stay in S3; the next run re-checks them cheaply.
+        report.update(finished=time.time(),deferred_exchange='shared sync lock busy');save();return report
+    rc('vfs/forget')
+    libc=ctypes.CDLL(None,use_errno=True)
+    libc.renameat2.argtypes=[ctypes.c_int,ctypes.c_char_p,ctypes.c_int,ctypes.c_char_p,ctypes.c_uint]
+    opened=active_writes();manifest=STATE/(stamp+'.replaced.jsonl')
+    with manifest.open('w') as records:
+        for i,(rel,before) in enumerate(files.items()):
+            p=SOURCE/rel
+            if i%500==0:opened=active_writes()
+            try:
+                if fingerprint(p)!=before or str(p) in opened:
+                    report['changed_or_busy_files']+=1;continue
+            except FileNotFoundError:
+                report['changed_or_busy_files']+=1;continue
+            link=p.parent/('.s3-switch-'+uuid.uuid4().hex);target=MOUNT/rel
+            link.symlink_to(target);os.lchown(link,1011,1011)
+            if fingerprint(p)!=before:
+                link.unlink();report['changed_or_busy_files']+=1;continue
+            if libc.renameat2(-100,os.fsencode(p),-100,os.fsencode(link),2):
+                link.unlink();raise OSError(ctypes.get_errno(),'atomic image exchange failed')
+            if fingerprint(link)!=before:
+                if libc.renameat2(-100,os.fsencode(p),-100,os.fsencode(link),2):raise RuntimeError('exchange rollback failed; original retained')
+                link.unlink();report['changed_or_busy_files']+=1;continue
+            allocated=link.lstat().st_blocks*512
+            records.write(json.dumps({'path':rel,'target':str(target),'allocated_bytes':allocated})+'\n')
+            link.unlink();report['replaced_files']+=1;report['freed_allocated_bytes']+=allocated
+            if i%1000==0:save()
+    report.update(finished=time.time(),all_selected_remote_content_verified=True,manifest_path=str(manifest),checks_path=str(checks))
+    save();(STATE/'latest.json').write_text(json.dumps(report,indent=2));return report
+
+if __name__=='__main__':
+    parser=argparse.ArgumentParser();parser.add_argument('--min-age-seconds',type=int,default=60);parser.add_argument('--only-file')
+    parser.add_argument('--sync-lock-wait-seconds',type=int,default=SYNC_LOCK_WAIT_SECONDS)
+    options=parser.parse_args()
+    try:print(json.dumps(execute(options),indent=2))
+    except BlockingIOError:print(json.dumps({'deferred':'another offload holds its lock'}))

@@ -4,9 +4,11 @@ set -Eeuo pipefail
 umask 077
 
 platform_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-compose_dir="${platform_dir}/postgres"
-backup_dir="${platform_dir}/backups"
+compose_dir="${HS_DATA_BACKUP_COMPOSE_DIR:-${platform_dir}/postgres}"
+backup_dir="${HS_DATA_BACKUP_DIR:-${platform_dir}/backups}"
 retention_days="${HS_DATA_BACKUP_RETENTION_DAYS:-14}"
+archive_config="${HS_DATA_S3_ARCHIVE_CONFIG:-/etc/hs-data-platform/s3-archive.env}"
+test_mode="${HS_DATA_BACKUP_TEST_MODE:-0}"
 run_id="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 lock_file="${backup_dir}/.backup.lock"
 
@@ -25,7 +27,7 @@ fi
 
 mkdir -p -- "${backup_dir}"
 chmod 0700 "${backup_dir}"
-if [[ "$(realpath -- "${backup_dir}")" != "/srv/hs-data-platform/backups" ]]; then
+if [[ "$test_mode" != 1 && "$(realpath -- "${backup_dir}")" != "/srv/hs-data-platform/backups" ]]; then
   log_event error backup_failed unsafe_backup_path
   exit 1
 fi
@@ -58,9 +60,13 @@ sudo -n docker compose --project-directory "${compose_dir}" -f "${compose_dir}/d
 
 mv -- "${hs_data_partial}" "${hs_data_partial%.partial}"
 
-find "${backup_dir}" -maxdepth 1 -type f \
-  -name 'hs-data-platform-*-hs_data.dump' \
-  -mtime "+${retention_days}" -delete
+if [[ -r "$archive_config" ]]; then
+  log_event info local_retention_deferred s3_archive_configured
+else
+  find "${backup_dir}" -maxdepth 1 -type f \
+    -name 'hs-data-platform-*-hs_data.dump' \
+    -mtime "+${retention_days}" -delete
+fi
 
 trap - ERR EXIT
 log_event info backup_completed

@@ -158,3 +158,10 @@ assert_contains scripts/sync-shadow.php "'catalog.catalog_card_versions'" 'card 
 assert_contains sql/012_bartender_catalog.sql 'catalog.battlegrounds_bartender_skins' 'bartender catalog must be mirrored before activation'
 assert_contains sql/012_bartender_catalog.sql 'source_payload_json jsonb' 'bartender JSON must match the shadow loader JSONB conversion'
 assert_contains scripts/apply-migrations.sh '012_bartender_catalog\.sql' 'the migration runner must install bartender catalog'
+
+assert_contains sql/015_full_card_catalog.sql 'catalog.hearthstone_card_catalog' 'the full card catalogue must be mirrored before shadow merge'
+assert_contains sql/015_full_card_catalog.sql 'dbf bigint NOT NULL UNIQUE' 'catalogue dbf must match the loader type and stay unique'
+assert_contains scripts/apply-migrations.sh '015_full_card_catalog\.sql' 'the migration runner must install the full card catalogue'
+
+assert_contains systemd/kolodahs-card-history-media.service 'flock -E 75 -w 900' 'a busy sync lock must end the card history turn with a distinct code'
+assert_contains systemd/kolodahs-card-history-media.service 'SuccessExitStatus=75' 'a skipped card history turn must not mark the unit failed'

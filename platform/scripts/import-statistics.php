@@ -2,6 +2,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/sync-context.php';
+
 require __DIR__ . '/statistics-normalizer.php';
 
 const STATISTICS_PLATFORM_DIR = __DIR__ . '/..';
@@ -30,8 +32,8 @@ function statistics_open_target(): array
             '/usr/bin/sudo', '-n', 'docker', 'compose',
             '--project-directory', $composeDir,
             '-f', $composeDir . '/docker-compose.yml',
-            'exec', '-T', 'postgres', 'sh', '-eu', '-c',
-            'psql -X -q -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d hs_data',
+            'exec', '-e', 'PGAPPNAME=' . syncApplicationName(), '-T', 'postgres', 'sh', '-eu', '-c',
+            'psql -X -qAt -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d hs_data',
         ],
         [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
         $pipes,
@@ -307,11 +309,11 @@ CREATE TEMP TABLE statistics_row_import (
     class_name text,
     tier text,
     games bigint,
-    win_rate numeric,
-    popularity numeric,
-    pick_rate numeric,
-    avg_placement numeric,
-    score numeric,
+    win_rate numeric(10, 4),
+    popularity numeric(10, 4),
+    pick_rate numeric(10, 4),
+    avg_placement numeric(10, 4),
+    score numeric(14, 4),
     image_url text,
     source_url text,
     metrics jsonb
@@ -333,32 +335,93 @@ SELECT DISTINCT ON (snapshot_key)
     format_name, rank_range, period, mode, rating_bracket, patch,
     source_url, fetched_at, metadata
 FROM statistics_snapshot_import
-ORDER BY snapshot_key, fetched_at DESC
+ORDER BY snapshot_key, fetched_at DESC, ctid
 ON CONFLICT (snapshot_key) DO UPDATE SET
+    patch = EXCLUDED.patch,
     source_url = EXCLUDED.source_url,
     fetched_at = EXCLUDED.fetched_at,
     imported_at = now(),
     metadata = EXCLUDED.metadata;
 
-DELETE FROM analytics.game_stat_rows AS target
-USING analytics.game_stat_snapshots AS snapshot,
-      (SELECT DISTINCT snapshot_key FROM statistics_snapshot_import) AS imported
-WHERE target.snapshot_id = snapshot.id
-  AND snapshot.snapshot_key = imported.snapshot_key;
-
-INSERT INTO analytics.game_stat_rows (
-    snapshot_id, entity_key, entity_type, card_id, dbf_id, name, name_ru,
-    class_name, tier, games, win_rate, popularity, pick_rate, avg_placement,
-    score, image_url, source_url, metrics
-)
+-- COPY uses the target numeric precision so rounding cannot create false changes.
+-- The first occurrence wins duplicate entity keys, in stable COPY order.
+CREATE TEMP TABLE statistics_row_ready ON COMMIT DROP AS
 SELECT DISTINCT ON (snapshot.id, row.entity_key)
-    snapshot.id, row.entity_key, row.entity_type, row.card_id, row.dbf_id,
+    snapshot.id AS snapshot_id, row.entity_key, row.entity_type, row.card_id, row.dbf_id,
     row.name, row.name_ru, row.class_name, row.tier, row.games, row.win_rate,
     row.popularity, row.pick_rate, row.avg_placement, row.score, row.image_url,
     row.source_url, row.metrics
 FROM statistics_row_import AS row
 JOIN analytics.game_stat_snapshots AS snapshot ON snapshot.snapshot_key = row.snapshot_key
-ORDER BY snapshot.id, row.entity_key;
+ORDER BY snapshot.id, row.entity_key, row.ctid;
+CREATE UNIQUE INDEX ON statistics_row_ready (snapshot_id, entity_key);
+ANALYZE statistics_row_ready;
+ANALYZE statistics_snapshot_import;
+
+CREATE TEMP TABLE statistics_import_result ON COMMIT DROP AS
+WITH written AS (
+    INSERT INTO analytics.game_stat_rows AS target (
+        snapshot_id, entity_key, entity_type, card_id, dbf_id, name, name_ru,
+        class_name, tier, games, win_rate, popularity, pick_rate, avg_placement,
+        score, image_url, source_url, metrics
+    )
+    SELECT incoming.*
+    FROM statistics_row_ready AS incoming
+    LEFT JOIN analytics.game_stat_rows AS stored
+      ON stored.snapshot_id = incoming.snapshot_id AND stored.entity_key = incoming.entity_key
+    WHERE stored.snapshot_id IS NULL
+       OR (stored.entity_type, stored.card_id, stored.dbf_id, stored.name,
+            stored.name_ru, stored.class_name, stored.tier, stored.games,
+            stored.win_rate, stored.popularity, stored.pick_rate, stored.avg_placement,
+            stored.score, stored.image_url, stored.source_url, stored.metrics)
+       IS DISTINCT FROM (incoming.entity_type, incoming.card_id, incoming.dbf_id, incoming.name,
+            incoming.name_ru, incoming.class_name, incoming.tier, incoming.games,
+            incoming.win_rate, incoming.popularity, incoming.pick_rate, incoming.avg_placement,
+            incoming.score, incoming.image_url, incoming.source_url, incoming.metrics)
+    ON CONFLICT (snapshot_id, entity_key) DO UPDATE SET
+        entity_type = EXCLUDED.entity_type,
+        card_id = EXCLUDED.card_id,
+        dbf_id = EXCLUDED.dbf_id,
+        name = EXCLUDED.name,
+        name_ru = EXCLUDED.name_ru,
+        class_name = EXCLUDED.class_name,
+        tier = EXCLUDED.tier,
+        games = EXCLUDED.games,
+        win_rate = EXCLUDED.win_rate,
+        popularity = EXCLUDED.popularity,
+        pick_rate = EXCLUDED.pick_rate,
+        avg_placement = EXCLUDED.avg_placement,
+        score = EXCLUDED.score,
+        image_url = EXCLUDED.image_url,
+        source_url = EXCLUDED.source_url,
+        metrics = EXCLUDED.metrics
+    WHERE (target.entity_type, target.card_id, target.dbf_id, target.name,
+            target.name_ru, target.class_name, target.tier, target.games,
+            target.win_rate, target.popularity, target.pick_rate, target.avg_placement,
+            target.score, target.image_url, target.source_url, target.metrics)
+          IS DISTINCT FROM (EXCLUDED.entity_type, EXCLUDED.card_id, EXCLUDED.dbf_id, EXCLUDED.name,
+            EXCLUDED.name_ru, EXCLUDED.class_name, EXCLUDED.tier, EXCLUDED.games,
+            EXCLUDED.win_rate, EXCLUDED.popularity, EXCLUDED.pick_rate, EXCLUDED.avg_placement,
+            EXCLUDED.score, EXCLUDED.image_url, EXCLUDED.source_url, EXCLUDED.metrics)
+    RETURNING 1
+)
+SELECT count(*) AS rows_written, 0::bigint AS rows_deleted FROM written;
+
+-- Reconcile removals only within snapshots actually present in this successful import.
+WITH deleted AS (
+    DELETE FROM analytics.game_stat_rows AS target
+    USING analytics.game_stat_snapshots AS snapshot,
+          (SELECT DISTINCT snapshot_key FROM statistics_snapshot_import) AS imported
+    WHERE target.snapshot_id = snapshot.id
+      AND snapshot.snapshot_key = imported.snapshot_key
+      AND NOT EXISTS (
+          SELECT 1 FROM statistics_row_ready AS incoming
+          WHERE incoming.snapshot_id = target.snapshot_id
+            AND incoming.entity_key = target.entity_key
+      )
+    RETURNING 1
+)
+UPDATE statistics_import_result SET rows_deleted = (SELECT count(*) FROM deleted);
 
 UPDATE platform.data_sources
 SET last_synced_at = now(), updated_at = now()
@@ -368,12 +431,22 @@ INSERT INTO platform.sync_runs (
     source_id, completed_at, state, rows_read, rows_written, details
 )
 SELECT
-    'statistics-normalized', now(), 'ok', count(*), count(*),
+    'statistics-normalized', now(), 'ok', (SELECT count(*) FROM statistics_row_import), rows_written,
     jsonb_build_object(
         'mode', 'normalized_snapshot',
-        'snapshots', (SELECT count(*) FROM statistics_snapshot_import)
+        'write_policy', 'changed_content',
+        'snapshots', (SELECT count(*) FROM statistics_snapshot_import),
+        'rows_unchanged', (SELECT count(*) FROM statistics_row_ready) - rows_written,
+        'rows_deleted', rows_deleted,
+        'rows_deduplicated', (SELECT count(*) FROM statistics_row_import) - (SELECT count(*) FROM statistics_row_ready)
     )
-FROM statistics_row_import;
+FROM statistics_import_result;
+SELECT jsonb_build_object(
+    'rows_written', rows_written,
+    'rows_unchanged', (SELECT count(*) FROM statistics_row_ready) - rows_written,
+    'rows_deleted', rows_deleted,
+    'rows_deduplicated', (SELECT count(*) FROM statistics_row_import) - (SELECT count(*) FROM statistics_row_ready)
+) FROM statistics_import_result;
 COMMIT;
 SQL
     );
@@ -388,11 +461,12 @@ SQL
         throw new RuntimeException(trim((string)$stderr) ?: 'PostgreSQL statistics import failed');
     }
 
-    statistics_log('info', 'statistics_import_completed', $runId, [
+    $summary = json_decode(trim((string)$stdout), true, flags: JSON_THROW_ON_ERROR);
+    statistics_log('info', 'statistics_import_completed', $runId, array_merge([
         'source_count' => $sourceCount,
         'snapshot_count' => $snapshotCount,
         'row_count' => $rowCount,
-    ]);
+    ], $summary));
 } catch (Throwable $exception) {
     statistics_log('error', 'statistics_import_failed', $runId, [
         'error_code' => 'import_failed',

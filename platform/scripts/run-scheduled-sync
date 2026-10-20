@@ -1,0 +1,198 @@
+#!/usr/bin/env python3
+"""Serialize scheduled producers and their PostgreSQL work, including cancellation."""
+import fcntl
+import json
+import os
+from pathlib import Path
+import re
+import signal
+import stat
+import subprocess
+import sys
+import time
+import uuid
+
+PLATFORM_DIR = Path('/srv/hs-data-platform')
+LOCK_DIR = Path('/run/hs-data-platform-sync')
+LOCK_WAIT_SECONDS = 900
+RUN_TIMEOUT = {'import': 1200, 'shadow': 1800}
+DB_COMMAND = [
+    '/usr/bin/docker', 'compose', '--project-directory', '/srv/hs-data-platform/postgres',
+    '-f', '/srv/hs-data-platform/postgres/docker-compose.yml', 'exec', '-T',
+    '-e', 'PGAPPNAME=hsdp-sync-guard', 'postgres', 'sh', '-eu', '-c',
+    'psql -X -qAt -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d hs_data',
+]
+TAG_PATTERN = r'hsdp-sync-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+stop_signal = 0
+
+
+def on_signal(signum, _frame):
+    global stop_signal
+    stop_signal = signum
+
+
+def db_cleanup(tag=None):
+    # Must hold the host lock and stop every host producer before this cleanup.
+    if tag is not None and not re.fullmatch(TAG_PATTERN, tag):
+        raise RuntimeError('Invalid synchronization identity')
+    selector = f"application_name = '{tag}'" if tag else f"application_name ~ '^{TAG_PATTERN}$'"
+    predicate = f"datname = current_database() AND backend_type = 'client backend' AND {selector}"
+    for _ in range(20):
+        sql = ("SET statement_timeout='5s'; SET lock_timeout='2s';\n"
+               f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE {predicate};\n"
+               "SELECT pg_stat_clear_snapshot();\n"
+               f"SELECT count(*) FROM pg_stat_activity WHERE {predicate};\n")
+        result = subprocess.run(DB_COMMAND, input=sql, text=True, capture_output=True, timeout=10)
+        if result.returncode:
+            raise RuntimeError('Unable to confirm database job cleanup')
+        lines = result.stdout.strip().splitlines()
+        if lines and lines[-1] == '0':
+            return
+        time.sleep(0.25)
+    raise RuntimeError('Tagged database sessions did not terminate; next job must not start')
+
+
+def group_running(group):
+    for path in Path('/proc').glob('[0-9]*/stat'):
+        try:
+            fields = path.read_text().rsplit(') ', 1)[1].split()
+            if int(fields[2]) == group and fields[0] not in ('Z', 'X'):
+                return True
+        except (FileNotFoundError, ProcessLookupError):
+            continue
+    return False
+
+
+def save_host_state(process=None):
+    state = {'boot_id': Path('/proc/sys/kernel/random/boot_id').read_text().strip(),
+             'supervisor': os.getpid(), 'phase': 'starting'}
+    if process is not None:
+        fields = Path(f'/proc/{process.pid}/stat').read_text().rsplit(') ', 1)[1].split()
+        state.update(phase='running', group=process.pid, leader_start_ticks=int(fields[19]))
+    temporary = LOCK_DIR / f'host-state.{os.getpid()}.tmp'
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(descriptor, 'w') as out:
+        json.dump(state, out)
+        out.flush()
+        os.fsync(out.fileno())
+    os.replace(temporary, LOCK_DIR / 'host-state.json')
+
+
+def recover_host_state():
+    path = LOCK_DIR / 'host-state.json'
+    if not path.exists():
+        return
+    state = json.loads(path.read_text())
+    boot_id = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+    if state['boot_id'] == boot_id:
+        if state['phase'] != 'running' or not isinstance(state.get('group'), int):
+            raise RuntimeError('Unconfirmed previous producer launch; inspect host-state.json before resuming')
+        # Fail conservatively even if a process-group id has been reused; never
+        # kill an old group by id during recovery. Its recorded start time is
+        # available for diagnosis. Only absence authorizes a fresh producer.
+        if group_running(state['group']):
+            raise RuntimeError('Previous host producer group is still present; refusing a new job')
+    path.unlink()
+
+
+def stop_group(process):
+    # Producers use a separate session and do not detach. Also stop lingering
+    # descendants when the direct PHP process has already exited.
+    for sig, grace in [(signal.SIGTERM, 5), (signal.SIGKILL, 5)]:
+        if not group_running(process.pid):
+            break
+        try:
+            os.killpg(process.pid, sig)
+        except ProcessLookupError:
+            break
+        until = time.monotonic() + grace
+        while group_running(process.pid) and time.monotonic() < until:
+            process.poll()
+            time.sleep(0.05)
+    process.wait(timeout=1)
+    if group_running(process.pid):
+        raise RuntimeError('Host producers still exist; refusing to confirm cleanup')
+
+
+def main(job):
+    if job not in RUN_TIMEOUT:
+        print('Usage: run-scheduled-sync import|shadow', file=sys.stderr)
+        return 64
+    if os.geteuid() != 0:
+        raise RuntimeError('Run scheduled synchronization as root')
+    os.umask(0o077)
+    LOCK_DIR.mkdir(mode=0o700, exist_ok=True)
+    directory = LOCK_DIR.lstat()
+    if not stat.S_ISDIR(directory.st_mode) or directory.st_uid != 0 or stat.S_IMODE(directory.st_mode) != 0o700:
+        raise RuntimeError('Unsafe synchronization lock directory')
+    fd = os.open(LOCK_DIR / 'sync.lock', os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    lock_stat = os.fstat(fd)
+    if not stat.S_ISREG(lock_stat.st_mode) or lock_stat.st_uid != 0 or lock_stat.st_nlink != 1:
+        os.close(fd)
+        raise RuntimeError('Unsafe synchronization lock file')
+    signal.signal(signal.SIGTERM, on_signal)
+    signal.signal(signal.SIGINT, on_signal)
+    tag = None
+    try:
+        print(f'Scheduled sync {job}: waiting for shared lock', flush=True)
+        until = time.monotonic() + LOCK_WAIT_SECONDS
+        while True:
+            if stop_signal:
+                return 128 + stop_signal
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= until:
+                    return 75
+                time.sleep(0.1)
+        # Recover only this scheduler's sessions, including after a hard kill.
+        # If database state cannot be established, no new producer is launched.
+        recover_host_state()
+        db_cleanup()
+        if stop_signal:
+            return 128 + stop_signal
+        tag = 'hsdp-sync-' + str(uuid.uuid4())
+        print(f'Scheduled sync {job}: acquired shared lock; run={tag}', flush=True)
+        env = os.environ.copy()
+        env['HS_DATA_SYNC_APPLICATION_NAME'] = tag
+        steps = (['import-datasets.php', 'import-statistics.php', 'index-media-assets.php']
+                 if job == 'import' else ['sync-shadow.php'])
+        deadline = time.monotonic() + RUN_TIMEOUT[job]
+        for name in steps:
+            if stop_signal:
+                return 128 + stop_signal
+            if time.monotonic() >= deadline:
+                return 124
+            # Persist intent before spawning: a hard kill during this tiny
+            # launch window must leave the next owner blocked, not guessing.
+            save_host_state()
+            process = subprocess.Popen([str(PLATFORM_DIR / 'scripts' / name)], env=env,
+                                       start_new_session=True, pass_fds=(fd,))
+            try:
+                save_host_state(process)
+                while process.poll() is None:
+                    if stop_signal or time.monotonic() >= deadline:
+                        return 128 + stop_signal if stop_signal else 124
+                    time.sleep(0.1)
+                if process.returncode:
+                    return process.returncode if process.returncode > 0 else 128 - process.returncode
+            finally:
+                stop_group(process)
+                (LOCK_DIR / 'host-state.json').unlink()
+        return 0
+    finally:
+        try:
+            if tag is not None:
+                db_cleanup(tag)
+                print(f'Scheduled sync {job}: database sessions finished; run={tag}', flush=True)
+        finally:
+            os.close(fd)
+
+
+if __name__ == '__main__':
+    try:
+        sys.exit(main(sys.argv[1] if len(sys.argv) == 2 else ''))
+    except Exception as error:
+        print(f'Scheduled synchronization failed: {error}', file=sys.stderr, flush=True)
+        sys.exit(1)

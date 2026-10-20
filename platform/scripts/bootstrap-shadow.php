@@ -2,6 +2,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/sync-context.php';
+
 const PLATFORM_DIR = __DIR__ . '/..';
 const CATALOG_CONFIG = '/etc/api-kolodahearthstone/panel-config.php';
 const ANALYTICS_DB = '/srv/hs-data-api/data/hs_parses.db';
@@ -158,11 +160,11 @@ function applyPostMigrationSql(): void
 }
 
 $mode = $argv[1] ?? 'all';
-if (!in_array($mode, ['catalog', 'analytics', 'all', 'stage'], true)) {
-    fail('Usage: bootstrap-shadow.php [catalog|analytics|all|stage]');
+if (!in_array($mode, ['catalog', 'analytics', 'all', 'stage', 'catalog-stage'], true)) {
+    fail('Usage: bootstrap-shadow.php [catalog|analytics|all|stage|catalog-stage]');
 }
 
-$catalogSchema = $mode === 'stage' ? 'catalog_stage' : 'catalog';
+$catalogSchema = in_array($mode, ['stage', 'catalog-stage'], true) ? 'catalog_stage' : 'catalog';
 $analyticsSchema = $mode === 'stage' ? 'analytics_stage' : 'analytics';
 
 $catalogConfig = require CATALOG_CONFIG;
@@ -182,10 +184,11 @@ $targetUri = connectionUri(
     'hs_data',
 );
 
+$syncApplication = syncApplicationName();
 $analyticsSnapshot = null;
 try {
     try {
-        if ($mode === 'catalog' || $mode === 'all' || $mode === 'stage') {
+        if ($mode === 'catalog' || $mode === 'all' || $mode === 'stage' || $mode === 'catalog-stage') {
             $mysql = parseMysqlDsn((string)$catalogConfig['db']['dsn']);
             $sourceUri = connectionUri(
                 'mysql',
@@ -205,6 +208,7 @@ LOAD DATABASE
       workers = 4, concurrency = 2, multiple readers per thread, rows per range = 50000
 
  SET PostgreSQL PARAMETERS
+     application_name to '{$syncApplication}',
      maintenance_work_mem to '1GB',
      work_mem to '64MB'
 
@@ -240,6 +244,7 @@ LOAD DATABASE
  WITH include drop, create tables, create indexes, reset sequences
 
  SET PostgreSQL PARAMETERS
+     application_name to '{$syncApplication}',
      maintenance_work_mem to '1GB',
      work_mem to '64MB'
 

@@ -2,6 +2,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/sync-context.php';
+
 const PLATFORM_DIR = __DIR__ . '/..';
 
 function runProcess(array $command, string $stdin = ''): string
@@ -43,16 +45,26 @@ try {
             '/usr/bin/sudo', '-n', 'docker', 'compose',
             '--project-directory', $composeDir,
             '-f', $composeDir . '/docker-compose.yml',
-            'exec', '-T', 'postgres', 'sh', '-eu', '-c',
-            'psql -X -q -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d hs_data',
+            'exec', '-e', 'PGAPPNAME=' . syncApplicationName(), '-T', 'postgres', 'sh', '-eu', '-c',
+            'psql -X -qAt -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d hs_data',
         ],
         "DROP SCHEMA IF EXISTS catalog_stage CASCADE;\n" .
-        "DROP SCHEMA IF EXISTS analytics_stage CASCADE;\n",
+        "DROP SCHEMA IF EXISTS analytics_stage CASCADE;\n" .
+        "DROP SCHEMA IF EXISTS analytics_sync_stage CASCADE;\n",
     );
 
-    $stageOutput = runProcess([PHP_BINARY, __DIR__ . '/bootstrap-shadow.php', 'stage']);
+    $stageOutput = runProcess([PHP_BINARY, __DIR__ . '/bootstrap-shadow.php', 'catalog-stage']);
     if ($stageOutput !== '') {
         fwrite(STDOUT, $stageOutput . PHP_EOL);
+    }
+
+    $analyticsCommand = ['/usr/bin/python3', __DIR__ . '/stage-analytics.py'];
+    if (in_array('--full-analytics', $argv, true) || getenv('HS_DATA_ANALYTICS_FULL') === '1') {
+        $analyticsCommand[] = '--full';
+    }
+    $analyticsOutput = runProcess($analyticsCommand);
+    if ($analyticsOutput !== '') {
+        fwrite(STDOUT, $analyticsOutput . PHP_EOL);
     }
 
     $mergeSql = <<<'SQL'
@@ -143,7 +155,7 @@ DECLARE
         'catalog.battlegrounds_card_wiki_related'
     ];
 BEGIN
-    FOREACH source_schema IN ARRAY ARRAY['catalog_stage', 'analytics_stage'] LOOP
+    FOREACH source_schema IN ARRAY ARRAY['catalog_stage'] LOOP
         target_schema := replace(source_schema, '_stage', '');
         FOR table_record IN
             SELECT table_name
@@ -275,6 +287,23 @@ BEGIN
               INTO key_condition
               FROM unnest(primary_keys) WITH ORDINALITY AS keys(key_name, key_position);
 
+            -- The catalogue replaces provisional blizzard:<dbf> card ids with
+            -- canonical ids. Remove only obsolete identities that collide on
+            -- dbf before the upsert; the normal snapshot cleanup would remove
+            -- these same rows afterwards, too late for the unique dbf index.
+            -- A source that still contains the old card_id must fail instead
+            -- of silently choosing between two authoritative identities.
+            IF target_schema = 'catalog' AND table_record.table_name = 'constructed_cards' THEN
+                DELETE FROM catalog.constructed_cards AS target
+                USING catalog_stage.constructed_cards AS source
+                WHERE target.dbf = source.dbf
+                  AND target.card_id <> source.card_id
+                  AND NOT EXISTS (
+                      SELECT 1 FROM catalog_stage.constructed_cards AS retained
+                      WHERE retained.card_id = target.card_id
+                  );
+            END IF;
+
             IF update_list IS NULL THEN
                 EXECUTE format(
                     'INSERT INTO %I.%I AS target (%s) SELECT %s FROM %I.%I '
@@ -305,11 +334,17 @@ BEGIN
 END
 $merge$;
 
+-- ANALYTICS_DELTA_MERGE
 DROP SCHEMA catalog_stage CASCADE;
 DROP SCHEMA analytics_stage CASCADE;
+DROP SCHEMA analytics_sync_stage CASCADE;
 COMMIT;
 SQL;
-    // Keep radar import inside the same transaction as the catalogue and history.
+    $analyticsMergeSql = file_get_contents(__DIR__ . '/merge-analytics.sql');
+    if (!is_string($analyticsMergeSql) || $analyticsMergeSql === '') {
+        throw new RuntimeException('Analytics merge SQL is missing');
+    }
+    $mergeSql = str_replace('-- ANALYTICS_DELTA_MERGE', $analyticsMergeSql, $mergeSql);
     $radarSql = runProcess(['/usr/bin/python3', __DIR__ . '/radar-shadow.py']);
     $mergeSql = str_replace("\nCOMMIT;", "\n" . $radarSql . "\nCOMMIT;", $mergeSql, $radarInsertions);
     if ($radarInsertions !== 1) {
@@ -320,15 +355,15 @@ SQL;
             '/usr/bin/sudo', '-n', 'docker', 'compose',
             '--project-directory', $composeDir,
             '-f', $composeDir . '/docker-compose.yml',
-            'exec', '-T', 'postgres', 'sh', '-eu', '-c',
-            'psql -X -q -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d hs_data',
+            'exec', '-e', 'PGAPPNAME=' . syncApplicationName(), '-T', 'postgres', 'sh', '-eu', '-c',
+            'psql -X -qAt -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d hs_data',
         ],
         $mergeSql . PHP_EOL,
     );
     if ($mergeOutput !== '') {
         fwrite(STDOUT, $mergeOutput . PHP_EOL);
     }
-    $verifyOutput = runProcess([__DIR__ . '/verify-data.php']);
+    $verifyOutput = runProcess([__DIR__ . '/verify-data.php', '--sync-contract']);
     fwrite(STDOUT, $verifyOutput . PHP_EOL);
     fwrite(STDOUT, 'Atomic shadow synchronization completed.' . PHP_EOL);
 } catch (Throwable $exception) {

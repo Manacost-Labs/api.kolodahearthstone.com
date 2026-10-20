@@ -5,10 +5,10 @@ Requires=docker.service
 
 [Service]
 Type=oneshot
-ExecStart=/srv/hs-data-platform/scripts/import-datasets.php
-ExecStartPost=/srv/hs-data-platform/scripts/import-statistics.php
-ExecStartPost=/srv/hs-data-platform/scripts/index-media-assets.php
-TimeoutStartSec=20min
+ExecStart=/srv/hs-data-platform/scripts/run-scheduled-sync import
+TimeoutStartSec=36min
+KillMode=mixed
+TimeoutStopSec=90s
 Nice=10
 PrivateTmp=true
 ProtectHome=true
