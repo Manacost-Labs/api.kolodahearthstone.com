@@ -120,6 +120,11 @@ Endpoint Web Unlocker зафиксирован в коде как
 заголовка принимаются только allowlisted поля billing/request/render. API key,
 zone, полный response body и произвольные headers не записываются в state.
 
+When `HS_META_LAB_ENABLED=1`, HSGuru Scrape.do attempts additionally enter the private
+Lab ledger, including failures/retries, durations and reported/estimated/unknown costs.
+The shared provider order is unchanged. Non-critical Lab budget denials do not fall
+through to another provider. See [Meta Intelligence Lab](specs/META_INTELLIGENCE_LAB.md).
+
 ### Бюджет и circuit breaker
 
 Перед платным запросом локальный state атомарно резервирует один слот под

@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh the public Koloda material embedding index
+Requires=hs-data-api-docker.service
+After=hs-data-api-docker.service network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/srv/hs-data-api
+ExecStart=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm api python -m app.build_material_index
+TimeoutStartSec=30min

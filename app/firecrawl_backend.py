@@ -24,12 +24,14 @@ from .brightdata_backend import (
 )
 from .brightdata_backend import scrape_url_sync as brightdata_scrape_url_sync
 from .config import (
+    decodo_api_key,
     firecrawl_hsguru_matchups_timeout_ms,
     firecrawl_max_age_ms,
     firecrawl_timeout_ms,
     firecrawl_wait_ms,
     scrape_do_token,
 )
+from .decodo_backend import scrape_url_sync as decodo_scrape_url_sync
 from .firecrawl_keys import (
     acquire_firecrawl_key,
     is_firecrawl_credit_error,
@@ -45,13 +47,14 @@ from .scrape_do_backend import (
     ScrapeDoTransientError,
     scrape_url_sync,
 )
+from .meta_intelligence.budget import BudgetExceeded, source_scope, validate_attempt
 from .scrapers.http_resilience import is_session_blocked
 from .scrapfly_backend import scrape_url_sync as scrapfly_scrape_url_sync
 from .scrapfly_backend import scrapfly_configured
 from .sources import Source
 
 FIRECRAWL_SCRAPE_URL = "https://api.firecrawl.dev/v2/scrape"
-_PROVIDER_POLICY = "scrape_do_firecrawl_brightdata_scrapfly"
+_PROVIDER_POLICY = "scrape_do_decodo_firecrawl_brightdata_scrapfly"
 _SCREENSHOT_MIN_BYTES = 1_024
 _SCREENSHOT_MAX_BYTES = 25 * 1024 * 1024
 _HTML_SITE_MIN_BYTES = 256
@@ -424,6 +427,7 @@ def _scrape_via_scrapfly(
     )
 
 
+@source_scope
 def _scrape_via_scrape_do(
     source: Source,
     *,
@@ -434,29 +438,67 @@ def _scrape_via_scrape_do(
     reason: str,
     attempt_observer: ProviderAttemptObserver | None = None,
     failure_observer: ProviderFailureObserver | None = None,
+    accept_html: Callable[[str], bool] | None = None,
+    accept_result: ProviderResultValidator | None = None,
+    profiles: tuple[tuple[bool, bool], ...] | None = None,
+    attempt_offset: int = 0,
 ) -> FirecrawlScrape:
     if not scrape_do_token():
         raise RuntimeError(reason or "Scrape.do is not configured")
     screenshot, full_screenshot = _screenshot_options(formats)
-    profiles = (True,) if source.site == "hsguru" else (False, True)
+    adaptive = source.site == "hsguru" and not screenshot
+    profiles = profiles or (
+        ((False, False), (False, True), (True, True))
+        if adaptive
+        else ((True, True),)
+        if source.site == "hsguru"
+        else ((True, False), (True, True))
+    )
     errors: list[str] = []
     scraped = None
-    attempts = 0
+    attempts = attempt_offset
     last_failure: Exception | None = None
-    for super_proxy in profiles:
-        for profile_attempt in range(1, 3):
+    for render, super_proxy in profiles:
+        # Escalate on the next call rather than retrying the cheap profile.
+        for profile_attempt in range(1, 2 if adaptive else 3):
             attempts += 1
             try:
                 scraped = scrape_url_sync(
                     source.url,
-                    render=True,
+                    render=render,
                     super_proxy=super_proxy,
                     headers=headers,
                     wait_ms=wait_ms,
                     timeout_ms=timeout_ms,
                     screenshot=screenshot,
                     full_screenshot=full_screenshot,
+                    **({"disable_retries": not render} if adaptive else {}),
                 )
+                if adaptive:
+                    candidate = _scrape_do_result(
+                        scraped,
+                        formats=formats,
+                        attempts=attempts,
+                        profile_attempt=profile_attempt,
+                        reason=reason,
+                        render=render,
+                    )
+                    accepted = _accepted_provider_result(
+                        candidate,
+                        source,
+                        formats=formats,
+                        accept_html=accept_html,
+                        accept_result=accept_result,
+                    )
+                    if not accepted:
+                        if attempt_observer is not None:
+                            attempt_observer(candidate, False)
+                        validate_attempt(scraped.acquisition_id, False)
+                        scraped = None
+                        last_failure = RuntimeError(
+                            "Scrape.do response failed content validation"
+                        )
+                        break
                 if is_session_blocked(scraped.status_code, scraped.html):
                     if attempt_observer is not None:
                         attempt_observer(
@@ -469,6 +511,7 @@ def _scrape_via_scrape_do(
                             ),
                             False,
                         )
+                    validate_attempt(scraped.acquisition_id, False)
                     errors.append(
                         f"{'super' if super_proxy else 'standard'} "
                         f"attempt {profile_attempt}: blocked_or_challenge_content"
@@ -489,6 +532,8 @@ def _scrape_via_scrape_do(
                     scraped = None
                     break
                 break
+            except BudgetExceeded:
+                raise
             except ScrapeDoContentError as exc:
                 last_failure = exc
                 if attempt_observer is not None:
@@ -547,7 +592,7 @@ def _scrape_via_scrape_do(
                     f"attempt {profile_attempt}: {type(exc).__name__}: "
                     f"{str(exc)[:300]}"
                 )
-                if profile_attempt == 1:
+                if profile_attempt == 1 and not adaptive:
                     provider_delay = min(
                         60.0,
                         max(0.0, float(exc.retry_after_seconds or 0.0)),
@@ -572,7 +617,7 @@ def _scrape_via_scrape_do(
                     f"{str(exc)[:300]}"
                 )
                 # A target 403 may improve with the residential Super profile.
-                if exc.status_code == 403 and not super_proxy:
+                if exc.status_code == 403 and (adaptive or not super_proxy):
                     break
                 raise
             except Exception as exc:  # noqa: BLE001 - normalize provider failures
@@ -603,6 +648,7 @@ def _scrape_via_scrape_do(
         attempts=attempts,
         profile_attempt=profile_attempt,
         reason=reason,
+        render=render,
     )
 
 
@@ -613,6 +659,7 @@ def _scrape_do_result(
     attempts: int,
     profile_attempt: int,
     reason: str,
+    render: bool = True,
 ) -> FirecrawlScrape:
     html = scraped.html
     requested = formats or ["html", "markdown"]
@@ -625,10 +672,12 @@ def _scrape_do_result(
             "backend": ("scrape_do_super" if scraped.super_proxy else "scrape_do"),
             "creditsUsed": 0,
             "scrapeDoCreditsUsed": scraped.request_cost,
+            "labAcquisitionId": scraped.acquisition_id,
             "scrapeDoRemainingCredits": scraped.credits_remaining,
             "scrapeDoAttempts": attempts,
             "scrapeDoProfileAttempt": profile_attempt,
             "scrapeDoSuperProxy": scraped.super_proxy,
+            "scrapeDoRender": render,
             "providerPolicy": _PROVIDER_POLICY,
             "providerChainReason": reason[:500],
             "firecrawlFallbackReason": reason[:500],
@@ -802,6 +851,18 @@ def _accepted_provider_content(
                 )
             )
         if source.site == "hsguru":
+            if source.category in {
+                "meta_matrix_slice",
+                "meta_current",
+                "meta_patch_discovery",
+            }:
+                from .hsguru_meta_matrix import parse_meta_table
+
+                try:
+                    parsed = parse_meta_table(content)
+                except Exception:  # noqa: BLE001 - reject unusable provider HTML
+                    return False
+                return bool(parsed.rows) or source.category == "meta_matrix_slice"
             return any(
                 marker in lowered
                 for marker in (
@@ -924,32 +985,122 @@ def _scrape_sync(
     attempt_observer: ProviderAttemptObserver | None = None,
     failure_observer: ProviderFailureObserver | None = None,
 ) -> FirecrawlScrape:
-    """Fetch through Scrape.do → Firecrawl → Bright Data → Scrapfly."""
+    """Try cheap HSGuru HTML, Decodo, then paid escalation and reserves."""
     errors: list[str] = []
     skip = frozenset(skip_providers or ())
 
-    if "scrape_do" not in skip and scrape_do_token():
-        try:
-            return _require_accepted_provider_result(
-                "Scrape.do",
-                _scrape_via_scrape_do(
+    screenshot_requested, _ = _screenshot_options(formats)
+    decodo_enabled = bool(
+        source.site == "hsguru"
+        and not screenshot_requested
+        and "decodo" not in skip
+        and decodo_api_key()
+    )
+    decodo_tried = False
+
+    def try_decodo() -> FirecrawlScrape | None:
+        nonlocal decodo_tried
+        if not decodo_enabled or decodo_tried:
+            return None
+        decodo_tried = True
+        for render, super_proxy in ((False, False), (True, True)):
+            try:
+                result = decodo_scrape_url_sync(
+                    source.url,
+                    render=render,
+                    super_proxy=super_proxy,
+                    # Public reserve never receives the authenticated session.
+                    # Source validators still reject missing premium data.
+                    headers=None,
+                    timeout_ms=timeout_ms,
+                )
+                candidate = FirecrawlScrape(
+                    html=result.html,
+                    markdown=_html_to_markdown(result.html)
+                    if "markdown" in (formats or ["html", "markdown"])
+                    else "",
+                    screenshot=None,
+                    metadata={
+                        "backend": "decodo",
+                        "providerPolicy": _PROVIDER_POLICY,
+                        "decodoRender": render,
+                        "decodoSuperProxy": super_proxy,
+                        "decodoRequests": 1,
+                        "decodoCostKnown": False,
+                    },
+                    status_code=result.status_code,
+                    final_url=result.final_url,
+                )
+                return _require_accepted_provider_result(
+                    "Decodo",
+                    candidate,
                     source,
                     formats=formats,
-                    headers=headers,
-                    wait_ms=wait_ms,
-                    timeout_ms=timeout_ms,
-                    reason="primary",
+                    accept_html=brightdata_accept_html,
+                    accept_result=accept_result,
                     attempt_observer=attempt_observer,
-                    failure_observer=failure_observer,
-                ),
-                source,
-                formats=formats,
-                accept_html=brightdata_accept_html,
-                accept_result=accept_result,
-                attempt_observer=attempt_observer,
-            )
-        except Exception as exc:  # noqa: BLE001 - provider boundary
-            errors.append(f"scrape_do: {type(exc).__name__}: {str(exc)[:300]}")
+                )
+            except BudgetExceeded:
+                raise
+            except Exception as exc:  # noqa: BLE001 - isolate reserve provider
+                _notify_provider_failure(
+                    failure_observer,
+                    "decodo",
+                    exc,
+                    super_proxy=super_proxy,
+                )
+                errors.append(f"decodo: {type(exc).__name__}: {str(exc)[:300]}")
+                if getattr(exc, "terminal", False):
+                    break
+        return None
+
+    if "scrape_do" not in skip and scrape_do_token():
+        phases = (
+            (((False, False),), ((False, True), (True, True)))
+            if decodo_enabled
+            else (None,)
+        )
+        for phase, profiles in enumerate(phases):
+            try:
+                return _require_accepted_provider_result(
+                    "Scrape.do",
+                    _scrape_via_scrape_do(
+                        source,
+                        formats=formats,
+                        headers=headers,
+                        wait_ms=wait_ms,
+                        timeout_ms=timeout_ms,
+                        reason="primary",
+                        attempt_observer=attempt_observer,
+                        failure_observer=failure_observer,
+                        accept_html=brightdata_accept_html,
+                        accept_result=accept_result,
+                        profiles=profiles,
+                        attempt_offset=phase,
+                    ),
+                    source,
+                    formats=formats,
+                    accept_html=brightdata_accept_html,
+                    accept_result=accept_result,
+                    attempt_observer=attempt_observer,
+                )
+            except BudgetExceeded:
+                raise
+            except Exception as exc:  # noqa: BLE001 - provider boundary
+                errors.append(f"scrape_do: {type(exc).__name__}: {str(exc)[:300]}")
+                reserve = try_decodo()
+                if reserve is not None:
+                    return reserve
+                if isinstance(exc, ScrapeDoRequestError) and (
+                    isinstance(exc, ScrapeDoAccountError)
+                    or not isinstance(exc, ScrapeDoTransientError)
+                    and exc.status_code != 403
+                ):
+                    break
+
+    reserve = try_decodo()
+    if reserve is not None:
+        return reserve
 
     if "firecrawl" not in skip:
         try:

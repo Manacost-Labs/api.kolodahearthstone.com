@@ -49,6 +49,8 @@ from .routers.bg import canonical_router as canonical_bg_v1_router
 from .routers.bg import router as bg_v1_router
 from .routers.constructed import router as constructed_v1_router
 from .routers.hsguru_meta import router as hsguru_meta_v1_router
+from .routers.material_search import router as material_search_router
+from .material_search_mcp import material_api_lifespan, mcp_app
 from .routers.system import canonical_router as canonical_system_v1_router
 from .routers.system import router as system_v1_router
 from .source_contracts import HSREPLAY_META_FRESHNESS_GATED_SOURCE_IDS
@@ -61,6 +63,7 @@ from .trinket_slices import (
     TRINKET_SLICE_SOURCE_IDS,
     source_ids_for_trinket_slice,
 )
+from .routers.meta_intelligence import router as meta_intelligence_router
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 ACTIVE_TRINKET_SOURCE_IDS = {
@@ -158,6 +161,7 @@ app = FastAPI(
     title="Hearthstone Data API",
     version="0.1.0",
     description="Cached API for configured Hearthstone public data sources.",
+    lifespan=material_api_lifespan,
 )
 
 app.add_middleware(ApiTokenLimitsMiddleware)
@@ -173,6 +177,7 @@ app.add_middleware(
         "Content-Type",
         "X-API-Key",
         "X-Request-ID",
+        "MCP-Protocol-Version",
     ],
     expose_headers=[
         "X-Request-ID",
@@ -200,6 +205,8 @@ app.include_router(system_v1_router)
 app.include_router(canonical_system_v1_router)
 app.include_router(hsguru_meta_v1_router)
 app.include_router(api_tokens_router)
+app.include_router(material_search_router)
+app.mount("/v1/mcp", mcp_app)
 
 
 @app.on_event("shutdown")
@@ -429,7 +436,7 @@ async def no_cache_ui(request: Request, call_next):
                 headers.pop("content-length", None)
                 headers.pop("content-type", None)
                 return Response(status_code=304, headers=headers)
-    if request.url.path.startswith("/admin") or request.url.path.startswith("/v1/auth"):
+    if request.url.path.startswith(("/admin", "/v1/auth", "/v1/meta-intelligence")):
         response.headers["Cache-Control"] = "private, no-store"
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
@@ -492,6 +499,18 @@ def require_orchestrator(
         status_code=401,
         detail="Missing or invalid X-Orchestrator-Key",
     )
+
+
+app.include_router(meta_intelligence_router, dependencies=[Depends(require_admin)])
+
+
+@app.get("/ui/meta-intelligence", include_in_schema=False)
+def meta_intelligence_panel() -> RedirectResponse:
+    return RedirectResponse("/?action=meta_lab", headers={
+        "Cache-Control": "private, no-store",
+        "Referrer-Policy": "no-referrer",
+        "X-Content-Type-Options": "nosniff",
+    })
 
 
 @app.get("/")

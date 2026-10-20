@@ -13,6 +13,10 @@ services:
         required: false
       - path: ${HS_GRAPHQL_ENV_FILE:-/home/debian/server/secrets/hs-data-api/graphql.env}
         required: false
+      - path: ${HS_META_LAB_ENV_FILE:-/etc/hs-data-api-meta-lab.env}
+        required: false
+      - path: ${HS_DECODO_ENV_FILE:-/home/debian/.config/hs-data-api/decodo.env}
+        required: false
     environment:
       HS_API_BIND_HOST: "0.0.0.0"
       HS_API_PORT: "8000"
@@ -21,6 +25,8 @@ services:
       # Persisted parser-control policy is authoritative. The legacy dated
       # environment fallback stays disabled so an old patch cannot reactivate.
       HS_ARENA_POST_PATCH_ENABLED: "false"
+      # Expansion release: accept volume/fill drops. Restore 0.30 to block them.
+      HS_DATASET_REGRESSION_DROP_RATIO: "1.0"
       DISPLAY: ":99"
     volumes:
       - ./data:/var/lib/hs-data-api

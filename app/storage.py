@@ -162,6 +162,16 @@ def save_dataset(source_id: str, payload: dict[str, Any]) -> None:
 
 def save_status(source_id: str, payload: dict[str, Any]) -> None:
     write_json(status_path(source_id), payload)
+    if source_id.startswith("hsguru"):
+        try:
+            from .meta_intelligence.snapshots import ingest_published
+
+            ingest_published(source_id, payload)
+        except Exception:
+            # A secondary research store must never break existing publication.
+            import logging
+
+            logging.getLogger(__name__).exception("Lab ingestion failed for source %s", source_id)
 
 
 def load_dataset(source_id: str) -> dict[str, Any] | None:

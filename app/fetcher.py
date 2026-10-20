@@ -2461,6 +2461,11 @@ async def _try_firecrawl_html(
             parsed = _parse_provider_candidate(scraped)
             gate = validate_candidate_for_publish(source, parsed, backend=backend)
         ok, validation_reason = gate.ok, gate.reason
+        from .meta_intelligence.budget import validate_attempt
+
+        validate_attempt(scraped.metadata.get("labAcquisitionId"), ok)
+        if scraped.metadata.get("labAcquisitionId"):
+            parsed["acquisition"] = {"attempt_ids": [scraped.metadata["labAcquisitionId"]]}
         qmetrics = quality_metrics(source, parsed)
         ai_telemetry: dict[str, Any] | None = None
         ai_quarantine = False
