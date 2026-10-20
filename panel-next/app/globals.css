@@ -2574,3 +2574,9 @@ textarea:focus-visible,
   border: 0;
   box-shadow: none;
 }
+/* The sidebar lists the categories on wide screens; the strip is the mobile shortcut. */
+@media (min-width: 900px) {
+  .category-tabs {
+    display: none;
+  }
+}
