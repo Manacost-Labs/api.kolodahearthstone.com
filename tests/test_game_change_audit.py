@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import io
 import json
 import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
+from app import cli
+from app.exit_codes import ExitCode
 from app.game_change_audit import (
     CRITICAL_SOURCES,
     POST_PATCH_EARLY_DURATION,
@@ -242,6 +245,158 @@ class GameChangeAuditTest(unittest.TestCase):
         issue = next(row for row in issues if row["source_id"] == source_id)
         self.assertEqual(issue["dataset_age_hours"], 100.0)
         self.assertIn("stale>72h", issue["reasons"])
+
+
+    def test_upstream_outage_with_lkg_is_degraded_but_missing_data_is_error(
+        self,
+    ) -> None:
+        now = datetime(2026, 10, 20, 9, 0, tzinfo=UTC)
+        stale_time = (now - timedelta(hours=65)).isoformat()
+        fresh_time = (now - timedelta(hours=1)).isoformat()
+
+        def status_loader(source_id: str):
+            if source_id == "hsreplay_battlegrounds_heroes":
+                # HSReplay Premium session rejected: LKG served, refresh fails.
+                return {
+                    "state": "ok",
+                    "serving_cached_dataset": True,
+                    "last_refresh_state": "fetch_error",
+                }
+            if source_id == "hsreplay_battlegrounds_minions":
+                return {
+                    "state": "ok",
+                    "serving_cached_dataset": True,
+                    "last_refresh_state": "quality_error",
+                }
+            if source_id == "heartharena_tierlist":
+                return {"state": "fetch_error"}
+            return {"state": "ok"}
+
+        def dataset_loader(source_id: str):
+            if source_id == "heartharena_tierlist":
+                return None
+            if source_id in {
+                "hsreplay_battlegrounds_heroes",
+                "hsreplay_battlegrounds_minions",
+                # Stale without any failed refresh: our scheduler stopped.
+                "hsreplay_battlegrounds_comps",
+            }:
+                return {"fetched_at": stale_time, "data": {}}
+            return {"fetched_at": fresh_time, "data": {}}
+
+        with (
+            patch(
+                "app.game_change_audit.source_operationally_enabled",
+                return_value=True,
+            ),
+            patch(
+                "app.game_change_audit.resolve_public_dataset",
+                side_effect=lambda _source_id, candidate: candidate,
+            ),
+        ):
+            _, issues = audit_critical_sources(
+                now=now,
+                status_loader=status_loader,
+                dataset_loader=dataset_loader,
+            )
+
+        severity = {row["source_id"]: row["severity"] for row in issues}
+        self.assertEqual(
+            severity,
+            {
+                "hsreplay_battlegrounds_heroes": "degraded",
+                "hsreplay_battlegrounds_minions": "degraded",
+                "hsreplay_battlegrounds_comps": "error",
+                "heartharena_tierlist": "error",
+            },
+        )
+
+    def _cli_audit(self, report: dict) -> tuple[int, AsyncMock, str]:
+        alert = AsyncMock()
+        with (
+            patch("app.cli.load_env_file"),
+            patch(
+                "app.game_change_audit.run_game_change_audit",
+                return_value=report,
+            ),
+            patch("app.fetcher.send_telegram_alert", alert),
+            patch("sys.stderr", new_callable=io.StringIO) as stderr,
+            patch("sys.stdout", new_callable=io.StringIO),
+        ):
+            code = cli.main(["game-change-audit", "--alert"])
+        return code, alert, stderr.getvalue()
+
+    @staticmethod
+    def _report(*issues: dict, patch_changed: bool = False) -> dict:
+        attention = patch_changed or bool(issues)
+        return {
+            "ok": not attention,
+            "requires_attention": attention,
+            "patch": {"current": "37.0.0", "changed": patch_changed},
+            "card_changes": {},
+            "source_issue_count": len(issues),
+            "source_issues": list(issues),
+        }
+
+    def test_cli_upstream_outage_alerts_and_exits_degraded_not_failed(self) -> None:
+        report = self._report(
+            {
+                "source_id": "hsreplay_battlegrounds_heroes",
+                "severity": "degraded",
+                "reasons": ["stale>36h", "live_refresh_failed_cached"],
+            }
+        )
+
+        code, alert, stderr = self._cli_audit(report)
+
+        self.assertEqual(code, int(ExitCode.DEGRADED))
+        alert.assert_awaited_once()
+        self.assertIn("degraded", stderr)
+        self.assertIn("hsreplay_battlegrounds_heroes", stderr)
+
+    def test_cli_patch_change_alone_is_degraded_attention(self) -> None:
+        code, alert, _ = self._cli_audit(self._report(patch_changed=True))
+
+        self.assertEqual(code, int(ExitCode.DEGRADED))
+        alert.assert_awaited_once()
+
+    def test_cli_hard_source_error_still_fails(self) -> None:
+        report = self._report(
+            {"source_id": "hsreplay_battlegrounds_heroes", "severity": "degraded"},
+            {
+                "source_id": "heartharena_tierlist",
+                "severity": "error",
+                "reasons": ["missing_dataset"],
+            },
+        )
+
+        code, alert, stderr = self._cli_audit(report)
+
+        self.assertEqual(code, int(ExitCode.ERROR))
+        alert.assert_awaited_once()
+        self.assertIn("heartharena_tierlist", stderr)
+
+    def test_cli_issue_without_severity_is_treated_as_error(self) -> None:
+        code, _, _ = self._cli_audit(
+            self._report({"source_id": "hsreplay_battlegrounds_heroes"})
+        )
+
+        self.assertEqual(code, int(ExitCode.ERROR))
+
+    def test_cli_healthy_audit_exits_ok_without_alert(self) -> None:
+        code, alert, _ = self._cli_audit(self._report())
+
+        self.assertEqual(code, int(ExitCode.OK))
+        alert.assert_not_awaited()
+
+    def test_audit_unit_treats_degraded_exit_as_success(self) -> None:
+        service = (
+            Path(__file__).resolve().parents[1]
+            / "systemd/hs-data-api-docker-game-change-audit.service"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("SuccessExitStatus=10", service)
+        self.assertEqual(int(ExitCode.DEGRADED), 10)
 
 
 if __name__ == "__main__":

@@ -169,6 +169,23 @@ def _dataset_age_hours(payload: dict[str, Any], now: datetime) -> float | None:
     return max(0.0, (now - fetched).total_seconds() / 3600)
 
 
+def _upstream_degraded(row: dict[str, Any]) -> bool:
+    """True when a source issue is explained by a failed live refresh with LKG.
+
+    The public dataset still exists and is served from the last known good
+    publication while the upstream refresh fails (auth rejection, provider
+    outage, contract/quality failure). Anything else (missing dataset, a
+    non-ok source state, staleness without a failed refresh) is a hard issue.
+    """
+
+    if not row.get("serving_cached_after_failure") or row.get("state") != SourceState.OK:
+        return False
+    return all(
+        reason == "live_refresh_failed_cached" or reason.startswith("stale>")
+        for reason in row.get("reasons") or ()
+    )
+
+
 def audit_critical_sources(
     *,
     now: datetime,
@@ -220,9 +237,10 @@ def audit_critical_sources(
             "last_refresh_state": status.get("last_refresh_state"),
             "reasons": reasons,
         }
-        rows.append(row)
         if reasons:
+            row["severity"] = "degraded" if _upstream_degraded(row) else "error"
             issues.append(row)
+        rows.append(row)
     return rows, issues
 
 
@@ -333,6 +351,9 @@ def run_game_change_audit() -> dict[str, Any]:
         post_patch_policy = activate_post_patch_policy(patch, now=now)
     content_changed = any(card_changes[key] for key in ("added_count", "removed_count", "changed_count"))
     requires_attention = patch_changed or content_changed or bool(source_issues)
+    source_error_count = sum(
+        1 for issue in source_issues if issue.get("severity") != "degraded"
+    )
     report = {
         "schema_version": AUDIT_SCHEMA_VERSION,
         "checked_at": now.isoformat(),
@@ -355,6 +376,8 @@ def run_game_change_audit() -> dict[str, Any]:
         },
         "sources": source_rows,
         "source_issue_count": len(source_issues),
+        "source_error_count": source_error_count,
+        "source_degraded_count": len(source_issues) - source_error_count,
         "source_issues": source_issues,
     }
     baseline_payload = {
