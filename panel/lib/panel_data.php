@@ -501,34 +501,6 @@ function load_constructed_wiki_meta_map(PDO $pdo, array $cards): array
     return $map;
 }
 
-function load_constructed_related_card_map(PDO $pdo, array $wikiMetaMap): array
-{
-    $cardIds = [];
-    foreach ($wikiMetaMap as $meta) {
-        foreach (json_array($meta['related_card_ids_json'] ?? null) as $cardId) {
-            $cardId = trim((string)$cardId);
-            if ($cardId !== '') {
-                $cardIds[$cardId] = true;
-            }
-        }
-    }
-    if (!$cardIds) {
-        return [];
-    }
-
-    $ids = array_keys($cardIds);
-    $placeholders = implode(',', array_fill(0, count($ids), '?'));
-    $stmt = $pdo->prepare('SELECT * FROM constructed_cards WHERE card_id IN (' . $placeholders . ')');
-    $stmt->execute($ids);
-
-    $map = [];
-    foreach ($stmt->fetchAll() as $row) {
-        $map[(string)$row['card_id']] = $row;
-    }
-
-    return $map;
-}
-
 function bind_statement_params(PDOStatement $stmt, array $params): void
 {
     foreach ($params as $key => $value) {
@@ -1124,7 +1096,6 @@ $cards = [];
 $goldenVariantMap = [];
 $wikiMetaMap = [];
 $constructedWikiMetaMap = [];
-$constructedRelatedCardMap = [];
 if ($showHeroSkins) {
     $countStmt = $pdo->prepare('SELECT COUNT(*) FROM hero_skins' . $whereSql);
     bind_statement_params($countStmt, $params);
@@ -1287,7 +1258,6 @@ if ($showHeroSkins) {
         static fn(array $row): string => (string)$row['card_id']
     );
     $constructedWikiMetaMap = load_constructed_wiki_meta_map($pdo, $constructedCards);
-    $constructedRelatedCardMap = load_constructed_related_card_map($pdo, $constructedWikiMetaMap);
 } elseif ($showLibrary) {
     $countStmt = $pdo->prepare('SELECT COUNT(*) FROM battlegrounds_library_cards' . $whereSql);
     bind_statement_params($countStmt, $params);
@@ -1342,10 +1312,6 @@ if ($showHeroSkins) {
     $wikiMetaMap = load_wiki_meta_map($pdo, $cards);
 }
 
-$heroSkinRarityTotals = [];
-foreach ($pdo->query("SELECT COALESCE(rarity_slug, 'unknown') AS rarity_slug, COUNT(*) AS total FROM hero_skins WHERE status IN ('ok', 'partial') GROUP BY COALESCE(rarity_slug, 'unknown')") as $row) {
-    $heroSkinRarityTotals[(string)$row['rarity_slug']] = (int)$row['total'];
-}
 $pageFrom = $filteredTotal === 0 ? 0 : $offset + 1;
 $pageTo = min($offset + ($showHeroSkins ? count($heroSkins) : ($showPets ? count($pets) : ($showCoins ? count($coins) : ($showHeroes ? count($heroes) : ($showTimewarped ? count($timewarpedCards) : ($showConstructed ? count($constructedCards) : ($showLibrary ? count($libraryCards) : count($cards)))))))), $filteredTotal);
 $showApiTokens = $action === 'api_tokens';
