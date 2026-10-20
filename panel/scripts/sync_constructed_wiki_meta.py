@@ -28,6 +28,11 @@ SOURCE = "hearthstone.wiki.gg"
 HSJ_EN_URL = "https://api.hearthstonejson.com/v1/latest/enUS/cards.json"
 
 
+# wiki.gg throttles bursts; waiting in-process keeps a refresh moving instead of
+# exiting at the first 429 and burning systemd restarts.
+MAX_RATE_LIMIT_WAIT_SECONDS = 600
+
+
 class RateLimitedError(RuntimeError):
     pass
 
@@ -160,11 +165,26 @@ def load_or_fetch_page(cache_dir: Path, title: str, refresh_pages: bool, parser,
             return result, "network"
         except Exception as exc:
             if is_rate_limited(exc):
-                raise RateLimitedError(f"Rate limited while fetching {title}: {exc}") from exc
+                if attempt >= retries:
+                    raise RateLimitedError(f"Rate limited while fetching {title}: {exc}") from exc
+                time.sleep(rate_limit_wait_seconds(exc, attempt))
+                continue
             last_error = exc
             if attempt < retries:
                 time.sleep(2**attempt)
     raise RuntimeError(f"Failed to fetch {title}: {last_error}") from last_error
+
+
+def rate_limit_wait_seconds(exc: BaseException, attempt: int) -> float:
+    """Honor Retry-After (seconds) from the HTTP error, else back off 60/120/240 s."""
+    seen: BaseException | None = exc
+    while seen is not None:
+        headers = getattr(seen, "headers", None)
+        value = headers.get("Retry-After") if headers is not None else None
+        if value and str(value).strip().isdigit():
+            return min(max(float(value), 1.0), MAX_RATE_LIMIT_WAIT_SECONDS)
+        seen = seen.__cause__ or seen.__context__
+    return min(60.0 * 2**attempt, MAX_RATE_LIMIT_WAIT_SECONDS)
 
 
 def is_rate_limited(exc: Exception) -> bool:
