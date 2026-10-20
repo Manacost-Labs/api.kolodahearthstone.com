@@ -151,6 +151,27 @@ real importer SQL, rollback, correction without a version change, history and
 deletion boundaries, numeric precision, and complete PHP imports with private
 test adapters for the database and external source boundaries.
 
+## Shared sync lock and media offload
+
+`/run/hs-data-platform-sync/sync.lock` serialises `run-scheduled-sync`
+(import, shadow), the panel catalogue publishers, `kolodahs-card-history-media`
+and the exchange step of `api-uploads-offload`. Keep every holder short:
+
+- `index-media-assets.php` never enters `uploads/.s3-storage` and reuses the
+  indexed size/mtime of offloaded links; only unseen links are stat()ed
+  (at most 2000 per run).
+- `api-uploads-offload` copies and verifies without the lock and waits up to
+  600 s for it only to swap files for links. A busy lock ends the run with
+  `deferred_exchange`; local files stay untouched.
+- `kolodahs-card-history-media` exits 75 (`SuccessExitStatus`) when the lock
+  stays busy for 900 s; the timer retries a minute later.
+
+`platform/scripts/api-uploads-offload` is installed outside this tree:
+
+```bash
+sudo install -o root -g root -m 0755 platform/scripts/api-uploads-offload /usr/local/sbin/api-uploads-offload
+```
+
 ## Custom panel
 
 - Document root: `/srv/api-kolodahearthstone/panel/current`
