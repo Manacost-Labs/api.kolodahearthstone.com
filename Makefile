@@ -41,6 +41,7 @@ platform-check:
 	PANEL_ROOT=$(CURDIR)/panel platform/tests/admin-ui-contract.sh
 	platform/tests/migration-cutover-contract.sh
 	php platform/tests/statistics-normalizer.test.php
+	php platform/tests/index-media-assets.test.php
 	@find platform/scripts -type f -name '*.php' -print0 | xargs -0 -n1 php -l >/dev/null
 	@find platform/scripts -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n
 
