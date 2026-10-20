@@ -354,7 +354,7 @@ legend {
 }
 .workspace {
   width: 100%;
-  max-width: 1440px;
+  max-width: 1760px;
   margin: 0 auto;
   padding: 28px 32px 48px;
 }
@@ -2579,4 +2579,20 @@ textarea:focus-visible,
   .category-tabs {
     display: none;
   }
+}
+/* Statistics tables carry long source descriptions: let them use the width instead of tall rows. */
+.analytics-main td {
+  max-width: 480px;
+}
+.analytics-main td:has(> span:only-child) {
+  min-width: 120px;
+}
+/* Filter bars: text fields and buttons match the 32px VaryloUI selects. */
+.filter-row input:not([type='checkbox']):not([type='hidden']),
+.filter-row .button {
+  min-height: 32px;
+}
+.filter-row label > span {
+  margin-bottom: 4px;
+  font-size: var(--text-xs);
 }
