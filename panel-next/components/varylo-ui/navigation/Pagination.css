@@ -1,0 +1,226 @@
+.ui-pagination {
+  --_h: var(--ui-control-h-sm);
+  --_px: 8px;
+  --_font: var(--ui-text-sm);
+
+  display: flex;
+  max-width: 100%;
+}
+
+.ui-pagination[data-size='md'] {
+  --_h: var(--ui-control-h-md);
+  --_px: 10px;
+  --_font: var(--ui-text-md);
+}
+
+.ui-pagination[data-size='lg'] {
+  --_h: var(--ui-control-h-lg);
+  --_px: 12px;
+  --_font: var(--ui-text-lg);
+}
+
+.ui-pagination[data-size='lg'] .ui-pagination__item .ui-icon {
+  width: var(--ui-icon-lg);
+  height: var(--ui-icon-lg);
+}
+
+/* The controls can sit in one track (a frosted capsule in Glass, whose radius `initial` is half the
+   one-line height: buttons + padding + border, so a very long range that wraps gets a rounded panel). */
+.ui-pagination__list {
+  /* Positioned for the cursor's offsets; isolated so the cursor (z-index -1) paints over the track
+     but under the page numbers. */
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: var(--ui-pagination-list-gap);
+  max-width: 100%;
+  margin: 0;
+  padding: var(--ui-pagination-list-padding);
+  border: var(--ui-material-border);
+  border-radius: var(--ui-pagination-list-radius, calc(var(--_h) / 2 + 5px));
+  background: var(--ui-control-track-bg);
+  box-shadow: var(--ui-raised-shadow);
+  list-style: none;
+  -webkit-backdrop-filter: var(--ui-blur);
+  backdrop-filter: var(--ui-blur);
+}
+
+.ui-pagination__item {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--_h);
+  height: var(--_h);
+  padding: 0 var(--_px);
+  border: 0;
+  border-radius: var(--ui-pagination-item-radius);
+  corner-shape: var(--ui-control-corner-shape);
+  background: transparent;
+  color: var(--ui-nav-item-fg);
+  font: inherit;
+  font-size: var(--_font);
+  font-weight: var(--ui-weight-medium);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background-color var(--ui-duration-fast) var(--ui-ease),
+    color var(--ui-duration-fast) var(--ui-ease),
+    box-shadow var(--ui-duration-fast) var(--ui-ease),
+    transform var(--ui-duration) var(--ui-ease-spring);
+}
+
+.ui-pagination__item:hover:not(:disabled, [aria-current='page']) {
+  background: var(--ui-hover);
+  color: var(--ui-fg);
+}
+
+/* Pressed: a deeper tint, so the press reads in themes without a press transform. */
+.ui-pagination__item:active:not(:disabled, [aria-current='page']) {
+  background: var(--ui-active);
+  transform: var(--ui-pagination-item-transform-active);
+}
+
+.ui-pagination__item[aria-current='page'] {
+  background: var(--ui-pagination-item-current-bg);
+  color: var(--ui-pagination-item-current-fg);
+  box-shadow: var(--ui-pagination-item-current-shadow);
+  cursor: default;
+}
+
+/* The current page's fill as one cursor that slides to the new page (Pagination.tsx measures it). */
+.ui-pagination__cursor {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: -1;
+  border-radius: var(--ui-pagination-item-radius);
+  corner-shape: var(--ui-control-corner-shape);
+  background: var(--ui-pagination-item-current-bg);
+  box-shadow: var(--ui-pagination-item-current-shadow);
+  pointer-events: none;
+  transition:
+    transform var(--ui-duration-slow) var(--ui-ease-spring),
+    width var(--ui-duration-slow) var(--ui-ease-spring);
+}
+
+.ui-pagination__list[data-cursor] .ui-pagination__item[aria-current='page']:not(:focus-visible) {
+  background: transparent;
+  box-shadow: none;
+}
+
+.ui-pagination__list[data-cursor] .ui-pagination__item[aria-current='page']:focus-visible {
+  background: transparent;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ui-pagination[data-motion='spring'] .ui-pagination__cursor {
+    transition:
+      transform calc(var(--ui-duration-slow) * 1.36) var(--ui-spring-snappy),
+      width calc(var(--ui-duration-slow) * 1.36) var(--ui-spring-snappy);
+  }
+}
+
+/* Previous / next: outlined here, tinted text in Glass. */
+.ui-pagination__item[data-kind='step'] {
+  padding: 0;
+  background: var(--ui-pagination-step-bg);
+  color: var(--ui-action-fg);
+  box-shadow: var(--ui-pagination-step-shadow);
+}
+
+.ui-pagination__item[data-kind='step']:hover:not(:disabled) {
+  background: var(--ui-pagination-step-bg-hover);
+  color: var(--ui-action-fg);
+}
+
+.ui-pagination__item:disabled {
+  opacity: var(--ui-disabled-opacity, 0.45);
+  cursor: not-allowed;
+}
+
+.ui-pagination__item[data-kind='step']:disabled {
+  color: var(--ui-pagination-step-fg-disabled);
+  opacity: var(--ui-pagination-step-opacity-disabled);
+}
+
+/* Lifted over the next button, whose fill (Glass) would otherwise cover that side of the ring. */
+.ui-pagination__item:focus-visible {
+  position: relative;
+  z-index: 1;
+  box-shadow: var(--ui-focus-ring);
+}
+
+.ui-pagination__ellipsis {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--_h);
+  color: var(--ui-fg-faint);
+}
+
+.ui-pagination__status {
+  padding: 0 var(--ui-space-3);
+  color: var(--ui-fg-muted);
+  font-size: var(--_font);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.ui-pagination__status strong {
+  color: var(--ui-fg);
+  font-weight: var(--ui-weight-semibold);
+}
+
+/* Phones: drop the gaps so the default range (9 controls) still fits on one line at 32px targets. */
+@media (max-width: 480px) {
+  .ui-pagination__list {
+    gap: 0;
+    padding: var(--ui-pagination-list-padding-compact);
+  }
+
+  .ui-pagination__ellipsis {
+    width: 24px;
+  }
+}
+
+@media (forced-colors: active) {
+  .ui-pagination__item[data-kind='step'] {
+    border: 1px solid ButtonText;
+  }
+
+  .ui-pagination__item[data-kind='step']:disabled {
+    border-color: GrayText;
+    color: GrayText;
+  }
+
+  /* Without opting out, Chromium paints a Canvas backplate behind the number, hiding it on Highlight. */
+  .ui-pagination__item[aria-current='page'],
+  .ui-pagination__cursor {
+    forced-color-adjust: none;
+    background: Highlight;
+    color: HighlightText;
+  }
+}
+
+/* Touch: page buttons get a 44px-tall hit area that also covers the gaps between them, without
+   overlapping a neighbour (WCAG 2.5.5). */
+@media (pointer: coarse) {
+  .ui-pagination__item {
+    position: relative;
+  }
+
+  .ui-pagination__item::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: calc(100% + 4px);
+    height: max(100%, 44px);
+    translate: -50% -50%;
+  }
+}

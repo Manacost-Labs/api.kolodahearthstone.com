@@ -1,13 +1,17 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiPath } from '@/lib/client';
-import { formatDateTime } from '@/lib/format';
+import { formatDateTime, toneOf } from '@/lib/format';
 import { record, text } from '@/lib/model';
 import type { Row } from '@/lib/types';
 import parserView from '@/lib/vendor/parser-control-view.cjs';
 import { Modal } from './Modal';
 import { RecordDetails } from './Details';
-import { KpiCard, Time } from './ui';
+import { KpiCard, StatusBadge, Time } from './ui';
+import { MagnifyingGlassIcon } from '@phosphor-icons/react/dist/ssr/MagnifyingGlass';
+import { ArrowClockwiseIcon } from '@phosphor-icons/react/dist/ssr/ArrowClockwise';
+import { Select } from './varylo-ui/forms/Select';
+import { Tabs } from './varylo-ui/navigation/Tabs';
 export function Parsers({ initial, csrf }: { initial: Row; csrf: string }) {
   const [snapshot, setSnapshot] = useState(initial);
   const [query, setQuery] = useState('');
@@ -78,12 +82,11 @@ export function Parsers({ initial, csrf }: { initial: Row; csrf: string }) {
     <section>
       <header className="page-head">
         <div>
-          <span className="eyebrow">Операционный центр</span>
           <h1>Парсеры и источники</h1>
           <p>Свежесть, расписания и история запусков.</p>
         </div>
         <button className="button secondary" type="button" onClick={() => void refresh()}>
-          Обновить
+          <ArrowClockwiseIcon size={16} aria-hidden="true" /> Обновить
         </button>
       </header>
       {error && (
@@ -115,8 +118,9 @@ export function Parsers({ initial, csrf }: { initial: Row; csrf: string }) {
           {parserView.runProgress(summary.activeRun).percent}%
         </div>
       )}
-      <div className="filter-row">
+      <div className="toolbar-row">
         <label className="search">
+          <MagnifyingGlassIcon size={16} aria-hidden="true" />
           <input
             type="search"
             aria-label="Поиск источника"
@@ -125,35 +129,31 @@ export function Parsers({ initial, csrf }: { initial: Row; csrf: string }) {
             placeholder="Название или ID источника"
           />
         </label>
-        <select aria-label="Состояние источника" value={status} onChange={e => setStatus(e.target.value)}>
-          {[
-            ['all', 'Все состояния'],
-            ['fresh', 'Свежие данные'],
-            ['fallback', 'На резерве'],
-            ['unavailable', 'Данных нет'],
-            ['disabled', 'Отключены'],
-          ].map(([key, name]) => (
-            <option key={key} value={key}>
-              {name}
-            </option>
-          ))}
-        </select>
+        <Select
+          aria-label="Состояние источника"
+          size="sm"
+          className="toolbar-select"
+          value={status}
+          onValueChange={setStatus}
+          options={[
+            { value: 'all', label: 'Все состояния' },
+            { value: 'fresh', label: 'Свежие данные' },
+            { value: 'fallback', label: 'На резерве' },
+            { value: 'unavailable', label: 'Данных нет' },
+            { value: 'disabled', label: 'Отключены' },
+          ]}
+        />
       </div>
-      <div className="tabs section-tabs" role="group" aria-label="Разделы источников">
-        <button type="button" aria-pressed={section === 'all'} onClick={() => setSection('all')}>
-          Все · {sources.length}
-        </button>
-        {sections.map(item => (
-          <button
-            type="button"
-            key={text(item.id)}
-            aria-pressed={section === item.id}
-            onClick={() => setSection(text(item.id))}
-          >
-            {text(item.label || item.id)}
-          </button>
-        ))}
-      </div>
+      <Tabs
+        className="section-tabs"
+        label="Разделы источников"
+        value={section}
+        onValueChange={setSection}
+        items={[
+          { value: 'all', label: 'Все', badge: sources.length },
+          ...sections.map(item => ({ value: text(item.id), label: text(item.label || item.id) })),
+        ]}
+      />
       {section !== 'all' && (
         <div className="form-actions">
           <button
@@ -211,7 +211,7 @@ export function Parsers({ initial, csrf }: { initial: Row; csrf: string }) {
                     <small>{text(source.sectionLabel)}</small>
                   </td>
                   <td>
-                    <span className={'badge ' + presentation.tone}>{presentation.label}</span>
+                    <StatusBadge tone={toneOf(presentation.tone)} label={presentation.label} />
                     <small>{presentation.description}</small>
                   </td>
                   <td>{text(source.rowsTotal)}</td>
@@ -246,7 +246,7 @@ export function Parsers({ initial, csrf }: { initial: Row; csrf: string }) {
             })}
           </tbody>
         </table>
-        {!rows.length && <p className="empty">Источники не найдены.</p>}
+        {!rows.length && <p className="empty table-empty">Источники не найдены.</p>}
       </div>
       <details className="extra-data">
         <summary>История запусков</summary>

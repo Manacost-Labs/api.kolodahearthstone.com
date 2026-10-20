@@ -4,6 +4,7 @@ import { getSession } from '@/lib/backend';
 import { categories } from '@/lib/navigation';
 import { Shell } from '@/components/Shell';
 import { themeBootScript } from '@/lib/theme';
+import '@/components/varylo-ui/styles/index.css';
 import './globals.css';
 import './deck-tiles.css';
 // Inter 4 variable font subset to Latin, Cyrillic and punctuation; rebuild with scripts/subset-inter.sh.
@@ -32,7 +33,13 @@ export const metadata: Metadata = {
 export default async function Layout({ children }: { children: React.ReactNode }) {
   const session = await getSession();
   return (
-    <html lang="ru" data-theme="light" data-theme-preference="light" suppressHydrationWarning>
+    <html
+      lang="ru"
+      data-theme="vercel"
+      data-mode="dark"
+      data-theme-preference="dark"
+      suppressHydrationWarning
+    >
       <head>
         {/* Runs before first paint so the stored or system theme never flashes. */}
         {/* biome-ignore lint/security/noDangerouslySetInnerHtml: static script built from lib/theme.ts constants */}

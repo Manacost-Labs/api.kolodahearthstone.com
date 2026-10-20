@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { toneColor } from '../lib/format.ts';
 
 const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
 
@@ -58,12 +59,10 @@ function over(fill: string, backdrop: string): string {
 const base = declarations('html');
 const themes: Record<string, Record<string, string>> = {
   light: base,
-  dark: { ...base, ...declarations('html[data-theme=dark]') },
-  tavern: { ...base, ...declarations('html[data-theme=tavern]') },
-  arcane: { ...base, ...declarations('html[data-theme=arcane]') },
+  dark: { ...base, ...declarations('html[data-mode=dark]') },
 };
 
-test('filled buttons keep WCAG AA text contrast in every theme', () => {
+test('filled buttons keep WCAG AA text contrast in both modes', () => {
   for (const [name, tokens] of Object.entries(themes)) {
     for (const [ink, fill] of [
       ['on-accent', 'accent'],
@@ -80,10 +79,9 @@ test('filled buttons keep WCAG AA text contrast in every theme', () => {
 test('filled controls use the theme ink instead of hard-coded white', () => {
   assert.equal(declarations('.button').color, 'var(--on-accent)');
   assert.equal(declarations('.button.danger').color, 'var(--on-bad)');
-  assert.equal(declarations('.page-link[aria-current]').color, 'var(--on-accent)');
 });
 
-test('text tokens keep WCAG AA contrast on their backgrounds in every theme', () => {
+test('text tokens keep WCAG AA contrast on their backgrounds in both modes', () => {
   for (const [name, tokens] of Object.entries(themes)) {
     const pairs: [string, string][] = [
       ['--text', tokens['--bg']],
@@ -104,6 +102,7 @@ test('text tokens keep WCAG AA contrast on their backgrounds in every theme', ()
 });
 
 test('warning and info badges no longer borrow the accent colour', () => {
-  assert.equal(declarations('.badge.warning').color, 'var(--warn)');
-  assert.equal(declarations('.badge.info').color, 'var(--info)');
+  assert.equal(toneColor.warning, 'amber');
+  assert.equal(toneColor.info, 'blue');
+  assert.notEqual(toneColor.warning, toneColor.info);
 });

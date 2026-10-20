@@ -15,6 +15,8 @@ import { CopyButton } from './CopyButton';
 import { RecordTabs } from './Details';
 import { Modal } from './Modal';
 import { StatusBadge, Time } from './ui';
+import { Tabs } from './varylo-ui/navigation/Tabs';
+import { SegmentedControl } from './varylo-ui/navigation/SegmentedControl';
 
 type Props = {
   row: Row;
@@ -52,7 +54,11 @@ export function CardInspector({
       // An image preview opened from the tabs sits on top; arrows belong to it, not to the card list.
       if (document.querySelectorAll('dialog[open]').length > 1) return;
       const target = event.target;
-      if (target instanceof HTMLElement && target.closest('input,textarea,select,[role="tab"]')) return;
+      if (
+        target instanceof HTMLElement &&
+        target.closest('input,textarea,select,[role="tab"],[role="radio"],[role="combobox"]')
+      )
+        return;
       if (event.key === 'ArrowLeft' && onPrev) onPrev();
       if (event.key === 'ArrowRight' && onNext) onNext();
     };
@@ -62,14 +68,16 @@ export function CardInspector({
 
   return (
     <Modal title={detail.name} onClose={onClose} wide>
-      <div className="segmented inspector-mode" role="group" aria-label="Раздел карточки">
-        <button type="button" aria-pressed={section === 'card'} onClick={() => setSection('card')}>
-          Карточка
-        </button>
-        <button type="button" aria-pressed={section === 'history'} onClick={() => setSection('history')}>
-          История изменений
-        </button>
-      </div>
+      <Tabs
+        className="inspector-mode"
+        label="Раздел карточки"
+        value={section}
+        onValueChange={value => setSection(value === 'history' ? 'history' : 'card')}
+        items={[
+          { value: 'card', label: 'Карточка' },
+          { value: 'history', label: 'История изменений' },
+        ]}
+      />
       {section === 'card' ? (
         <>
           <div className="inspector">
@@ -78,15 +86,21 @@ export function CardInspector({
                 <Artwork key={images.join('|')} urls={images} alt={detail.name} />
               </div>
               {detail.images.golden.length > 0 && (
-                <fieldset className="segmented">
-                  <legend className="sr-only">Версия карты</legend>
-                  <button type="button" aria-pressed={!showGolden} onClick={() => setGolden(false)}>
-                    Обычная
-                  </button>
-                  <button type="button" aria-pressed={showGolden} onClick={() => setGolden(true)}>
-                    <SparkleIcon size={14} weight="fill" aria-hidden="true" /> Золотая
-                  </button>
-                </fieldset>
+                <SegmentedControl
+                  aria-label="Версия карты"
+                  size="sm"
+                  fullWidth
+                  value={showGolden ? 'golden' : 'normal'}
+                  onValueChange={value => setGolden(value === 'golden')}
+                  options={[
+                    { value: 'normal', label: 'Обычная' },
+                    {
+                      value: 'golden',
+                      label: 'Золотая',
+                      icon: <SparkleIcon size={14} weight="fill" aria-hidden="true" />,
+                    },
+                  ]}
+                />
               )}
             </div>
             <div className="inspector-body">
@@ -157,7 +171,7 @@ export function CardInspector({
             </div>
           </div>
           <details className="inspector-more">
-            <summary>История, изображения и все данные</summary>
+            <summary>Все поля, изображения и JSON API</summary>
             <RecordTabs row={row} apiBase={apiBase} />
           </details>
           <footer className="inspector-footer">
