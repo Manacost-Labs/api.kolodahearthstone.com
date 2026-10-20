@@ -298,7 +298,12 @@ def hsguru_streamer_window_is_empty(soup: BeautifulSoup) -> bool:
     if not _HSGURU_STREAMER_REQUIRED_HEADERS <= headers:
         return False
     body = table.find("tbody")
-    return body is not None and body.find("tr") is None
+    if body is None or body.find("tr") is not None:
+        return False
+    # The card layout or any deckstring on the page means decks exist.
+    return soup.select_one('[id^="deck_stats-"]') is None and not DECK_CODE_RE.search(
+        str(soup)
+    )
 
 
 def _extract_hsguru_streamer_cards(

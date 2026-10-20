@@ -2517,7 +2517,7 @@ async def _try_firecrawl_html(
                     "ai_review": ai_telemetry,
                 },
             )
-            if is_primary:
+            if is_primary and not empty_window:
                 return None
             ai_diagnosis = None
             if not ai_quarantine and not empty_window:

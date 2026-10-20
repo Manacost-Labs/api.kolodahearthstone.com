@@ -68,8 +68,20 @@ def test_intact_empty_streamer_table_is_a_verified_empty_window() -> None:
         _streamer_page(None),
         _streamer_page("", headers="<th>Deck</th><th>Format</th>"),
         "<html><body><main>Something went wrong</main></body></html>",
+        EMPTY_WINDOW.replace(
+            "</main>", "<div id='deck_stats-1'>Aggro Paladin</div></main>"
+        ),
+        EMPTY_WINDOW.replace(
+            "</main>", "<p>AAECAZ8FBrSBB8ODB9roB5f6B4GKCMOLCAzunwSS1ATP</p></main>"
+        ),
     ],
-    ids=["missing-body", "missing-headers", "missing-table"],
+    ids=[
+        "missing-body",
+        "missing-headers",
+        "missing-table",
+        "card-layout",
+        "deckstring",
+    ],
 )
 def test_incomplete_streamer_page_is_not_an_empty_window(html: str) -> None:
     structured = parse_html(STREAMER, html)["structured"]
@@ -332,3 +344,54 @@ def test_matrix_slices_record_lab_verdicts() -> None:
     calls = {call.args for call in verdict.call_args_list}
     assert ("lab-legend", True) in calls
     assert ("lab-all", False) in calls
+
+
+def test_primary_scrape_keeps_the_empty_window_verdict() -> None:
+    from app import fetcher
+    from app.firecrawl_backend import FirecrawlScrape
+
+    scraped = FirecrawlScrape(
+        html=EMPTY_WINDOW,
+        markdown="",
+        screenshot=None,
+        metadata={"backend": "scrape_do"},
+        status_code=200,
+        final_url=STREAMER.url,
+    )
+
+    def scrape_source(source, *, accept_result):
+        assert accept_result(scraped) is True
+        return scraped
+
+    with (
+        patch(
+            "app.firecrawl_backend.scrape_source",
+            new=AsyncMock(side_effect=scrape_source),
+        ),
+        patch("app.fetcher._diagnose_candidate_with_ai", new=AsyncMock()) as ai,
+        patch("app.fetcher._save_failure_status", side_effect=lambda _s, status: status),
+        patch("app.fetcher.firecrawl_primary_source_ids", return_value={STREAMER.id}),
+        patch("app.fetcher.log_action"),
+    ):
+        status = asyncio.run(
+            fetcher._try_firecrawl_html(
+                STREAMER,
+                fetched_at="2026-10-20T05:00:00+00:00",
+                reason="primary",
+            )
+        )
+
+    # The primary route returns the verdict instead of a second paid fetch.
+    assert status is not None
+    assert status["empty_window_verified"] is True
+    ai.assert_not_awaited()
+
+
+def test_lab_verdict_failure_does_not_fail_the_matrix() -> None:
+    from app.hsguru_meta_matrix import _record_lab_verdict
+
+    with patch(
+        "app.hsguru_meta_matrix.validate_attempt",
+        side_effect=RuntimeError("database is locked"),
+    ):
+        _record_lab_verdict("lab-1", True)

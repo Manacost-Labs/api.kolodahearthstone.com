@@ -192,6 +192,15 @@ def _parse_checkpoint_time(value: Any) -> datetime | None:
     return parsed.astimezone(UTC)
 
 
+def _record_lab_verdict(acquisition_id: str | None, valid: bool) -> None:
+    """Meta Lab bookkeeping must never fail a matrix refresh."""
+
+    try:
+        validate_attempt(acquisition_id, valid)
+    except Exception as exc:  # noqa: BLE001 - telemetry is fail-open
+        logger.warning("Meta Lab verdict was not recorded: %s", type(exc).__name__)
+
+
 def _empty_base_slice_allowed(spec: SliceSpec) -> bool:
     """Allow an empty table only for documented low-sample rank windows."""
     return (spec.format, spec.rank, spec.period) in EMPTY_BASE_SLICE_ALLOWLIST
@@ -1465,17 +1474,17 @@ async def _refresh_hsguru_meta_matrix_unlocked(
                     },
                 }
                 matrix_slices_by_key[spec.key] = item
-                await asyncio.to_thread(validate_attempt, acquisition_id, True)
+                await asyncio.to_thread(_record_lab_verdict, acquisition_id, True)
                 run.finish_slice(succeeded=True)
                 save_progress_checkpoint()
                 return item
             except HSGuruMetaDataError as exc:
                 last_error = exc
-                await asyncio.to_thread(validate_attempt, acquisition_id, False)
+                await asyncio.to_thread(_record_lab_verdict, acquisition_id, False)
                 break
             except HSGuruMetaSchemaError as exc:
                 last_error = exc
-                await asyncio.to_thread(validate_attempt, acquisition_id, False)
+                await asyncio.to_thread(_record_lab_verdict, acquisition_id, False)
                 if attempt >= min(max(1, attempts), 2):
                     break
                 await asyncio.sleep(min(2 ** (attempt - 1), 4))
