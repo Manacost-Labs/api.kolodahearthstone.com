@@ -511,6 +511,20 @@ def scrape_do_token() -> str | None:
     return value or None
 
 
+def decodo_api_key() -> str | None:
+    value = os.environ.get("HS_DECODO_API_KEY") or os.environ.get("DECODO_API_KEY")
+    return value.strip() or None if value else None
+
+
+def decodo_request_limit() -> int:
+    """Conservative request ceiling for the current and preceding 31 UTC days."""
+    try:
+        return min(
+            10_000, max(0, int(os.environ.get("HS_DECODO_REQUEST_LIMIT", "9000")))
+        )
+    except ValueError:
+        return 0
+
 def scrape_do_timeout_seconds() -> float:
     return max(15.0, float(os.environ.get("HS_SCRAPE_DO_TIMEOUT_SECONDS", "120")))
 

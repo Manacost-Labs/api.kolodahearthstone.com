@@ -16,6 +16,8 @@ services:
       HS_API_PORT: "8000"
       HS_FLARESOLVERR_URL: "http://flaresolverr:8191/v1"
       HS_CLOAKBROWSER_DISPLAY: ":99"
+      # Expansion release: accept volume/fill drops. Restore 0.30 to block them.
+      HS_DATASET_REGRESSION_DROP_RATIO: "1.0"
       DISPLAY: ":99"
     volumes:
       - ./data:/var/lib/hs-data-api

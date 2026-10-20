@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh Meta Intelligence Lab card/deck/class-matchup statistics daily
+
+[Timer]
+OnCalendar=*-*-* 02:35:00 UTC
+AccuracySec=1min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

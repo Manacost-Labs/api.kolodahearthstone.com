@@ -484,7 +484,8 @@ CONTRACTS: dict[str, SourceContract] = {
         min_rows=40,
         critical_fields=("archetype_name", "win_rate", "games"),
         min_field_fill_rate=0.80,
-        regression_drop_ratio=0.35,
+        # Current upstream volume may shrink; validate content, not historical counts.
+        regression_drop_ratio=1.0,
         fallback_policy="api_only",
     ),
     "metastats_matchups": SourceContract(
@@ -494,7 +495,8 @@ CONTRACTS: dict[str, SourceContract] = {
         min_rows=50,
         critical_fields=("archetype", "vs", "winrate"),
         min_field_fill_rate=0.80,
-        regression_drop_ratio=0.35,
+        # Current upstream volume may shrink; validate content, not historical counts.
+        regression_drop_ratio=1.0,
         fallback_policy="api_only",
     ),
     "hearthstone_decks": SourceContract(

@@ -1,0 +1,10 @@
+[Unit]
+Description=Update Meta Lab research from published datasets every 30 minutes
+
+[Timer]
+OnCalendar=*-*-* *:15,45:00 UTC
+Persistent=true
+Unit=hs-data-api-meta-lab-sync.service
+
+[Install]
+WantedBy=timers.target

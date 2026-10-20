@@ -647,7 +647,7 @@ def _valid_vicious_response(url: str, html: str) -> bool:
             return False
         return True
 
-    if "/datareaper/radars/" in path:
+    if "/datareaper/radars/" in path or "/datareaper/hearthnet_with_archetypes/" in path:
         radar = parse_radar_js(html)
         return bool(radar.get("nodes") and radar.get("edges"))
 

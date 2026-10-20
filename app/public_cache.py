@@ -22,11 +22,16 @@ def _no_store_path(path: str) -> bool:
             "/v1/constructed/hsguru-deck",
             "/v1/hsguru/archetypes/analysis",
             "/v1/system/parsing-reliability",
+            "/v1/search",
+            "/v1/materials/",
+            "/v1/mcp",
         )
     )
 
 
 def _cacheable_path(path: str) -> bool:
+    if path.startswith(("/v1/search", "/v1/materials/", "/v1/mcp")):
+        return False
     if path.startswith("/v1/constructed/hsguru-deck"):
         # This endpoint can refresh an exact archetype in process without
         # changing the disk catalogs. A disk-derived strong ETag could return
@@ -42,7 +47,7 @@ def _cacheable_path(path: str) -> bool:
         # This report has moving time-window boundaries and generated_at even
         # without a database write. A strong shared ETag would be dishonest.
         return False
-    if path.startswith(("/ops", "/admin", "/ui", "/health")):
+    if path.startswith(("/ops", "/admin", "/ui", "/health", "/v1/meta-intelligence")):
         return False
     if path.endswith("/health"):
         return False

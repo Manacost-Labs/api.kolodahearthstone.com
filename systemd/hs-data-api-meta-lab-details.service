@@ -1,0 +1,10 @@
+[Unit]
+Description=Collect daily details for up to 40 priority Hearthstone archetypes
+Requires=hs-data-api-docker.service
+After=hs-data-api-docker.service network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/srv/hs-data-api
+ExecStart=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm api python -m app.meta_intelligence details
+TimeoutStartSec=4h

@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
+from contextvars import ContextVar
+from dataclasses import replace
+from functools import wraps
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -9,6 +13,14 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from .config import scrape_do_timeout_seconds, scrape_do_token
+
+_lab_receipt: ContextVar[dict | None] = ContextVar("scrape_do_lab_receipt", default=None)
+
+
+def _capture_lab_receipt(headers: Mapping[str, str], status: int) -> None:
+    receipt = _lab_receipt.get()
+    if receipt is not None:
+        receipt.update(credits=_header_int({k.lower(): v for k, v in headers.items()}, "scrape.do-request-cost"), status=status)
 
 SCRAPE_DO_URL = "https://api.scrape.do/"
 SCRAPE_DO_MIN_TIMEOUT_MS = 5_000
@@ -72,6 +84,8 @@ class ScrapeDoScrape:
     super_proxy: bool
     screenshot: str | None = None
     target_headers: dict[str, str] = field(default_factory=dict)
+    acquisition_id: str | None = None
+    cost_basis: str = "estimated"
 
     @property
     def content_length(self) -> int:
@@ -141,7 +155,7 @@ def _clamp_retry_timeout_ms(retry_timeout_ms: int) -> int:
     )
 
 
-def scrape_url_sync(
+def _scrape_url_sync(
     url: str,
     *,
     render: bool = True,
@@ -153,6 +167,7 @@ def scrape_url_sync(
     retry_timeout_ms: int | None = None,
     screenshot: bool = False,
     full_screenshot: bool = False,
+    disable_retries: bool = False,
 ) -> ScrapeDoScrape:
     token = scrape_do_token()
     if not token:
@@ -163,6 +178,8 @@ def scrape_url_sync(
         "render": str(bool(render)).lower(),
         **({"super": "true"} if super_proxy else {}),
     }
+    if disable_retries:
+        params["disableRetry"] = "true"
     if headers:
         params["forwardHeaders" if forward_headers else "extraHeaders"] = "true"
     if wait_ms is not None and render:
@@ -197,6 +214,7 @@ def scrape_url_sync(
             request,
             timeout=request_timeout,
         ) as response:
+            _capture_lab_receipt(response.headers, int(response.status))
             raw = response.read()
             response_headers = {
                 key.lower(): value for key, value in response.headers.items()
@@ -208,6 +226,7 @@ def scrape_url_sync(
                 or url
             )
     except urllib.error.HTTPError as exc:
+        _capture_lab_receipt(exc.headers or {}, exc.code)
         # Do not include exc.url: Scrape.do puts the secret token in it.
         detail = exc.read().decode("utf-8", errors="replace")
         detail = detail.replace(token, "<redacted>")
@@ -245,6 +264,7 @@ def scrape_url_sync(
     body = raw.decode("utf-8", errors="replace")
     target_headers = _safe_target_response_headers(response_headers)
     request_cost = _header_int(response_headers, "scrape.do-request-cost")
+    cost_basis = "reported" if request_cost is not None else "estimated"
     if request_cost is None:
         request_cost = (
             25 if render and super_proxy else 10 if super_proxy else 5 if render else 1
@@ -299,9 +319,36 @@ def scrape_url_sync(
             "scrape.do-remaining-credits",
         ),
         super_proxy=super_proxy,
+        cost_basis=cost_basis,
         screenshot=image,
         target_headers=target_headers,
     )
+
+
+@wraps(_scrape_url_sync)
+def scrape_url_sync(url: str, **kwargs) -> ScrapeDoScrape:
+    from .meta_intelligence.budget import begin_attempt, finish_attempt
+
+    if not scrape_do_token():
+        return _scrape_url_sync(url, **kwargs)
+    identity = begin_attempt(url)
+    if identity is None:
+        return _scrape_url_sync(url, **kwargs)
+    receipt: dict = {}
+    token = _lab_receipt.set(receipt)
+    started = time.monotonic()
+    outcome = "error"
+    try:
+        result = _scrape_url_sync(url, **kwargs)
+        receipt.update(credits=result.request_cost, basis=result.cost_basis, status=result.status_code)
+        outcome = "response"
+        return replace(result, acquisition_id=identity)
+    finally:
+        _lab_receipt.reset(token)
+        finish_attempt(identity, credits=receipt.get("credits"),
+                       basis=receipt.get("basis", "reported" if receipt.get("credits") is not None else "unknown"),
+                       duration_ms=(time.monotonic()-started)*1000, outcome=outcome,
+                       http_status=receipt.get("status"))
 
 
 async def scrape_url(
@@ -316,6 +363,7 @@ async def scrape_url(
     retry_timeout_ms: int | None = None,
     screenshot: bool = False,
     full_screenshot: bool = False,
+    disable_retries: bool = False,
 ) -> ScrapeDoScrape:
     return await asyncio.to_thread(
         scrape_url_sync,
@@ -329,4 +377,5 @@ async def scrape_url(
         retry_timeout_ms=retry_timeout_ms,
         screenshot=screenshot,
         full_screenshot=full_screenshot,
+        disable_retries=disable_retries,
     )
