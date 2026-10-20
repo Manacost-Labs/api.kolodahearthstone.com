@@ -1,8 +1,8 @@
 <?php
 declare(strict_types=1);
 
-// Authenticated adapter during the incremental frontend migration.
-// This endpoint accepts only the existing panel's fixed actions.
+// Authenticated JSON adapter for the Next.js panel.
+// This endpoint accepts only the panel's fixed actions.
 $method = strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET'));
 $rawAction = $_POST['action'] ?? $_GET['action'] ?? 'list';
 $action = is_string($rawAction) ? $rawAction : '';
@@ -54,6 +54,5 @@ if ($action === 'analytics_registry') {
     }
     panel_next_json(['ok' => true, 'modules' => $modules]);
 }
-define('KOLODA_NEXT_JSON', true);
-// index.php owns the established SQL queries, validation and mutation budgets.
-require __DIR__ . '/index.php';
+// panel_data.php owns the established SQL queries, validation and mutation budgets.
+require __DIR__ . '/lib/panel_data.php';

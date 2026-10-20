@@ -24,7 +24,7 @@ HTTPS считается каноническим transport.
 находится в [panel-next](panel-next/README.md): каталоги, статистика, источники,
 редактор и API-токены. Вход проходит через существующий GitHub OAuth.
 PHP/FastAPI продолжают обслуживать данные и административные операции;
-старый PHP-интерфейс доступен по `/index.php` для отката.
+старый PHP-интерфейс (`/index.php`) удалён.
 
 Для локальной сборки: `npm --prefix panel-next ci`, затем
 `npm --prefix panel-next run check`. Настройка standalone-релиза описана
