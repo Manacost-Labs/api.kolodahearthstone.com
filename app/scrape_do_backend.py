@@ -167,6 +167,7 @@ def _scrape_url_sync(
     retry_timeout_ms: int | None = None,
     screenshot: bool = False,
     full_screenshot: bool = False,
+    disable_retries: bool = False,
 ) -> ScrapeDoScrape:
     token = scrape_do_token()
     if not token:
@@ -177,6 +178,8 @@ def _scrape_url_sync(
         "render": str(bool(render)).lower(),
         **({"super": "true"} if super_proxy else {}),
     }
+    if disable_retries:
+        params["disableRetry"] = "true"
     if headers:
         params["forwardHeaders" if forward_headers else "extraHeaders"] = "true"
     if wait_ms is not None and render:
@@ -360,6 +363,7 @@ async def scrape_url(
     retry_timeout_ms: int | None = None,
     screenshot: bool = False,
     full_screenshot: bool = False,
+    disable_retries: bool = False,
 ) -> ScrapeDoScrape:
     return await asyncio.to_thread(
         scrape_url_sync,
@@ -373,4 +377,5 @@ async def scrape_url(
         retry_timeout_ms=retry_timeout_ms,
         screenshot=screenshot,
         full_screenshot=full_screenshot,
+        disable_retries=disable_retries,
     )

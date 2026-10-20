@@ -511,7 +511,7 @@ async def _fetch_catalog_page(
             max_age_ms=max_age_ms,
             wait_ms=wait_ms,
             timeout_ms=timeout_ms,
-            skip_providers={"scrape_do"},
+            skip_providers={"scrape_do", "decodo"},
             accept_result=catalog_result_is_valid,
             attempt_observer=observe_remote,
             failure_observer=observe_remote_failure,
