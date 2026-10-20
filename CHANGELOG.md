@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Constructed sync renames tokens and hero powers that were stored before release
+  as `blizzard:<dbf>` to their HearthstoneJSON ID once it is published. Before,
+  related-card sync kept updating the fallback row, so new-set tokens had no
+  Russian names or local images in `related_cards_localized` (66 «Власть
+  Темной империи» tokens on 2026-10-20).
 - Public `/v1/*` responses no longer wait about a second for their ETag: the
   cache revision memoizes each dataset's `fetched_at` by file signature
   instead of parsing every published dataset (~260 MB) on each request inside
