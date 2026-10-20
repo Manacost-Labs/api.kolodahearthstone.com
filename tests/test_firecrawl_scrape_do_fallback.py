@@ -219,11 +219,12 @@ def test_scrape_do_retry_telemetry_keeps_recovered_502_attempt() -> None:
             failure_observer=failures.append,
         )
 
+    # HSGuru HTML escalates from the cheap profile instead of retrying it.
     assert result.backend == "scrape_do_super"
     assert attempts == [("scrape_do_super", True)]
     assert failures == [
         {
-            "backend": "scrape_do_super",
+            "backend": "scrape_do",
             "state": "failed",
             "http_status": 502,
             "request_credits": 0,
@@ -231,11 +232,12 @@ def test_scrape_do_retry_telemetry_keeps_recovered_502_attempt() -> None:
             "error_code": "ROTATION_FAILED",
             "profile_attempt": 1,
             "provider_attempt": 1,
-            "super_proxy": True,
+            "super_proxy": False,
         }
     ]
     assert result.metadata["scrapeDoAttempts"] == 2
-    assert result.metadata["scrapeDoProfileAttempt"] == 2
+    assert result.metadata["scrapeDoProfileAttempt"] == 1
+    assert result.metadata["scrapeDoRender"] is False
 
 
 def test_scrape_do_terminal_retry_reports_each_http_attempt_once() -> None:
@@ -251,11 +253,16 @@ def test_scrape_do_terminal_retry_reports_each_http_attempt_once() -> None:
             status_code=429,
             super_proxy=True,
         ),
+        ScrapeDoTransientError(
+            "ROTATION_FAILED",
+            status_code=502,
+            super_proxy=True,
+        ),
     ]
 
     with (
         patch("app.firecrawl_backend.scrape_do_token", return_value="configured"),
-        patch("app.firecrawl_backend.scrape_url_sync", side_effect=errors),
+        patch("app.firecrawl_backend.scrape_url_sync", side_effect=errors) as scrape,
         patch("app.firecrawl_backend.time.sleep"),
         pytest.raises(RuntimeError, match="All scrape providers failed"),
     ):
@@ -266,12 +273,18 @@ def test_scrape_do_terminal_retry_reports_each_http_attempt_once() -> None:
             failure_observer=failures.append,
         )
 
-    assert [event["http_status"] for event in failures] == [502, 429]
-    assert [event["provider_attempt"] for event in failures] == [1, 2]
+    # One attempt per HSGuru profile: cheap, super, then rendered super.
+    assert [event["http_status"] for event in failures] == [502, 429, 502]
+    assert [event["provider_attempt"] for event in failures] == [1, 2, 3]
     assert [event["error_code"] for event in failures] == [
         "ROTATION_FAILED",
         "CONCURRENT_REQUEST_LIMIT",
+        "ROTATION_FAILED",
     ]
+    assert [
+        (item.kwargs["render"], item.kwargs["super_proxy"])
+        for item in scrape.call_args_list
+    ] == [(False, False), (False, True), (True, True)]
 
 
 def test_scrapfly_runs_after_scrape_do_firecrawl_and_unavailable_brightdata() -> None:
@@ -388,7 +401,7 @@ def test_brightdata_is_third_before_scrapfly() -> None:
     configured.assert_not_called()
     scrapfly.assert_not_called()
     assert result.metadata["providerPolicy"] == (
-        "scrape_do_firecrawl_brightdata_scrapfly"
+        "scrape_do_decodo_firecrawl_brightdata_scrapfly"
     )
 
 
