@@ -22,7 +22,8 @@ on_error() {
 trap on_error ERR
 
 for php_file in \
-  "${admin_root}/index.php" \
+  "${admin_root}/next-data.php" \
+  "${admin_root}/lib/panel_data.php" \
   "${admin_root}/analytics.php" \
   "${admin_root}/lib/analytics.php" \
   "${admin_root}/api/index.php"

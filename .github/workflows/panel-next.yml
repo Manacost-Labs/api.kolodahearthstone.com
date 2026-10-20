@@ -6,7 +6,7 @@ on:
     paths:
       - 'panel-next/**'
       - 'panel/examples/horizontal-art-tiles.css'
-      - 'panel/index.php'
+      - 'panel/lib/panel_data.php'
       - 'panel/nginx/**'
       - 'scripts/deploy-panel-next.sh'
       - 'Makefile'
@@ -20,7 +20,7 @@ on:
     paths:
       - 'panel-next/**'
       - 'panel/examples/horizontal-art-tiles.css'
-      - 'panel/index.php'
+      - 'panel/lib/panel_data.php'
       - 'panel/nginx/**'
       - 'scripts/deploy-panel-next.sh'
       - 'Makefile'

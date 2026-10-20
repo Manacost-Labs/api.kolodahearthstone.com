@@ -79,7 +79,11 @@ function panel_safe_return_to($candidate): string
     }
 
     $path = (string)($parts['path'] ?? '');
-    if ($path !== '/' && $path !== '/index.php') {
+    if ($path === '/index.php') {
+        // The retired PHP view shared its query contract with the Next.js root.
+        return '/' . substr($candidate, strlen('/index.php'));
+    }
+    if ($path !== '/') {
         return '/';
     }
 
