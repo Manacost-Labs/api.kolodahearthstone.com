@@ -58,5 +58,16 @@ export function useCatalogQuery(query: string) {
     go({ view: value }, true);
   };
   const params = new URLSearchParams(draftQuery);
-  return { pending, params, search, changeSearch, go, mode, view: catalogView(params.get('view')) };
+  // Pending includes the debounce interval: an older request settling must not
+  // announce completed results while a newer search is waiting to be applied.
+  const searchPending = search !== (new URLSearchParams(query).get('q') || '');
+  return {
+    pending: pending || searchPending,
+    params,
+    search,
+    changeSearch,
+    go,
+    mode,
+    view: catalogView(params.get('view')),
+  };
 }

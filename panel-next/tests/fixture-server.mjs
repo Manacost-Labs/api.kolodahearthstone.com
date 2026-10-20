@@ -202,6 +202,15 @@ export const server = http.createServer(async (req, res) => {
             event: 'changed',
             observed_at: '2026-10-11 12:00:00',
             snapshot: { card_id: input.get('card_id'), attack: 4, health: 4, text_ru: 'Даёт +2/+2.' },
+            media: {
+              card_image: {
+                status: 'archived',
+                archive_url: '/uploads/card-history-media/' + 'a'.repeat(64) + '.png',
+                sha256: 'a'.repeat(64),
+                captured_at: '2026-10-11 12:00:01',
+                evidence: 'captured_after_observation',
+              },
+            },
           },
           {
             version_id: 11,
