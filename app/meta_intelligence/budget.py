@@ -114,10 +114,13 @@ def finish_attempt(identity: str | None, *, credits: float | None, basis: str,
         ))
 
 
-def validate_attempt(identity: str | None, valid: bool, store: Store | None = None) -> None:
+def validate_attempt(identity: str | None, valid: bool, store: Store | None = None,
+                     *, empty: bool = False) -> None:
+    """Record the content verdict; ``empty`` marks a correct page without rows."""
     if identity:
+        verdict = "valid" if valid else "empty" if empty else "invalid"
         with (store or Store()).connect(write=True) as conn:
-            conn.execute("UPDATE attempts SET validation=? WHERE id=?", ("valid" if valid else "invalid", identity))
+            conn.execute("UPDATE attempts SET validation=? WHERE id=?", (verdict, identity))
 
 
 def summary(store: Store, settings: Settings, now: datetime | None = None) -> dict:

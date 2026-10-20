@@ -86,9 +86,13 @@ def test_schedule_inventory_calculates_nominal_next_runs_in_utc() -> None:
     assert _schedule(inventory, "refresh-vicious-syndicate")["nextRunAt"] == (
         "2026-07-21T00:20:00+00:00"
     )
+    # Streamer decks run every three hours from 00:15 Warsaw (UTC+2 in July).
     assert _schedule(inventory, "refresh-streamer-decks")["nextRunAt"] == (
-        "2026-07-21T00:15:00+00:00"
+        "2026-07-21T01:15:00+00:00"
     )
+    analysis = _schedule(inventory, "refresh-hsguru-archetype-analysis")
+    assert analysis["onCalendar"] == ["*-*-1/2 03:20:00 Europe/Warsaw"]
+    assert analysis["nextRunAt"] == "2026-07-21T01:20:00+00:00"
     streamer_recovery = _schedule(inventory, "recover-hsguru-streamer")
     assert streamer_recovery["purpose"] == "recovery"
     assert streamer_recovery["onCalendar"] == [
@@ -125,7 +129,7 @@ def test_schedule_inventory_calculates_nominal_next_runs_in_utc() -> None:
         "2026-07-21T03:20:00+00:00"
     )
     streamer = sources["hsguru_streamer_decks_legend_1000"]
-    assert streamer["nextRunAt"] == "2026-07-21T00:15:00+00:00"
+    assert streamer["nextRunAt"] == "2026-07-21T01:15:00+00:00"
     assert streamer["recoveryScheduleIds"] == ["recover-hsguru-streamer"]
     assert streamer["nextRecoveryRunAt"] == "2026-07-21T00:10:00+00:00"
 
@@ -245,3 +249,13 @@ def test_parser_control_snapshot_exposes_effective_section_and_source_schedule()
         assert disabled_arena["nextRunAt"] is None
         assert all(source["enabled"] is False for source in disabled_arena["sources"])
         assert all(source["nextRunAt"] is None for source in disabled_arena["sources"])
+
+
+def test_archetype_analysis_skips_even_month_days() -> None:
+    inventory = build_schedule_inventory(
+        at=datetime(2026, 7, 22, 0, 0, tzinfo=UTC),
+        include_runtime=False,
+    )
+
+    analysis = _schedule(inventory, "refresh-hsguru-archetype-analysis")
+    assert analysis["nextRunAt"] == "2026-07-23T01:20:00+00:00"

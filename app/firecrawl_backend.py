@@ -55,6 +55,16 @@ from .sources import Source
 
 FIRECRAWL_SCRAPE_URL = "https://api.firecrawl.dev/v2/scrape"
 _PROVIDER_POLICY = "scrape_do_decodo_firecrawl_brightdata_scrapfly"
+# Cheapest-first Scrape.do (render, super) profiles for HSGuru HTML: plain
+# (1 credit), datacenter render (5), residential (10), residential render (25).
+# Datacenter render returns complete card-stats and meta tables that the plain
+# profile cannot fetch, so most pages no longer need the 25-credit profile.
+_HSGURU_SCRAPE_DO_PROFILES = (
+    (False, False),
+    (True, False),
+    (False, True),
+    (True, True),
+)
 _SCREENSHOT_MIN_BYTES = 1_024
 _SCREENSHOT_MAX_BYTES = 25 * 1024 * 1024
 _HTML_SITE_MIN_BYTES = 256
@@ -448,7 +458,7 @@ def _scrape_via_scrape_do(
     screenshot, full_screenshot = _screenshot_options(formats)
     adaptive = source.site == "hsguru" and not screenshot
     profiles = profiles or (
-        ((False, False), (False, True), (True, True))
+        _HSGURU_SCRAPE_DO_PROFILES
         if adaptive
         else ((True, True),)
         if source.site == "hsguru"
@@ -1056,7 +1066,7 @@ def _scrape_sync(
 
     if "scrape_do" not in skip and scrape_do_token():
         phases = (
-            (((False, False),), ((False, True), (True, True)))
+            (_HSGURU_SCRAPE_DO_PROFILES[:1], _HSGURU_SCRAPE_DO_PROFILES[1:])
             if decodo_enabled
             else (None,)
         )

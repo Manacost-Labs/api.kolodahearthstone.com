@@ -278,6 +278,34 @@ def _hsguru_card_deck_code(card: Any, text: str) -> str | None:
     return first_deck_code_from_text(text)
 
 
+_HSGURU_STREAMER_REQUIRED_HEADERS = frozenset({"deck", "streamer", "last played"})
+
+
+def hsguru_streamer_window_is_empty(soup: BeautifulSoup) -> bool:
+    """Return True only for an intact streamer table whose body has no decks.
+
+    HSGuru renders the rolling-hour table header even when nobody qualified in
+    the window. A missing table, header or body is an incomplete page instead.
+    """
+
+    table = soup.select_one("#streamer_decks_table table")
+    if table is None:
+        return False
+    headers = {
+        _clean_text(cell.get_text(" ")).casefold()
+        for cell in table.select("thead th")
+    }
+    if not _HSGURU_STREAMER_REQUIRED_HEADERS <= headers:
+        return False
+    body = table.find("tbody")
+    if body is None or body.find("tr") is not None:
+        return False
+    # The card layout or any deckstring on the page means decks exist.
+    return soup.select_one('[id^="deck_stats-"]') is None and not DECK_CODE_RE.search(
+        str(soup)
+    )
+
+
 def _extract_hsguru_streamer_cards(
     soup: BeautifulSoup,
     *,
@@ -611,6 +639,13 @@ def parse_html(source: Source, html: str, snapshot: dict[str, Any] | None = None
             "hsreplay_extracted": hsreplay_extracted,
         },
     )
+    if (
+        source.id == "hsguru_streamer_decks_legend_1000"
+        and isinstance(structured, dict)
+        and not structured.get("rows")
+        and hsguru_streamer_window_is_empty(soup)
+    ):
+        structured["empty_window_verified"] = True
     return {
         "source_id": source.id,
         "site": source.site,

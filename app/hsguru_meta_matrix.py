@@ -18,6 +18,7 @@ from .config import hsguru_current_patch_period
 from .firecrawl_backend import FirecrawlScrape, scrape_source_with_options
 from .hsguru_auth import hsguru_firecrawl_headers
 from .hsguru_decks import cached_hsguru_catalog_decks
+from .meta_intelligence.budget import validate_attempt
 from .job_run import (
     AtomicJobRunSnapshotWriter,
     JobRunContext,
@@ -189,6 +190,15 @@ def _parse_checkpoint_time(value: Any) -> datetime | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=UTC)
     return parsed.astimezone(UTC)
+
+
+def _record_lab_verdict(acquisition_id: str | None, valid: bool) -> None:
+    """Meta Lab bookkeeping must never fail a matrix refresh."""
+
+    try:
+        validate_attempt(acquisition_id, valid)
+    except Exception as exc:  # noqa: BLE001 - telemetry is fail-open
+        logger.warning("Meta Lab verdict was not recorded: %s", type(exc).__name__)
 
 
 def _empty_base_slice_allowed(spec: SliceSpec) -> bool:
@@ -1393,6 +1403,7 @@ async def _refresh_hsguru_meta_matrix_unlocked(
         last_error: Exception | None = None
         started = False
         for attempt in range(1, max(1, attempts) + 1):
+            acquisition_id: str | None = None
             try:
                 async with semaphore:
                     if not started:
@@ -1415,6 +1426,9 @@ async def _refresh_hsguru_meta_matrix_unlocked(
                         )
                         break
                     result = await scrape(spec)
+                acquisition_id = (getattr(result, "metadata", None) or {}).get(
+                    "labAcquisitionId"
+                )
                 slice_acquisition.append(
                     {
                         "key": spec.key,
@@ -1460,14 +1474,17 @@ async def _refresh_hsguru_meta_matrix_unlocked(
                     },
                 }
                 matrix_slices_by_key[spec.key] = item
+                await asyncio.to_thread(_record_lab_verdict, acquisition_id, True)
                 run.finish_slice(succeeded=True)
                 save_progress_checkpoint()
                 return item
             except HSGuruMetaDataError as exc:
                 last_error = exc
+                await asyncio.to_thread(_record_lab_verdict, acquisition_id, False)
                 break
             except HSGuruMetaSchemaError as exc:
                 last_error = exc
+                await asyncio.to_thread(_record_lab_verdict, acquisition_id, False)
                 if attempt >= min(max(1, attempts), 2):
                     break
                 await asyncio.sleep(min(2 ** (attempt - 1), 4))
