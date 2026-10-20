@@ -8,11 +8,12 @@ from starlette.testclient import TestClient
 
 from app.main import app
 from app.public_cache import (
+    _FETCHED_AT,
     NO_STORE_CACHE_CONTROL,
     PUBLIC_CACHE_CONTROL,
     cache_revision,
 )
-from app.storage import save_dataset
+from app.storage import load_dataset, save_dataset
 
 client = TestClient(app)
 
@@ -107,8 +108,49 @@ def test_legacy_api_shape_is_unchanged_and_gets_cache_headers() -> None:
 
 
 def test_cache_revision_is_best_effort_when_storage_is_unavailable() -> None:
+    _FETCHED_AT.clear()
     with patch("app.public_cache.load_dataset", side_effect=PermissionError("denied")):
         assert cache_revision("/datasets", b"") == "not-cached"
+
+
+def test_dataset_revision_reads_an_unchanged_file_once() -> None:
+    source_id = "hsreplay_arena"
+    fetched_at = (datetime.now(UTC) - timedelta(minutes=2)).isoformat()
+    save_dataset(source_id, {"source_id": source_id, "fetched_at": fetched_at, "data": {}})
+    _FETCHED_AT.clear()
+    with patch("app.public_cache.load_dataset", wraps=load_dataset) as reads:
+        first = cache_revision(f"/datasets/{source_id}", b"")
+        second = cache_revision(f"/datasets/{source_id}", b"")
+
+    assert first == second
+    assert first.startswith(fetched_at)
+    assert reads.call_count == 1
+
+
+def test_global_revision_does_not_reparse_published_datasets_per_request() -> None:
+    source_id = "hsreplay_arena"
+    fetched_at = (datetime.now(UTC) - timedelta(minutes=4)).isoformat()
+    save_dataset(source_id, {"source_id": source_id, "fetched_at": fetched_at, "data": {}})
+    _FETCHED_AT.clear()
+    first = cache_revision("/v1/hsguru/meta", b"rank=legend")
+    with patch("app.public_cache.load_dataset", wraps=load_dataset) as reads:
+        second = cache_revision("/v1/hsguru/meta", b"rank=legend")
+
+    assert first == second
+    assert source_id not in [call.args[0] for call in reads.call_args_list]
+
+
+def test_rewritten_dataset_changes_the_memoized_revision() -> None:
+    source_id = "hsreplay_arena"
+    first_time = (datetime.now(UTC) - timedelta(minutes=3)).isoformat()
+    save_dataset(source_id, {"source_id": source_id, "fetched_at": first_time, "data": {}})
+    first = cache_revision(f"/datasets/{source_id}", b"")
+    second_time = datetime.now(UTC).isoformat()
+    save_dataset(source_id, {"source_id": source_id, "fetched_at": second_time, "data": {}})
+    second = cache_revision(f"/datasets/{source_id}", b"")
+
+    assert first.startswith(first_time)
+    assert second.startswith(second_time)
 
 
 def test_hsguru_legend_deck_revision_reads_only_its_catalog() -> None:
@@ -310,3 +352,42 @@ def test_deckview_legacy_decks_contract_remains_unchanged() -> None:
             }
         ],
     }
+
+
+def test_global_revision_reads_parser_control_state_once() -> None:
+    from app import public_cache
+    from app.parser_control import EARLY_SOURCE_IDS, ParserControlStore
+
+    for source_id in sorted(EARLY_SOURCE_IDS)[:3]:
+        save_dataset(
+            source_id,
+            {"source_id": source_id, "fetched_at": datetime.now(UTC).isoformat(), "data": {}},
+        )
+    unshared = max(
+        value
+        for source in public_cache.SOURCES
+        if (value := public_cache._dataset_timestamp(source.id))
+    )
+    with patch.object(
+        ParserControlStore, "read_state", autospec=True, side_effect=ParserControlStore.read_state
+    ) as reads:
+        shared = cache_revision("/v1/hsguru/meta", b"rank=legend")
+
+    assert shared == unshared
+    assert reads.call_count == 1
+
+
+def test_health_freshness_is_bounded_like_the_diagnostics_outside_tests() -> None:
+    from app.routers import system
+
+    system._public_freshest = None
+    with (
+        patch("app.config.python_environment", return_value="production"),
+        patch.object(system, "_public_freshest_timestamp", return_value="2026-10-20T10:00:00+00:00") as compute,
+    ):
+        first = system._cached_public_freshest_timestamp()
+        second = system._cached_public_freshest_timestamp()
+    system._public_freshest = None
+
+    assert first == second == "2026-10-20T10:00:00+00:00"
+    assert compute.call_count == 1

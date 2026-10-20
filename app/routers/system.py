@@ -635,16 +635,12 @@ def datasets() -> Envelope[list[DatasetSummary]]:
     )
 
 
-@router.get(
-    "/health",
-    response_model=Envelope[dict[str, Any]],
-    deprecated=True,
-)
-def health() -> Envelope[dict[str, Any]]:
-    from ..main import cached_health_diagnostics
+_public_freshest_lock = threading.Lock()
+_public_freshest: tuple[float, str | None] | None = None
 
-    diagnostics = cached_health_diagnostics()
-    fetched_at = freshest_timestamp(
+
+def _public_freshest_timestamp() -> str | None:
+    return freshest_timestamp(
         [
             {
                 "fetched_at": (load_resolved_public_dataset(source.id) or {}).get(
@@ -655,6 +651,40 @@ def health() -> Envelope[dict[str, Any]]:
         ],
         "fetched_at",
     )
+
+
+def _cached_public_freshest_timestamp() -> str | None:
+    """Bound health polling like ``cached_health_diagnostics``.
+
+    Resolving every public dataset parses ~260 MB of JSON, about six seconds
+    of CPU per probe; monitors poll several times a minute. Concurrent probes
+    wait for one computation. Tests keep the exact value.
+    """
+    global _public_freshest
+    from ..config import python_environment
+    from ..main import _HEALTH_CACHE_SECONDS
+
+    if python_environment() == "test":
+        return _public_freshest_timestamp()
+    now = time.monotonic()
+    with _public_freshest_lock:
+        if _public_freshest is not None and now - _public_freshest[0] < _HEALTH_CACHE_SECONDS:
+            return _public_freshest[1]
+        value = _public_freshest_timestamp()
+        _public_freshest = (now, value)
+        return value
+
+
+@router.get(
+    "/health",
+    response_model=Envelope[dict[str, Any]],
+    deprecated=True,
+)
+def health() -> Envelope[dict[str, Any]]:
+    from ..main import cached_health_diagnostics
+
+    diagnostics = cached_health_diagnostics()
+    fetched_at = _cached_public_freshest_timestamp()
     return Envelope(
         data=diagnostics,
         meta=ApiMeta(
