@@ -6,10 +6,13 @@ ConditionPathIsDirectory=/run/hs-data-platform-sync
 [Service]
 Type=oneshot
 # Acquire the root-owned platform lock, then drop privileges for every worker.
+# A busy lock is a skipped turn, not a failure: flock exits 75 and the timer
+# retries a minute later. The job itself never uses 75.
 User=root
 Group=root
-ExecStart=/usr/bin/flock -w 900 /run/hs-data-platform-sync/sync.lock /usr/sbin/runuser -u koloda -- /bin/bash /srv/api-kolodahearthstone/panel/current/scripts/archive_card_history_media_job.sh
+ExecStart=/usr/bin/flock -E 75 -w 900 /run/hs-data-platform-sync/sync.lock /usr/sbin/runuser -u koloda -- /bin/bash /srv/api-kolodahearthstone/panel/current/scripts/archive_card_history_media_job.sh
 TimeoutStartSec=30min
+SuccessExitStatus=75
 Nice=10
 UMask=0022
 NoNewPrivileges=true
