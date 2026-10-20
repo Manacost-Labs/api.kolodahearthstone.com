@@ -110,7 +110,7 @@ export function CommandPalette({
   const current = Math.min(active, Math.max(0, items.length - 1));
   const optionId = (index: number) => `${id}-option-${index}`;
 
-  // Modal focuses its close button when it opens; the search field takes focus right after.
+  // The dialog has no close button; focus the search field as soon as it opens.
   useEffect(() => {
     const frame = requestAnimationFrame(() => input.current?.focus());
     return () => cancelAnimationFrame(frame);
@@ -183,7 +183,7 @@ export function CommandPalette({
   );
 
   return (
-    <Modal title="Быстрый переход" onClose={onClose}>
+    <Modal title="Быстрый переход" onClose={onClose} bare>
       <div className="palette">
         <label className="palette-search">
           <MagnifyingGlassIcon size={18} aria-hidden="true" />
@@ -207,6 +207,9 @@ export function CommandPalette({
             ref={input}
           />
           {cards.status === 'loading' && <span className="palette-spinner" aria-hidden="true" />}
+          <button type="button" className="palette-close" aria-label="Закрыть" onClick={onClose}>
+            Esc
+          </button>
         </label>
         <div className="palette-list" id={`${id}-list`} role="listbox" aria-label="Результаты" ref={list}>
           {sectionItems.length > 0 && (

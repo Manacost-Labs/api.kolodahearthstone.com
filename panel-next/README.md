@@ -1,6 +1,6 @@
 # HS Data Panel — Next.js
 
-Новый интерфейс всей панели: каталоги, редактор карт, переводы Wiki, статистика, надёжность сбора, управление источниками и API-токены. Сохраняет выбранную светлую галерею, четыре темы и прежние параметры адресов.
+Новый интерфейс всей панели: каталоги, редактор карт, переводы Wiki, статистика, надёжность сбора, управление источниками и API-токены. Оформление — тема `vercel` библиотеки VaryloUI (тёмный режим по умолчанию, светлый и системный в меню аккаунта); прежние параметры адресов сохраняются.
 
 ## Границы миграции
 
@@ -14,7 +14,7 @@ Next.js / React / TypeScript обслуживают интерфейс и сер
 
 Требуется Node.js >=22.13. Установка: `npm ci`; полный gate: `npm run check`. Сборка не обращается к API за данными или внешними шрифтами. `make check` в корне включает этот gate.
 
-Gate начинается с `prettier --check` и `biome lint --error-on-warnings`; `npm run format` исправляет форматирование. Оформление задают токены в `app/globals.css`, значения форматирует только `lib/format.ts`, общие элементы лежат в `components/ui.tsx` (подробнее — `panel/docs/ADMIN_UI.md`). Шрифт Inter хранится в `public/fonts/inter.woff2` как подмножество (латиница, кириллица, пунктуация); полный исходник — `fonts-src/inter.ttf`, пересборка — `scripts/subset-inter.sh` (нужны `fonttools` и `brotli`).
+Gate начинается с `prettier --check` и `biome lint --error-on-warnings`; `npm run format` исправляет форматирование. Оболочка (AppShell, Sidebar, меню аккаунта) и элементы управления (Select, SegmentedControl, Tabs, Pagination, Badge, EmptyState, Skeleton) — исходники VaryloUI в `components/varylo-ui/` (см. README там; lint и prettier эту папку пропускают). Токены приложения в `app/globals.css` повторяют палитру Vercel, значения форматирует только `lib/format.ts`, общие элементы лежат в `components/ui.tsx` (подробнее — `panel/docs/ADMIN_UI.md`). Шрифт Inter хранится в `public/fonts/inter.woff2` как подмножество (латиница, кириллица, пунктуация); полный исходник — `fonts-src/inter.ttf`, пересборка — `scripts/subset-inter.sh` (нужны `fonttools` и `brotli`).
 
 HTTP-интеграционные тесты сами запускают standalone Next и локальный fixture на временных портах. Браузерные проверки используют отдельный Chromium, фиксированные тестовые порты и вымышленные данные; реальные токены и парсеры не запускаются.
 

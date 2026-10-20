@@ -23,7 +23,8 @@ assert_same(PANEL_AUTH_CALLBACK_URL, $manifest['callback_urls'][0] ?? null, 'The
 assert_same([], (array)$manifest['default_permissions'], 'The sign-in app must not request repository permissions.');
 
 assert_same('/?action=analytics#statistics', panel_safe_return_to('/?action=analytics#statistics'), 'A local panel URL must be preserved.');
-assert_same('/index.php?page=2', panel_safe_return_to('/index.php?page=2'), 'The legacy panel entrypoint must be preserved.');
+assert_same('/?page=2', panel_safe_return_to('/index.php?page=2'), 'A retired PHP view URL must return to the Next.js root.');
+assert_same('/', panel_safe_return_to('/index.php'), 'The bare retired PHP view must return to the Next.js root.');
 assert_same('/', panel_safe_return_to('https://evil.example/'), 'An absolute return URL must be rejected.');
 assert_same('/', panel_safe_return_to('//evil.example/'), 'A scheme-relative return URL must be rejected.');
 assert_same('/', panel_safe_return_to('/analytics.php'), 'A JSON endpoint must not be a post-login destination.');

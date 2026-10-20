@@ -8,11 +8,14 @@ export function Modal({
   children,
   onClose,
   wide = false,
+  bare = false,
 }: {
   title: string;
   children: ReactNode;
   onClose: () => void;
   wide?: boolean;
+  /** No visible title bar; the title stays the dialog's accessible name. */
+  bare?: boolean;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -64,13 +67,15 @@ export function Modal({
           close();
       }}
     >
-      <header className="modal-head">
-        <h2>{title}</h2>
-        {/* biome-ignore lint/a11y/noAutofocus: a modal dialog must move focus inside when it opens */}
-        <button type="button" className="icon-button" aria-label="Закрыть" onClick={close} autoFocus>
-          <XIcon size={20} />
-        </button>
-      </header>
+      {!bare && (
+        <header className="modal-head">
+          <h2>{title}</h2>
+          {/* biome-ignore lint/a11y/noAutofocus: a modal dialog must move focus inside when it opens */}
+          <button type="button" className="icon-button" aria-label="Закрыть" onClick={close} autoFocus>
+            <XIcon size={18} />
+          </button>
+        </header>
+      )}
       {children}
     </dialog>
   );

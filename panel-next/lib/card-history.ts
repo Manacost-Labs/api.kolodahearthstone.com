@@ -5,6 +5,17 @@ export type HistoryVersion = {
   observed_at: string;
   event: string;
   snapshot: Row;
+  media?: Record<
+    string,
+    {
+      status: string;
+      reason?: string | null;
+      archive_url?: string | null;
+      sha256?: string | null;
+      evidence?: string | null;
+      captured_at: string;
+    }
+  >;
 };
 export type CardHistoryData = {
   entity: string;
@@ -12,6 +23,32 @@ export type CardHistoryData = {
   versions: HistoryVersion[];
   pagination: { page: number; total: number; total_pages: number };
 };
+
+export function archivedHistoryImage(version: HistoryVersion) {
+  const priorities = [
+    'local_image_url',
+    'card_image',
+    'card_image_url',
+    'framed_image',
+    'image_url',
+    'hero_image_url',
+  ];
+  const media = Object.entries(version.media || {}).sort(([a], [b]) => {
+    const rank = (key: string) => {
+      const index = priorities.indexOf(key);
+      return index < 0 ? priorities.length : index;
+    };
+    return rank(a) - rank(b);
+  });
+  for (const [field, image] of media) {
+    const match = image.archive_url?.match(
+      /^\/uploads\/card-history-media\/([a-f0-9]{64})\.(png|jpg|webp|gif)$/,
+    );
+    if (image.status !== 'archived' || !match || image.sha256 !== match[1]) continue;
+    return { ...image, field, url: 'https://api.kolodahearthstone.com' + image.archive_url };
+  }
+  return null;
+}
 const ignored = new Set([
   'id',
   'created_at',

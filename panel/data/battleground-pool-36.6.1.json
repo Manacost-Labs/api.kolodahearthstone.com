@@ -3,7 +3,7 @@
   "effective_date": "2026-09-22",
   "source": "https://hearthstone.blizzard.com/en-us/news/24302091",
   "upstream_last_modified": "2026-09-16T11:00:45Z",
-  "source_pool_sha256": "6dbea86c582e9bfa129268a4fc4534aac82a3bc2d7d63d459711704768c66bbb",
+  "source_pool_sha256": "73411a955db7ce0cd48bec19920cdff6274bd684c63bd8ea22384db5c12cb897",
   "cards": {
     "BG_TTN_401": {
       "name": "Ancestral Automaton",

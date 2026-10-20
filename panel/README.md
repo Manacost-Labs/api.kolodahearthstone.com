@@ -7,10 +7,10 @@ cards with a null creature type. The normal import updates existing rows even
 when their source payload hash is unchanged; no schema migration is needed.
 Regression check: `php panel/tests/battleground_creature_types_test.php`.
 
-This directory owns the PHP data operations, authentication and legacy view of
-the authenticated database panel at `https://api.kolodahearthstone.com/`.
-The main interface now lives in [panel-next](../panel-next/README.md), with
-the previous PHP view available at `/index.php`. Only GitHub user `Zulut30` is allowed to
+This directory owns the PHP data operations and authentication of the
+authenticated database panel at `https://api.kolodahearthstone.com/`.
+The interface lives in [panel-next](../panel-next/README.md); the former PHP
+view at `/index.php` has been retired. Only GitHub user `Zulut30` is allowed to
 open it. The public REST compatibility surface is under `/api/v1`, while the
 central GraphQL API is under `/v1/`.
 
@@ -88,3 +88,11 @@ copy credentials into the repository. The repair requires agreement between
 available source locales. It does not change stats, pool membership or source
 hashes. Publish the API vocabulary and scanner together; then verify
 `/api/v1/cards?creature_type=aberration&in_pool=1` and the library's client filters.
+
+The public compatibility API's Nginx cache needs both
+`nginx/api.kolodahearthstone.com.conf` (server configuration) and
+`nginx/koloda-rest-cache.conf` (install as
+`/etc/nginx/conf.d/31-koloda-rest-cache.conf` in the HTTP context). Validate with
+`nginx -t` before reloading. Keep the cache key's API version synchronized with
+`api/index.php`. The cache applies only to public `/api/v1`, not auth, token
+issuance or the panel bridge. See `../docs/card-tiles.md` for client layers.

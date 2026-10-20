@@ -82,6 +82,11 @@ test('history relay is private and carries the selected card identity', async ()
   const history = (await response.json()).data;
   assert.equal(history.card_id, 'BG_FIXTURE_1');
   assert.equal(history.versions[0].snapshot.attack, 4);
+  assert.equal(history.versions[0].media.card_image.status, 'archived');
+  assert.match(
+    history.versions[0].media.card_image.archive_url,
+    /^\/uploads\/card-history-media\/[a-f0-9]{64}\.png$/,
+  );
   const anonymous = await fetch(origin + '/api/panel?action=card_history&entity=card&card_id=BG_FIXTURE_1');
   assert.equal(anonymous.status, 401);
 });

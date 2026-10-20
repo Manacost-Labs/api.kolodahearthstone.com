@@ -1,0 +1,8 @@
+/*
+ * ui-kit/styles.css: shared tokens, the bundled themes (src/lib/theme/themes.ts: bundled) and base styles.
+ * Every other theme is opt-in: import ui-kit/themes/<name>.css after this file. Fonts: ui-kit/fonts/<id>.css.
+ */
+@import './tokens.css';
+@import './themes/vercel.css';
+@import './base.css';
+@import './motion.css';

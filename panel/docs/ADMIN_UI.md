@@ -4,72 +4,39 @@
 
 `api.kolodahearthstone.com` is an operational catalogue for Hearthstone data. Its UI is
 optimized for fast scanning and maintenance rather than for public browsing.
-The server-rendered page remains intentionally dependency-free: PHP renders the
-catalogues, CSS provides the responsive design system, and dependency-free
-JavaScript handles themes, automatic filters, previews, the mobile menu, and
-shortcuts.
+The interface is the Next.js application in [`panel-next`](../../panel-next/README.md).
+The former server-rendered PHP view (`index.php`, `partials/`, its CSS and DOM
+scripts) has been retired; PHP now provides only authentication, the JSON
+adapters behind `/api/panel` and the public REST API.
 
-The trinket catalogue has a dedicated **Full art** column. It shows the local
-square original without a card frame and opens it through the shared lightbox.
-The import and API contracts are documented in `LIBRARY_FULL_ART.md`.
+The trinket catalogue has a dedicated **Full art** column. The import and API
+contracts are documented in `LIBRARY_FULL_ART.md`.
 
 ## Source map
 
-- `index.php` — queries, server-rendered markup, filter state, and lightweight UI
-  behavior.
-- `assets/style.css` — theme tokens, reusable components, catalogue layouts, and
-  responsive behavior.
-- `partials/analytics-dashboard.php` — statistics navigation, compact filters,
-  accessible loading/error containers, and the shared entity-detail drawer.
+- `next-data.php` + `lib/panel_data.php` + `lib/next_panel.php` — the fixed
+  action allowlist, catalogue queries, filter state, validation and mutation
+  budgets behind `/api/panel`. They return only the explicit JSON contract.
 - `analytics.php` + `lib/analytics.php` — protected, read-only allowlist gateway
   to the local Hearthstone Data API. New statistics modules are registered in
   `analytics_module_registry()` and normalized before reaching the browser.
-- `assets/analytics.js` — URL-backed statistics state and generic table
-  rendering. It never receives internal API credentials or arbitrary URLs.
-- `assets/panel-ui.js` — shared command palette, mobile navigation behavior and
-  persistent per-table column visibility. Labels are always derived through
-  `textContent`; preferences contain column indexes only.
-- `partials/command-palette.php` — allowlisted quick navigation available from
-  every authenticated page through `Ctrl/⌘ K`.
-- `assets/parsing-reliability.js` — dependency-free view model for observed and
-  collecting parser-reliability states; the same pure logic is exercised in
-  Node tests.
-- `partials/parser-control.php` — parser operations workspace, source table,
-  recent runs, and the explicit manual-run confirmation dialog.
 - `parser-control.php` + `lib/parser_control.php` — narrow authenticated bridge
   for the local parser control API. The browser never receives its admin token.
-- `assets/parser-control-view.js` + `assets/parser-control.js` — tested parser
-  view model and DOM controller with adaptive automatic refresh.
+- `assets/parsing-reliability.js` and `assets/parser-control-view.js` — pure,
+  dependency-free view models. `panel-next` copies them into `lib/vendor/`
+  during `prebuild`; the same logic is exercised in Node tests.
+- `auth/` + `lib/auth.php` — GitHub sign-in limited to `Zulut30`. A retired
+  `/index.php?…` return address is rewritten to the Next.js root `/?…`.
 - `api/index.php` — public API; it is not coupled to the admin presentation.
+
+These three PHP adapters are reachable only through the private
+`127.0.0.1:18769` listener used by the Next.js server.
 
 ## Interaction contracts
 
 - Filters use URL query parameters and stay shareable/bookmarkable.
-- Changing a select submits immediately; search is debounced by 520 ms.
-- Pressing `/` focuses the primary catalogue search when focus is not already in
-  a form control.
-- The warm light theme and horizontal navigation are the default. Secondary
-  catalogues and theme choices stay reachable through “Разделы”; Escape closes
-  the menu. The new `hsDataTheme-v2` preference starts in light mode independently
-  of the former theme preference.
-- BG opens as a four-column artwork gallery (three columns on tablets, two on
-  phones). `hsDataCatalogView` stores the gallery/table choice. Both views use
-  the same server-rendered records, URL filters and real server pagination;
-  the default BG page has eight records. The table is the fallback without JS.
-- Selecting a BG card opens a native modal dialog with Data, Images and JSON
-  API tabs. Escape closes it and restores focus to the card. Image previews
-  use a second native dialog; there are no new API requests for card details.
-- Card, golden, and framed previews use the shared `data-preview` lightbox.
 - Golden variants are represented inside their base-card row, but their IDs and
   DBFs are also searchable.
-- The action column remains sticky during horizontal table scrolling.
-- Catalogue and statistics tables provide a persistent compact-density option.
-- Large catalogue, analytics, parser, and token tables expose a shared column
-  picker. The first identity column and final action column stay visible; each
-  module stores only its hidden column indexes in local browser storage.
-- Every horizontally overflowing table exposes the same explicit left/right
-  navigation with start, percentage, and end feedback. It remains hidden when
-  all columns fit, so compact tables do not gain redundant controls.
 - The parser workspace prioritizes error/partial sources, keeps source and
   action columns sticky, and exposes schedules, published row counts and recent
   run progress without loading raw operational logs into the initial view.
@@ -112,8 +79,6 @@ The import and API contracts are documented in `LIBRARY_FULL_ART.md`.
 - Battlegrounds heroes use square HearthstoneJSON portrait art. Battlegrounds
   minions use the verified local card renders. Failed images keep a stable
   placeholder and are counted in the result metadata.
-- “Новая карта” and “Переводы Wiki” are intentionally absent from navigation;
-  catalogue and analytics workflows are the primary interface.
 
 ## Adding a statistics module
 
@@ -121,53 +86,36 @@ The import and API contracts are documented in `LIBRARY_FULL_ART.md`.
    `analytics_module_registry()` in `lib/analytics.php`.
 2. Add a normalization branch that returns `summary`, `columns`, and `rows`.
    Keep source-specific response shapes out of the browser renderer.
-3. Add the navigation button to `partials/analytics-dashboard.php`.
-4. If the module needs special filters, expose them with semantic labels and
-   wire them in `assets/analytics.js`. Prefer the existing generic table.
-5. Use a bounded `limit`, a short upstream timeout, and a cache TTL appropriate
+3. `panel-next` lists modules from `action=analytics_registry`, so a
+   registered module appears in navigation automatically. Add special filters
+   in `panel-next/components/Analytics.tsx`; prefer the existing generic table.
+4. Use a bounded `limit`, a short upstream timeout, and a cache TTL appropriate
    for the source. Never add a user-controlled upstream URL.
-
-## Responsive rules
-
-- Above 1440 px: persistent sidebar and full data table.
-- 1121–1440 px: navigation becomes a horizontal catalogue header and secondary
-  BG columns are hidden to keep primary data readable.
-- Up to 1120 px: compact menu, full-width workspace, and wrapped controls.
-- Up to 680 px: two-column filters, compact pagination, and horizontal table
-  scrolling for data that cannot be represented safely as cards.
 
 ## Maintenance rules
 
-1. Reuse the semantic color and spacing tokens in `:root`; do not add isolated
-   hard-coded palettes for one catalogue.
-2. New filter controls require an accessible label and must preserve query state.
-3. New image previews should use `data-preview`, `data-tooltip`, keyboard focus,
-   and an explicit accessible name.
-4. Preserve `loading="lazy"` and `decoding="async"` for table media.
-5. Increment the `style.css` query version in `index.php` after visible CSS
-   changes so browsers and proxies receive the new interface.
-6. In `panel-next`, text on filled controls uses `--on-accent` or `--on-bad`,
+1. In `panel-next`, text on filled controls uses `--on-accent` or `--on-bad`,
    never a literal white: the three dark themes have light accents.
    `tests/theme-contrast.test.ts` enforces 4.5:1 for every theme.
-7. The Next deck-tile grid uses `auto-fill` columns of at least 256 px. Do not
+2. The Next deck-tile grid uses `auto-fill` columns of at least 256 px. Do not
    restore the shared example's fixed `min-width`; it forces sideways scrolling
    below 1500 px.
-8. `panel-next/app/globals.css` defines the scales once: `--space-*`,
+3. `panel-next/app/globals.css` defines the scales once: `--space-*`,
    `--radius-*`, `--text-*`, `--z-*`, and per-theme `--good`, `--bad`,
    `--warn`, `--info` with their `-soft` fills. Use them instead of raw px or
    colours; the contrast test covers every text/fill pair.
-9. Format values only through `panel-next/lib/format.ts` (dates, relative
+4. Format values only through `panel-next/lib/format.ts` (dates, relative
    times, numbers, percents, statuses, slugs, field and filter labels) and
    render them through `components/ui.tsx` (`Value`, `StatusBadge`, `Time`,
    `KpiCard`, `EmptyState`). Do not print raw ISO dates, status codes or
    slugs; the parser run history JSON is the one remaining exception.
-10. Icons come from `@phosphor-icons/react` with `aria-hidden`; the control
+5. Icons come from `@phosphor-icons/react` with `aria-hidden`; the control
     keeps a text label or an `aria-label`.
-11. `npm run check` starts with `prettier --check` and `biome lint`. Biome is
+6. `npm run check` starts with `prettier --check` and `biome lint`. Biome is
     used instead of ESLint because `eslint-config-next` pulls a dependency with
     an unpatched high advisory and typescript-eslint cannot load TypeScript 7.
     A deliberate exception carries a `biome-ignore` comment with its reason.
-12. The open catalogue record lives in `?card=<id>` (`lib/card-detail.ts`:
+7. The open catalogue record lives in `?card=<id>` (`lib/card-detail.ts`:
     `cardKey`, `matchesCard`, `cardHref`). `Catalog` writes it with
     `history.pushState`, which Next syncs into `useSearchParams` without a
     server round trip; arrows use `replaceState`, and closing goes back when
@@ -176,55 +124,29 @@ The import and API contracts are documented in `LIBRARY_FULL_ART.md`.
     strips `card` before calling PHP and resolves a card outside the current
     page with `q=<id>&per_page=150` plus an exact identifier match, because
     PHP search is a LIKE match.
-13. Table columns come from `lib/catalog-columns.ts`, one list per category,
+8. Table columns come from `lib/catalog-columns.ts`, one list per category,
     with field names from `panel/sql/schema.mysql.sql`. A new category adds
     its columns and a case in `tests/catalog-columns.test.ts`. Do not add a
     client-side column sort: `next-data.php` has no sort parameter, and
     sorting one page of a paginated list misleads.
-14. Ctrl+K is `components/CommandPalette.tsx`, a WAI-ARIA combobox with
+9. Ctrl+K is `components/CommandPalette.tsx`, a WAI-ARIA combobox with
     `aria-activedescendant`. Card search goes through
     `GET /api/panel?view=panel&action=list&q=…&per_page=8` for the current
     category, debounced, and aborts stale requests.
-15. `.table-scroll` is `position: relative`, so `.sr-only` text inside cells
+10. `.table-scroll` is `position: relative`, so `.sr-only` text inside cells
     scrolls with the table instead of widening the page on phones.
 
 ## Verification
 
-Before deployment:
+Before deployment, from the repository root:
 
 ```bash
-/opt/php74/bin/php -l index.php
-/opt/php74/bin/php -l analytics.php
-/opt/php74/bin/php -l lib/analytics.php
-node --check assets/analytics.js
-node --check assets/parsing-reliability.js
-node --check assets/parser-control.js
-node --test tests/parser_control_view.test.js
-node --test tests/parsing_reliability_view.test.js
-php tests/parsing_reliability_test.php
-php tests/parser_control_test.php
-PANEL_ROOT="$PWD" /srv/projects/data/hs-data-platform/tests/admin-ui-contract.sh
+make panel-check
+make platform-check
 ```
 
-Then render the default catalogue and at least one filtered result at desktop,
-tablet, and mobile widths. Verify that the browser console is clean, the menu,
-statistics tabs, scrollable table, detail drawer, and lightbox are
-keyboard-accessible. Verify the source registry, a HSGuru archetype with decks,
-a BG minion with combat rounds, and BG hero portrait dimensions. Test an empty
-card-statistics search and a known card such as `Fire Fly`; a golden ID such as
-`BG31_835_G` must still resolve to its base-card row.
-
-## Gallery browser regression
-
-`tests/catalog_gallery_browser.mjs` exercises the shared gallery and inspector
-against `tests/catalog_panel_fixture.php`, with HTTPS media requests blocked.
-Start the PHP fixture server on `127.0.0.1:18767` and an isolated Chromium with
-CDP on `127.0.0.1:18766`, then run:
-
-```sh
-node panel/tests/catalog_gallery_browser.mjs
-```
-
-It checks card identifiers and API links, modal focus restoration, nested image
-preview, saved table preference, empty results and desktop/tablet/mobile layout.
-Screenshots and results are written to `/tmp/koloda-catalog-gallery-qa`.
+Then open the Next.js panel and verify the default catalogue, one filtered
+result, statistics, sources and API tokens at desktop, tablet and mobile widths
+with a clean browser console. Test an empty card-statistics search and a known
+card such as `Fire Fly`; a golden ID such as `BG31_835_G` must still resolve to
+its base-card row.

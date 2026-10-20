@@ -12,16 +12,19 @@ import { RowsIcon } from '@phosphor-icons/react/dist/ssr/Rows';
 import { MagnifyingGlassIcon } from '@phosphor-icons/react/dist/ssr/MagnifyingGlass';
 import { ArrowRightIcon } from '@phosphor-icons/react/dist/ssr/ArrowRight';
 import { CheckIcon } from '@phosphor-icons/react/dist/ssr/Check';
-import { CaretLeftIcon } from '@phosphor-icons/react/dist/ssr/CaretLeft';
-import { CaretRightIcon } from '@phosphor-icons/react/dist/ssr/CaretRight';
 import { HeartIcon } from '@phosphor-icons/react/dist/ssr/Heart';
 import { SparkleIcon } from '@phosphor-icons/react/dist/ssr/Sparkle';
 import { StarIcon } from '@phosphor-icons/react/dist/ssr/Star';
 import { SwordIcon } from '@phosphor-icons/react/dist/ssr/Sword';
 import { TableIcon } from '@phosphor-icons/react/dist/ssr/Table';
 import { XIcon } from '@phosphor-icons/react/dist/ssr/X';
+import { PlusIcon } from '@phosphor-icons/react/dist/ssr/Plus';
+import { Select } from './varylo-ui/forms/Select';
+import { SegmentedControl } from './varylo-ui/navigation/SegmentedControl';
+import { Pagination } from './varylo-ui/navigation/Pagination';
 import { cardKey, matchesCard } from '@/lib/card-detail';
 import { catalogColumns, type Cell } from '@/lib/catalog-columns';
+import { categories as navigationCategories } from '@/lib/navigation';
 import { normalizedCard, queryHref, entityApiBase, text } from '@/lib/model';
 import type { PageData, Row } from '@/lib/types';
 import { CardInspector } from './CardInspector';
@@ -70,17 +73,19 @@ export function Catalog({
     per_page: resultView === 'tiles' ? 15 : data.perPage,
   });
   const select = (name: string, label: string, anyLabel: string, options: Record<string, string>) => (
-    <label className="filter-field">
-      <span>{label}</span>
-      <select name={name} value={params.get(name) || ''} onChange={e => go({ [name]: e.target.value })}>
-        <option value="">{anyLabel}</option>
-        {Object.entries(options).map(([key, optionLabel]) => (
-          <option key={key} value={key}>
-            {optionLabel}
-          </option>
-        ))}
-      </select>
-    </label>
+    <div className="filter-field">
+      <span aria-hidden="true">{label}</span>
+      <Select
+        aria-label={label}
+        size="sm"
+        value={params.get(name) || ''}
+        onValueChange={value => go({ [name]: value })}
+        options={[
+          { value: '', label: anyLabel },
+          ...Object.entries(options).map(([key, optionLabel]) => ({ value: key, label: optionLabel })),
+        ]}
+      />
+    </div>
   );
   const filterKeys = ['tier', 'creature_type', 'pool', 'duos', 'constructed_format', 'rarity', 'media'];
   const activeCount = Math.max(data.activeFilters.length, filterKeys.filter(key => params.get(key)).length);
@@ -93,7 +98,6 @@ export function Catalog({
     <section className="catalog">
       <header className="page-head">
         <div>
-          <span className="eyebrow">База Hearthstone</span>
           <h1>{data.title}</h1>
           <p>
             {data.total
@@ -102,8 +106,8 @@ export function Catalog({
           </p>
         </div>
         {['', 'minion', 'spell'].includes(type) && (
-          <PanelLink className="button secondary" href="/?action=new" prefetch={false}>
-            Добавить карту
+          <PanelLink className="button" href="/?action=new" prefetch={false}>
+            <PlusIcon size={16} aria-hidden="true" /> Добавить карту
           </PanelLink>
         )}
       </header>
@@ -119,7 +123,7 @@ export function Catalog({
       >
         <div className="filter-search">
           <label className="search">
-            <MagnifyingGlassIcon size={20} aria-hidden="true" />
+            <MagnifyingGlassIcon size={16} aria-hidden="true" />
             <input
               type="search"
               name="q"
@@ -137,7 +141,7 @@ export function Catalog({
             aria-controls="catalog-filter-fields"
             onClick={() => setFiltersOpen(open => !open)}
           >
-            <SlidersHorizontalIcon size={18} aria-hidden="true" />
+            <SlidersHorizontalIcon size={16} aria-hidden="true" />
             Фильтры{activeCount ? ` · ${activeCount}` : ''}
           </button>
         </div>
@@ -149,7 +153,7 @@ export function Catalog({
               href={catalogHref(query, { card_type: key, view })}
               aria-current={filterType === key ? 'page' : undefined}
             >
-              {label}
+              {navigationCategories[key] || label}
             </PanelLink>
           ))}
         </nav>
@@ -233,32 +237,34 @@ export function Catalog({
             {pending ? 'Обновляем результаты…' : ''}
           </span>
         </div>
-        <label className="per-page">
-          <span>На странице</span>
-          <select
-            name="per_page"
-            value={params.get('per_page') || data.perPage}
-            disabled={view === 'tiles'}
-            onChange={e => go({ per_page: e.target.value })}
-          >
-            {[8, 12, 15, 25, 50, 100, 150].map(n => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </select>
-        </label>
-        <div className="view-switch" role="group" aria-label="Вид каталога">
-          <button type="button" aria-pressed={view === 'tiles'} onClick={() => mode('tiles')}>
-            <RowsIcon size={18} aria-hidden="true" /> <span>Плитки</span>
-          </button>
-          <button type="button" aria-pressed={view === 'grid'} onClick={() => mode('grid')}>
-            <SquaresFourIcon size={18} aria-hidden="true" /> <span>Карточки</span>
-          </button>
-          <button type="button" aria-pressed={view === 'list'} onClick={() => mode('list')}>
-            <TableIcon size={18} aria-hidden="true" /> <span>Таблица</span>
-          </button>
-        </div>
+        {view !== 'tiles' && (
+          <div className="per-page">
+            <span aria-hidden="true">На странице</span>
+            <Select
+              aria-label="Записей на странице"
+              size="sm"
+              value={String(params.get('per_page') || data.perPage)}
+              onValueChange={value => go({ per_page: value })}
+              options={[8, 12, 15, 25, 50, 100, 150].map(n => ({ value: String(n), label: String(n) }))}
+            />
+          </div>
+        )}
+        <SegmentedControl
+          className="view-switch"
+          aria-label="Вид каталога"
+          size="sm"
+          value={view}
+          onValueChange={value => mode(catalogView(value))}
+          options={[
+            { value: 'tiles', label: <span>Плитки</span>, icon: <RowsIcon size={16} aria-hidden="true" /> },
+            {
+              value: 'grid',
+              label: <span>Карточки</span>,
+              icon: <SquaresFourIcon size={16} aria-hidden="true" />,
+            },
+            { value: 'list', label: <span>Таблица</span>, icon: <TableIcon size={16} aria-hidden="true" /> },
+          ]}
+        />
       </div>
       <div className="catalog-results" aria-busy={pending}>
         {!cards.length ? (
@@ -397,42 +403,26 @@ export function Catalog({
           </div>
         )}
       </div>
-      <nav className="pagination" aria-label="Страницы каталога">
-        <button
-          type="button"
-          className="page-link"
-          disabled={pending || data.page === 1}
-          onClick={() => go({ page: data.page - 1 })}
-        >
-          <CaretLeftIcon size={16} aria-hidden="true" /> Назад
-        </button>
-        {Array.from(
-          { length: Math.min(5, data.totalPages) },
-          (_, i) => Math.max(1, Math.min(data.page - 2, data.totalPages - 4)) + i,
-        ).map(page => (
-          <button
-            key={page}
-            type="button"
-            className="page-link"
-            disabled={pending}
-            aria-current={page === data.page ? 'page' : undefined}
-            onClick={() => go({ page })}
-          >
-            {page}
-          </button>
-        ))}
-        <button
-          type="button"
-          className="page-link"
-          disabled={pending || data.page === data.totalPages}
-          onClick={() => go({ page: data.page + 1 })}
-        >
-          Вперёд <CaretRightIcon size={16} aria-hidden="true" />
-        </button>
-        <span>
-          Страница {data.page} из {data.totalPages}
-        </span>
-      </nav>
+      {data.totalPages > 1 && (
+        <div className="pagination" data-pending={pending || undefined}>
+          <Pagination
+            aria-label="Страницы каталога"
+            pageCount={data.totalPages}
+            value={data.page}
+            onValueChange={page => {
+              if (!pending) go({ page });
+            }}
+            labels={{
+              previous: 'Предыдущая страница',
+              next: 'Следующая страница',
+              page: page => `Страница ${page}`,
+            }}
+          />
+          <span>
+            Страница {data.page} из {data.totalPages}
+          </span>
+        </div>
+      )}
       {selected && (
         // One dialog for the whole browse session: flipping cards must not close and reopen it.
         <CardInspector

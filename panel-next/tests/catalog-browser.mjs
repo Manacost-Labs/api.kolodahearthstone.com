@@ -16,7 +16,7 @@ export default async function verify(page, root, output) {
   await page.setViewportSize({ width: 1440, height: 760 });
   await load('view=grid');
   await page.evaluate(() => {
-    window.uxHeader = document.querySelector('.site-header');
+    window.uxHeader = document.querySelector('.ui-app-shell__header');
     window.uxInput = document.querySelector('input[name=q]');
   });
   const search = page.getByRole('searchbox', { name: 'Поиск карт' });
@@ -39,8 +39,10 @@ export default async function verify(page, root, output) {
   ensure(new URL(page.url()).searchParams.get('q') === 'BG_FIXTURE_2', 'Latest search did not win');
   checks.searchAndStaleResponses = true;
   await load('view=grid');
-  await page.getByRole('combobox', { name: 'Уровень таверны' }).selectOption('2');
-  await page.getByRole('combobox', { name: 'Тип существа' }).selectOption('beast');
+  await page.getByRole('combobox', { name: 'Уровень таверны' }).click();
+  await page.getByRole('option', { name: 'Уровень 2', exact: true }).click();
+  await page.getByRole('combobox', { name: 'Тип существа' }).click();
+  await page.getByRole('option', { name: 'Зверь', exact: true }).click();
   await settled();
   ensure(
     new URL(page.url()).searchParams.get('tier') === '2' &&
@@ -66,7 +68,7 @@ export default async function verify(page, root, output) {
   await load('view=grid');
   await page
     .getByRole('navigation', { name: 'Страницы каталога' })
-    .getByRole('button', { name: '2', exact: true })
+    .getByRole('button', { name: 'Страница 2', exact: true })
     .click();
   await settled();
   ensure(new URL(page.url()).searchParams.get('page') === '2', 'Pagination did not navigate');
@@ -76,7 +78,7 @@ export default async function verify(page, root, output) {
   checks.history = true;
   await page
     .getByRole('navigation', { name: 'Страницы каталога' })
-    .getByRole('button', { name: '2', exact: true })
+    .getByRole('button', { name: 'Страница 2', exact: true })
     .click();
   await settled();
   await search.fill('UNSENT_SEARCH');
@@ -90,29 +92,29 @@ export default async function verify(page, root, output) {
   checks.backCancelsDebounce = true;
   await page
     .getByRole('navigation', { name: 'Страницы каталога' })
-    .getByRole('button', { name: '2', exact: true })
+    .getByRole('button', { name: 'Страница 2', exact: true })
     .click();
   await settled();
   const originalUrl = page.url();
   await page.evaluate(() => {
-    window.uxHeader = document.querySelector('.site-header');
+    window.uxHeader = document.querySelector('.ui-app-shell__header');
     window.scrollTo(0, 380);
   });
   const originalY = await page.evaluate(() => window.scrollY);
   await page
-    .getByRole('navigation', { name: 'Основные разделы' })
+    .getByRole('navigation', { name: 'Разделы панели' })
     .getByRole('link', { name: 'Статистика' })
     .click();
   await page.waitForFunction(
     () => location.search.includes('action=analytics') && document.querySelector('.analytics-layout'),
   );
   ensure(
-    await page.evaluate(() => window.uxHeader === document.querySelector('.site-header')),
+    await page.evaluate(() => window.uxHeader === document.querySelector('.ui-app-shell__header')),
     'Header remounted between sections',
   );
   await page
-    .getByRole('navigation', { name: 'Основные разделы' })
-    .getByRole('link', { name: 'Каталог' })
+    .getByRole('navigation', { name: 'Разделы панели' })
+    .getByRole('link', { name: 'Поля сражений' })
     .click();
   await settled();
   await page.waitForTimeout(100);
@@ -124,7 +126,7 @@ export default async function verify(page, root, output) {
   checks.sectionReturn = { scroll: originalY, headerStable: true };
   await search.fill('UNSENT_SEARCH');
   await page
-    .getByRole('navigation', { name: 'Основные разделы' })
+    .getByRole('navigation', { name: 'Разделы панели' })
     .getByRole('link', { name: 'Статистика' })
     .click();
   await page.waitForFunction(
@@ -136,8 +138,8 @@ export default async function verify(page, root, output) {
     'A search timer overrode section navigation',
   );
   await page
-    .getByRole('navigation', { name: 'Основные разделы' })
-    .getByRole('link', { name: 'Каталог' })
+    .getByRole('navigation', { name: 'Разделы панели' })
+    .getByRole('link', { name: 'Поля сражений' })
     .click();
   await settled();
   checks.sectionChangeCancelsDebounce = true;
@@ -160,7 +162,7 @@ export default async function verify(page, root, output) {
     ['Таблица', 'tbody tr'],
     ['Карточки', '.card-tile'],
   ]) {
-    await page.getByRole('button', { name, exact: true }).click();
+    await page.getByRole('radio', { name, exact: true }).click();
     await settled();
     ensure((await page.locator(selector).count()) > 0, 'View did not change: ' + name);
     const view = new URL(page.url()).searchParams.get('view');
@@ -182,12 +184,14 @@ export default async function verify(page, root, output) {
   );
   ensure((await page.locator('.card-tile').count()) > 0, 'Single-character search was ignored');
   checks.emptyAndSingleCharacterSearch = true;
-  await page.evaluate(() => localStorage.setItem('hsDataTheme-v2', 'dark'));
+  await page.evaluate(() => localStorage.setItem('hsDataTheme-v3', 'light'));
   await load('view=tiles');
   ensure(
-    await page.evaluate(() => document.documentElement.dataset.theme === 'dark'),
+    await page.evaluate(() => document.documentElement.dataset.mode === 'light'),
     'Saved theme not applied',
   );
+  await page.evaluate(() => localStorage.setItem('hsDataTheme-v3', 'dark'));
+  await load('view=tiles');
   await page.screenshot({ path: output + '/desktop.png' });
   for (const width of [320, 768, 1024, 1440]) {
     await page.setViewportSize({ width, height: 800 });
@@ -210,9 +214,14 @@ export default async function verify(page, root, output) {
   await page.keyboard.press('Escape');
   await page.waitForFunction(() => !document.querySelector('dialog[open]'));
   checks.reducedMotion = true;
+  // Closing a shared card uses asynchronous Back; wait for its URL before navigating again.
+  await page.waitForFunction(() => !new URLSearchParams(location.search).has('card'));
   await page.goto(root + '/?view=tiles&q=__fixture_error__');
   await page.getByRole('heading', { name: 'Не удалось загрузить панель' }).waitFor();
-  ensure(await page.locator('.site-header').isVisible(), 'Server error removed the workspace header');
+  ensure(
+    await page.locator('.ui-app-shell__header').isVisible(),
+    'Server error removed the workspace header',
+  );
   await page.getByRole('button', { name: 'Повторить', exact: true }).click();
   await settled();
   ensure(await page.locator('.empty').isVisible(), 'Retry did not recover after a server error');

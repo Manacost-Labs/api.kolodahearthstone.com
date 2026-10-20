@@ -1,0 +1,216 @@
+.ui-dialog {
+  --_w: 540px;
+  --_pad: var(--ui-dialog-pad);
+  /* Room the header leaves for the close button. */
+  --_close-room: 32px;
+
+  display: flex;
+  flex-direction: column;
+  width: min(var(--_w), 100%);
+  overflow: hidden;
+  border-radius: var(--ui-radius-modal);
+  box-shadow: var(--ui-highlight), var(--ui-shadow-modal);
+  border-image: var(--ui-frame);
+}
+
+.ui-dialog[data-size='sm'] {
+  --_w: var(--ui-dialog-w-sm);
+  --_pad: var(--ui-dialog-pad-sm);
+  --_close-room: var(--ui-dialog-close-room-sm);
+}
+
+.ui-dialog[data-size='lg'] { --_w: 760px; }
+
+.ui-dialog[data-size='full'] {
+  --_w: 100%;
+  height: 100%;
+}
+
+/* Header and footer stay put; only the body scrolls. */
+.ui-dialog__header {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  gap: 6px;
+  padding: var(--_pad) var(--_pad) var(--ui-dialog-header-pad-bottom);
+  transition: box-shadow var(--ui-duration-fast) var(--ui-ease);
+}
+
+.ui-dialog[data-closable] .ui-dialog__header {
+  padding-inline-end: calc(var(--_pad) + var(--_close-room));
+}
+
+/* No body: keep the header's breathing room above the footer. */
+.ui-dialog__header:not(:has(+ .ui-dialog__body)) {
+  padding-bottom: var(--_pad);
+}
+
+/* Once the body scrolls, a hairline separates it from the fixed header (or the body's fade does). */
+.ui-dialog[data-scrolled] .ui-dialog__header {
+  box-shadow: var(--ui-dialog-header-shadow-scrolled);
+}
+
+.ui-dialog__title {
+  margin: 0;
+  color: var(--ui-fg);
+  font-family: var(--ui-font-display, inherit);
+  font-size: var(--ui-text-xl);
+  font-weight: var(--ui-weight-semibold);
+  line-height: var(--ui-leading-tight);
+  letter-spacing: var(--ui-tracking-tight);
+  overflow-wrap: anywhere;
+}
+
+.ui-dialog__description {
+  margin: 0;
+  color: var(--ui-fg-muted);
+  font-size: var(--ui-text-md);
+}
+
+.ui-dialog__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--ui-dialog-body-pad-top) var(--_pad) var(--_pad);
+  color: var(--ui-fg);
+  font-size: var(--ui-text-md);
+  /* Optional scroll edges: content fades out under the header and the buttons (iOS). */
+  -webkit-mask-image: var(--ui-dialog-body-mask);
+  mask-image: var(--ui-dialog-body-mask);
+}
+
+.ui-dialog__body:first-child {
+  padding-top: var(--_pad);
+}
+
+/* A ruled band, or a borderless row whose bottom padding is the dialog's (`initial` bottom padding). */
+.ui-dialog__footer {
+  --_footer-pad: var(--_pad);
+
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--ui-space-2);
+  padding: var(--ui-dialog-footer-pad-top) var(--_footer-pad) var(--ui-modal-footer-pad-bottom, var(--_footer-pad));
+  border-top: var(--ui-modal-section-border);
+  background: var(--ui-modal-footer-bg);
+}
+
+/* A footer placed at the end of the body (e.g. inside a form) spans the dialog edge to edge (bleed 1),
+   or sits unpadded inside the body's padding (0). */
+.ui-dialog__body .ui-dialog__footer {
+  --_footer-pad: calc(var(--ui-dialog-footer-bleed) * var(--_pad));
+  margin: var(--_pad) calc(-1 * var(--_footer-pad)) calc(-1 * var(--_footer-pad));
+}
+
+.ui-dialog__close {
+  position: absolute;
+  top: var(--ui-space-4);
+  inset-inline-end: var(--ui-space-4);
+  z-index: 2;
+  /* `initial`: the IconButton's own fill. */
+  background-color: var(--ui-modal-close-bg, var(--_bg));
+  color: var(--ui-fg-muted);
+}
+
+/* Small dialogs: optionally iOS alerts, with centered text and equal-width buttons. */
+.ui-dialog[data-size='sm'] :is(.ui-dialog__header, .ui-dialog__body) {
+  text-align: var(--ui-dialog-text-align-sm, inherit);
+}
+
+.ui-dialog[data-size='sm'] .ui-dialog__header {
+  align-items: var(--ui-dialog-header-align-sm);
+}
+
+.ui-dialog[data-size='sm'] .ui-dialog__title {
+  font-size: var(--ui-dialog-title-size-sm);
+}
+
+.ui-dialog[data-size='sm'] .ui-dialog__description {
+  font-size: var(--ui-dialog-description-size-sm);
+}
+
+/* `initial`: actions keep their own flex (Buttons don't shrink). */
+.ui-dialog[data-size='sm'] .ui-dialog__footer > * {
+  flex: var(--ui-dialog-action-flex-sm, 0 1 auto);
+}
+
+.ui-dialog[data-size='sm'] .ui-dialog__footer > .ui-button {
+  flex: var(--ui-dialog-action-flex-sm, 0 0 auto);
+}
+
+/* Three or more actions (stacked primary on top, as in iOS). */
+.ui-dialog[data-size='sm'] .ui-dialog__footer:has(> :nth-child(3)) {
+  flex-direction: var(--ui-dialog-footer-stack-direction-sm);
+  align-items: var(--ui-dialog-footer-stack-align-sm);
+}
+
+.ui-dialog[data-size='sm']:has(.ui-dialog__footer) .ui-dialog__close {
+  display: var(--ui-dialog-close-display-sm);
+}
+
+/*
+ * Phones: dialogs become bottom sheets (edge to edge in Vercel, a floating inset
+ * card in Glass) with full-width actions in thumb reach. Small Glass dialogs stay
+ * centered iOS alerts.
+ */
+@media (max-width: 480px) {
+  .ui-dialog-layer.ui-modal-layer:not(.ui-dialog-layer--sm) {
+    align-items: flex-end;
+    padding: var(--ui-dialog-sheet-layer-padding);
+  }
+
+  .ui-dialog-layer.ui-modal-layer.ui-dialog-layer--sm {
+    align-items: var(--ui-dialog-layer-align-sm-compact);
+    padding: var(--ui-dialog-layer-padding-sm-compact);
+  }
+
+  .ui-dialog-layer.ui-modal-layer > .ui-dialog {
+    --_pad: var(--ui-dialog-pad-compact);
+    border-radius: var(--ui-dialog-radius-compact);
+  }
+
+  .ui-dialog-layer.ui-modal-layer:not(.ui-dialog-layer--sm) > .ui-dialog {
+    width: 100%;
+  }
+
+  .ui-dialog[data-size='sm'] {
+    --_w: var(--ui-dialog-w-sm-compact);
+  }
+
+  .ui-dialog-layer.ui-modal-layer:not(.ui-dialog-layer--sm) > .ui-dialog[data-state='open'] {
+    animation: ui-modal-from-bottom var(--ui-duration-slow) var(--ui-ease);
+  }
+
+  .ui-dialog-layer.ui-modal-layer:not(.ui-dialog-layer--sm) > .ui-dialog[data-state='closed'] {
+    animation: ui-modal-to-bottom var(--ui-duration) var(--ui-ease) forwards;
+  }
+
+  .ui-dialog-layer.ui-modal-layer.ui-dialog-layer--sm > .ui-dialog[data-state='open'] {
+    animation: var(--ui-dialog-enter-sm-compact);
+  }
+
+  .ui-dialog-layer.ui-modal-layer.ui-dialog-layer--sm > .ui-dialog[data-state='closed'] {
+    animation: var(--ui-dialog-exit-sm-compact);
+  }
+
+  .ui-dialog__footer {
+    padding-bottom: var(--ui-dialog-footer-pad-bottom-compact, var(--_footer-pad));
+  }
+
+  .ui-dialog__footer > *,
+  .ui-dialog[data-size='sm'] .ui-dialog__footer > *,
+  .ui-dialog[data-size='sm'] .ui-dialog__footer > .ui-button {
+    flex: 1;
+  }
+
+  .ui-dialog__title,
+  .ui-dialog[data-size='sm'] .ui-dialog__title {
+    font-size: var(--ui-text-lg);
+  }
+}

@@ -38,7 +38,6 @@ export function Editor({ data }: { data: PageData }) {
     <section>
       <header className="page-head">
         <div>
-          <span className="eyebrow">Каталог</span>
           <h1>{data.title}</h1>
         </div>
         <Link href="/" className="button secondary" prefetch={false}>

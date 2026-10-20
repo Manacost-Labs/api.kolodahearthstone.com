@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Адаптивные плитки API</title>
+<style>
+  body{margin:32px;background:#10151b;color:#eef2f6;font:16px system-ui}
+  main{max-width:760px;margin:auto}label{display:block;margin:20px 0}input{width:100%}
+  #tiles{display:grid;gap:16px;max-width:100%}#status{color:#adb8c4}
+</style>
+<main>
+  <h1>Плитки, которые подстраиваются по ширине</h1>
+  <label>Ширина: <output id="width">400</output> px <input id="size" type="range" min="224" max="640" value="400"></label>
+  <div id="tiles" style="width:400px"></div><p id="status">Загрузка…</p>
+</main>
+<script type="module">
+  import {renderDeckTile} from './adaptive-deck-tile.js';
+  const list=document.querySelector('#tiles');
+  document.querySelector('#size').addEventListener('input',event=>{
+    list.style.width=event.target.value+'px';document.querySelector('#width').value=event.target.value;
+  });
+  try{
+    const paths=['constructed-cards/CFM_754','cards/BG28_168','constructed-cards?q='+encodeURIComponent('Авиана')+'&per_page=1'];
+    const results=await Promise.all(paths.map(async path=>{
+      const response=await fetch('https://api.kolodahearthstone.com/api/v1/'+path);
+      if(!response.ok)throw new Error('HTTP '+response.status);
+      const {data}=await response.json();return Array.isArray(data)?data[0]:data;
+    }));
+    await Promise.all(results.map(row=>{const tile=document.createElement('div');list.append(tile);return renderDeckTile(tile,row.tile_layout);}));
+    document.querySelector('#status').textContent='Меняйте ширину: текст и значки сохраняют пропорции.';
+  }catch(error){document.querySelector('#status').textContent='Не удалось загрузить плитки: '+error.message;}
+</script>
+</html>

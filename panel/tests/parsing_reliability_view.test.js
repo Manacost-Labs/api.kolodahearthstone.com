@@ -1,8 +1,6 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
 const test = require('node:test');
 const {
     buildReliabilityViewModel,
@@ -174,47 +172,6 @@ const convergence = {
         last_run_at: '2026-08-11T03:29:00+00:00',
     },
 };
-
-test('describes extraction evidence without claiming full upstream pages', () => {
-    const renderer = fs.readFileSync(
-        path.join(__dirname, '../assets/analytics.js'),
-        'utf8'
-    );
-
-    assert.match(renderer, /Проверенная полнота извлечения/);
-    assert.match(renderer, /Свежие ответы без потерь извлечения/);
-    assert.match(renderer, /Полнота каталога upstream/);
-    assert.match(renderer, /Свежесть для пользователя/);
-    assert.match(renderer, /Надёжность парсера/);
-    assert.match(renderer, /Ждём upstream/);
-    assert.match(renderer, /Fresh после повтора/);
-    assert.match(renderer, /переклассифицированы upstream/);
-    assert.match(renderer, /не закрыто/);
-    assert.match(renderer, /On-time parser/);
-    assert.match(renderer, /Rollout источников/);
-    assert.match(renderer, /weighted по попыткам/);
-    assert.match(renderer, /Источники, выполняющие 99%/);
-    assert.match(renderer, /Macro rate по источникам/);
-    assert.match(renderer, /Худший наблюдавшийся источник/);
-    assert.match(renderer, /Выполнение расписания/);
-    assert.match(renderer, /Бюджет ошибок парсера fresh-only/);
-    assert.match(renderer, /Использовано бюджета/);
-    assert.match(renderer, /Сверх бюджета/);
-    assert.match(renderer, /Сходимость к свежим данным/);
-    assert.match(renderer, /Fresh после recovery/);
-    assert.match(renderer, /Shadow · без автозапросов/);
-    assert.match(renderer, /LKG успехом не считается/);
-    assert.match(renderer, /On-time end-to-end/);
-    assert.match(renderer, /Покрытие расписаний/);
-    assert.match(renderer, /Внедрение ParsesUnix/);
-    assert.match(renderer, /Транспорт подтверждён/);
-    assert.match(renderer, /Кандидат пригоден/);
-    assert.match(renderer, /Публикация подтверждена/);
-    assert.match(renderer, /Shadow-попытки только сравниваются/);
-    assert.match(renderer, /без нулевой оценки неизвестной стоимости/);
-    assert.match(renderer, /предварительно/i);
-    assert.doesNotMatch(renderer, /Полное получение данных|страница получена целиком/);
-});
 
 test('shows convergence separately without inflating the primary SLO', () => {
     const model = buildReliabilityViewModel({

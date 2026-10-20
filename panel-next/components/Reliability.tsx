@@ -3,7 +3,8 @@ import { useState } from 'react';
 import view from '@/lib/vendor/parsing-reliability.cjs';
 import { windowLabel } from '@/lib/format';
 import { record, text } from '@/lib/model';
-import { Value } from './ui';
+import { StatusBadge, Value } from './ui';
+import { Select } from './varylo-ui/forms/Select';
 export function Reliability({ data }: { data: unknown }) {
   const [window, setWindow] = useState('24h');
   const model = view.buildReliabilityViewModel(data, window);
@@ -13,14 +14,15 @@ export function Reliability({ data }: { data: unknown }) {
     <section className="reliability">
       <div className="data-status">
         <h2>Надёжность сбора</h2>
-        <span className="badge info">{text(model.badge)}</span>
-        <select aria-label="Окно надёжности" value={window} onChange={e => setWindow(e.target.value)}>
-          {(windows.length ? windows : ['24h']).map(w => (
-            <option key={w} value={w}>
-              {windowLabel(w)}
-            </option>
-          ))}
-        </select>
+        <StatusBadge tone="info" label={text(model.badge)} />
+        <Select
+          aria-label="Окно надёжности"
+          size="sm"
+          className="reliability-window"
+          value={window}
+          onValueChange={setWindow}
+          options={(windows.length ? windows : ['24h']).map(w => ({ value: w, label: windowLabel(w) }))}
+        />
       </div>
       <div className="summary-grid">
         {[

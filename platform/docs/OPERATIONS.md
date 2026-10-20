@@ -37,9 +37,9 @@ manual because it recreates shadow tables and must be followed by
 
 - Document root: `/srv/api-kolodahearthstone/panel/current`
 - Persistent media and state: `/srv/api-kolodahearthstone/panel-data`
-- Main catalogue: `index.php`
+- Interface: the Next.js panel (`panel-next`); the PHP view is retired
+- Catalogue JSON adapter: `next-data.php` and `lib/panel_data.php`
 - Statistics gateway: `analytics.php` and `lib/analytics.php`
-- Browser statistics client: `assets/analytics.js`
 - Public API: `api/index.php`
 
 The panel exposes real meta, the HSGuru archetype list, Arena card slices,

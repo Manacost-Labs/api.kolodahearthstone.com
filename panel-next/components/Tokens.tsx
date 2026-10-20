@@ -5,7 +5,7 @@ import { text, tokenUsage } from '@/lib/model';
 import { mutate, MutationError } from '@/lib/client';
 import type { PageData, Row } from '@/lib/types';
 import { Modal } from './Modal';
-import { Time } from './ui';
+import { StatusBadge, Time } from './ui';
 export function Tokens({ data }: { data: PageData }) {
   const [issued, setIssued] = useState<Row | null>(null);
   const [nonce, setNonce] = useState(data.issueNonce || '');
@@ -36,13 +36,13 @@ export function Tokens({ data }: { data: PageData }) {
     <section>
       <header className="page-head">
         <div>
-          <span className="eyebrow">Доступ к API</span>
           <h1>API-токены</h1>
           <p>Отдельные права и сроки действия для каждого сервиса.</p>
         </div>
-        <span className={'badge ' + (data.tokenConfigured ? 'good' : 'bad')}>
-          {data.tokenConfigured ? 'Подключено' : 'Не настроено'}
-        </span>
+        <StatusBadge
+          tone={data.tokenConfigured ? 'good' : 'bad'}
+          label={data.tokenConfigured ? 'Подключено' : 'Не настроено'}
+        />
       </header>
       {(error || data.tokenError) && (
         <p className="notice bad" role="alert">
@@ -99,10 +99,12 @@ export function Tokens({ data }: { data: PageData }) {
           <fieldset>
             <legend>Права доступа</legend>
             {Object.entries(data.scopeCatalog || {}).map(([key, name]) => (
-              <label className="check-label" key={key}>
+              <label className="scope-option" key={key}>
                 <input type="checkbox" name="scopes[]" value={key} defaultChecked={key === 'database:read'} />
-                {name.label}
-                <small>{name.description}</small>
+                <span>
+                  <strong>{name.label}</strong>
+                  <small>{name.description}</small>
+                </span>
               </label>
             ))}
           </fieldset>
@@ -127,7 +129,7 @@ export function Tokens({ data }: { data: PageData }) {
                   <td>
                     <strong>{text(token.name)}</strong>
                     <code>{text(token.id)}</code>
-                    {Boolean(token.revoked_at) && <span className="badge bad">Отозван</span>}
+                    {Boolean(token.revoked_at) && <StatusBadge tone="bad" label="Отозван" />}
                   </td>
                   <td>
                     {(Array.isArray(token.scopes) ? token.scopes.map(String) : [text(token.scopes)])

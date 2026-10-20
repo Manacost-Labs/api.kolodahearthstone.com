@@ -697,14 +697,14 @@ def test_report_uses_one_logical_attempt_and_excludes_skips(tmp_path: Path) -> N
     assert day["failure_reasons"]["timeout"] == 1
     assert sum(day["failure_reasons"].values()) == 3
     assert day["freshness_slo"] == {
-        "target_rate_pct": 99.0,
+        "target_rate_pct": 99.9,
         "objective_status": "collecting",
         "good_attempts": 1,
         "bad_attempts": 4,
-        "allowed_bad_attempts": 0.05,
+        "allowed_bad_attempts": 0.005,
         "bad_attempts_over_budget": 4,
-        "error_budget_remaining_attempts": -3.95,
-        "error_budget_consumed_pct": 8000.0,
+        "error_budget_remaining_attempts": -3.995,
+        "error_budget_consumed_pct": 80000.0,
     }
     assert day["availability_slo"]["good_attempts"] == 3
     assert day["ai_quality"]["candidate_review"]["completed"] == 0
@@ -1048,7 +1048,7 @@ def test_empty_report_never_claims_one_hundred_percent(tmp_path: Path) -> None:
             "states": {"complete": 0, "incomplete": 0, "unknown": 0},
             "coverage_of_all_parser_attempts_pct": None,
             "complete_fresh_rate_pct": None,
-            "target_rate_pct": 99.0,
+            "target_rate_pct": 99.9,
             "objective_status": "collecting",
         }
 
@@ -1503,7 +1503,7 @@ def test_verified_completeness_window_folds_recovery_and_requires_fresh_data(
         "states": {"complete": 2, "incomplete": 1, "unknown": 1},
         "coverage_of_all_parser_attempts_pct": 80.0,
         "complete_fresh_rate_pct": 25.0,
-        "target_rate_pct": 99.0,
+        "target_rate_pct": 99.9,
         "objective_status": "collecting",
     }
 
@@ -1577,7 +1577,7 @@ def test_verified_completeness_objective_requires_all_three_coverage_gates(
     assert verified["states"][expected_state] == 1
     assert verified["coverage_of_all_parser_attempts_pct"] == 100.0
     assert verified["complete_fresh_rate_pct"] == expected_rate
-    assert verified["target_rate_pct"] == 99.0
+    assert verified["target_rate_pct"] == 99.9
     assert verified["objective_status"] == objective_status
 
 
@@ -1639,18 +1639,18 @@ def test_verified_completeness_cannot_meet_target_before_catalog_is_observed(
 
 
 def test_verified_completeness_threshold_uses_exact_counts_not_rounded_rate() -> None:
-    assert reliability_telemetry._percentage(19_799, 20_000) == 99.0
-    assert not reliability_telemetry._ratio_meets_target(19_799, 20_000)
-    assert reliability_telemetry._ratio_meets_target(19_800, 20_000)
+    assert reliability_telemetry._percentage(199_799, 200_000) == 99.9
+    assert not reliability_telemetry._ratio_meets_target(199_799, 200_000)
+    assert reliability_telemetry._ratio_meets_target(199_800, 200_000)
 
 
 def test_verified_completeness_macro_gate_uses_exact_per_source_ratios() -> None:
     per_source_counts = {
-        f"frequent-{index}": (200, 199, 199, 1, 0) for index in range(99)
+        f"frequent-{index}": (2000, 1999, 1999, 1, 0) for index in range(99)
     }
     per_source_counts["rare-failure"] = (1, 0, 0, 1, 0)
 
-    assert reliability_telemetry._ratio_meets_target(19_701, 19_801)
+    assert reliability_telemetry._ratio_meets_target(197_901, 198_001)
     assert (
         sum(
             reliability_telemetry._ratio_meets_target(counts[1], counts[0])

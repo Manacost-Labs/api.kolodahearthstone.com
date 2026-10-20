@@ -47,7 +47,7 @@ The normalized statistics contract is documented in
 | `scripts/verify-data.php` | Compare source/target counts, keys and JSONB types |
 | `scripts/verify-platform.sh` | Check the custom panel, Nginx and PostgreSQL |
 | `tests/statistics-normalizer.test.php` | Verify the normalized statistics contract |
-| `tests/admin-ui-contract.sh` | Verify the panel modules and accessible lightbox hooks |
+| `tests/admin-ui-contract.sh` | Verify the panel backend modules and that the retired PHP view stays removed |
 | `sudo scripts/backup.sh` | Back up and validate PostgreSQL |
 | `cd postgres && sudo docker compose ps` | Inspect PostgreSQL |
 
