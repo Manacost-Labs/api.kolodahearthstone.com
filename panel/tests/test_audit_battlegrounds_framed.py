@@ -51,6 +51,36 @@ class BattlegroundsFramedAuditTest(unittest.TestCase):
 
         self.assertIn("non-local", result or "")
 
+    def golden(self, url: str, size: tuple[int, int] = (512, 776)) -> str | None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            image = root / "uploads" / "golden" / ("BGS_004-" + "a" * 64 + ".png")
+            image.parent.mkdir(parents=True)
+            image.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\x0dIHDR" + struct.pack(">II", *size))
+            original_root = audit.APP_ROOT
+            audit.APP_ROOT = root
+            try:
+                return audit.validate_png_asset("TB_BaconUps_079", "card", url, "cards", (256, 388))
+            finally:
+                audit.APP_ROOT = original_root
+
+    def test_accepts_content_addressed_golden_render(self) -> None:
+        url = "https://api.kolodahearthstone.com/uploads/golden/BGS_004-" + "a" * 64 + ".png?v=2026-10-20%2021%3A37%3A28"
+        self.assertIsNone(self.golden(url))
+
+    def test_checks_golden_render_geometry(self) -> None:
+        url = "https://api.kolodahearthstone.com/uploads/golden/BGS_004-" + "a" * 64 + ".png"
+        self.assertIn("geometry", self.golden(url, (256, 388)) or "")
+
+    def test_rejects_unversioned_or_foreign_golden_paths(self) -> None:
+        for url in (
+            "https://api.kolodahearthstone.com/uploads/golden/BGS_004.png",
+            "https://api.kolodahearthstone.com/uploads/golden/../cards/BGS_004-" + "a" * 64 + ".png",
+            "https://cards.hearthpwn.com/uploads/golden/BGS_004-" + "a" * 64 + ".png",
+        ):
+            with self.subTest(url=url):
+                self.assertIn("non-local", self.golden(url) or "")
+
 
 if __name__ == "__main__":
     unittest.main()

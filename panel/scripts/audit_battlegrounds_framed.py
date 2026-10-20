@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import struct
 import urllib.parse
 import urllib.request
@@ -15,6 +16,10 @@ APP_ROOT = Path(__file__).resolve().parents[1]
 API_URL = "https://api.kolodahearthstone.com/api/v1/cards"
 API_HOST = "api.kolodahearthstone.com"
 USER_AGENT = "KolodahsFramedAudit/1.0"
+# sync_battlegrounds_images.py publishes golden renders as immutable,
+# content-addressed files named after the base card (TB_BaconUps_079 uses BGS_004).
+GOLDEN_RENDER_RE = re.compile(r"/uploads/golden/[A-Za-z0-9_]+-[0-9a-f]{64}\.png")
+GOLDEN_RENDER_GEOMETRY = (512, 776)
 
 # Internal Blizzard fixtures/skin tokens published in card metadata without any
 # render in either HearthstoneJSON's card or original-art repositories. They are
@@ -65,7 +70,13 @@ def validate_png_asset(
 ) -> str | None:
     parsed = urllib.parse.urlparse(asset_url)
     expected_path = f"/uploads/{directory}/{urllib.parse.quote(card_id)}.png"
-    if parsed.hostname != API_HOST or parsed.path != expected_path:
+    if (
+        parsed.hostname == API_HOST
+        and asset_name == "card"
+        and GOLDEN_RENDER_RE.fullmatch(parsed.path)
+    ):
+        expected_geometry = GOLDEN_RENDER_GEOMETRY
+    elif parsed.hostname != API_HOST or parsed.path != expected_path:
         return f"{card_id}: non-local {asset_name} image {asset_url or '<missing>'}"
     local = APP_ROOT / parsed.path.lstrip("/")
     geometry = png_geometry(local)

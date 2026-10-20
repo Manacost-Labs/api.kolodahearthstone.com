@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/lib/constructed_views.php';
+
 $config = require __DIR__ . '/../config.php';
 
 $pdo = new PDO($config['db']['dsn'], $config['db']['user'], $config['db']['password'], [
@@ -272,21 +274,8 @@ $pdo->exec("
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 ");
 
-$pdo->exec("
-    CREATE OR REPLACE VIEW constructed_standard_cards AS
-    SELECT c.*, f.in_format, f.availability_status, f.rotation_year, f.changed_at AS format_changed_at
-    FROM constructed_cards c
-    INNER JOIN constructed_format_cards f ON f.card_id = c.card_id
-    WHERE f.format_slug = 'standard'
-");
-
-$pdo->exec("
-    CREATE OR REPLACE VIEW constructed_wild_cards AS
-    SELECT c.*, f.in_format, f.availability_status, f.rotation_year, f.changed_at AS format_changed_at
-    FROM constructed_cards c
-    INNER JOIN constructed_format_cards f ON f.card_id = c.card_id
-    WHERE f.format_slug = 'wild'
-");
+ensure_constructed_view($pdo, 'constructed_standard_cards', 'standard');
+ensure_constructed_view($pdo, 'constructed_wild_cards', 'wild');
 
 foreach (['standard', 'wild'] as $format) {
     $stmt = $pdo->prepare("

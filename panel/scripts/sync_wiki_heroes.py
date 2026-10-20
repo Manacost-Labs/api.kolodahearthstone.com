@@ -639,7 +639,6 @@ def enrich_related_card_from_wiki(
     enriched["wiki"] = {
         "page_title": result.get("page_title") or page_title,
         "page_url": result.get("page_url") or wiki_page_url(page_title),
-        "cache_source": source,
     }
     if gallery:
         enriched["gallery"] = gallery

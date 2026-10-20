@@ -13,4 +13,6 @@ if grep -Fq 'flock -n 8' "$RUNNER"; then
   exit 1
 fi
 grep -Fq 'Restart=on-failure' "$OVERRIDE"
-grep -Fq 'RestartSec=45m' "$OVERRIDE"
+grep -Fq 'RestartSec=3h' "$OVERRIDE"
+grep -Fq 'StartLimitIntervalSec=1d' "$OVERRIDE"
+grep -Fq 'StartLimitBurst=10' "$OVERRIDE"
