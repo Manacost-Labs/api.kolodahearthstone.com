@@ -275,7 +275,12 @@ def test_scrape_do_map_and_daily_audit_schedules_are_canonical() -> None:
     streamer_timer = (
         systemd_dir / "hs-data-api-docker-firecrawl-streamer.timer"
     ).read_text(encoding="utf-8")
-    assert "OnCalendar=*-*-* *:15:00 Europe/Warsaw" in streamer_timer
+    assert "OnCalendar=*-*-* 00/3:15:00 Europe/Warsaw" in streamer_timer
+
+    analysis_timer = (
+        systemd_dir / "hs-data-api-docker-refresh-hsguru-archetype-analysis.timer"
+    ).read_text(encoding="utf-8")
+    assert "OnCalendar=*-*-1/2 03:20:00 Europe/Warsaw" in analysis_timer
 
     patch_service = (
         systemd_dir / "hs-data-api-docker-refresh-patches.service"

@@ -67,6 +67,13 @@ def recovery_decision(
     }
     if attempt_state == "ok" and not serving_lkg:
         return {**base, "reason": "latest_attempt_fresh"}
+    empty_window = status.get(
+        "last_refresh_empty_window_verified" if serving_lkg else "empty_window_verified"
+    )
+    if empty_window is True:
+        # Every provider returns the same empty rolling window; retrying before
+        # the next scheduled refresh only spends credits.
+        return {**base, "reason": "empty_window_waits_for_schedule"}
     failed_lkg = serving_lkg and bool(attempt_state) and attempt_state != "ok"
     if attempt_state not in RECOVERY_STATES and not failed_lkg:
         return {**base, "reason": "latest_attempt_not_failed"}

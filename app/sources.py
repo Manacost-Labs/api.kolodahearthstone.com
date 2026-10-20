@@ -447,11 +447,12 @@ SOURCES: tuple[Source, ...] = (
         site="hsguru",
         category="archetype_analysis",
         description=(
-            "HSGuru per-archetype matchup and card-stat analysis refreshed daily by "
-            "a checkpointed dedicated pipeline; incomplete provider runs preserve the "
-            "last-known-good publication and are resumed by the recovery timer."
+            "HSGuru per-archetype matchup and card-stat analysis refreshed on odd "
+            "days of the month by a checkpointed dedicated pipeline; incomplete "
+            "provider runs preserve the last-known-good publication and are resumed "
+            "by the recovery timer. stale_hours = 48h maximum gap + 24h slack."
         ),
-        stale_hours=48,
+        stale_hours=72,
         kind="pipeline",
     ),
     Source(

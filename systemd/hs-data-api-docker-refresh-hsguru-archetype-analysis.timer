@@ -1,8 +1,8 @@
 [Unit]
-Description=Refresh HSGuru Legend archetype analysis daily
+Description=Refresh HSGuru Legend archetype analysis on odd days of the month
 
 [Timer]
-OnCalendar=*-*-* 03:20:00 Europe/Warsaw
+OnCalendar=*-*-1/2 03:20:00 Europe/Warsaw
 AccuracySec=10min
 Persistent=true
 

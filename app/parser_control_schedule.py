@@ -101,12 +101,12 @@ _SCHEDULES: tuple[_ScheduleSpec, ...] = (
     ),
     _ScheduleSpec(
         id="refresh-streamer-decks",
-        label="Каждый час в :15",
+        label="Каждые 3 часа в :15",
         systemd_unit="hs-data-api-docker-firecrawl-streamer.timer",
-        on_calendar=("*-*-* *:15:00 Europe/Warsaw",),
+        on_calendar=("*-*-* 00/3:15:00 Europe/Warsaw",),
         source_ids=frozenset({"hsguru_streamer_decks_legend_1000"}),
         recurrence="daily",
-        local_times=_times(*((hour, 15) for hour in range(24))),
+        local_times=_times(*((hour, 15) for hour in range(0, 24, 3))),
     ),
     _ScheduleSpec(
         id="recover-hsguru-streamer",
@@ -134,11 +134,11 @@ _SCHEDULES: tuple[_ScheduleSpec, ...] = (
     ),
     _ScheduleSpec(
         id="refresh-hsguru-archetype-analysis",
-        label="Ежедневно в 03:20",
+        label="По нечётным дням месяца в 03:20",
         systemd_unit="hs-data-api-docker-refresh-hsguru-archetype-analysis.timer",
-        on_calendar=("*-*-* 03:20:00 Europe/Warsaw",),
+        on_calendar=("*-*-1/2 03:20:00 Europe/Warsaw",),
         source_ids=frozenset({"hsguru_archetype_analysis"}),
-        recurrence="daily",
+        recurrence="odd-month-days",
         local_times=_times((3, 20)),
     ),
     _ScheduleSpec(

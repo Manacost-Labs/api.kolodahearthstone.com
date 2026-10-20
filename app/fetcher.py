@@ -1029,6 +1029,21 @@ def _looks_like_hsreplay_auth_error(message: str) -> bool:
     )
 
 
+def _is_verified_empty_window(parsed: dict[str, Any] | None) -> bool:
+    """A structurally intact rolling window with no rows.
+
+    Another provider or profile returns the same empty window, so paying for
+    escalation or an AI diagnosis cannot produce publishable rows.
+    """
+
+    structured = (parsed or {}).get("structured")
+    return (
+        isinstance(structured, dict)
+        and structured.get("empty_window_verified") is True
+        and not structured.get("rows")
+    )
+
+
 def _preserve_cached_ok_status(source: Source, failed_status: dict[str, Any]) -> dict[str, Any] | None:
     """Keep the last valid dataset visible when a live refresh attempt fails.
 
@@ -1122,6 +1137,8 @@ def _preserve_cached_ok_status(source: Source, failed_status: dict[str, Any]) ->
         status["latest_ai_diagnosis"] = failed_status["ai_diagnosis"]
     if failed_status.get("failure_class"):
         status["last_refresh_failure_class"] = failed_status["failure_class"]
+    if failed_status.get("empty_window_verified") is True:
+        status["last_refresh_empty_window_verified"] = True
     if isinstance(failed_status.get("http_status"), int):
         status["last_refresh_http_status"] = failed_status["http_status"]
     if failed_status.get("backend"):
@@ -2431,8 +2448,10 @@ async def _try_firecrawl_html(
                 )
             except Exception:  # noqa: BLE001 - provider acceptance fails closed
                 return False
-            if not candidate_gate.ok:
+            if not candidate_gate.ok and not _is_verified_empty_window(candidate):
                 return False
+            # A verified empty window stops paid escalation; the publication
+            # gate below still rejects it and preserves the previous dataset.
             accepted_candidate.update(
                 {
                     "scraped": scraped,
@@ -2461,9 +2480,12 @@ async def _try_firecrawl_html(
             parsed = _parse_provider_candidate(scraped)
             gate = validate_candidate_for_publish(source, parsed, backend=backend)
         ok, validation_reason = gate.ok, gate.reason
+        empty_window = _is_verified_empty_window(parsed)
         from .meta_intelligence.budget import validate_attempt
 
-        validate_attempt(scraped.metadata.get("labAcquisitionId"), ok)
+        validate_attempt(
+            scraped.metadata.get("labAcquisitionId"), ok, empty=empty_window
+        )
         if scraped.metadata.get("labAcquisitionId"):
             parsed["acquisition"] = {"attempt_ids": [scraped.metadata["labAcquisitionId"]]}
         qmetrics = quality_metrics(source, parsed)
@@ -2498,7 +2520,7 @@ async def _try_firecrawl_html(
             if is_primary:
                 return None
             ai_diagnosis = None
-            if not ai_quarantine:
+            if not ai_quarantine and not empty_window:
                 ai_diagnosis = await _diagnose_candidate_with_ai(
                     source,
                     parsed,
@@ -2523,6 +2545,8 @@ async def _try_firecrawl_html(
             )
             _attach_ai_review_status(status, ai_telemetry)
             _attach_ai_diagnosis_status(status, ai_diagnosis)
+            if empty_window:
+                status["empty_window_verified"] = True
             status["firecrawl_credits_used"] = scraped.firecrawl_credits_used
             status["scrape_do_credits_used"] = scraped.scrape_do_credits_used
             status["scrapfly_credits_used"] = scraped.scrapfly_credits_used
@@ -3664,22 +3688,32 @@ async def _fetch_source_with_active_lifecycle(
                     logging.getLogger(__name__).info("Relogin successful, retrying fetch for %s...", source.id)
                     return await fetch_source(client, source, retry_on_auth_failure=False)
 
-        firecrawl_status = await _try_firecrawl_html(
-            source,
-            fetched_at=fetched_at,
-            reason=f"quality_error:{reason[:120]}",
-        )
-        if firecrawl_status is not None:
-            _attach_parsesunix_observation(
-                firecrawl_status,
-                mode=parsesunix_mode,
-                observation=parsesunix_observation,
-                publication_validated=False,
+        empty_window = _is_verified_empty_window(parsed)
+        if empty_window:
+            log_action(
+                "firecrawl.fetch.skip",
+                source_id=source.id,
+                backend=backend,
+                level="info",
+                detail="verified empty rolling window; paid escalation skipped",
             )
-            return _finish(firecrawl_status)
+        else:
+            firecrawl_status = await _try_firecrawl_html(
+                source,
+                fetched_at=fetched_at,
+                reason=f"quality_error:{reason[:120]}",
+            )
+            if firecrawl_status is not None:
+                _attach_parsesunix_observation(
+                    firecrawl_status,
+                    mode=parsesunix_mode,
+                    observation=parsesunix_observation,
+                    publication_validated=False,
+                )
+                return _finish(firecrawl_status)
 
         ai_diagnosis = None
-        if not ai_quarantine:
+        if not ai_quarantine and not empty_window:
             ai_diagnosis = await _diagnose_candidate_with_ai(
                 source,
                 parsed,
@@ -3704,6 +3738,8 @@ async def _fetch_source_with_active_lifecycle(
         )
         _attach_ai_review_status(status, ai_telemetry)
         _attach_ai_diagnosis_status(status, ai_diagnosis)
+        if empty_window:
+            status["empty_window_verified"] = True
         _attach_parsesunix_observation(
             status,
             mode=parsesunix_mode,

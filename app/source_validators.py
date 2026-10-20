@@ -2146,9 +2146,13 @@ def _validate_hsguru_streamer_decks(
             "complete_rows": complete_rows,
             "decodable_deck_codes": decodable_deck_codes,
             "low_activity": 0 < len(rows) < 3 and complete_rows == len(rows),
+            "empty_window_verified": (
+                not rows and structured.get("empty_window_verified") is True
+            ),
         }
     )
     if not rows:
+        # A verified empty window is a correct page, yet it is never published.
         report.add_issue(
             "hsguru_streamer_decks.empty_window",
             "HSGuru streamer decks rolling-hour window is empty",
