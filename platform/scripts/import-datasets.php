@@ -2,6 +2,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/sync-context.php';
+
 const PLATFORM_DIR = __DIR__ . '/..';
 const DATASET_DIR = '/srv/hs-data-api/data/datasets';
 
@@ -31,12 +33,14 @@ function openTarget(): array
             '-f',
             $composeDir . '/docker-compose.yml',
             'exec',
+            '-e',
+            'PGAPPNAME=' . syncApplicationName(),
             '-T',
             'postgres',
             'sh',
             '-eu',
             '-c',
-            'psql -X -q -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d hs_data',
+            'psql -X -qAt -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d hs_data',
         ],
         [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
         $pipes,
@@ -109,14 +113,38 @@ SQL
 
     fwrite($pipes[0], "\\." . PHP_EOL);
     fwrite($pipes[0], <<<'SQL'
-INSERT INTO raw.datasets (source_id, dataset_version, fetched_at, state, payload)
-SELECT source_id, dataset_version, fetched_at, state, payload
-FROM dataset_import
-ON CONFLICT (source_id, dataset_version) DO UPDATE SET
-    fetched_at = EXCLUDED.fetched_at,
-    state = EXCLUDED.state,
-    payload = EXCLUDED.payload,
-    imported_at = now();
+-- Compare actual JSONB content: a source may correct data without changing its version.
+-- Pre-filter identical rows before ON CONFLICT to avoid even tuple-lock writes.
+CREATE TEMP TABLE dataset_import_result ON COMMIT DROP AS
+WITH written AS (
+    INSERT INTO raw.datasets AS target (source_id, dataset_version, fetched_at, state, payload)
+    SELECT incoming.source_id, incoming.dataset_version, incoming.fetched_at,
+           incoming.state, incoming.payload
+    FROM dataset_import AS incoming
+    LEFT JOIN raw.datasets AS stored
+      ON stored.source_id = incoming.source_id
+     AND stored.dataset_version = incoming.dataset_version
+    WHERE stored.source_id IS NULL
+       -- Sources without their own timestamp use imported_at as freshness in the API.
+       OR incoming.fetched_at IS NULL
+       OR (stored.fetched_at, stored.state, stored.payload)
+          IS DISTINCT FROM (incoming.fetched_at, incoming.state, incoming.payload)
+       OR EXISTS (
+           -- Re-selecting a previously stored version must preserve the latest-view tie-break.
+           SELECT 1 FROM raw.datasets AS sibling
+           WHERE sibling.source_id = stored.source_id
+             AND sibling.dataset_version <> stored.dataset_version
+             AND sibling.fetched_at IS NOT DISTINCT FROM stored.fetched_at
+             AND sibling.imported_at >= stored.imported_at
+       )
+    ON CONFLICT (source_id, dataset_version) DO UPDATE SET
+        fetched_at = EXCLUDED.fetched_at,
+        state = EXCLUDED.state,
+        payload = EXCLUDED.payload,
+        imported_at = now()
+    RETURNING 1
+)
+SELECT count(*) AS rows_written FROM written;
 
 UPDATE platform.data_sources
 SET last_synced_at = now(), updated_at = now()
@@ -126,9 +154,17 @@ INSERT INTO platform.sync_runs (
     source_id, completed_at, state, rows_read, rows_written, details
 )
 SELECT
-    'parser-json', now(), 'ok', count(*), count(*),
-    jsonb_build_object('mode', 'snapshot')
-FROM dataset_import;
+    'parser-json', now(), 'ok', (SELECT count(*) FROM dataset_import), rows_written,
+    jsonb_build_object(
+        'mode', 'snapshot',
+        'write_policy', 'changed_content',
+        'rows_unchanged', (SELECT count(*) FROM dataset_import) - rows_written
+    )
+FROM dataset_import_result;
+SELECT jsonb_build_object(
+    'rows_written', rows_written,
+    'rows_unchanged', (SELECT count(*) FROM dataset_import) - rows_written
+) FROM dataset_import_result;
 COMMIT;
 SQL
     );
@@ -143,7 +179,10 @@ SQL
     if ($exitCode !== 0) {
         throw new RuntimeException(trim((string)$stderr) ?: 'PostgreSQL dataset import failed');
     }
-    logEvent('info', 'dataset_import_completed', $runId, ['source_count' => $imported]);
+    $summary = json_decode(trim((string)$stdout), true, flags: JSON_THROW_ON_ERROR);
+    logEvent('info', 'dataset_import_completed', $runId, array_merge(
+        ['source_count' => $imported], $summary
+    ));
 } catch (Throwable $exception) {
     logEvent('error', 'dataset_import_failed', $runId, [
         'error_code' => 'import_failed',

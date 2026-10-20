@@ -2,6 +2,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/sync-context.php';
+
 const PLATFORM_DIR = __DIR__ . '/..';
 const CATALOG_CONFIG = '/etc/api-kolodahearthstone/panel-config.php';
 const ANALYTICS_DB = '/srv/hs-data-api/data/hs_parses.db';
@@ -49,6 +51,8 @@ function targetScalar(string $sql): string
             '-f',
             $composeDir . '/docker-compose.yml',
             'exec',
+            '-e',
+            'PGAPPNAME=' . syncApplicationName(),
             '-T',
             'postgres',
             'sh',
@@ -79,10 +83,30 @@ function analyticsSourceTables(): array
         "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name;"
     )));
 
-    return array_values(array_filter(
+    $tables = array_values(array_filter(
         $tables,
         static fn(string $table): bool => !in_array($table, PRIVATE_ANALYTICS_TABLES, true),
     ));
+    if (!in_array('--sync-contract', $_SERVER['argv'] ?? [], true)) {
+        return $tables;
+    }
+    // Scheduled incremental synchronization owns an explicit table contract.
+    // Full/manual verification still checks every public source table.
+    $contract = json_decode(runProcess([
+        '/usr/bin/python3', __DIR__ . '/stage-analytics.py', '--list-tables',
+    ]), true, 512, JSON_THROW_ON_ERROR);
+    if (!is_array($contract) || $contract === [] || !array_is_list($contract)) {
+        throw new RuntimeException('Invalid analytics synchronization contract');
+    }
+    foreach ($contract as $table) {
+        if (!is_string($table) || !in_array($table, $tables, true)) {
+            throw new RuntimeException('An analytics contract source table is missing');
+        }
+    }
+    foreach (array_diff($tables, $contract) as $table) {
+        fwrite(STDOUT, "WARNING: analytics.{$table}: outside incremental contract; not synchronized" . PHP_EOL);
+    }
+    return $contract;
 }
 
 function sourceMysql(): PDO

@@ -5,8 +5,10 @@ Requires=docker.service
 
 [Service]
 Type=oneshot
-ExecStart=/srv/hs-data-platform/scripts/sync-shadow.php
-TimeoutStartSec=30min
+ExecStart=/srv/hs-data-platform/scripts/run-scheduled-sync shadow
+TimeoutStartSec=46min
+KillMode=mixed
+TimeoutStopSec=90s
 Nice=10
 PrivateTmp=false
 ProtectHome=true

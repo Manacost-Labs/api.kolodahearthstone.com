@@ -2,6 +2,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/sync-context.php';
+
 const PLATFORM_DIR = __DIR__ . '/..';
 const MEDIA_ROOT = '/srv/api-kolodahearthstone/panel-data/uploads';
 
@@ -38,7 +40,7 @@ $command = [
     '/usr/bin/sudo', '-n', 'docker', 'compose',
     '--project-directory', $composeDir,
     '-f', $composeDir . '/docker-compose.yml',
-    'exec', '-T', 'postgres', 'sh', '-eu', '-c',
+    'exec', '-e', 'PGAPPNAME=' . syncApplicationName(), '-T', 'postgres', 'sh', '-eu', '-c',
     'psql -X -q -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d hs_data',
 ];
 $process = proc_open(
