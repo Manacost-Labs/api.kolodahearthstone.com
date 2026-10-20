@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess
+import time
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -102,7 +103,10 @@ def main() -> int:
 
 
 def audit_rows(
-    rows: list[dict[str, Any]], check: Callable[[str | None], bool], workers: int = 16
+    rows: list[dict[str, Any]],
+    check: Callable[[str | None], bool],
+    workers: int = 16,
+    recheck_delay: float = 5.0,
 ) -> tuple[dict[str, Any], int]:
     broken: list[dict[str, Any]] = []
     broken_full_art: list[dict[str, Any]] = []
@@ -125,6 +129,13 @@ def audit_rows(
             row = full_art_futures[future]
             if not future.result():
                 broken_full_art.append(row)
+
+    # One CDN timeout among hundreds of parallel checks should not fail the
+    # job: re-check failed URLs once, sequentially, before reporting them.
+    if any(row.get("image_url") for row in broken) or broken_full_art:
+        time.sleep(recheck_delay)
+    broken = [row for row in broken if not row.get("image_url") or not check(row["image_url"])]
+    broken_full_art = [row for row in broken_full_art if not check(row.get("local_full_art_url"))]
 
     counts: dict[str, dict[str, int]] = {}
     for row in rows:
