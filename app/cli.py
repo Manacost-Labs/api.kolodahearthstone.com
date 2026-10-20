@@ -572,6 +572,49 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _game_change_audit_exit_code(result: dict[str, object]) -> int:
+    """Map an audit report to a systemd outcome.
+
+    OK: nothing needs attention. ERROR: a critical source has a hard issue
+    (missing dataset, non-ok state, stale without a failed refresh). DEGRADED:
+    attention is required, but only because of patch/content changes or
+    sources serving their last known good dataset after an upstream refresh
+    failure; the report and alert stay visible without failing the unit.
+    """
+
+    if result.get("ok"):
+        return int(ExitCode.OK)
+    issues = result.get("source_issues")
+    issues = issues if isinstance(issues, list) else []
+    errors = sorted(
+        str(issue.get("source_id"))
+        for issue in issues
+        if isinstance(issue, dict) and issue.get("severity") != "degraded"
+    )
+    degraded = sorted(
+        str(issue.get("source_id"))
+        for issue in issues
+        if isinstance(issue, dict) and issue.get("severity") == "degraded"
+    )
+    patch = result.get("patch")
+    patch_changed = isinstance(patch, dict) and bool(patch.get("changed"))
+    if errors:
+        print(
+            "game-change-audit: failed; critical source errors: "
+            + ", ".join(errors),
+            file=sys.stderr,
+        )
+        return int(ExitCode.ERROR)
+    print(
+        "game-change-audit: degraded (attention required, not failed); "
+        f"patch_changed={patch_changed}; "
+        "upstream refresh failing, serving cached data: "
+        + (", ".join(degraded) or "none"),
+        file=sys.stderr,
+    )
+    return int(ExitCode.DEGRADED)
+
+
 def main(argv: list[str] | None = None) -> int:
     load_env_file()
     args = parse_args(argv or sys.argv[1:])
@@ -831,7 +874,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
         print(json.dumps(result, ensure_ascii=False, indent=2))
-        return 0 if result.get("ok") else 1
+        return _game_change_audit_exit_code(result)
     if args.command == "quality-check":
         from collections import Counter
 

@@ -30,8 +30,21 @@ Reports are written atomically to:
 - `/var/lib/hs-data-api/audits/game-change-YYYY-MM-DD.json`;
 - `/var/lib/hs-data-api/audits/game-change-baseline.json`.
 
-The service exits non-zero and sends the configured Telegram alert when a new
-patch/card change is found or a critical feed is unhealthy. The upstream card
+The service sends the configured Telegram alert when a new patch/card change
+is found or a critical feed is unhealthy. Exit codes:
+
+- `0`: nothing requires attention.
+- `10` (degraded, `SuccessExitStatus=10`, the unit does not end `failed`):
+  attention is required only because of a patch/card change, or because a
+  critical source still serves its last known good dataset after its upstream
+  live refresh failed (for example a rejected HSReplay Premium session). Such
+  issues carry `"severity": "degraded"`; the report, alert and the stderr
+  summary line remain the visible signal.
+- `1`: a critical source has a hard issue (`"severity": "error"`: missing
+  dataset, non-ok state, or stale data without a failed refresh), or the audit
+  itself raised an error.
+
+The upstream card
 baseline is still advanced after a complete fetch, so the report distinguishes
 new changes from persistent site-source failures on the following day.
 
