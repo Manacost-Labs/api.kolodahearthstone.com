@@ -54,9 +54,9 @@ def test_supported_named_release_wins_over_an_unpublished_patch_period() -> None
         "scripts.seed_hs_manacost_patches.current_patch_version",
         return_value="36.4",
     ):
-        period = resolve_current_hsguru_period(_matrix_dataset("most_wanted"))
+        period = resolve_current_hsguru_period(_matrix_dataset("black_empire"))
 
-    assert period == "most_wanted"
+    assert period == "black_empire"
 
 
 def test_hsguru_post_patch_scope_preserves_filters_and_adds_current_period() -> None:

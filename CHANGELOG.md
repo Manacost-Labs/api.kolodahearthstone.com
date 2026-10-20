@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- HSGuru meta matrix follows HSGuru's new period menu: seven rolling windows
+  (`past_3_hours`, `past_6_hours`, `past_day`, `past_3_days`, `past_week`,
+  `past_2_weeks`, `past_30_days`), the current patch and the «Власть Темной
+  империи» expansion window `black_empire`, which is now the current-catalog
+  period. The retired `violet_hold` and `most_wanted` windows are no longer
+  scraped. 3/6-hour slices may be empty for every rank except ALL. The matrix
+  grows from 126 to 162 Scrape.do pages per twelve-hour run.
 - Constructed sync renames tokens and hero powers that were stored before release
   as `blizzard:<dbf>` to their HearthstoneJSON ID once it is published. Before,
   related-card sync kept updating the fallback row, so new-set tokens had no

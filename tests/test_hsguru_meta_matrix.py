@@ -85,25 +85,27 @@ def _valid_current_acquisition(format_name: str, rows: int = 1) -> dict:
     }
 
 
-def test_matrix_has_126_remote_slices_and_six_local_min_game_filters() -> None:
+def test_matrix_has_162_remote_slices_and_six_local_min_game_filters() -> None:
     from app.hsguru_meta_matrix import MIN_GAMES, iter_slice_specs
 
     specs = list(iter_slice_specs())
 
     assert MIN_GAMES == (100, 250, 500, 1000, 2500, 5000)
     assert 7500 not in MIN_GAMES
-    assert len(specs) == 126
-    assert len({spec.key for spec in specs}) == 126
+    assert len(specs) == 162
+    assert len({spec.key for spec in specs}) == 162
     assert all("min_games=100" in spec.url for spec in specs)
     assert all("7500" not in spec.url for spec in specs)
     assert {spec.period for spec in specs} == {
+        "past_3_hours",
+        "past_6_hours",
         "past_day",
         "past_3_days",
         "past_week",
         "past_2_weeks",
-        "patch_36.2.0",
-        "violet_hold",
-        "most_wanted",
+        "past_30_days",
+        "patch_36.6.3",
+        "black_empire",
     }
     assert {spec.rank for spec in specs} == {
         "all",
@@ -276,6 +278,12 @@ def test_hsguru_table_parser_distinguishes_missing_from_empty_table() -> None:
         ("top_100", "past_week", False),
         ("top_legend", "past_day", False),
         ("legend", "past_week", False),
+        ("top_legend", "past_3_hours", True),
+        ("legend", "past_6_hours", True),
+        ("all", "past_3_hours", False),
+        ("all", "past_6_hours", False),
+        ("top_100", "past_30_days", False),
+        ("top_100", "black_empire", False),
     ],
 )
 def test_empty_base_slice_policy_is_an_explicit_sparse_rank_allowlist(
@@ -422,7 +430,7 @@ def test_deck_catalog_join_skips_while_matrix_resource_is_locked(tmp_path) -> No
     save_dataset.assert_not_called()
 
 
-def test_refresh_publishes_one_unified_dataset_after_126_firecrawl_pages() -> None:
+def test_refresh_publishes_one_unified_dataset_after_162_firecrawl_pages() -> None:
     from app.firecrawl_backend import FirecrawlScrape
     from app.hsguru_meta_matrix import refresh_hsguru_meta_matrix
 
@@ -487,11 +495,11 @@ def test_refresh_publishes_one_unified_dataset_after_126_firecrawl_pages() -> No
         )
 
     assert result["ok"] is True
-    assert result["base_slices"] == 126
-    assert result["logical_slices"] == 756
-    assert result["firecrawl_credits_used"] == 128
+    assert result["base_slices"] == 162
+    assert result["logical_slices"] == 972
+    assert result["firecrawl_credits_used"] == 164
     assert result["current_catalog_archetypes"] == 2
-    assert len(calls) == 126
+    assert len(calls) == 162
     save_dataset.assert_called_once()
     dataset = save_dataset.call_args.args[1]
     assert dataset["data"]["structured"]["dimensions"]["min_games"] == [
@@ -511,9 +519,9 @@ def test_refresh_publishes_one_unified_dataset_after_126_firecrawl_pages() -> No
     }
     save_status.assert_called_once()
     status = save_status.call_args.args[1]
-    assert status["rows_total"] == 756
-    assert status["base_slices"] == 126
-    assert status["fresh_base_slices"] == 126
+    assert status["rows_total"] == 972
+    assert status["base_slices"] == 162
+    assert status["fresh_base_slices"] == 162
     assert status["cached_base_slices"] == 0
 
 
@@ -1812,26 +1820,30 @@ def test_runtime_periods_replace_previous_patch_with_discovered_patch() -> None:
     )
 
     assert matrix_periods("patch_36.0.4") == (
+        "past_3_hours",
+        "past_6_hours",
         "past_day",
         "past_3_days",
         "past_week",
         "past_2_weeks",
+        "past_30_days",
         "patch_36.0.4",
-        "violet_hold",
-        "most_wanted",
+        "black_empire",
     )
     html = """
     <a href="/meta?format=2&amp;period=patch_36.0.3&amp;rank=all">36.0.3</a>
     <a href="/meta?format=2&amp;period=patch_36.0.10&amp;rank=all">36.0.10</a>
     <a href="/meta?format=2&amp;period=violet_hold&amp;rank=all">Violet Hold</a>
     <a href="/meta?format=2&amp;period=most_wanted&amp;rank=all">Most Wanted</a>
+    <a href="/meta?format=2&amp;period=black_empire&amp;rank=all">Black Empire</a>
     <a href="/meta?format=2&amp;period=brawl&amp;rank=all">Brawl</a>
     """
     assert patch_periods_from_html(html) == (
         "patch_36.0.3",
         "patch_36.0.10",
     )
-    assert named_periods_from_html(html) == ("violet_hold", "most_wanted")
+    # Retired release windows stay out of the paid matrix even if still linked.
+    assert named_periods_from_html(html) == ("black_empire",)
 
 
 def test_patch_discovery_prefers_advertised_current_named_release() -> None:
@@ -1839,8 +1851,9 @@ def test_patch_discovery_prefers_advertised_current_named_release() -> None:
     from app.hsguru_meta_matrix import _discover_hsguru_patch_period
 
     html = """
-    <a href="/meta?period=patch_36.2.2">36.2.2</a>
-    <a href="/meta?period=most_wanted">Azeroth's Most Wanted</a>
+    <a href="/meta?period=black_empire">Black Empire</a>
+    <a href="/meta?period=patch_36.6.3">36.6.3</a>
+    <a href="/meta?period=past_3_hours">Past 3 Hours</a>
     """
     response = FirecrawlScrape(
         html=html,
@@ -1862,11 +1875,11 @@ def test_patch_discovery_prefers_advertised_current_named_release() -> None:
     ):
         period, evidence = asyncio.run(_discover_hsguru_patch_period(None))
 
-    assert period == "most_wanted"
+    assert period == "black_empire"
     assert evidence is not None
-    assert evidence["selected_patch_period"] == "patch_36.2.2"
-    assert evidence["selected_period"] == "most_wanted"
-    assert evidence["named_periods_found"] == ["most_wanted"]
+    assert evidence["selected_patch_period"] == "patch_36.6.3"
+    assert evidence["selected_period"] == "black_empire"
+    assert evidence["named_periods_found"] == ["black_empire"]
 
 
 def test_v1_hsguru_meta_filters_unified_dataset_by_min_games() -> None:

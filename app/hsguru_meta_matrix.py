@@ -52,18 +52,24 @@ RANKS = (
     "top_100",
 )
 ROLLING_PERIODS = (
+    "past_3_hours",
+    "past_6_hours",
     "past_day",
     "past_3_days",
     "past_week",
     "past_2_weeks",
+    "past_30_days",
 )
-DEFAULT_PATCH_PERIOD = "patch_36.2.0"
-NAMED_PERIODS = ("violet_hold", "most_wanted")
+# Rolling windows short enough that high-rank slices can legitimately be empty.
+SHORT_ROLLING_PERIODS = ("past_3_hours", "past_6_hours")
+DEFAULT_PATCH_PERIOD = "patch_36.6.3"
+NAMED_PERIODS = ("black_empire",)
 # Named windows are not ordinary patch identifiers. When HSGuru advertises one
 # of these release windows, it is a more precise current-catalog boundary than
-# the preceding patch_* window (for example, the 36.4 class-set release is
-# exposed as ``most_wanted`` while the newest patch link remains 36.2.2).
-CURRENT_NAMED_PERIODS = ("most_wanted",)
+# the preceding patch_* window (for example, the Black Empire expansion is
+# exposed as ``black_empire`` next to the newest patch link 36.6.3). Retired
+# windows (violet_hold, most_wanted) are no longer advertised and not scraped.
+CURRENT_NAMED_PERIODS = ("black_empire",)
 PERIODS = (*ROLLING_PERIODS, DEFAULT_PATCH_PERIOD, *NAMED_PERIODS)
 COINS = ("any_player",)
 MIN_GAMES = (100, 250, 500, 1000, 2500, 5000)
@@ -76,10 +82,22 @@ CHECKPOINT_SCHEMA_VERSION = 1
 CHECKPOINT_LABEL = "refresh_checkpoint_v1"
 CHECKPOINT_TTL = timedelta(hours=2)
 EMPTY_BASE_SLICE_ALLOWLIST = frozenset(
-    (format_name, rank, period)
-    for format_name in FORMATS
-    for rank in ("top_500", "top_100")
-    for period in ("past_day", "past_3_days")
+    {
+        *(
+            (format_name, rank, period)
+            for format_name in FORMATS
+            for rank in ("top_500", "top_100")
+            for period in ("past_day", "past_3_days")
+        ),
+        # A 3/6-hour window can miss any narrow rank; only ALL must have rows.
+        *(
+            (format_name, rank, period)
+            for format_name in FORMATS
+            for rank in RANKS
+            if rank != "all"
+            for period in SHORT_ROLLING_PERIODS
+        ),
+    }
 )
 CRITICAL_BASE_SLICE_SOURCE_IDS = {
     "standard": "hsguru_meta_standard_legend",

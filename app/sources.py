@@ -394,8 +394,9 @@ SOURCES: tuple[Source, ...] = (
         category="meta_matrix",
         description=(
             "Unified Standard/Wild HSGuru matrix refreshed every twelve hours: nine ranks "
-            "(including ALL, Top-500 and Top-100), four rolling periods, the latest patch, "
-            "named release windows (violet_hold, most_wanted), Any Player, and six locally "
+            "(including ALL, Top-500 and Top-100), seven rolling periods (3 hours to 30 "
+            "days), the latest patch, the black_empire expansion window, Any Player, "
+            "and six locally "
             "derived min-games filters. It also publishes the current 50-game archetype "
             "catalog with cached HSGuru builds and history."
         ),
