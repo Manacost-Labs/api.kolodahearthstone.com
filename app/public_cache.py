@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import hashlib
+import threading
 from typing import Any
 from urllib.parse import parse_qs
 
 from starlette.datastructures import MutableHeaders
 from starlette.requests import Request
 
+from .config import data_dir
 from .sources import SOURCES
 from .storage import load_dataset
 
@@ -47,12 +49,38 @@ def _cacheable_path(path: str) -> bool:
     return path == "/datasets" or path.startswith(("/datasets/", "/api/", "/v1/"))
 
 
+# source_id -> ((st_mtime_ns, st_size), fetched_at). Revisions run inside the
+# async middleware, and the global fallback covers every source: parsing all
+# published datasets (~260 MB) on each request held the event loop for about
+# a second. Datasets are replaced atomically, so an unchanged file signature
+# means an unchanged ``fetched_at``.
+_FETCHED_AT: dict[str, tuple[tuple[int, int], Any]] = {}
+_FETCHED_AT_LOCK = threading.Lock()
+
+
+def _dataset_fetched_at(source_id: str) -> Any:
+    # The path of storage.dataset_path, without its directory creation: this
+    # only reads metadata. Without a file, read through storage as before.
+    try:
+        stat = (data_dir() / "datasets" / f"{source_id}.json").stat()
+    except OSError:
+        return (load_dataset(source_id) or {}).get("fetched_at")
+    signature = (stat.st_mtime_ns, stat.st_size)
+    with _FETCHED_AT_LOCK:
+        cached = _FETCHED_AT.get(source_id)
+    if cached and cached[0] == signature:
+        return cached[1]
+    value = (load_dataset(source_id) or {}).get("fetched_at")
+    with _FETCHED_AT_LOCK:
+        _FETCHED_AT[source_id] = (signature, value)
+    return value
+
+
 def _dataset_timestamp(source_id: str) -> str | None:
     try:
-        dataset = load_dataset(source_id) or {}
+        value = _dataset_fetched_at(source_id)
     except (OSError, ValueError):
         return None
-    value = dataset.get("fetched_at")
     if not value:
         return None
     try:

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Public `/v1/*` responses no longer wait about a second for their ETag: the
+  cache revision memoizes each dataset's `fetched_at` by file signature
+  instead of parsing every published dataset (~260 MB) on each request inside
+  the async middleware. `/v1/hsguru/meta` dropped from 1.1–2.8 s to tens of
+  milliseconds; ETag values are unchanged.
 - Next.js panel catalogue: artwork tiles with a loading shimmer, tier and pool
   badges and a golden marker; labelled filters, category pills, active-filter
   chips with a reset, and a filter sheet on phones.
