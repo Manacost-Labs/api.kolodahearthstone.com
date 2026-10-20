@@ -76,7 +76,31 @@ def _dataset_fetched_at(source_id: str) -> Any:
     return value
 
 
-def _dataset_timestamp(source_id: str) -> str | None:
+class _StateReadOnce:
+    """One parser-control state read shared by every source of one revision.
+
+    Each early source otherwise locks and parses the control state again.
+    A storage error is raised again to each caller, which falls back as usual.
+    """
+
+    def __init__(self) -> None:
+        self._result: Any = None
+        self._error: Exception | None = None
+
+    def read_state(self) -> Any:
+        if self._result is None and self._error is None:
+            from .parser_control import parser_control_store
+
+            try:
+                self._result = parser_control_store().read_state()
+            except Exception as exc:  # noqa: BLE001 - re-raised to every caller
+                self._error = exc
+        if self._error is not None:
+            raise self._error
+        return self._result
+
+
+def _dataset_timestamp(source_id: str, *, store: Any = None) -> str | None:
     try:
         value = _dataset_fetched_at(source_id)
     except (OSError, ValueError):
@@ -86,14 +110,19 @@ def _dataset_timestamp(source_id: str) -> str | None:
     try:
         from .parser_control import publication_cache_token
 
-        control_token = publication_cache_token(source_id)
+        control_token = publication_cache_token(source_id, store=store)
     except Exception:
         control_token = ""
     return f"{value}:{control_token}" if control_token else str(value)
 
 
 def _latest_dataset_timestamp() -> str | None:
-    values = [value for source in SOURCES if (value := _dataset_timestamp(source.id))]
+    store = _StateReadOnce()
+    values = [
+        value
+        for source in SOURCES
+        if (value := _dataset_timestamp(source.id, store=store))
+    ]
     return max(values) if values else None
 
 

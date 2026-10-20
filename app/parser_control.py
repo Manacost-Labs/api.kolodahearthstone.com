@@ -1551,11 +1551,16 @@ def effective_early_window(
     }
 
 
-def publication_cache_token(source_id: str, *, at: datetime | None = None) -> str:
+def publication_cache_token(
+    source_id: str,
+    *,
+    at: datetime | None = None,
+    store: ParserControlStore | None = None,
+) -> str:
     """Return a cheap token that changes whenever public channel selection changes."""
     if source_id not in EARLY_SOURCE_IDS:
         return ""
-    context = publication_policy_context(source_id, at=at)
+    context = publication_policy_context(source_id, at=at, store=store)
     return f"{context.get('revision') or 'env'}:{context['token']}"
 
 

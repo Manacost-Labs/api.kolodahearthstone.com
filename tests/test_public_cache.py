@@ -352,3 +352,42 @@ def test_deckview_legacy_decks_contract_remains_unchanged() -> None:
             }
         ],
     }
+
+
+def test_global_revision_reads_parser_control_state_once() -> None:
+    from app import public_cache
+    from app.parser_control import EARLY_SOURCE_IDS, ParserControlStore
+
+    for source_id in sorted(EARLY_SOURCE_IDS)[:3]:
+        save_dataset(
+            source_id,
+            {"source_id": source_id, "fetched_at": datetime.now(UTC).isoformat(), "data": {}},
+        )
+    unshared = max(
+        value
+        for source in public_cache.SOURCES
+        if (value := public_cache._dataset_timestamp(source.id))
+    )
+    with patch.object(
+        ParserControlStore, "read_state", autospec=True, side_effect=ParserControlStore.read_state
+    ) as reads:
+        shared = cache_revision("/v1/hsguru/meta", b"rank=legend")
+
+    assert shared == unshared
+    assert reads.call_count == 1
+
+
+def test_health_freshness_is_bounded_like_the_diagnostics_outside_tests() -> None:
+    from app.routers import system
+
+    system._public_freshest = None
+    with (
+        patch("app.config.python_environment", return_value="production"),
+        patch.object(system, "_public_freshest_timestamp", return_value="2026-10-20T10:00:00+00:00") as compute,
+    ):
+        first = system._cached_public_freshest_timestamp()
+        second = system._cached_public_freshest_timestamp()
+    system._public_freshest = None
+
+    assert first == second == "2026-10-20T10:00:00+00:00"
+    assert compute.call_count == 1
