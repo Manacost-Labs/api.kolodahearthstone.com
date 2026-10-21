@@ -105,7 +105,8 @@ export function Analytics({
                 </label>
               ),
             )}
-            {!!Object.keys(definition?.params || {}).length && (
+            {/* Lists apply on selection; only typed fields need an explicit submit. */}
+            {Object.values(definition?.params || {}).some(param => param.type !== 'enum') && (
               <button className="button secondary" type="submit">
                 Применить
               </button>
@@ -146,7 +147,7 @@ export function Analytics({
           {'provider_usage' in data && <ProviderUsage data={data.provider_usage} />}
           {data.rows?.length ? (
             <DataTable key={module} rows={data.rows} columns={data.columns} onDetail={setSelected} />
-          ) : (
+          ) : 'provider_usage' in data ? null : (
             <EmptyState title="По этим условиям данных нет">
               Измените фильтры или выберите другой набор.
             </EmptyState>

@@ -1,4 +1,4 @@
-import { cardTypeLabels, slugLabel, tribeLabels } from './format.ts';
+import { cardTypeLabels, parseDate, slugLabel, tribeLabels } from './format.ts';
 import type { Row } from './types.ts';
 export const text = (value: unknown, fallback = '—'): string =>
   value === null || value === undefined || value === ''
@@ -240,4 +240,17 @@ export function tokenUsage(token: Row): { requests: number; errors: number; mont
     errors: count(usage.error_count),
     month: text(usage.month, ''),
   };
+}
+
+/** Lifecycle of an API token for the list: revoked, expired, expiring within two weeks, or active. */
+export function tokenState(
+  token: Row,
+  now = Date.now(),
+): { key: 'revoked' | 'expired' | 'expiring' | 'active'; days: number } {
+  if (token.revoked_at) return { key: 'revoked', days: 0 };
+  const expires = parseDate(token.expires_at)?.getTime();
+  if (expires === undefined) return { key: 'active', days: 0 };
+  const days = Math.ceil((expires - now) / 86_400_000);
+  if (expires <= now) return { key: 'expired', days: 0 };
+  return { key: days <= 14 ? 'expiring' : 'active', days };
 }

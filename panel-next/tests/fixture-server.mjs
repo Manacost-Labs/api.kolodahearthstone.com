@@ -178,6 +178,67 @@ export const server = http.createServer(async (req, res) => {
       input.action === 'run' ? 202 : 200,
     );
   }
+  if (url.pathname === '/analytics.php' && url.searchParams.get('module') === 'providers') {
+    const days = Array.from({ length: 7 }, (_, i) => `2026-10-${String(15 + i).padStart(2, '0')}`);
+    const providers = [
+      ['decodo', 420, 401, 0.62, 'request', 0.0015],
+      ['scrape_do', 260, 236, 1.3, 'credit', 0.00029],
+    ];
+    return send({
+      ok: true,
+      module: 'providers',
+      title: 'Провайдеры',
+      description: 'Расход, успешность и скорость платных провайдеров по дням.',
+      summary: [
+        { label: 'Вызовов', value: 680 },
+        { label: 'Успешных', value: 637, tone: 'good' },
+        { label: 'Расход', value: '$1.92' },
+      ],
+      columns: [],
+      rows: [],
+      meta: { updated_at: '2026-10-21T08:00:00Z', cached: false, stale: false },
+      provider_usage: {
+        from: days[0],
+        to: days[6],
+        first_recorded_at: '2026-10-15T00:00:00Z',
+        retention_days: 90,
+        providers: providers.map(([provider, total, success, cost, unit, price]) => ({
+          provider,
+          total,
+          success,
+          failed: total - success,
+          success_rate: (100 * success) / total,
+          avg_ms: provider === 'decodo' ? 2400 : 5100,
+          p95_ms: provider === 'decodo' ? 6100 : 12800,
+          bytes: total * 180_000,
+          cost_usd: cost,
+          cost_units: Math.round(cost / price),
+          cost_unit: unit,
+          usd_per_1k_success: (1000 * cost) / success,
+        })),
+        daily: days.flatMap((day, i) =>
+          providers.map(([provider, total, success, cost]) => ({
+            day,
+            provider,
+            total: Math.round(total / 7 + (i % 3) * 6),
+            success_rate: (100 * success) / total - (i % 2) * 3,
+            avg_ms: 2000 + i * 300,
+            bytes: 9_000_000 + i * 800_000,
+            cost_usd: cost / 7,
+          })),
+        ),
+        pricing: {
+          decodo: { usd_per_unit: 0.0015, basis: 'configured' },
+          scrape_do: { usd_per_unit: 0.00029, basis: 'list' },
+        },
+        failure_reasons: [
+          { provider: 'scrape_do', reason: 'blocked_content', count: 17 },
+          { provider: 'decodo', reason: 'timeout', count: 12 },
+        ],
+        sources: [{ source_id: 'hsguru_meta_matrix', total: 300, success_rate: 96.5, cost_usd: 0.9 }],
+      },
+    });
+  }
   if (url.pathname === '/analytics.php')
     return send({
       ok: true,
@@ -278,6 +339,11 @@ export const server = http.createServer(async (req, res) => {
           title: 'Статистика карты',
           description: 'Карты',
           params: { q: { type: 'string', max: 120 } },
+        },
+        providers: {
+          title: 'Провайдеры',
+          description: 'Расход и успешность платных провайдеров',
+          params: { days: { type: 'enum', values: ['7', '30'], default: '7' } },
         },
         meta: {
           title: 'Мета Standard / Wild',

@@ -1691,12 +1691,13 @@ time[title] {
     flex: none;
     min-height: 46px;
   }
-  .filter-row {
+  /* Only the catalogue folds its filters behind a toggle; statistics filters stay visible. */
+  .catalog-filters .filter-row {
     display: none;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: var(--space-2);
   }
-  .filter-row[data-open] {
+  .catalog-filters .filter-row[data-open] {
     display: grid;
   }
   .filter-field {
@@ -2998,4 +2999,103 @@ html[data-mode='dark'] .provider-usage {
   .card-grid {
     grid-template-columns: repeat(5, minmax(0, 1fr));
   }
+}
+
+/* API tokens: lifecycle badges, a quiet revoke action and cards on phones. */
+.tokens-table th[scope='row'] {
+  padding: 10px 14px;
+  border-top: 1px solid var(--line);
+  border-bottom: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: var(--text-sm);
+  white-space: normal;
+  vertical-align: top;
+  min-width: 180px;
+}
+.tokens-table th[scope='row'] code {
+  display: block;
+  margin: 4px 0 6px;
+  color: var(--muted);
+  font-weight: 400;
+}
+.tokens-table tr[data-state='revoked'] > *:not(:last-child),
+.tokens-table tr[data-state='expired'] > *:not(:last-child) {
+  opacity: 0.6;
+}
+.revoke-link {
+  color: var(--muted);
+}
+.revoke-link:hover,
+.revoke-link:focus-visible,
+.tokens-table tr:hover .revoke-link {
+  color: var(--bad);
+}
+@media (max-width: 640px) {
+  .tokens-table,
+  .tokens-table tbody {
+    display: block;
+  }
+  .tokens-table thead {
+    display: none;
+  }
+  .tokens-table tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px 12px;
+    padding: 12px 14px;
+    border-top: 1px solid var(--line);
+  }
+  .tokens-table tr:first-child {
+    border-top: 0;
+  }
+  .tokens-table th[scope='row'],
+  .tokens-table td {
+    padding: 0;
+    border: 0;
+    min-width: 0;
+    max-width: none;
+    background: transparent;
+  }
+  .tokens-table th[scope='row'],
+  .tokens-table td[data-label='Права'] {
+    grid-column: 1 / -1;
+  }
+  .tokens-table td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 2px;
+    color: var(--muted);
+    font-size: var(--text-xs);
+  }
+  .tokens-table tr:hover td {
+    background: transparent;
+  }
+  .tokens-table td time {
+    white-space: normal;
+  }
+  /* Issuing is occasional; on a phone the existing tokens come first. */
+  .token-layout {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .token-layout > .table-scroll {
+    order: -1;
+    margin-top: 0;
+  }
+}
+
+/* Provider usage on phones: the metric switch scrolls instead of widening the page. */
+.provider-usage,
+.provider-chart {
+  min-width: 0;
+}
+.provider-chart > .data-status {
+  flex-wrap: wrap;
+}
+.provider-chart .ui-segmented-control {
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
 }

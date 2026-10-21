@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { countLabel, scopeLabels } from '@/lib/format';
-import { text, tokenUsage } from '@/lib/model';
+import { text, tokenState, tokenUsage } from '@/lib/model';
 import { mutate, MutationError } from '@/lib/client';
 import type { PageData, Row } from '@/lib/types';
 import { Modal } from './Modal';
@@ -14,6 +14,11 @@ export function Tokens({ data }: { data: PageData }) {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [revoke, setRevoke] = useState<Row | null>(null);
+  // Live tokens first, then the expired and revoked ones; the order within a group is the server's.
+  const rank = { expiring: 0, active: 0, expired: 1, revoked: 2 };
+  const sorted = tokens
+    .map(token => ({ token, state: tokenState(token) }))
+    .sort((a, b) => rank[a.state.key] - rank[b.state.key]);
   const submit = async (form: FormData) => {
     setBusy(true);
     setError('');
@@ -112,34 +117,44 @@ export function Tokens({ data }: { data: PageData }) {
             {busy ? 'Выпускаем…' : 'Выпустить'}
           </button>
         </form>
-        <div className="table-scroll">
-          <table>
+        {/* biome-ignore lint/a11y/noNoninteractiveTabindex: scrollable regions must be reachable by keyboard */}
+        <div className="table-scroll" role="region" tabIndex={0} aria-label="Выпущенные токены">
+          <table className="tokens-table">
             <thead>
               <tr>
-                <th>Название</th>
-                <th>Права</th>
-                <th>Действует до</th>
-                <th>Использование</th>
-                <th>Действия</th>
+                <th scope="col">Название</th>
+                <th scope="col">Права</th>
+                <th scope="col">Действует до</th>
+                <th scope="col">Использование</th>
+                <th scope="col">
+                  <span className="sr-only">Действия</span>
+                </th>
               </tr>
             </thead>
             <tbody>
-              {tokens.map(token => (
-                <tr key={text(token.id)}>
-                  <td>
+              {sorted.map(({ token, state }) => (
+                <tr key={text(token.id)} data-state={state.key}>
+                  <th scope="row">
                     <strong>{text(token.name)}</strong>
                     <code>{text(token.id)}</code>
-                    {Boolean(token.revoked_at) && <StatusBadge tone="bad" label="Отозван" />}
-                  </td>
-                  <td>
+                    {state.key === 'revoked' && <StatusBadge tone="neutral" label="Отозван" />}
+                    {state.key === 'expired' && <StatusBadge tone="bad" label="Срок истёк" />}
+                    {state.key === 'expiring' && (
+                      <StatusBadge
+                        tone="warning"
+                        label={`Истекает через ${countLabel(state.days, { one: 'день', few: 'дня', many: 'дней' })}`}
+                      />
+                    )}
+                  </th>
+                  <td data-label="Права">
                     {(Array.isArray(token.scopes) ? token.scopes.map(String) : [text(token.scopes)])
                       .map(scope => data.scopeCatalog?.[scope]?.label ?? scopeLabels[scope] ?? scope)
                       .join(', ')}
                   </td>
-                  <td>
+                  <td data-label="Действует до">
                     <Time value={token.expires_at} />
                   </td>
-                  <td>
+                  <td data-label="Использование">
                     {(() => {
                       const usage = tokenUsage(token);
                       return (
@@ -159,7 +174,8 @@ export function Tokens({ data }: { data: PageData }) {
                     {!Boolean(token.revoked_at) && text(token.id) !== data.managerId && (
                       <button
                         type="button"
-                        className="link-button danger-text"
+                        className="link-button revoke-link"
+                        aria-label={`Отозвать токен «${text(token.name)}»`}
                         onClick={() => setRevoke(token)}
                       >
                         Отозвать
