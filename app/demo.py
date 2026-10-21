@@ -7,7 +7,7 @@ from .deck_decode import (
     first_deck_code_from_text,
 )
 from .source_state import SourceState
-from .sources import SOURCE_BY_ID, SOURCES, Source
+from .sources import SOURCE_BY_ID, SOURCES, STATUS_ONLY_SOURCE_IDS, Source
 from .storage import load_dataset, load_status
 from .structured import build_structured
 
@@ -182,7 +182,11 @@ def build_overview() -> dict[str, Any]:
     items: list[dict[str, Any]] = []
     for source in SOURCES:
         status = load_status(source.id) or {}
-        dataset = load_resolved_public_dataset(source.id)
+        dataset = (
+            None
+            if source.id in STATUS_ONLY_SOURCE_IDS
+            else load_resolved_public_dataset(source.id)
+        )
         operationally_enabled = source_operationally_enabled(source.id)
         stale = stale_by_source.get(source.id)
         state = status.get("state", SourceState.NEVER_FETCHED)

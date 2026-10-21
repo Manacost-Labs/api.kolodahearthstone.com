@@ -136,6 +136,10 @@ def read_json(path: Path) -> dict[str, Any] | None:
 
 
 def save_dataset(source_id: str, payload: dict[str, Any]) -> None:
+    from .sources import STATUS_ONLY_SOURCE_IDS
+
+    if source_id in STATUS_ONLY_SOURCE_IDS:
+        raise ValueError(f"{source_id} publishes no dataset; refusing to write one")
     write_json(dataset_path(source_id), payload)
     try:
         from .db import store_dataset_to_db

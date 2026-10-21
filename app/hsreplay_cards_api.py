@@ -354,7 +354,7 @@ def _has_metric(card: dict[str, Any]) -> bool:
 
 async def fetch_hsreplay_ranked_cards(source: Source, *, locale: str = "ruRU") -> dict[str, Any]:
     """Load HSReplay Gold cards (14d) via analytics JSON."""
-    from .hsreplay_client import fetch_hsreplay_json
+    from .hsreplay_client import HsReplayQueryProcessingError, fetch_hsreplay_json
 
     sort_mode = _sort_mode(source)
     api_url = _analytics_card_list_url(source)
@@ -374,7 +374,10 @@ async def fetch_hsreplay_ranked_cards(source: Source, *, locale: str = "ruRU") -
     except Exception as direct_error:
         from .refresh_context import is_direct_only_candidate_confirmation
 
-        if is_direct_only_candidate_confirmation():
+        # A rendered page fallback would hit the same cold HSReplay query.
+        if is_direct_only_candidate_confirmation() or isinstance(
+            direct_error, HsReplayQueryProcessingError
+        ):
             raise
         from .hsreplay_card_periods import fetch_hsreplay_card_period_json
 

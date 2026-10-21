@@ -21,6 +21,9 @@ from .config import (
     flaresolverr_url,
     hsreplay_json_channels,
     hsreplay_markdown_channels,
+    hsreplay_query_processing_attempts,
+    hsreplay_query_processing_budget_seconds,
+    hsreplay_query_processing_delay_seconds,
     hsreplay_scrape_do_max_credits,
     hsreplay_scrape_do_max_requests,
     http_retry_attempts,
@@ -61,13 +64,44 @@ _COOKIE_NAME = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
 _SCRAPE_DO_STANDARD_CREDIT_RESERVATION = 1
 _SCRAPE_DO_MAX_RETRY_DELAY_SECONDS = 30.0
 _SAFE_TARGET_RESPONSE_HEADERS = frozenset(
-    {"date", "age", "etag", "last-modified", "cache-control", "cf-cache-status"}
+    {
+        "date",
+        "age",
+        "etag",
+        "last-modified",
+        "cache-control",
+        "cf-cache-status",
+        "retry-after",
+    }
 )
 _MAX_TARGET_HEADER_VALUE_LENGTH = 512
+_QUERY_PROCESSING_MARKER = "query is processing"
+_MAX_QUERY_PROCESSING_RETRY_AFTER_SECONDS = 60.0
 
 
 class HsReplayScrapeDoBudgetError(RuntimeError):
     """The refresh-scoped Scrape.do HSReplay JSON budget is exhausted."""
+
+
+class HsReplayQueryProcessingError(RuntimeError):
+    """HSReplay kept answering "Query is processing" for every bounded poll.
+
+    Cold analytics queries (typically TimeRange=CURRENT_PATCH right after a
+    patch) are computed asynchronously and answer HTTP 202 until the result
+    exists. That is an upstream readiness state, not an empty dataset, so the
+    caller must keep its last known good publication.
+    """
+
+    failure_reason_code = "unavailable"
+    upstream_state = "upstream_processing"
+
+
+class _HsReplayQueryStillProcessing(Exception):
+    """One poll of an analytics query returned the HTTP 202 processing body."""
+
+    def __init__(self, retry_after: str | None) -> None:
+        super().__init__("HSReplay query is processing")
+        self.retry_after = retry_after
 
 
 class _HsReplayProxyCircuitOpen(RuntimeError):
@@ -89,6 +123,7 @@ class _HsReplayTransportState:
     proxy_probe_task: asyncio.Task[str] | None = None
     scrape_do_requests_reserved: int = 0
     scrape_do_credits_reserved: int = 0
+    query_processing_deadline: float | None = None
     json_cache_transports: dict[str, str] = field(default_factory=dict)
     json_cache_target_headers: dict[str, dict[str, str]] = field(default_factory=dict)
     json_key_locks: dict[str, asyncio.Lock] = field(default_factory=dict)
@@ -1014,6 +1049,41 @@ def _consume_proxy_probe_exception(task: asyncio.Task[str]) -> None:
         _ = task.exception()
 
 
+def is_hsreplay_query_processing(payload: object) -> bool:
+    """Detect HSReplay's HTTP 202 body for a not-yet-computed analytics query."""
+
+    if not isinstance(payload, dict) or "series" in payload or "data" in payload:
+        return False
+    message = payload.get("msg")
+    return isinstance(message, str) and _QUERY_PROCESSING_MARKER in message.lower()
+
+
+def _query_processing_delay(retry_after: str | None) -> float:
+    # Only delta-seconds are honoured; an HTTP-date falls back to the default.
+    raw = (retry_after or "").strip()
+    if raw.isdigit():
+        return min(float(raw), _MAX_QUERY_PROCESSING_RETRY_AFTER_SECONDS)
+    return hsreplay_query_processing_delay_seconds()
+
+
+def _reserve_query_processing_wait(delay: float) -> bool:
+    """Allow a processing wait only inside the refresh-wide wall-clock budget.
+
+    Per-archetype and parallel slices may all hit cold queries after a patch.
+    The window opens at the first processing answer of the refresh, so the
+    total extra runtime stays bounded no matter how many queries are cold.
+    """
+
+    state = _current_transport_state()
+    now = time.monotonic()
+    with state.lock:
+        if state.query_processing_deadline is None:
+            state.query_processing_deadline = (
+                now + hsreplay_query_processing_budget_seconds()
+            )
+        return now + delay <= state.query_processing_deadline
+
+
 def _payload_to_dict(payload: dict[str, Any] | list[Any]) -> dict[str, Any]:
     if isinstance(payload, list):
         return {"data": payload}
@@ -1043,6 +1113,60 @@ async def _fetch_hsreplay_json_serialized(
         )
         return cached
 
+    attempts = hsreplay_query_processing_attempts()
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            return await _fetch_hsreplay_json_channels(
+                api_url,
+                source_id=source_id,
+                key=key,
+            )
+        except _HsReplayQueryStillProcessing as exc:
+            delay = _query_processing_delay(exc.retry_after)
+            will_retry = attempt < attempts and _reserve_query_processing_wait(delay)
+            log_action(
+                (
+                    "api.upstream_processing.retry"
+                    if will_retry
+                    else "api.upstream_processing.fail"
+                ),
+                source_id=source_id,
+                level="warn",
+                attempt=attempt,
+                detail="HSReplay analytics query is processing (HTTP 202)",
+                extra={
+                    "reason": "upstream_processing",
+                    "api_url": api_url,
+                    "attempts": attempts,
+                    "delay_seconds": delay if will_retry else None,
+                },
+            )
+            if not will_retry:
+                break
+            await asyncio.sleep(delay)
+
+    detail = (
+        f"HSReplay analytics query still processing after {attempt} "
+        "attempt(s) (upstream_processing)"
+    )
+    log_action(
+        "api.route.fail",
+        source_id=source_id,
+        detail=detail,
+        level="error",
+        extra={"reason": "upstream_processing", "api_url": api_url},
+    )
+    raise HsReplayQueryProcessingError(detail)
+
+
+async def _fetch_hsreplay_json_channels(
+    api_url: str,
+    *,
+    source_id: str,
+    key: str,
+) -> dict[str, Any]:
     errors: list[str] = []
     channels = (
         [("direct_unproxied", api_url)]
@@ -1082,6 +1206,10 @@ async def _fetch_hsreplay_json_serialized(
                 fetch_url,
             )
             payload = extract_json_payload(body)
+            if is_hsreplay_query_processing(payload):
+                # Every channel reaches the same HSReplay query worker, so a
+                # further (possibly paid) channel cannot help; poll later.
+                raise _HsReplayQueryStillProcessing(target_headers.get("retry-after"))
             normalized_payload = (
                 _payload_to_dict(payload)
                 if isinstance(payload, (dict, list))
@@ -1171,6 +1299,8 @@ async def _fetch_hsreplay_json_serialized(
                 level="warn",
                 extra={"channel": label},
             )
+        except _HsReplayQueryStillProcessing:
+            raise
         except _HsReplayProxyCircuitOpen as exc:
             first_proxy_error = first_proxy_error or exc.proxy_error
             errors.append(f"{label}: skipped after proxy CONNECT failure")
