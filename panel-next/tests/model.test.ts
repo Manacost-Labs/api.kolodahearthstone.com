@@ -1,6 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizedCard, imagesFrom, mediaUrl, queryHref, deckTile, tokenUsage } from '../lib/model.ts';
+import {
+  normalizedCard,
+  imagesFrom,
+  mediaUrl,
+  queryHref,
+  deckTile,
+  tileNameScale,
+  tokenUsage,
+} from '../lib/model.ts';
 import { countLabel } from '../lib/format.ts';
 test('preserves zero stats and base/golden identities', () => {
   const row = {
@@ -26,6 +34,7 @@ test('deck tiles keep zero and double-digit mana, exclude framed fallbacks and m
       mana_cost: 0,
       rarity: 'LEGENDARY',
       horizontal_image_url: '/uploads/horizontal-art/TEST.webp',
+      horizontal_image_2x_url: '/uploads/horizontal-art/TEST@2x.webp',
     }),
     {
       cost: '0',
@@ -35,8 +44,10 @@ test('deck tiles keep zero and double-digit mana, exclude framed fallbacks and m
       background: '#715022',
       legendary: true,
       image: '/uploads/horizontal-art/TEST.webp',
+      image2x: '/uploads/horizontal-art/TEST@2x.webp',
     },
   );
+  assert.equal(deckTile({ horizontal_image_url: '/uploads/horizontal-art/OLD.webp' }).image2x, '');
   assert.equal(deckTile({ mana_cost: '10', rarity: 4 }).cost, '10');
   assert.equal(deckTile({ rarity: 4 }).color, '#503961');
   assert.equal(deckTile({ rarity: 3 }).color, '#23445b');
@@ -127,4 +138,10 @@ test('token state flags revoked, expired and soon-expiring tokens', async () => 
   assert.deepEqual(tokenState({ expires_at: '2026-10-28T12:00:00Z' }, now), { key: 'expiring', days: 7 });
   assert.equal(tokenState({ expires_at: '2027-10-08T11:37:00Z' }, now).key, 'active');
   assert.equal(tokenState({ expires_at: null }, now).key, 'active');
+});
+
+test('long tile names shrink before they are truncated', () => {
+  assert.equal(tileNameScale('Огненный шар'), 1);
+  assert.equal(tileNameScale('Зиллиакс Делюкс 3000'), 0.9);
+  assert.equal(tileNameScale('Невероятно длинное название карты для проверки'), 0.72);
 });

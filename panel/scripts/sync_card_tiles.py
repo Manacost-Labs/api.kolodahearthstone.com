@@ -16,12 +16,14 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from PIL import Image, ImageDraw, ImageFilter, ImageFont, UnidentifiedImageError
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont, UnidentifiedImageError
 
 ROOT = Path(os.environ.get('KOLODAHS_APP_ROOT') or Path(__file__).resolve().parents[1])
-RECIPE = '1-app-png'
+RECIPE = '2-hires-fit-title'
 SIZE = (640, 128)
 SCALE = 4
+TITLE_SIZE = 18
+TITLE_MIN_SIZE = 13
 FIELDS = (
     'name', 'name_ru', 'name_en', 'name_russian', 'pet_name_ru', 'variant_name',
     'pet_name', 'coin_name_ru', 'coin_name_en', 'card_type', 'tavern_tier', 'tier',
@@ -113,6 +115,11 @@ def local_art(row: dict, root: Path) -> Path | None:
     allowed = (root / 'uploads').resolve()
     if allowed not in candidate.parents:
         raise ValueError('Art path escapes uploads')
+    # Recipe 8 art has a 640x128 companion; tiles use it instead of upscaling.
+    # Each file may independently be a link into the offloaded S3 mount.
+    retina = (root / (path.removesuffix('.webp') + '@2x.webp').lstrip('/')).resolve()
+    if path.endswith('.webp') and allowed in retina.parents and retina.is_file():
+        return retina
     return candidate if candidate.is_file() else None
 
 
@@ -132,6 +139,16 @@ def ellipsis(name: str, face, width: int) -> str:
         else:
             hi = mid - 1
     return name[:lo] + '…'
+
+
+def fit_title(root: Path, name: str, width: int) -> tuple:
+    """Largest title size that fits; truncate only below the minimum size."""
+    face_name = 'hearthstone-benguiat.ttf' if re.search('[А-Яа-яЁё]', name) else 'hearthstone-belwe.ttf'
+    for size in range(TITLE_SIZE, TITLE_MIN_SIZE - 1, -1):
+        face = font(str(root), face_name, size)
+        if face.getlength(name) <= width:
+            return name, face
+    return ellipsis(name, face, width), face
 
 
 def draw_text(image: Image.Image, xy: tuple, text: str, face, color='#ffffff', stroke='#18130f', anchor='mm'):
@@ -175,35 +192,44 @@ def gradient(colors: list[str], size: tuple[int, int]) -> Image.Image:
 def render(row: dict, entity_type: str, root: Path = ROOT) -> bytes:
     design = tile(row, entity_type)
     colors = design['colors']
-    image = Image.new('RGBA', (320 * SCALE, 64 * SCALE), colors[0])
+    # Background and artwork are composed at the output size, so 640x128 art
+    # keeps its detail; text and icons are supersampled on a separate layer.
+    image = Image.new('RGBA', SIZE, colors[0])
     if len(colors) > 1:
-        image = gradient(colors, image.size)
+        image = gradient(colors, SIZE)
     source = local_art(row, root)
     if source:
         with Image.open(source) as artwork:
-            if artwork.size != (320, 64):
-                raise ValueError('Horizontal art must be 320x64')
-            image.alpha_composite(artwork.convert('RGBA').resize(image.size, Image.Resampling.LANCZOS), (-34 * SCALE, 0))
-    # The opaque right column covers the two edge pixels exactly as in the panel.
-    ImageDraw.Draw(image).rectangle((284 * SCALE, 0, image.width, image.height), fill=colors[-1])
+            if artwork.size not in ((320, 64), SIZE):
+                raise ValueError('Horizontal art must be 320x64 or 640x128')
+            image.alpha_composite(artwork.convert('RGBA').resize(SIZE, Image.Resampling.LANCZOS))
+    layer = Image.new('RGBA', (320 * SCALE, 64 * SCALE))
+    if design['price']:
+        # The art reaches the edge; a short fade in the rarity color keeps the
+        # badge legible instead of reserving an empty column on every tile.
+        scrim = Image.new('RGBA', (60 * SCALE, 64 * SCALE), colors[-1])
+        fade = Image.linear_gradient('L').rotate(90, expand=True).resize(scrim.size)
+        scrim.putalpha(fade.point(lambda value: min(235, value * 2)))
+        layer.alpha_composite(scrim, (260 * SCALE, 0))
     belwe = font(str(root), 'hearthstone-belwe.ttf', 28)
     if not design['bg'] and design['cost'] != '—':
         with Image.open(root / 'assets/deck-tiles/mana-crystal.png') as crystal:
-            image.alpha_composite(crystal.convert('RGBA').resize((40 * SCALE, 42 * SCALE), Image.Resampling.LANCZOS), (0, 11 * SCALE))
-    draw_text(image, (20 * SCALE, 32 * SCALE), design['cost'], belwe, '#ffe2a0' if design['bg'] else '#ffffff', '#392008' if design['bg'] else '#102746')
-    face_name = 'hearthstone-benguiat.ttf' if re.search('[А-Яа-яЁё]', design['name']) else 'hearthstone-belwe.ttf'
-    title_face = font(str(root), face_name, 21)
-    title = ellipsis(design['name'], title_face, 236 * SCALE)
-    draw_text(image, (48 * SCALE, 32 * SCALE), title, title_face, anchor='lm')
+            layer.alpha_composite(crystal.convert('RGBA').resize((40 * SCALE, 42 * SCALE), Image.Resampling.LANCZOS), (0, 11 * SCALE))
+    draw_text(layer, (20 * SCALE, 32 * SCALE), design['cost'], belwe, '#ffe2a0' if design['bg'] else '#ffffff', '#392008' if design['bg'] else '#102746')
+    title_end = 284 if design['price'] else 312
+    title, title_face = fit_title(root, design['name'], (title_end - 48) * SCALE)
+    draw_text(layer, (48 * SCALE, 32 * SCALE), title, title_face, anchor='lm')
     if design['price'] == '★':
-        draw_star(image)
+        draw_star(layer)
     elif design['price']:
-        draw_text(image, (302 * SCALE, 32 * SCALE), design['price'], font(str(root), 'hearthstone-benguiat.ttf', 27), '#ffe2a0' if design['bg'] else '#ffffff')
-    mask = Image.new('L', image.size)
-    ImageDraw.Draw(mask).rounded_rectangle((0, 0, image.width-1, image.height-1), radius=3*SCALE, fill=255)
-    image.putalpha(mask)
+        draw_text(layer, (302 * SCALE, 32 * SCALE), design['price'], font(str(root), 'hearthstone-benguiat.ttf', 27), '#ffe2a0' if design['bg'] else '#ffffff')
+    # Resample premultiplied, so transparent black does not darken text edges.
+    image.alpha_composite(layer.convert('RGBa').resize(SIZE, Image.Resampling.LANCZOS).convert('RGBA'))
+    mask = Image.new('L', (320 * SCALE, 64 * SCALE))
+    ImageDraw.Draw(mask).rounded_rectangle((0, 0, mask.width - 1, mask.height - 1), radius=3 * SCALE, fill=255)
+    image.putalpha(ImageChops.multiply(image.getchannel('A'), mask.resize(SIZE, Image.Resampling.LANCZOS)))
     output = io.BytesIO()
-    image.resize(SIZE, Image.Resampling.LANCZOS).save(output, format='PNG', optimize=True)
+    image.save(output, format='PNG', optimize=True)
     return output.getvalue()
 
 

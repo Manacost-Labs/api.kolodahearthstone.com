@@ -1,18 +1,18 @@
 from __future__ import annotations
 
 import json
+import random
 import sqlite3
-import subprocess
 import sys
 import tempfile
 import unittest
 import urllib.error
 from contextlib import redirect_stdout
 from io import StringIO
-from itertools import pairwise
 from pathlib import Path
 from unittest import mock
 
+import numpy as np
 from PIL import Image, ImageDraw
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -20,162 +20,198 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 import sync_horizontal_art as horizontal
 
+HSJ = "https://art.hearthstonejson.com/v1/"
 
-class HorizontalArtTest(unittest.TestCase):
-    def test_revealed_cards_use_only_trusted_official_illustration_crops(self) -> None:
-        official = "https://d15f34w2p8l1cc.cloudfront.net/hearthstone/illustration.png"
-        fixtures = [
-            {
-                "card_id": "blizzard:1",
-                "source_payload_json": json.dumps(
-                    {
-                        "official_reveal_en": {
-                            "cropImage": official,
-                            "image": "https://images.example/framed.png",
-                        },
-                        "blizzard_en": {"cropImage": official},
-                    }
-                ),
-            },
-            {
-                "card_id": "blizzard:2",
-                "source_payload_json": json.dumps(
-                    {
-                        "official_reveal_en": {
-                            "cropImage": "https://images.example/framed.png"
-                        }
-                    }
-                ),
-            },
-            {"card_id": "blizzard:3", "source_payload_json": "invalid"},
+
+def textured(size: tuple[int, int], seed: int = 7) -> Image.Image:
+    """Painterly noise: smooth color fields with enough detail to match."""
+    rng = random.Random(seed)
+    small = Image.new("RGB", (max(2, size[0] // 16), max(2, size[1] // 16)))
+    small.putdata(
+        [
+            (rng.randrange(40, 220), rng.randrange(40, 220), rng.randrange(40, 220))
+            for _ in range(small.width * small.height)
         ]
-        with mock.patch.object(
-            horizontal,
-            "query_rows",
-            side_effect=lambda conn, query: (
-                fixtures if "FROM constructed_cards" in query else []
-            ),
-        ):
-            candidates = horizontal.collect_candidates(mock.Mock(), {})
+    )
+    return small.resize(size, Image.Resampling.BICUBIC)
+
+
+def rows_for(tables: dict[str, list[dict]]):
+    def query_rows(conn, query):
+        for table, rows in tables.items():
+            if f"FROM {table}" in query:
+                return rows
+        return []
+
+    return query_rows
+
+
+class CandidateTest(unittest.TestCase):
+    def collect(self, tables: dict[str, list[dict]]) -> list[horizontal.Candidate]:
+        with mock.patch.object(horizontal, "query_rows", side_effect=rows_for(tables)):
+            return horizontal.collect_candidates(mock.Mock())
+
+    def test_revealed_cards_use_only_trusted_official_illustration_strips(self) -> None:
+        official = "https://d15f34w2p8l1cc.cloudfront.net/hearthstone/illustration.png"
+        candidates = self.collect(
+            {
+                "constructed_cards": [
+                    {
+                        "card_id": "blizzard:1",
+                        "source_payload_json": json.dumps(
+                            {
+                                "official_reveal_en": {
+                                    "cropImage": official,
+                                    "image": "https://images.example/framed.png",
+                                },
+                                "blizzard_en": {"cropImage": official},
+                            }
+                        ),
+                    },
+                    {
+                        "card_id": "blizzard:2",
+                        "source_payload_json": json.dumps(
+                            {"official_reveal_en": {"cropImage": "https://x.example/a.png"}}
+                        ),
+                    },
+                    {"card_id": "blizzard:3", "source_payload_json": "invalid"},
+                ]
+            }
+        )
         self.assertEqual(len(candidates), 1)
-        self.assertEqual(candidates[0].source_url, official)
-        self.assertEqual(candidates[0].source_kind, "art")
+        self.assertEqual(
+            (candidates[0].source_url, candidates[0].source_kind), (official, "strip")
+        )
         self.assertEqual(candidates[0].fallback_sources, ())
 
-    def test_constructed_reprints_try_their_own_art_before_original_card_art(
+    def test_constructed_prefers_local_full_art_then_game_texture_then_tile(
         self,
     ) -> None:
-        for prefix in ("CORE_", "VAN_", "LEG_"):
+        candidates = self.collect(
+            {
+                "constructed_cards": [
+                    {
+                        "card_id": "CORE_RLK_079",
+                        "dbf": 1,
+                        "local_wiki_full_art_url": "/uploads/full/CORE_RLK_079.jpg",
+                        "wiki_full_art_url": "https://wiki.example/full.jpg",
+                    }
+                ]
+            }
+        )
+        candidate = candidates[0]
+        self.assertEqual(
+            [(candidate.source_url, candidate.source_kind), *candidate.fallback_sources],
+            [
+                ("/uploads/full/CORE_RLK_079.jpg", "art"),
+                (HSJ + "orig/CORE_RLK_079.png", "art"),
+                (HSJ + "orig/RLK_079.png", "art"),
+                ("https://wiki.example/full.jpg", "art"),
+                (HSJ + "tiles/CORE_RLK_079.webp", "tile"),
+                (HSJ + "tiles/RLK_079.webp", "tile"),
+            ],
+        )
+        self.assertEqual(
+            candidate.focus_tiles,
+            (HSJ + "tiles/CORE_RLK_079.webp", HSJ + "tiles/RLK_079.webp"),
+        )
 
-            def rows(conn, query, prefix=prefix):
-                return (
-                    [{"card_id": prefix + "RLK_079", "dbf": 1}]
-                    if "FROM constructed_cards" in query
-                    else []
-                )
-
-            with mock.patch.object(horizontal, "query_rows", side_effect=rows):
-                candidates = horizontal.collect_candidates(mock.Mock(), {})
-            self.assertEqual(
-                candidates[0].source_url,
-                "https://art.hearthstonejson.com/v1/tiles/" + prefix + "RLK_079.webp",
-            )
-            self.assertEqual(
-                candidates[0].fallback_sources,
-                (
-                    ("https://art.hearthstonejson.com/v1/tiles/RLK_079.webp", "art"),
-                    (
-                        "https://art.hearthstonejson.com/v1/orig/"
-                        + prefix
-                        + "RLK_079.png",
-                        "art",
-                    ),
-                    ("https://art.hearthstonejson.com/v1/orig/RLK_079.png", "art"),
-                ),
-            )
-
-    def test_card_candidates_use_full_art_and_hsj_for_constructed_missing_wiki(
-        self,
-    ) -> None:
-        tables = {
-            "battlegrounds_cards": ("battleground_card", "art_image"),
-            "constructed_cards": ("constructed_card", "local_wiki_full_art_url"),
-            "battlegrounds_library_cards": ("library_card", "local_full_art_url"),
-            "battlegrounds_timewarped_cards": ("timewarped_card", "art_image_url"),
+    def test_rendered_cards_and_crops_are_never_sources(self) -> None:
+        framed = {
+            "dbf": 1,
+            "static_image_url": "/uploads/hero-skins/static/HERO_01af.png",
+            "card_image_url": "/uploads/pets/cards/PET_8_1.png",
+            "hero_image_url": "https://wiki.example/BG20_HERO_100.png",
+            "crop_image_url": "https://images.example/crop.png",
+            "wiki_image_url": "https://wiki.example/thumb/AT_COIN.png",
+            "image_url": "https://images.example/render/AT_COIN.png",
         }
+        candidates = self.collect(
+            {
+                "hero_skins": [
+                    dict(framed, card_id="HERO_01af", game_id="HERO_01af", full_art_url=None)
+                ],
+                "battlegrounds_heroes": [
+                    dict(
+                        framed,
+                        card_id="BG20_HERO_100",
+                        game_id="BG20_HERO_100",
+                        hero_full_art_url="https://wiki.example/full.jpg",
+                    )
+                ],
+                "hearthstone_coins": [dict(framed, card_id="AT_COIN", game_id="AT_COIN")],
+                "hearthstone_pets": [
+                    dict(framed, card_id="PET_8_1", variant_id=22),
+                    dict(
+                        framed,
+                        card_id="PET_3_1",
+                        variant_id=5,
+                        end_screen_background_url="https://wiki.example/bg.png",
+                    ),
+                ],
+                "battlegrounds_library_cards": [
+                    dict(
+                        framed,
+                        library="quest",
+                        card_id="BG24_Quest_314",
+                        game_id="BG24_Quest_314",
+                    )
+                ],
+            }
+        )
+        sources = {
+            (item.entity_type, item.entity_id): [
+                (item.source_url, item.source_kind),
+                *item.fallback_sources,
+            ]
+            for item in candidates
+        }
+        self.assertEqual(
+            sources,
+            {
+                ("hero_skin", "HERO_01af"): [(HSJ + "orig/HERO_01af.png", "art")],
+                # Remote wiki art can be a panorama: the game portrait comes first.
+                ("hero", "BG20_HERO_100"): [
+                    (HSJ + "orig/BG20_HERO_100.png", "art"),
+                    ("https://wiki.example/full.jpg", "art"),
+                ],
+                ("coin", "AT_COIN"): [(HSJ + "orig/AT_COIN.png", "art")],
+                ("pet", "PET_3_1"): [("https://wiki.example/bg.png", "art")],
+                ("library_card", "quest:BG24_Quest_314"): [
+                    (HSJ + "orig/BG24_Quest_314.png", "art")
+                ],
+            },
+        )
+        for item in candidates:
+            self.assertEqual(item.focus_tiles, ())
 
-        def rows(conn, query):
-            for table, (_, art_field) in tables.items():
-                if f"FROM {table}" not in query:
-                    continue
-                framed = {
-                    "card_id": "FRAMED",
-                    "entity_id": "FRAMED",
-                    "library": "quest",
-                    "dbf": 1,
-                    "local_crop_image_url": "/uploads/crop.jpg",
-                    "crop_image_url": "https://images.example/crop.jpg",
-                    "card_image": "/uploads/card.png",
-                    "image_url": "/uploads/card.png",
-                    "local_image_url": "/uploads/card.png",
-                    "card_image_url": "/uploads/card.png",
-                }
-                artwork = dict(framed, card_id="ART", entity_id="ART")
-                artwork[art_field] = f"/uploads/art/{table}.jpg"
-                artwork["wiki_full_art_url"] = "https://images.example/full-art.jpg"
-                return [artwork, framed]
-            return []
+    def test_local_art_precedes_the_game_texture(self) -> None:
+        candidates = self.collect(
+            {
+                "battlegrounds_cards": [
+                    {"card_id": "BG1", "game_id": "BG1", "dbf": 1, "art_image": "/uploads/art/BG1.jpg"}
+                ]
+            }
+        )
+        self.assertEqual(candidates[0].source_url, "/uploads/art/BG1.jpg")
+        self.assertEqual(
+            candidates[0].fallback_sources, ((HSJ + "orig/BG1.png", "art"),)
+        )
 
-        with mock.patch.object(horizontal, "query_rows", side_effect=rows):
-            candidates = horizontal.collect_candidates(
-                mock.Mock(), {1: "/uploads/blizzard-crop.jpg"}
-            )
 
-        self.assertEqual(len(candidates), 5)
-        for candidate in candidates:
-            self.assertEqual(candidate.source_kind, "art")
-            if (
-                candidate.entity_type == "constructed_card"
-                and candidate.entity_id == "FRAMED"
-            ):
-                self.assertEqual(
-                    candidate.source_url,
-                    "https://art.hearthstonejson.com/v1/tiles/FRAMED.webp",
-                )
-                continue
-            self.assertIn("ART", candidate.entity_id)
-            if candidate.entity_type != "constructed_card":
-                self.assertTrue(candidate.source_url.startswith("/uploads/art/"))
-            self.assertTrue(
-                all(kind == "art" for _, kind in candidate.fallback_sources)
-            )
-            if candidate.entity_type == "constructed_card":
-                self.assertEqual(
-                    candidate.source_url,
-                    "https://art.hearthstonejson.com/v1/tiles/ART.webp",
-                )
-                self.assertIn(
-                    ("/uploads/art/constructed_cards.jpg", "art"),
-                    candidate.fallback_sources,
-                )
-                self.assertIn(
-                    ("https://art.hearthstonejson.com/v1/orig/ART.png", "art"),
-                    candidate.fallback_sources,
-                )
-
-    def test_sync_disables_framed_card_assets_but_keeps_art_and_other_entities(
-        self,
-    ) -> None:
+class SyncTest(unittest.TestCase):
+    def test_sync_disables_framed_and_cropped_assets_of_every_entity(self) -> None:
         with sqlite3.connect(":memory:") as database:
             database.execute(
                 "CREATE TABLE horizontal_art_assets (entity_type TEXT, source_kind TEXT, status TEXT, last_error TEXT, recipe_version TEXT)"
             )
             fixtures = [
-                ("battleground_card", "crop", "ready"),
-                ("constructed_card", "card", "ready"),
+                ("hero_skin", "card", "ready"),
+                ("hero", "crop", "ready"),
                 ("library_card", "art", "ready"),
+                ("constructed_card", "strip", "ready"),
                 ("timewarped_card", "crop", "error"),
-                ("hero", "card", "ready"),
+                ("pet", "card", "ready"),
             ]
             database.executemany(
                 "INSERT INTO horizontal_art_assets VALUES (?, ?, ?, NULL, 'old')",
@@ -189,506 +225,283 @@ class HorizontalArtTest(unittest.TestCase):
                 cursor.rowcount = result.rowcount
 
             cursor.execute.side_effect = execute
-            self.assertEqual(horizontal.disable_framed_card_assets(conn), 2)
+            self.assertEqual(horizontal.disable_framed_card_assets(conn), 3)
             statuses = database.execute(
                 "SELECT status FROM horizontal_art_assets ORDER BY rowid"
             ).fetchall()
             self.assertEqual(
-                statuses,
-                [
-                    ("unavailable",),
-                    ("unavailable",),
-                    ("ready",),
-                    ("error",),
-                    ("ready",),
-                ],
+                [status for (status,) in statuses],
+                ["unavailable", "unavailable", "ready", "ready", "error", "unavailable"],
             )
+
+    def run_main(self, argv: list[str], candidates=(), existing=None):
+        conn = mock.MagicMock()
+        output = StringIO()
+        with (
+            mock.patch.object(sys, "argv", ["sync_horizontal_art.py", *argv]),
+            mock.patch.object(horizontal, "load_php_config", return_value={}),
+            mock.patch.object(horizontal, "connect_db", return_value=conn),
+            mock.patch.object(horizontal, "ensure_schema"),
+            mock.patch.object(horizontal, "load_focus_overrides", return_value={}),
+            mock.patch.object(
+                horizontal, "collect_candidates", return_value=list(candidates)
+            ),
+            mock.patch.object(
+                horizontal, "load_existing_assets", return_value=existing or {}
+            ),
+            mock.patch.object(
+                horizontal,
+                "process_candidate",
+                side_effect=lambda candidate, *_, **__: {
+                    "action": "error",
+                    "candidate": candidate,
+                    "error": "x",
+                },
+            ) as process,
+            mock.patch.object(horizontal, "persist_result"),
+            mock.patch.object(
+                horizontal, "disable_framed_card_assets", return_value=2
+            ) as disable,
+            redirect_stdout(output),
+        ):
+            code = horizontal.main()
+        return code, json.loads(output.getvalue()), conn, disable, process
 
     def test_dry_run_does_not_disable_existing_assets(self) -> None:
         for dry_run in (True, False):
             with self.subTest(dry_run=dry_run):
-                conn = mock.MagicMock()
-                output = StringIO()
-                argv = ["sync_horizontal_art.py", "--workers", "1"]
-                if dry_run:
-                    argv.append("--dry-run")
-                with (
-                    mock.patch.object(sys, "argv", argv),
-                    mock.patch.object(horizontal, "load_php_config", return_value={}),
-                    mock.patch.object(horizontal, "connect_db", return_value=conn),
-                    mock.patch.object(horizontal, "ensure_schema"),
-                    mock.patch.object(
-                        horizontal, "fetch_blizzard_crop_urls", return_value={}
-                    ),
-                    mock.patch.object(
-                        horizontal, "collect_candidates", return_value=[]
-                    ),
-                    mock.patch.object(
-                        horizontal, "load_existing_assets", return_value={}
-                    ),
-                    mock.patch.object(
-                        horizontal, "disable_framed_card_assets", return_value=2
-                    ) as disable,
-                    redirect_stdout(output),
-                ):
-                    self.assertEqual(horizontal.main(), 0)
+                code, summary, conn, disable, _ = self.run_main(
+                    ["--workers", "1", *(["--dry-run"] if dry_run else [])]
+                )
+                self.assertEqual(code, 0)
                 if dry_run:
                     disable.assert_not_called()
                     conn.commit.assert_not_called()
                 else:
                     disable.assert_called_once_with(conn)
                     conn.commit.assert_called_once_with()
-                self.assertEqual(
-                    json.loads(output.getvalue())["framed_assets_disabled"],
-                    0 if dry_run else 2,
-                )
+                self.assertEqual(summary["framed_assets_disabled"], 0 if dry_run else 2)
 
-    def create_source(self, path: Path, size: str) -> None:
-        subprocess.run(
-            [
-                "convert",
-                "-size",
-                size,
-                "gradient:#102030-#f08030",
-                str(path),
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
+    def test_bounded_runs_defer_work_and_keep_legacy_assets(self) -> None:
+        candidates = [
+            horizontal.Candidate("hero", f"H{index}", None, "/uploads/a.png", "art")
+            for index in range(5)
+        ]
+        code, summary, _, disable, process = self.run_main(
+            ["--max-generate", "2"], candidates
         )
+        self.assertEqual(code, 1)
+        self.assertEqual(process.call_count, 2)
+        self.assertEqual(summary["deferred"], 3)
+        # Legacy rows stay visible until a complete run replaced what it can.
+        disable.assert_not_called()
+        _, summary, _, disable, process = self.run_main(
+            ["--entity", "coin", "--max-generate", "0"], candidates
+        )
+        self.assertEqual(process.call_count, 0)
+        disable.assert_not_called()
 
-    def test_render_supported_source_kinds(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
-            fixtures = {
-                "crop": "243x64",
-                "card": "256x388",
-                "art": "900x1200",
-            }
-            for source_kind, size in fixtures.items():
-                with self.subTest(source_kind=source_kind):
-                    source = root / f"{source_kind}.png"
-                    target = root / f"{source_kind}.webp"
-                    self.create_source(source, size)
-                    horizontal.render_horizontal_art(source, target, source_kind)
-                    self.assertEqual(horizontal.identify_size(target), (320, 64))
-                    self.assertGreater(target.stat().st_size, 0)
-                    with Image.open(target) as rendered:
-                        self.assertEqual(rendered.mode, "RGBA")
 
-    def test_light_margins_are_removed_on_all_sides_before_focusing(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            source = Path(tmp_dir) / "padded.png"
-            target = Path(tmp_dir) / "trimmed.png"
-            image = Image.new("RGB", (512, 512), "white")
-            ImageDraw.Draw(image).rectangle((70, 8, 441, 503), fill="#164878")
-            image.save(source)
-            horizontal.trim_light_art_margins(source, target)
-            trimmed = Image.open(target).convert("RGB")
-            self.assertEqual(trimmed.size, (372, 496))
-            self.assertEqual(trimmed.getextrema(), ((22, 22), (72, 72), (120, 120)))
+class RenderTest(unittest.TestCase):
+    def test_white_and_gray_texture_padding_is_removed(self) -> None:
+        # New cards: portrait art padded with white columns to a square texture.
+        canvas = Image.new("RGBA", (512, 512), "white")
+        canvas.paste(textured((300, 512)), (106, 0))
+        trimmed = horizontal.trim_padding(canvas)
+        self.assertLessEqual(abs(trimmed.width - 300), 8)
+        self.assertGreaterEqual(trimmed.height, 500)
+        # Older textures: light gray packing bars across most of the bottom rows.
+        canvas = textured((512, 512)).convert("RGBA")
+        draw = ImageDraw.Draw(canvas)
+        draw.rectangle((0, 470, 200, 511), fill="#c8c8c8")
+        draw.rectangle((330, 470, 511, 511), fill="#c8c8c8")
+        trimmed = horizontal.trim_padding(canvas)
+        self.assertLessEqual(abs(trimmed.height - 470), 8)
+        self.assertGreaterEqual(trimmed.width, 500)
 
     def test_bright_subject_touching_edge_is_not_treated_as_padding(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            source = Path(tmp_dir) / "subject.png"
-            target = Path(tmp_dir) / "trimmed.png"
-            image = Image.new("RGB", (256, 64), "#164878")
-            ImageDraw.Draw(image).ellipse((200, 8, 280, 56), fill="white")
-            image.save(source)
-            horizontal.trim_light_art_margins(source, target)
-            self.assertEqual(horizontal.identify_size(target), image.size)
+        image = textured((256, 256)).convert("RGBA")
+        ImageDraw.Draw(image).ellipse((180, 60, 300, 180), fill="#fff4d0")
+        self.assertGreater(horizontal.trim_padding(image).width, 248)
 
-    def test_game_strip_keeps_face_at_right_edge_without_recropping(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            source = Path(tmp_dir) / "game-cut.png"
-            target = Path(tmp_dir) / "tile.webp"
-            image = Image.new("RGB", (256, 59), "#164878")
-            draw = ImageDraw.Draw(image)
-            draw.rectangle((0, 0, 27, 58), fill="white")
-            draw.rectangle((230, 3, 253, 55), fill="#df9955")
-            image.save(source)
-            horizontal.render_horizontal_art(source, target, "art")
-            rendered = Image.open(target).convert("RGBA")
-            face = [
-                (x, y)
-                for y in range(64)
-                for x in range(225, 320)
-                if rendered.getpixel((x, y))[0] > 170
-                and 90 < rendered.getpixel((x, y))[1] < 190
-                and rendered.getpixel((x, y))[2] < 130
-            ]
-            self.assertGreater(len(face), 1200)
-            self.assertGreater(max(x for x, _ in face), 313)
-            self.assertGreater(max(y for _, y in face) - min(y for _, y in face), 50)
-            self.assertFalse(
-                any(
-                    min(rendered.getpixel((x, y))[:3]) > 240
-                    and rendered.getpixel((x, y))[3] > 10
-                    for x in range(320)
-                    for y in range(64)
-                )
-            )
+    def test_game_tile_locates_stretched_subject_in_full_art(self) -> None:
+        art = textured((500, 640), seed=3)
+        left, top, right, bottom = 60, 150, 460, 270
+        # Game tiles are a horizontally stretched view of the illustration.
+        tile = art.crop((left, top, right, bottom)).resize((256, 59))
+        ImageDraw.Draw(tile).rectangle((10, 0, 55, 58), fill="white")
+        x, y, width, height, score = horizontal.locate_game_tile(
+            art.convert("RGBA"), tile.convert("RGBA")
+        )
+        self.assertGreater(score, 0.9)
+        self.assertAlmostEqual(x + width / 2, (left + right) / 2 / 500, delta=0.04)
+        self.assertAlmostEqual(y + height / 2, (top + bottom) / 2 / 640, delta=0.04)
 
-    def test_subject_focus_prefers_detailed_character_area(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            source = Path(tmp_dir) / "subject.png"
-            image = Image.new("RGB", (600, 800), "#253443")
-            draw = ImageDraw.Draw(image)
-            draw.ellipse((390, 190, 510, 310), fill="#d99b75")
-            for offset in range(0, 96, 12):
-                draw.line(
-                    (402 + offset, 205, 402, 290 - offset),
-                    fill="#17202a",
-                    width=5,
-                )
-            draw.ellipse((420, 235, 435, 250), fill="#ffffff")
-            draw.ellipse((465, 235, 480, 250), fill="#ffffff")
-            image.save(source)
+    def test_subject_focus_prefers_face_over_detailed_lower_hands(self) -> None:
+        image = Image.new("RGB", (600, 800), "#253443")
+        draw = ImageDraw.Draw(image)
+        draw.ellipse((390, 190, 510, 310), fill="#d99b75")
+        draw.ellipse((420, 235, 435, 250), fill="#ffffff")
+        draw.ellipse((465, 235, 480, 250), fill="#ffffff")
+        for offset in range(0, 200, 12):
+            draw.line((80, 560 + offset // 4, 280, 760 - offset), fill="#f0e090", width=3)
+        focus_x, focus_y = horizontal.subject_focus(image)
+        self.assertAlmostEqual(focus_y, 250 / 800, delta=0.07)
+        self.assertGreater(focus_x, 0.45)
 
-            focus_x, focus_y = horizontal.subject_focus(source)
+    def test_crop_keeps_aspect_and_subject_out_of_the_text_fade(self) -> None:
+        for size, focus in (((400, 512), (0.5, 0.3)), ((2000, 400), (0.8, 0.5))):
+            with self.subTest(size=size):
+                left, top, width, height = horizontal.plan_crop(*size, *focus)
+                self.assertAlmostEqual(width / height, horizontal.ART_ASPECT, places=6)
+                self.assertTrue(0 <= left and left + width <= size[0] + 1e-6)
+                self.assertTrue(0 <= top and top + height <= size[1] + 1e-6)
+                self.assertTrue(top <= focus[1] * size[1] <= top + height)
+        left, _, width, _ = horizontal.plan_crop(400, 512, 0.3, 0.3)
+        self.assertGreaterEqual((0.3 * 400 - left) / width, 0.45)
 
-            self.assertGreater(focus_x, 0.50)
-            self.assertLess(focus_x, 0.62)
-            self.assertGreater(focus_y, 0.20)
-            self.assertLess(focus_y, 0.48)
-
-    def test_tile_art_blends_into_rarity_background_without_black_padding(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
-            source = root / "crop.png"
-            target = root / "tile.webp"
-            Image.new("RGB", (243, 64), "#d08040").save(source)
-
-            horizontal.render_horizontal_art(source, target, "crop")
-
-            with Image.open(target) as image:
-                self.assertEqual(image.mode, "RGBA")
-                alpha = image.getchannel("A")
-                self.assertEqual(alpha.getpixel((0, 32)), 0)
-                self.assertEqual(alpha.getpixel((128, 32)), 0)
-                self.assertEqual(alpha.getpixel((319, 32)), 255)
-                transition = [alpha.getpixel((x, 32)) for x in range(129, 226)]
-                self.assertEqual(transition, sorted(transition))
-                self.assertGreater(len(set(transition)), 60)
-                self.assertLessEqual(max(b - a for a, b in pairwise(transition)), 5)
-                for color in ("#666666", "#20405a", "#503961", "#705022"):
-                    with self.subTest(background=color):
-                        background = Image.new("RGBA", image.size, color)
-                        composite = Image.alpha_composite(background, image)
-                        self.assertEqual(
-                            composite.getpixel((80, 32)),
-                            background.getpixel((80, 32)),
-                        )
-                        self.assertGreater(composite.getpixel((180, 32))[0], 50)
-
-    def test_tile_art_preserves_transparent_source_pixels(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
-            source = root / "crop.png"
-            target = root / "tile.webp"
-            image = Image.new("RGBA", (243, 64), "#d08040")
-            ImageDraw.Draw(image).rectangle((0, 0, 242, 7), fill=(0, 0, 0, 0))
-            image.save(source)
-
-            horizontal.render_horizontal_art(source, target, "crop")
-
-            with Image.open(target) as rendered:
-                self.assertEqual(rendered.convert("RGBA").getpixel((319, 2))[3], 0)
-                self.assertEqual(rendered.convert("RGBA").getpixel((319, 32))[3], 255)
-
-    def test_subject_focus_ignores_detailed_outer_border(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            source = Path(tmp_dir) / "border.png"
-            image = Image.new("RGB", (600, 800), "#263748")
-            draw = ImageDraw.Draw(image)
-            for inset in range(0, 45, 5):
-                draw.rectangle(
-                    (inset, inset, 599 - inset, 799 - inset),
-                    outline="#f7ca5d",
-                    width=2,
-                )
-            draw.ellipse((245, 210, 355, 320), fill="#b77b62")
-            draw.line((260, 230, 340, 300), fill="#18212b", width=8)
-            draw.line((340, 230, 260, 300), fill="#18212b", width=8)
-            image.save(source)
-
-            focus_x, focus_y = horizontal.subject_focus(source)
-
-            self.assertGreater(focus_x, 0.38)
-            self.assertLess(focus_x, 0.62)
-            self.assertGreater(focus_y, 0.20)
-            self.assertLess(focus_y, 0.50)
-
-    def test_portrait_character_face_remains_visible_in_horizontal_art(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
-            source = root / "portrait.png"
-            target = root / "horizontal.webp"
-            image = Image.new("RGB", (600, 800), "#21384a")
-            draw = ImageDraw.Draw(image)
-            draw.ellipse((365, 155, 515, 315), fill="#d99b75")
-            draw.ellipse((400, 215, 420, 235), fill="#ffffff")
-            draw.ellipse((460, 215, 480, 235), fill="#ffffff")
-            draw.arc((405, 225, 475, 280), 10, 170, fill="#4a211a", width=6)
-            image.save(source)
-
-            horizontal.render_horizontal_art(source, target, "art")
-
-            rendered = Image.open(target).convert("RGB")
-            face_pixels = [
-                (x, y)
-                for y in range(rendered.height)
-                for x in range(185, rendered.width)
-                if rendered.getpixel((x, y))[0] > 150
-                and rendered.getpixel((x, y))[1] > 75
-                and rendered.getpixel((x, y))[2] < 155
-            ]
-            self.assertGreater(len(face_pixels), 450)
-            self.assertGreater(
-                max(y for _, y in face_pixels) - min(y for _, y in face_pixels), 28
-            )
-
-    def test_curated_crop_keeps_left_side_character_visible(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
-            source = root / "curated-crop.png"
-            target = root / "horizontal.webp"
-            image = Image.new("RGB", (243, 64), "#132839")
-            draw = ImageDraw.Draw(image)
-            draw.ellipse((18, 3, 82, 63), fill="#d99b75")
-            draw.ellipse((34, 22, 43, 31), fill="#ffffff")
-            draw.ellipse((57, 22, 66, 31), fill="#ffffff")
-            draw.line((35, 45, 65, 45), fill="#4a211a", width=4)
-            image.save(source)
-
-            horizontal.render_horizontal_art(source, target, "crop")
-
-            rendered = Image.open(target).convert("RGB")
-            visible_face_pixels = sum(
-                1
-                for y in range(rendered.height)
-                for x in range(150, rendered.width)
-                if rendered.getpixel((x, y))[0] > 135
-                and rendered.getpixel((x, y))[1] > 65
-            )
-            self.assertGreater(visible_face_pixels, 300)
-
-    def test_output_filename_is_stable_and_collision_safe(self) -> None:
-        self.assertEqual(horizontal.output_filename("BG_TEST_001"), "BG_TEST_001.webp")
-        first = horizontal.output_filename("quest:BG_TEST_001")
-        second = horizontal.output_filename("quest/BG_TEST_001")
-        self.assertNotEqual(first, second)
-        self.assertTrue(first.endswith(".webp"))
-
-    def test_rejects_unknown_source_kind(self) -> None:
+    def test_render_writes_sharp_2x_and_compatible_1x_renditions(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             source = Path(tmp_dir) / "source.png"
-            target = Path(tmp_dir) / "target.webp"
-            self.create_source(source, "243x64")
-            with self.assertRaisesRegex(ValueError, "Unsupported source kind"):
-                horizontal.render_horizontal_art(source, target, "unknown")
+            textured((1200, 1600)).save(source)
+            target = Path(tmp_dir) / "out" / "CARD.webp"
+            report = horizontal.render_horizontal_art(source, target, "art")
+            retina = horizontal.retina_path(target)
+            self.assertEqual(retina.name, "CARD@2x.webp")
+            with Image.open(target) as small, Image.open(retina) as large:
+                self.assertEqual(small.size, (320, 64))
+                self.assertEqual(large.size, (640, 128))
+                alpha = np.asarray(large.convert("RGBA"))[..., 3]
+            self.assertEqual(int(alpha[:, :150].max()), 0)
+            self.assertGreaterEqual(int(alpha[:, 400:].min()), 250)
+            self.assertEqual(report["focus_method"], "subject")
+            self.assertEqual(report["white_columns"], 0)
 
-    def test_accepts_generic_binary_image_content_type(self) -> None:
-        self.assertTrue(
-            horizontal.allowed_image_content_type("application/octet-stream")
+    def test_quality_check_rejects_artifacts(self) -> None:
+        image = Image.new("RGBA", (640, 128), "#406080")
+        ImageDraw.Draw(image).rectangle((420, 0, 639, 127), fill="white")
+        with self.assertRaisesRegex(RuntimeError, "white margin"):
+            horizontal.check_quality(horizontal.quality_report(image))
+        flat = Image.new("RGBA", (640, 128), "#406080")
+        with self.assertRaisesRegex(RuntimeError, "blank"):
+            horizontal.check_quality(horizontal.quality_report(flat))
+        with self.assertRaises(ValueError):
+            horizontal.render_horizontal_art(Path("x"), Path("y.webp"), "card")
+
+
+class ProcessTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.uploads = self.root / "uploads"
+        (self.uploads / "art").mkdir(parents=True)
+        self.patches = [
+            mock.patch.object(horizontal, "APP_ROOT", self.root),
+            mock.patch.object(horizontal, "UPLOAD_ROOT", self.uploads),
+        ]
+        for patch in self.patches:
+            patch.start()
+
+    def tearDown(self) -> None:
+        for patch in self.patches:
+            patch.stop()
+        self.tmp.cleanup()
+
+    def test_new_recipe_writes_beside_the_previous_files(self) -> None:
+        textured((900, 1200)).save(self.uploads / "art" / "TEST_CARD.jpg")
+        old = self.uploads / "horizontal-art" / "battleground_card" / "TEST_CARD.webp"
+        old.parent.mkdir(parents=True)
+        old.write_bytes(b"recipe 7")
+        candidate = horizontal.Candidate(
+            "battleground_card", "TEST_CARD", 1, "/uploads/art/TEST_CARD.jpg", "art"
         )
-        self.assertTrue(horizontal.allowed_image_content_type("image/webp"))
-        self.assertFalse(horizontal.allowed_image_content_type("text/html"))
+        generated = horizontal.process_candidate(
+            candidate, None, force=False, dry_run=False
+        )
+        self.assertEqual(generated["action"], "generated")
+        self.assertEqual(
+            generated["public_path"],
+            "/uploads/horizontal-art/r8/battleground_card/TEST_CARD.webp",
+        )
+        self.assertEqual(old.read_bytes(), b"recipe 7")
+        current = {
+            "status": "ready",
+            "source_signature": generated["source_signature"],
+            "recipe_version": horizontal.RECIPE_VERSION,
+            "local_image_url": generated["public_path"],
+        }
+        unchanged = horizontal.process_candidate(
+            candidate, current, force=False, dry_run=False
+        )
+        self.assertEqual(unchanged["action"], "unchanged")
+        self.assertTrue(horizontal.is_current(candidate, current, None))
+        # A manual focus override is part of the signature.
+        overridden = horizontal.process_candidate(
+            candidate,
+            current,
+            force=False,
+            dry_run=False,
+            focus_overrides={"battleground_card:TEST_CARD": (0.5, 0.2)},
+        )
+        self.assertEqual(overridden["action"], "generated")
+        self.assertEqual(overridden["report"]["focus_method"], "override")
+        legacy = dict(current, recipe_version="7-game-cuts-trimmed-art")
+        self.assertFalse(horizontal.is_current(candidate, legacy, None))
 
-    def test_square_crop_source_and_white_edge_are_repaired(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
-            source = root / "square.jpg"
-            target = root / "horizontal.webp"
-            subprocess.run(
-                [
-                    "convert",
-                    "-size",
-                    "410x512",
-                    "gradient:#153755-#ed782f",
-                    "-size",
-                    "102x512",
-                    "xc:white",
-                    "+append",
-                    str(source),
-                ],
-                check=True,
-            )
-            horizontal.render_horizontal_art(source, target, "crop")
-            pixel = subprocess.run(
-                ["identify", "-format", "%[pixel:p{319,32}]", str(target)],
-                check=True,
-                capture_output=True,
-                text=True,
-            ).stdout
-            self.assertNotIn("255,255,255", pixel)
+    def test_failed_source_falls_back_and_missing_art_is_unavailable(self) -> None:
+        textured((900, 1200)).save(self.uploads / "art" / "fallback.jpg")
+        Image.new("RGB", (900, 1200), "white").save(self.uploads / "art" / "blank.jpg")
+        candidate = horizontal.Candidate(
+            "battleground_card",
+            "TEST",
+            None,
+            "/uploads/art/blank.jpg",
+            "art",
+            (("/uploads/art/fallback.jpg", "art"),),
+        )
+        result = horizontal.process_candidate(candidate, None, force=False, dry_run=False)
+        self.assertEqual(result["action"], "generated")
+        self.assertEqual(result["source_url"], "/uploads/art/fallback.jpg")
 
-    def test_wide_crop_source_white_edge_is_repaired(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
-            source = root / "crop.jpg"
-            target = root / "horizontal.webp"
-            subprocess.run(
-                [
-                    "convert",
-                    "-size",
-                    "213x64",
-                    "gradient:#153755-#ed782f",
-                    "-size",
-                    "30x64",
-                    "xc:white",
-                    "+append",
-                    str(source),
-                ],
-                check=True,
-            )
-            horizontal.render_horizontal_art(source, target, "crop")
-            pixel = subprocess.run(
-                ["identify", "-format", "%[pixel:p{319,32}]", str(target)],
-                check=True,
-                capture_output=True,
-                text=True,
-            ).stdout
-            self.assertNotIn("255,255,255", pixel)
-
-    def test_blank_primary_crop_uses_fallback(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
-            uploads = root / "uploads"
-            blank = uploads / "blank.jpg"
-            fallback = uploads / "fallback.jpg"
-            uploads.mkdir()
-            subprocess.run(
-                ["convert", "-size", "243x64", "xc:white", str(blank)], check=True
-            )
-            self.create_source(fallback, "900x1200")
-            candidate = horizontal.Candidate(
-                "hero",
-                "BLANK_HERO",
-                None,
-                "/uploads/blank.jpg",
-                "crop",
-                (("/uploads/fallback.jpg", "art"),),
-            )
-            with (
-                mock.patch.object(horizontal, "APP_ROOT", root),
-                mock.patch.object(horizontal, "UPLOAD_ROOT", uploads),
-            ):
-                result = horizontal.process_candidate(
-                    candidate, None, force=False, dry_run=False
-                )
-            self.assertEqual(result["action"], "generated")
-            self.assertEqual(result["source_url"], "/uploads/fallback.jpg")
-
-    def test_process_candidate_uses_fallback_art(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
-            uploads = root / "uploads"
-            fallback = uploads / "art" / "fallback.jpg"
-            fallback.parent.mkdir(parents=True)
-            self.create_source(fallback, "900x1200")
-            candidate = horizontal.Candidate(
-                "hero",
-                "TEST_HERO",
-                456,
-                "ftp://invalid.test/primary.jpg",
-                "art",
-                (("/uploads/art/fallback.jpg", "art"),),
-            )
-            with (
-                mock.patch.object(horizontal, "APP_ROOT", root),
-                mock.patch.object(horizontal, "UPLOAD_ROOT", uploads),
-            ):
-                result = horizontal.process_candidate(
-                    candidate, None, force=False, dry_run=False
-                )
-            self.assertEqual(result["action"], "generated")
-            self.assertEqual(result["source_url"], "/uploads/art/fallback.jpg")
-
-    def test_permanently_missing_art_is_not_a_sync_failure(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
-            candidate = horizontal.Candidate(
-                "battleground_card",
-                "MISSING_TEST_CARD",
-                None,
-                "https://images.example/missing.png",
-                "art",
-            )
-            missing = urllib.error.HTTPError(
-                candidate.source_url, 404, "Not Found", None, None
-            )
-            with (
-                mock.patch.object(horizontal, "APP_ROOT", root),
-                mock.patch.object(horizontal, "UPLOAD_ROOT", root / "uploads"),
-                mock.patch.object(horizontal, "download_source", side_effect=missing),
-            ):
-                result = horizontal.process_candidate(
-                    candidate, None, force=False, dry_run=False
-                )
+        missing = horizontal.Candidate(
+            "battleground_card", "MISSING", None, "https://images.example/x.png", "art"
+        )
+        error = urllib.error.HTTPError(missing.source_url, 404, "Not Found", None, None)
+        with mock.patch.object(horizontal, "download_source", side_effect=error):
+            result = horizontal.process_candidate(missing, None, force=False, dry_run=False)
         self.assertEqual(result["action"], "unavailable")
 
-    def test_process_local_candidate_is_idempotent(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
-            uploads = root / "uploads"
-            source = uploads / "art" / "TEST_CARD.jpg"
-            source.parent.mkdir(parents=True)
-            self.create_source(source, "900x1200")
-            candidate = horizontal.Candidate(
-                "battleground_card",
-                "TEST_CARD",
-                123,
-                "/uploads/art/TEST_CARD.jpg",
-                "art",
-            )
-            with (
-                mock.patch.object(horizontal, "APP_ROOT", root),
-                mock.patch.object(horizontal, "UPLOAD_ROOT", uploads),
-            ):
-                generated = horizontal.process_candidate(
-                    candidate,
-                    None,
-                    force=False,
-                    dry_run=False,
-                )
-                self.assertEqual(generated["action"], "generated")
-                target = horizontal.local_upload_path(generated["public_path"])
-                self.assertEqual(horizontal.identify_size(target), (320, 64))
-                unchanged = horizontal.process_candidate(
-                    candidate,
-                    {
-                        "status": "ready",
-                        "source_signature": generated["source_signature"],
-                        "recipe_version": horizontal.RECIPE_VERSION,
-                    },
-                    force=False,
-                    dry_run=False,
-                )
-                self.assertEqual(unchanged["action"], "unchanged")
-                regenerated = horizontal.process_candidate(
-                    candidate,
-                    {
-                        "status": "ready",
-                        "source_signature": generated["source_signature"],
-                        "recipe_version": "4-subject-aware-focus",
-                    },
-                    force=False,
-                    dry_run=False,
-                )
-                self.assertEqual(regenerated["action"], "generated")
+    def test_constructed_tile_sets_focus(self) -> None:
+        art = textured((500, 640), seed=5)
+        art.save(self.uploads / "art" / "C.png")
+        art.crop((40, 380, 460, 480)).resize((256, 59)).save(self.uploads / "art" / "tile.webp")
+        candidate = horizontal.Candidate(
+            "constructed_card",
+            "C",
+            None,
+            "/uploads/art/C.png",
+            "art",
+            focus_tiles=("/uploads/art/tile.webp",),
+        )
+        result = horizontal.process_candidate(candidate, None, force=False, dry_run=False)
+        self.assertEqual(result["report"]["focus_method"], "game_tile")
+        self.assertAlmostEqual(result["report"]["focus"][1], 430 / 640, delta=0.04)
 
-    def test_local_upload_path_rejects_escape(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
-            uploads = root / "uploads"
-            uploads.mkdir()
-            with (
-                mock.patch.object(horizontal, "APP_ROOT", root),
-                mock.patch.object(horizontal, "UPLOAD_ROOT", uploads),
-                self.assertRaisesRegex(ValueError, "escapes media root"),
-            ):
-                horizontal.local_upload_path("/uploads/../outside.webp")
+
+class WiringTest(unittest.TestCase):
+    def test_output_filename_is_stable_and_collision_safe(self) -> None:
+        self.assertEqual(horizontal.output_filename("BG_001"), "BG_001.webp")
+        self.assertRegex(
+            horizontal.output_filename("quest:BG24_Quest_314"),
+            r"^quest_BG24_Quest_314-[0-9a-f]{10}\.webp$",
+        )
+
+    def test_focus_overrides_file_is_valid(self) -> None:
+        overrides = horizontal.load_focus_overrides()
+        for key in overrides:
+            entity_type, _, entity_id = key.partition(":")
+            self.assertIn(entity_type, horizontal.ENTITY_TYPES)
+            self.assertTrue(entity_id)
 
     def test_job_and_timer_are_wired(self) -> None:
         runner = (ROOT / "scripts" / "run_sync_job.sh").read_text(encoding="utf-8")
@@ -704,16 +517,8 @@ class HorizontalArtTest(unittest.TestCase):
         api = (ROOT / "api" / "index.php").read_text(encoding="utf-8")
         self.assertIn("function attach_horizontal_art(", api)
         self.assertIn("'horizontal' =>", api)
-        for entity_type in (
-            "battleground_card",
-            "constructed_card",
-            "hero",
-            "hero_skin",
-            "pet",
-            "coin",
-            "timewarped_card",
-            "library_card",
-        ):
+        self.assertEqual(api.count("'horizontal' =>"), api.count("'horizontal_2x' =>"))
+        for entity_type in horizontal.ENTITY_TYPES:
             self.assertIn(f"'{entity_type}'", api)
 
     def test_panel_data_attaches_horizontal_art_for_supported_entities(self) -> None:
@@ -721,18 +526,8 @@ class HorizontalArtTest(unittest.TestCase):
         self.assertIn("function panel_attach_horizontal_art(", panel)
         loader_start = panel.index("function load_wiki_meta_map(")
         loader_end = panel.index("\n}\n", loader_start)
-        loader = panel[loader_start:loader_end]
-        self.assertIn("$variants = panel_attach_horizontal_art(", loader)
-        for entity_type in (
-            "battleground_card",
-            "constructed_card",
-            "hero",
-            "hero_skin",
-            "pet",
-            "coin",
-            "timewarped_card",
-            "library_card",
-        ):
+        self.assertIn("$variants = panel_attach_horizontal_art(", panel[loader_start:loader_end])
+        for entity_type in horizontal.ENTITY_TYPES:
             self.assertIn(f"'{entity_type}'", panel)
 
 

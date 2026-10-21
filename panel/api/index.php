@@ -348,6 +348,7 @@ function attach_horizontal_art(PDO $pdo, array $rows, string $entityType, callab
         $id = trim((string)$entityId($row));
         $art = $assets[$id] ?? [];
         $row['horizontal_image_url'] = absolute_url($art['local_image_url'] ?? null, $art['generated_at'] ?? null);
+        $row['horizontal_image_2x_url'] = absolute_url(horizontal_art_2x_path($art['local_image_url'] ?? null), $art['generated_at'] ?? null);
         $row['tile_image_url'] = card_tile_asset_url($row, $entityType, $id, $art);
         $row['tile_layout'] = card_tile_layout($row, $entityType);
     }
@@ -570,6 +571,7 @@ function golden_variant_to_api(array $card): array
             'art' => absolute_url($card['art_image'] ?? null, $imageVersion),
             'framed' => absolute_url($card['framed_image'] ?? null, $imageVersion),
             'horizontal' => $card['horizontal_image_url'] ?? null,
+            'horizontal_2x' => $card['horizontal_image_2x_url'] ?? null,
             'tile' => $card['tile_image_url'] ?? null,
         ],
         'updated_at' => (string)$card['updated_at'],
@@ -656,6 +658,7 @@ function card_to_api(
             'art' => absolute_url($card['art_image'] ?? null, $imageVersion),
             'framed' => absolute_url($card['framed_image'] ?? null, $imageVersion),
             'horizontal' => $card['horizontal_image_url'] ?? null,
+            'horizontal_2x' => $card['horizontal_image_2x_url'] ?? null,
             'tile' => $card['tile_image_url'] ?? null,
         ],
         'wiki_page' => $wikiMeta ? [
@@ -824,6 +827,7 @@ function constructed_card_to_api(
             'diamond' => $card['image_diamond_url'] !== null && $card['image_diamond_url'] !== '' ? (string)$card['image_diamond_url'] : null,
             'crop' => $cropImage,
             'horizontal' => $card['horizontal_image_url'] ?? null,
+            'horizontal_2x' => $card['horizontal_image_2x_url'] ?? null,
             'tile' => $card['tile_image_url'] ?? null,
             'animated' => [
                 'golden' => $card['animated_gold_url'] !== null && $card['animated_gold_url'] !== '' ? (string)$card['animated_gold_url'] : null,
@@ -1134,6 +1138,7 @@ function hero_to_api(array $hero): array
             'hero' => $hero['hero_image_url'] !== null && $hero['hero_image_url'] !== '' ? (string)$hero['hero_image_url'] : null,
             'full_art' => $hero['hero_full_art_url'] !== null && $hero['hero_full_art_url'] !== '' ? (string)$hero['hero_full_art_url'] : null,
             'horizontal' => $hero['horizontal_image_url'] ?? null,
+            'horizontal_2x' => $hero['horizontal_image_2x_url'] ?? null,
             'tile' => $hero['tile_image_url'] ?? null,
         ],
         'hero_power' => [
@@ -1203,6 +1208,7 @@ function hero_skin_to_api(array $skin): array
             'animated_assets' => json_field($skin['animated_asset_json'] ?? null),
             'full_art' => $skin['full_art_url'] !== null && $skin['full_art_url'] !== '' ? (string)$skin['full_art_url'] : null,
             'horizontal' => $skin['horizontal_image_url'] ?? null,
+            'horizontal_2x' => $skin['horizontal_image_2x_url'] ?? null,
             'tile' => $skin['tile_image_url'] ?? null,
         ],
         'gallery' => json_field($skin['gallery_json'] ?? null),
@@ -1262,6 +1268,7 @@ function pet_to_api(array $pet): array
             'card' => $pet['card_image_url'] !== null && $pet['card_image_url'] !== '' ? (string)$pet['card_image_url'] : null,
             'end_screen_background' => $pet['end_screen_background_url'] !== null && $pet['end_screen_background_url'] !== '' ? (string)$pet['end_screen_background_url'] : null,
             'horizontal' => $pet['horizontal_image_url'] ?? null,
+            'horizontal_2x' => $pet['horizontal_image_2x_url'] ?? null,
             'tile' => $pet['tile_image_url'] ?? null,
         ],
         'gallery' => json_field($pet['gallery_json'] ?? null),
@@ -1348,6 +1355,7 @@ function timewarped_card_to_api(array $card, array $termTranslations = []): arra
             'golden' => $card['golden_image_url'] !== null && $card['golden_image_url'] !== '' ? (string)$card['golden_image_url'] : null,
             'art' => $card['art_image_url'] !== null && $card['art_image_url'] !== '' ? (string)$card['art_image_url'] : null,
             'horizontal' => $card['horizontal_image_url'] ?? null,
+            'horizontal_2x' => $card['horizontal_image_2x_url'] ?? null,
             'tile' => $card['tile_image_url'] ?? null,
         ],
         'golden' => [
@@ -1462,6 +1470,7 @@ function library_card_to_api(array $card): array
                 ? (string)$card['full_art_source_url']
                 : null,
             'horizontal' => $card['horizontal_image_url'] ?? null,
+            'horizontal_2x' => $card['horizontal_image_2x_url'] ?? null,
             'tile' => $card['tile_image_url'] ?? null,
         ],
         'full_art' => [
@@ -1527,6 +1536,7 @@ function coin_to_api(array $coin): array
             'crop' => $coin['crop_image_url'] !== null && $coin['crop_image_url'] !== '' ? (string)$coin['crop_image_url'] : null,
             'wiki' => $coin['wiki_image_url'] !== null && $coin['wiki_image_url'] !== '' ? (string)$coin['wiki_image_url'] : null,
             'horizontal' => $coin['horizontal_image_url'] ?? null,
+            'horizontal_2x' => $coin['horizontal_image_2x_url'] ?? null,
             'tile' => $coin['tile_image_url'] ?? null,
         ],
         'cosmetic_sort_order' => $coin['cosmetic_sort_order'] !== null ? (int)$coin['cosmetic_sort_order'] : null,

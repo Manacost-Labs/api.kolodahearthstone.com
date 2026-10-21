@@ -38,6 +38,7 @@ export async function renderDeckTile(element, layout, height = 64) {
   if (layout.art.url) {
     const node = document.createElement('img');
     node.src = layout.art.url;
+    if (layout.art.url_2x) node.srcset = `${layout.art.url} 1x, ${layout.art.url_2x} 2x`;
     node.alt = '';
     Object.assign(node.style, {position:'absolute',right:px(layout.art.end_inset),top:0,width:px(64*layout.art.aspect_ratio),height:'100%',objectFit:layout.art.fit});
     element.append(node);
@@ -49,6 +50,8 @@ export async function renderDeckTile(element, layout, height = 64) {
     paintOrder:'stroke fill',textShadow:`0 ${px(shadow.offset_y)} ${px(shadow.blur)} ${shadow.color}`,
   });
   const [costFont,titleFont,badgeFont] = await Promise.all([layout.cost,layout.title,layout.badge].map(item => fontFamily(item.font_url)));
+  const backdrop = layout.badge.backdrop;
+  if (backdrop) part({right:0,width:px(backdrop.width),background:`linear-gradient(90deg, transparent, ${backdrop.color} 50%)`});
   const cost = part({left:0,width:px(layout.cost.column_width),justifyContent:'center'});
   if (layout.cost.icon) image(cost,layout.cost.icon);
   const costText = document.createElement('span');
@@ -60,7 +63,12 @@ export async function renderDeckTile(element, layout, height = 64) {
   titleText.textContent = layout.title.text;
   Object.assign(titleText.style,{overflow:'hidden',whiteSpace:'nowrap',textOverflow:'ellipsis'});
   title.append(titleText);
-  const badge = part({right:0,width:px(layout.badge.column_width),justifyContent:'center',background:layout.background.color,...textStyle(layout.badge,badgeFont)});
+  // Shrink a long name before the ellipsis: measure at each size in 1px steps.
+  for (let size = layout.title.font_size; size > (layout.title.min_font_size || layout.title.font_size); size--) {
+    if (titleText.scrollWidth <= title.clientWidth - 1) break;
+    titleText.style.fontSize = px(size - 1);
+  }
+  const badge = part({right:0,width:px(layout.badge.column_width),justifyContent:'center',...textStyle(layout.badge,badgeFont)});
   if (layout.badge.icon) image(badge,layout.badge.icon);
   else badge.textContent = layout.badge.text;
 }
