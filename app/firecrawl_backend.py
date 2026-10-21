@@ -4,11 +4,14 @@ import asyncio
 import base64
 import binascii
 import json
+import os
 import random
 import re
+import threading
 import time
 import urllib.error
 import urllib.request
+import zlib
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import Any
@@ -41,6 +44,7 @@ from .firecrawl_keys import (
     record_firecrawl_credits,
 )
 from .scrape_do_backend import (
+    SCRAPE_DO_MAX_SESSION_ID,
     ScrapeDoAccountError,
     ScrapeDoContentError,
     ScrapeDoRequestError,
@@ -56,16 +60,27 @@ from .sources import Source
 
 FIRECRAWL_SCRAPE_URL = "https://api.firecrawl.dev/v2/scrape"
 _PROVIDER_POLICY = "scrape_do_decodo_firecrawl_brightdata_scrapfly"
-# Cheapest-first Scrape.do (render, super) profiles for HSGuru HTML: plain
-# (1 credit), datacenter render (5), residential (10), residential render (25).
-# Datacenter render returns complete card-stats and meta tables that the plain
-# profile cannot fetch, so most pages no longer need the 25-credit profile.
+# Cheapest-first Scrape.do (render, super) profiles for HSGuru HTML, measured
+# on 2026-10-21 (Scrape.do bills only successful responses):
+# - plain datacenter (1 credit) never passes HSGuru's Cloudflare challenge
+#   (0/40) and only burned 15-57 s per page, so it is no longer tried;
+# - datacenter render (5) passes ~93% with complete tables;
+# - residential without a browser (10) passes 32/32 in ~2 s, but only
+#   anonymously and with Scrape.do's own (free) retries enabled;
+# - residential render (25) is the last resort.
 _HSGURU_SCRAPE_DO_PROFILES = (
-    (False, False),
     (True, False),
     (False, True),
     (True, True),
 )
+# HSGuru pages are Phoenix LiveView dead renders: every real page (including
+# a legitimately empty window) carries a LiveView root, the Cloudflare
+# interstitial never does. Waiting for it replaces a fixed customWait.
+_HSGURU_WAIT_SELECTOR = "[data-phx-session]"
+# Cloudflare cookies are bound to the browser/IP that obtained them. Forwarded
+# through a proxy they trigger BLOCKED_BY_WAF, so only the site session goes.
+_CLOUDFLARE_COOKIE_PREFIXES = ("__cf", "cf_")
+_HSGURU_PAYWALL_MARKERS = ("you do not have access to these filters",)
 _SCREENSHOT_MIN_BYTES = 1_024
 _SCREENSHOT_MAX_BYTES = 25 * 1024 * 1024
 _HTML_SITE_MIN_BYTES = 256
@@ -439,6 +454,55 @@ def _scrape_via_scrapfly(
     )
 
 
+def _without_cloudflare_cookies(cookie_header: str) -> str:
+    kept = []
+    for part in cookie_header.split(";"):
+        name = part.split("=", 1)[0].strip()
+        if name and not name.casefold().startswith(_CLOUDFLARE_COOKIE_PREFIXES):
+            kept.append(part.strip())
+    return "; ".join(kept)
+
+
+def _hsguru_session_id(render: bool, super_proxy: bool) -> int:
+    """A sticky Scrape.do session per worker thread and proxy profile."""
+    seed = f"hsguru:{os.getpid()}:{threading.get_ident()}:{render}:{super_proxy}"
+    return zlib.crc32(seed.encode()) % SCRAPE_DO_MAX_SESSION_ID
+
+
+def _hsguru_scrape_do_options(
+    headers: dict[str, str] | None,
+    *,
+    render: bool,
+    super_proxy: bool,
+    wait_ms: int | None,
+) -> dict[str, Any]:
+    """Per-profile HSGuru request shape backed by the 2026-10-21 benchmark."""
+    forwarded: dict[str, str] = {}
+    for name, value in (headers or {}).items():
+        if name.casefold() != "cookie":
+            forwarded[name] = value
+        elif render:
+            # The logged-in session unlocks premium filters in the browser.
+            cookie = _without_cloudflare_cookies(value)
+            if cookie:
+                forwarded[name] = cookie
+        # Without a browser any forwarded cookie gets blocked by Cloudflare;
+        # premium-only pages fail validation there and escalate instead.
+    options: dict[str, Any] = {
+        "headers": forwarded or None,
+        "session_id": _hsguru_session_id(render, super_proxy),
+    }
+    if render:
+        options.update(
+            wait_ms=None,
+            wait_selector=_HSGURU_WAIT_SELECTOR,
+            block_resources=True,
+        )
+    else:
+        options["wait_ms"] = wait_ms
+    return options
+
+
 @source_scope
 def _scrape_via_scrape_do(
     source: Source,
@@ -475,16 +539,26 @@ def _scrape_via_scrape_do(
         for profile_attempt in range(1, 2 if adaptive else 3):
             attempts += 1
             try:
+                # Scrape.do retries are free (only successes are billed), so
+                # HSGuru keeps them: disabling them made residential fail.
+                request_options = (
+                    _hsguru_scrape_do_options(
+                        headers,
+                        render=render,
+                        super_proxy=super_proxy,
+                        wait_ms=wait_ms,
+                    )
+                    if adaptive
+                    else {"headers": headers, "wait_ms": wait_ms}
+                )
                 scraped = scrape_url_sync(
                     source.url,
                     render=render,
                     super_proxy=super_proxy,
-                    headers=headers,
-                    wait_ms=wait_ms,
                     timeout_ms=timeout_ms,
                     screenshot=screenshot,
                     full_screenshot=full_screenshot,
-                    **({"disable_retries": not render} if adaptive else {}),
+                    **request_options,
                 )
                 if adaptive:
                     candidate = _scrape_do_result(
@@ -868,6 +942,10 @@ def _accepted_provider_content(
     accept_html: Callable[[str], bool] | None,
 ) -> bool:
     if is_session_blocked(None, content):
+        return False
+    if source.site == "hsguru" and any(
+        marker in content.casefold() for marker in _HSGURU_PAYWALL_MARKERS
+    ):
         return False
     if accept_html is None:
         normalized = content.strip()

@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- HSGuru Scrape.do requests follow a measured ladder: datacenter render
+  (5 credits) waiting for the LiveView root instead of a fixed delay, then the
+  anonymous 10-credit residential profile with Scrape.do's free retries left
+  on, then rendered residential (25). The 1-credit plain profile never passed
+  HSGuru's Cloudflare (0/40) and is dropped. Cloudflare cookies are no longer
+  forwarded and non-browser requests no longer carry the HSGuru session: both
+  made Cloudflare block the residential profile, so pages that render missed
+  went straight to 25 credits. Premium-filter paywall pages are rejected and
+  escalate to the logged-in browser profile. A sticky Scrape.do session per
+  worker cut median render time from 18.5 to 9.4 s in a 16-page benchmark.
 - HSGuru meta matrix follows HSGuru's new period menu: seven rolling windows
   (`past_3_hours`, `past_6_hours`, `past_day`, `past_3_days`, `past_week`,
   `past_2_weeks`, `past_30_days`), the current patch and the «Власть Темной

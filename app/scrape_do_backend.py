@@ -28,6 +28,8 @@ SCRAPE_DO_MIN_TIMEOUT_MS = 5_000
 SCRAPE_DO_MAX_TIMEOUT_MS = 120_000
 SCRAPE_DO_MIN_RETRY_TIMEOUT_MS = 5_000
 SCRAPE_DO_MAX_RETRY_TIMEOUT_MS = 55_000
+SCRAPE_DO_MAX_SESSION_ID = 1_000_000
+SCRAPE_DO_MAX_WAIT_SELECTOR_LENGTH = 200
 
 _TRANSIENT_HTTP_STATUSES = frozenset({408, 425, 429, 500, 502, 503, 504})
 _ACCOUNT_HTTP_STATUSES = frozenset({401})
@@ -170,6 +172,9 @@ def _scrape_url_sync(
     screenshot: bool = False,
     full_screenshot: bool = False,
     disable_retries: bool = False,
+    wait_selector: str | None = None,
+    session_id: int | None = None,
+    block_resources: bool | None = None,
 ) -> ScrapeDoScrape:
     token = scrape_do_token()
     if not token:
@@ -188,6 +193,18 @@ def _scrape_url_sync(
         params["customWait"] = str(max(0, int(wait_ms)))
     if timeout_ms is not None:
         params["timeout"] = str(_clamp_timeout_ms(timeout_ms))
+    # Browser-only options: wait for the target's own markup instead of a
+    # fixed delay, and keep the provider's resource blocking explicit.
+    if wait_selector and render:
+        selector = str(wait_selector).strip()
+        if len(selector) > SCRAPE_DO_MAX_WAIT_SELECTOR_LENGTH:
+            raise ValueError("Scrape.do waitSelector is too long")
+        params["waitSelector"] = selector
+    if block_resources is not None and render:
+        params["blockResources"] = str(bool(block_resources)).lower()
+    # A sticky session keeps one proxy IP; Scrape.do rotates it on failure.
+    if session_id is not None:
+        params["sessionId"] = str(int(session_id) % SCRAPE_DO_MAX_SESSION_ID)
     # retryTimeout is supported only by Scrape.do's non-rendered request path.
     if retry_timeout_ms is not None and not render:
         params["retryTimeout"] = str(_clamp_retry_timeout_ms(retry_timeout_ms))
@@ -431,6 +448,9 @@ async def scrape_url(
     screenshot: bool = False,
     full_screenshot: bool = False,
     disable_retries: bool = False,
+    wait_selector: str | None = None,
+    session_id: int | None = None,
+    block_resources: bool | None = None,
 ) -> ScrapeDoScrape:
     return await asyncio.to_thread(
         scrape_url_sync,
@@ -445,4 +465,7 @@ async def scrape_url(
         screenshot=screenshot,
         full_screenshot=full_screenshot,
         disable_retries=disable_retries,
+        wait_selector=wait_selector,
+        session_id=session_id,
+        block_resources=block_resources,
     )
