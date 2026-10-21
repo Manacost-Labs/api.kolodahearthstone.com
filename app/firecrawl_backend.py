@@ -79,7 +79,7 @@ _HSGURU_SCRAPE_DO_PROFILES = (
 _HSGURU_WAIT_SELECTOR = "[data-phx-session]"
 # Cloudflare cookies are bound to the browser/IP that obtained them. Forwarded
 # through a proxy they trigger BLOCKED_BY_WAF, so only the site session goes.
-_CLOUDFLARE_COOKIE_PREFIXES = ("__cf", "cf_")
+_CLOUDFLARE_COOKIE_PREFIXES = ("__cf", "_cf", "cf_")
 _HSGURU_PAYWALL_MARKERS = ("you do not have access to these filters",)
 _SCREENSHOT_MIN_BYTES = 1_024
 _SCREENSHOT_MAX_BYTES = 25 * 1024 * 1024
@@ -454,6 +454,18 @@ def _scrape_via_scrapfly(
     )
 
 
+class HSGuruSessionRejectedError(ScrapeDoRequestError):
+    """The logged-in browser request still got HSGuru's premium paywall."""
+
+
+def _is_hsguru_paywall(content: str) -> bool:
+    """HSGuru's premium-filter notice on a page without any data table."""
+    lowered = content.casefold()
+    return "<table" not in lowered and any(
+        marker in lowered for marker in _HSGURU_PAYWALL_MARKERS
+    )
+
+
 def _without_cloudflare_cookies(cookie_header: str) -> str:
     kept = []
     for part in cookie_header.split(";"):
@@ -583,6 +595,17 @@ def _scrape_via_scrape_do(
                         if attempt_observer is not None:
                             attempt_observer(candidate, False)
                         validate_attempt(scraped.acquisition_id, False)
+                        if render and _is_hsguru_paywall(scraped.html) and any(
+                            name.casefold() == "cookie"
+                            for name in request_options.get("headers") or {}
+                        ):
+                            # An expired session would be billed again by
+                            # every remaining profile; stop the ladder.
+                            raise HSGuruSessionRejectedError(
+                                "HSGuru session no longer unlocks premium filters",
+                                request_cost=scraped.request_cost,
+                                super_proxy=super_proxy,
+                            )
                         scraped = None
                         last_failure = RuntimeError(
                             "Scrape.do response failed content validation"
@@ -943,9 +966,7 @@ def _accepted_provider_content(
 ) -> bool:
     if is_session_blocked(None, content):
         return False
-    if source.site == "hsguru" and any(
-        marker in content.casefold() for marker in _HSGURU_PAYWALL_MARKERS
-    ):
+    if source.site == "hsguru" and _is_hsguru_paywall(content):
         return False
     if accept_html is None:
         normalized = content.strip()

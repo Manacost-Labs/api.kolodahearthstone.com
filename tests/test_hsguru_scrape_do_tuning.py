@@ -6,6 +6,8 @@ import urllib.parse
 from email.message import Message
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from app.firecrawl_backend import (
     _HSGURU_SCRAPE_DO_PROFILES,
     _HSGURU_WAIT_SELECTOR,
@@ -218,3 +220,115 @@ def test_non_hsguru_sources_keep_their_request_shape() -> None:
     assert kwargs["wait_ms"] == 3_000
     assert "wait_selector" not in kwargs
     assert "session_id" not in kwargs
+
+
+def test_expired_session_paywall_stops_the_paid_ladder() -> None:
+    paywall = (
+        "<html><body><div data-phx-session='x'>You do not have access to "
+        "these filters. Login to access this page</div>"
+        + " navigation" * 60
+        + "</body></html>"
+    )
+    with (
+        patch("app.firecrawl_backend.scrape_do_token", return_value="configured"),
+        patch("app.firecrawl_backend.decodo_api_key", return_value=None),
+        patch(
+            "app.firecrawl_backend.scrape_url_sync",
+            side_effect=[_scraped(paywall, super_proxy=False)],
+        ) as scrape,
+        patch("app.firecrawl_backend.time.sleep"),
+        pytest.raises(RuntimeError, match="All scrape providers failed"),
+    ):
+        _scrape_sync(
+            HSGURU_SOURCE,
+            formats=["html"],
+            headers={"cookie": COOKIE},
+            skip_providers={"firecrawl", "brightdata", "scrapfly"},
+        )
+
+    # Only the logged-in render was billed; residential profiles were skipped.
+    assert scrape.call_count == 1
+    assert scrape.call_args.kwargs["headers"] == {
+        "cookie": "_backend_key=session-value"
+    }
+
+
+def test_paywall_notice_next_to_a_data_table_is_accepted() -> None:
+    page = (
+        "<html><body>You do not have access to these filters."
+        "<table><tr><th>Archetype</th></tr><tr><td>Burn Mage</td></tr></table>"
+        + " x" * 400
+    )
+    assert _accepted_provider_content(page, HSGURU_SOURCE, accept_html=None) is True
+
+
+def test_decodo_reserve_still_runs_after_the_first_scrape_do_profile() -> None:
+    from app.scrape_do_backend import ScrapeDoTransientError
+
+    order: list[str] = []
+
+    def scrape_do(url: str, **kwargs):
+        order.append(f"scrape_do:{kwargs['render']}:{kwargs['super_proxy']}")
+        if kwargs["render"] and not kwargs["super_proxy"]:
+            raise ScrapeDoTransientError("ROTATION_FAILED", status_code=502)
+        return _scraped(PAGE, super_proxy=True)
+
+    def decodo(url: str, **kwargs):
+        order.append("decodo")
+        raise RuntimeError("Decodo returned an unusable result")
+
+    with (
+        patch("app.firecrawl_backend.scrape_do_token", return_value="configured"),
+        patch("app.firecrawl_backend.decodo_api_key", return_value="configured"),
+        patch("app.firecrawl_backend.decodo_scrape_url_sync", side_effect=decodo),
+        patch("app.firecrawl_backend.scrape_url_sync", side_effect=scrape_do),
+        patch("app.firecrawl_backend.time.sleep"),
+    ):
+        result = _scrape_sync(
+            HSGURU_SOURCE,
+            formats=["html"],
+            headers={"Cookie": COOKIE},
+            skip_providers={"firecrawl", "brightdata", "scrapfly"},
+        )
+
+    assert result.backend == "scrape_do_super"
+    # Decodo keeps its own two reserve profiles between the Scrape.do phases.
+    assert order == [
+        "scrape_do:True:False",
+        "decodo",
+        "decodo",
+        "scrape_do:False:True",
+    ]
+
+
+def test_hsguru_screenshots_keep_the_full_session_and_no_sticky_ip() -> None:
+    shot = ScrapeDoScrape(
+        html=PAGE,
+        status_code=200,
+        final_url=HSGURU_SOURCE.url,
+        request_cost=25,
+        credits_remaining=None,
+        super_proxy=True,
+        screenshot="https://cdn.example.com/shot.png",
+    )
+    with (
+        patch("app.firecrawl_backend.scrape_do_token", return_value="configured"),
+        patch("app.firecrawl_backend.decodo_api_key", return_value=None),
+        patch("app.firecrawl_backend.scrape_url_sync", return_value=shot) as scrape,
+        patch("app.firecrawl_backend._normalize_screenshot", side_effect=lambda v: v),
+        patch("app.firecrawl_backend.time.sleep"),
+    ):
+        try:
+            _scrape_sync(
+                HSGURU_SOURCE,
+                formats=[{"type": "screenshot", "fullPage": True}],
+                headers={"Cookie": COOKIE},
+                skip_providers={"firecrawl", "brightdata", "scrapfly"},
+            )
+        except RuntimeError:
+            pass  # screenshot validation is covered elsewhere
+
+    kwargs = scrape.call_args_list[0].kwargs
+    assert kwargs["headers"] == {"Cookie": COOKIE}
+    assert "session_id" not in kwargs
+    assert "wait_selector" not in kwargs
