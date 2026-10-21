@@ -7,12 +7,14 @@ from .hsguru_decks import (
     HSGuruCatalogPartial,
     current_hsguru_deck_period,
     refresh_hsguru_deck_catalog,
+    refresh_hsguru_fallback_deck_catalog,
     reset_hsguru_catalog_provider_state,
 )
 from .hsguru_meta_matrix import refresh_current_catalog_deck_join
 from .storage import load_dataset
 
 CatalogRefresh = Callable[..., Awaitable[list[dict[str, Any]]]]
+CatalogFallbackRefresh = Callable[..., Awaitable[dict[str, Any]]]
 CatalogJoin = Callable[[], dict[str, Any]]
 CatalogDatasetLoader = Callable[[str], dict[str, Any] | None]
 
@@ -82,6 +84,7 @@ def _persisted_all_rank_summary(
 async def refresh_all_deck_catalogs(
     *,
     refresh: CatalogRefresh = refresh_hsguru_deck_catalog,
+    refresh_fallback: CatalogFallbackRefresh = refresh_hsguru_fallback_deck_catalog,
     join: CatalogJoin = refresh_current_catalog_deck_join,
     load_persisted: CatalogDatasetLoader = load_dataset,
 ) -> dict[str, Any]:
@@ -91,7 +94,8 @@ async def refresh_all_deck_catalogs(
     catalog receives one immediate continuation so its bounded retry queue can
     advance without rerunning already successful format/rank combinations.
     Other failures are reported without preventing independent combinations
-    from becoming fresh.
+    from becoming fresh. Archetypes that the all-rank catalog leaves without
+    a build then get one from a wider HSGuru window before the join.
     """
     reset_hsguru_catalog_provider_state()
     run_period = current_hsguru_deck_period()
@@ -150,6 +154,22 @@ async def refresh_all_deck_catalogs(
             )
         datasets[key] = summary
 
+    fallbacks: dict[str, dict[str, Any]] = {}
+    for format_name in ("standard", "wild"):
+        if f"{format_name}_all" not in datasets:
+            continue
+        key = f"{format_name}_fallback"
+        try:
+            fallbacks[format_name] = await refresh_fallback(
+                format_name, period=run_period
+            )
+        except Exception as exc:
+            errors[key] = _error_summary(exc)
+            continue
+        failed = fallbacks[format_name].get("failed_archetypes") or []
+        if failed:
+            errors[key] = f"{len(failed)} archetypes could not be fetched"
+
     archetype_join: dict[str, Any] | None = None
     current_period = current_hsguru_deck_period()
     if current_period != run_period:
@@ -168,6 +188,7 @@ async def refresh_all_deck_catalogs(
         "datasets": datasets,
         "errors": errors,
         "continuations": continuations,
+        "fallbacks": fallbacks,
         "archetype_join": archetype_join,
         "period": run_period,
         **{f"{key}_decks": int(value["decks"]) for key, value in datasets.items()},

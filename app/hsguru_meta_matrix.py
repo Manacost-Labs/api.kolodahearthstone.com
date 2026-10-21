@@ -1038,6 +1038,7 @@ def enrich_current_rows_with_cached_decks(
             and (
                 sample_period is None
                 or str(deck.get("sample_period") or "") == effective_sample_period
+                or str(deck.get("sample_fallback_for") or "") == effective_sample_period
             )
         ]
         previous_decks[
