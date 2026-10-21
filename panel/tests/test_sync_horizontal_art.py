@@ -282,6 +282,19 @@ class SyncTest(unittest.TestCase):
                     conn.commit.assert_called_once_with()
                 self.assertEqual(summary["framed_assets_disabled"], 0 if dry_run else 2)
 
+    def test_failures_keeping_a_previous_asset_do_not_fail_the_job(self) -> None:
+        candidates = [
+            horizontal.Candidate("pet", pet, None, "https://wiki.example/bg.png", "art")
+            for pet in ("KEPT", "NEW")
+        ]
+        existing = {("pet", "KEPT"): {"status": "ready"}}
+        code, summary, *_ = self.run_main(["--id", "KEPT"], candidates, existing)
+        self.assertEqual(code, 0)
+        self.assertEqual([item["entity_id"] for item in summary["kept_previous"]], ["KEPT"])
+        code, summary, *_ = self.run_main([], candidates, existing)
+        self.assertEqual(code, 1)
+        self.assertEqual([item["entity_id"] for item in summary["errors"]], ["NEW"])
+
     def test_bounded_runs_defer_work_and_keep_legacy_assets(self) -> None:
         candidates = [
             horizontal.Candidate("hero", f"H{index}", None, "/uploads/a.png", "art")

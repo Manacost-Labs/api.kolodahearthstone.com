@@ -1087,6 +1087,7 @@ def main() -> int:
             "unchanged": len(candidates) - len(pending) - deferred
         }
         errors = []
+        kept_previous = []
         by_type: dict[str, int] = {}
         focus_methods: dict[str, int] = {}
         quality_flags = []
@@ -1102,13 +1103,18 @@ def main() -> int:
                 if report["white_columns"] or report["black_columns"]:
                     quality_flags.append({"entity_id": candidate.entity_id, **report})
             if action == "error":
-                errors.append(
-                    {
-                        "entity_type": candidate.entity_type,
-                        "entity_id": candidate.entity_id,
-                        "error": result.get("error"),
-                    }
-                )
+                error = {
+                    "entity_type": candidate.entity_type,
+                    "entity_id": candidate.entity_id,
+                    "error": result.get("error"),
+                }
+                # A source outage that leaves the previous asset in the API is
+                # reported, but must not fail the job and skip the tile step.
+                existing = existing_assets.get(key(candidate)) or {}
+                if str(existing.get("status") or "") == "ready":
+                    kept_previous.append(error)
+                else:
+                    errors.append(error)
         summary = {
             "status": "ok" if not errors else "partial",
             "dry_run": args.dry_run,
@@ -1121,6 +1127,7 @@ def main() -> int:
             "focus_methods": focus_methods,
             "quality_flags": quality_flags[:50],
             "errors": errors[:100],
+            "kept_previous": kept_previous[:100],
         }
         print(json.dumps(summary, ensure_ascii=False, sort_keys=True))
         return 0 if not errors else 1
