@@ -2958,3 +2958,34 @@ html[data-mode='dark'] .provider-usage {
     margin-left: 0;
   }
 }
+
+/* Statistics tables: search, attention filter, clamped long text and a header that stays visible. */
+.table-tools {
+  flex-wrap: wrap;
+}
+.table-search {
+  flex: 1 1 240px;
+  max-width: 360px;
+}
+.table-count {
+  font-variant-numeric: tabular-nums;
+}
+.cell-clamp {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+  min-width: 220px;
+}
+.analytics-main .table-scroll {
+  max-height: min(72vh, 900px);
+}
+.analytics-main .table-scroll thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.analytics-main td .value-code {
+  white-space: nowrap;
+}

@@ -190,7 +190,8 @@ export const server = http.createServer(async (req, res) => {
         { label: 'Требуют внимания', value: 1 },
       ],
       columns: [
-        { key: 'source_id', label: 'Источник' },
+        { key: 'source_id', label: 'Источник', type: 'code' },
+        { key: 'description', label: 'Что загружается', type: 'text' },
         { key: 'state', label: 'Состояние' },
         { key: 'rows', label: 'Строк' },
         { key: 'updated_at', label: 'Обновлено' },
@@ -198,6 +199,15 @@ export const server = http.createServer(async (req, res) => {
       rows: [
         { source_id: 'hsguru', state: 'ok', rows: 120, updated_at: '2026-10-02T12:00:00Z' },
         { source_id: 'hsreplay', state: 'warning', rows: 20, updated_at: '2026-10-01T12:00:00Z' },
+        ...Array.from({ length: 10 }, (_, i) => ({
+          source_id: 'fixture_source_' + (i + 1),
+          description:
+            'Тестовый источник для проверки длинных описаний: таблица показывает три строки текста, ' +
+            'а полный текст остаётся в подсказке и в деталях записи.',
+          state: 'ok',
+          rows: 10 * (i + 1),
+          updated_at: '2026-10-02T10:00:00Z',
+        })),
       ],
       meta: { total: 2, updated_at: '2026-10-02T12:00:00Z', cached: false, stale: false },
       parsing_reliability: { windows: [], message: 'Накапливаем статистику' },

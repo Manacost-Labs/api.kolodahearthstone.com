@@ -40,6 +40,9 @@ export default async function Page({
     const statsQuery = new URLSearchParams(query);
     statsQuery.delete('action');
     statsQuery.delete('stats');
+    // Client-side table filters (DataTable) never reach the analytics backend.
+    statsQuery.delete('rows_q');
+    statsQuery.delete('rows');
     statsQuery.set('module', moduleKey);
     const statsSearch = statsQuery.get('stats_q');
     if (statsSearch !== null) {
