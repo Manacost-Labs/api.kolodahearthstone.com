@@ -284,7 +284,7 @@ await screenshot('analytics-desktop.png');
 await click('tbody .link-button');
 checks.analyticsDetails = await evaluate('!!document.querySelector("dialog[open]")');
 await pressEscape();
-await navigate(root + '?action=parsers', 'document.querySelectorAll("tbody tr").length===3');
+await navigate(root + '?action=parsers', 'document.querySelectorAll(".sources-table tbody tr").length===3');
 await screenshot('parsers-desktop.png');
 await click('tbody tr:first-child .row-actions button:last-child');
 checks.runConfirm = await evaluate('!!document.querySelector("dialog[open]")');

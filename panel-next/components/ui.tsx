@@ -82,12 +82,31 @@ export function KpiCard({
   value,
   hint,
   tone,
+  pressed,
+  onSelect,
 }: {
   label: ReactNode;
   value: ReactNode;
   hint?: ReactNode;
   tone?: Tone;
+  /** Makes the card a toggle that filters the list below it. */
+  pressed?: boolean;
+  onSelect?: () => void;
 }) {
+  if (onSelect)
+    return (
+      <button
+        type="button"
+        className="kpi kpi-filter"
+        data-tone={tone && tone !== 'neutral' ? tone : undefined}
+        aria-pressed={Boolean(pressed)}
+        onClick={onSelect}
+      >
+        <span>{label}</span>
+        <strong>{value}</strong>
+        {hint && <small>{hint}</small>}
+      </button>
+    );
   return (
     <article className="kpi" data-tone={tone && tone !== 'neutral' ? tone : undefined}>
       <span>{label}</span>

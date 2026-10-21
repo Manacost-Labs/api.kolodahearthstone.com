@@ -116,7 +116,34 @@ const snapshot = {
     },
   ],
   activeRun: null,
-  recentRuns: [],
+  recentRuns: [
+    {
+      id: 'fixture-run-2',
+      status: 'partial',
+      sourceIds: ['hsguru', 'replay', 'cards'],
+      requestedBy: 'trigger.dev',
+      reason: 'scheduled refresh',
+      createdAt: '2026-10-02T11:59:58Z',
+      startedAt: '2026-10-02T12:00:00Z',
+      finishedAt: '2026-10-02T12:01:05Z',
+      totalSources: 3,
+      completedSources: 2,
+      failedSources: 1,
+    },
+    {
+      id: 'fixture-run-1',
+      status: 'succeeded',
+      sourceIds: ['hsguru'],
+      requestedBy: 'UI fixture',
+      reason: 'manual',
+      createdAt: '2026-10-01T09:00:00Z',
+      startedAt: '2026-10-01T09:00:01Z',
+      finishedAt: '2026-10-01T09:00:13Z',
+      totalSources: 1,
+      completedSources: 1,
+      failedSources: 0,
+    },
+  ],
 };
 export const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://127.0.0.1:18768');
