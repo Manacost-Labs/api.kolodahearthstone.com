@@ -13,7 +13,11 @@ from .completeness import (
     build_hsreplay_transport_evidence_unavailable,
     row_retrieval_evidence,
 )
-from .hsreplay_client import fetch_hsreplay_json, get_hsreplay_json_target_headers
+from .hsreplay_client import (
+    HsReplayQueryProcessingError,
+    fetch_hsreplay_json,
+    get_hsreplay_json_target_headers,
+)
 from .publish_gate import validate_candidate_for_publish
 from .sources import SOURCE_BY_ID, Source
 from .structured import parse_legendary_groups
@@ -727,6 +731,9 @@ async def fetch_legendary_groups(
                 continue
         if not groups:
             raise last_error or RuntimeError("card_packages returned no groups")
+    except HsReplayQueryProcessingError:
+        # Firecrawl would render the same cold HSReplay query.
+        raise
     except Exception as exc:
         logger.warning("HSReplay legendaries API failed (%s); trying Firecrawl fallback", exc)
         return await fetch_legendary_groups_via_firecrawl(source_id=source_id, locale=locale)

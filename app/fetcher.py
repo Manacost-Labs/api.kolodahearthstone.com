@@ -56,6 +56,7 @@ from .config import (
 )
 from .dataset_regression import check_dataset_regression, estimate_metric_count
 from .fetch_routes import source_can_run_without_residential_proxy
+from .hsreplay_client import HsReplayQueryProcessingError
 from .parser import parse_html
 from .parsesunix_contracts import (
     SPECIALIZED_API_SOURCE_IDS,
@@ -946,6 +947,14 @@ def _attach_failure_class(
         status["proxy_status"] = exc.status_code
     elif isinstance(exc, ParsesUnixTransportRejected):
         status["failure_reason_code"] = exc.evidence.failure_reason_code
+    else:
+        # Specialised parsers may wrap the client error in their own message.
+        cause: BaseException | None = exc
+        while cause is not None and not isinstance(cause, HsReplayQueryProcessingError):
+            cause = cause.__cause__ or cause.__context__
+        if isinstance(cause, HsReplayQueryProcessingError):
+            status["failure_reason_code"] = cause.failure_reason_code
+            status["upstream_state"] = cause.upstream_state
     return status
 
 
@@ -1152,9 +1161,10 @@ def _preserve_cached_ok_status(source: Source, failed_status: dict[str, Any]) ->
     failure_reason = str(failed_status.get("failure_reason_code") or "").strip()
     if failure_reason in FAILURE_REASONS:
         status["failure_reason_code"] = failure_reason
-    if failed_status.get("upstream_state") == "upstream_publication_pending":
-        status["upstream_state"] = "upstream_publication_pending"
-        status["last_refresh_upstream_state"] = "upstream_publication_pending"
+    upstream_state = failed_status.get("upstream_state")
+    if upstream_state in {"upstream_publication_pending", "upstream_processing"}:
+        status["upstream_state"] = upstream_state
+        status["last_refresh_upstream_state"] = upstream_state
     if source.id == "vicious_syndicate_radars":
         from .vicious_syndicate import sanitize_upstream_readiness
 
@@ -1194,6 +1204,7 @@ def _preserve_cached_ok_status(source: Source, failed_status: dict[str, Any]) ->
             "backend_policy_grandfathered": status.get(
                 "cached_backend_policy_grandfathered"
             ),
+            "upstream_state": status.get("last_refresh_upstream_state"),
         },
     )
     return status

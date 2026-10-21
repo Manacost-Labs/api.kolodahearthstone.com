@@ -884,6 +884,21 @@ def api_json_retry_delay_seconds() -> float:
     return float(os.environ.get("HS_API_JSON_RETRY_DELAY_SECONDS", "2.0"))
 
 
+def hsreplay_query_processing_attempts() -> int:
+    """Total polls of one HSReplay analytics query that answers "processing"."""
+    return max(1, int(os.environ.get("HS_HSREPLAY_QUERY_PROCESSING_ATTEMPTS", "4")))
+
+
+def hsreplay_query_processing_delay_seconds() -> float:
+    """Pause between polls when HSReplay sends no usable Retry-After."""
+    return max(0.0, float(os.environ.get("HS_HSREPLAY_QUERY_PROCESSING_DELAY_SECONDS", "30")))
+
+
+def hsreplay_query_processing_budget_seconds() -> float:
+    """Wall-clock window per refresh in which processing polls may still wait."""
+    return max(0.0, float(os.environ.get("HS_HSREPLAY_QUERY_PROCESSING_BUDGET_SECONDS", "240")))
+
+
 def refresh_parallel_stagger_min() -> float:
     return float(os.environ.get("HS_REFRESH_PARALLEL_STAGGER_MIN", "0.3"))
 

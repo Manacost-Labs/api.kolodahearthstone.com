@@ -472,4 +472,12 @@ SOURCES: tuple[Source, ...] = (
 )
 
 
+# Pipeline sources whose publication is not datasets/*.json (the screenshot is
+# an image plus its own metadata). Their freshness is the status timestamp, and
+# no writer may create a dataset file for them: an orphaned legacy file would
+# otherwise pin freshness to its old fetched_at.
+STATUS_ONLY_SOURCE_IDS: frozenset[str] = frozenset(
+    {"hsreplay_battlegrounds_compositions_screenshot"}
+)
+
 SOURCE_BY_ID = {source.id: source for source in SOURCES}

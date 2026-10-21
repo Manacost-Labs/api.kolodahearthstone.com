@@ -58,6 +58,8 @@ ACTION_GROUPS: dict[str, str] = {
     "api.route.begin": "api",
     "api.route.ok": "api",
     "api.route.fail": "api",
+    "api.upstream_processing.retry": "api",
+    "api.upstream_processing.fail": "api",
     "api.route.skip": "api",
     "routing.channel.ok": "api",
     "routing.channel.fail": "api",

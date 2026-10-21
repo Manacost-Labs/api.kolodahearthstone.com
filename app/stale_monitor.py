@@ -6,7 +6,7 @@ from typing import Any
 from .config import source_operationally_enabled, stale_dataset_hours
 from .parser_control import resolve_public_dataset
 from .source_state import SourceState
-from .sources import SOURCES
+from .sources import SOURCES, STATUS_ONLY_SOURCE_IDS
 from .storage import load_dataset, load_status
 
 
@@ -49,7 +49,11 @@ def find_stale_sources(*, include_ok: bool = True) -> list[dict[str, Any]]:
 
         fetched_at = st.get("fetched_at")
         try:
-            candidate = load_dataset(source.id)
+            candidate = (
+                None
+                if source.id in STATUS_ONLY_SOURCE_IDS
+                else load_dataset(source.id)
+            )
         except (OSError, UnicodeError, ValueError):
             candidate = None
             corrupt_parts.append("dataset")

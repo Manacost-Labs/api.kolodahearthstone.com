@@ -12,7 +12,11 @@ from bs4 import BeautifulSoup
 from .cards_index import _load_raw_cards, cards_by_dbfid
 from .config import flaresolverr_url, request_timeout_seconds
 from .hsreplay_auth import hsreplay_cookies_for_fetch
-from .hsreplay_client import fetch_hsreplay_json, fetch_text_via_flaresolverr
+from .hsreplay_client import (
+    HsReplayQueryProcessingError,
+    fetch_hsreplay_json,
+    fetch_text_via_flaresolverr,
+)
 from .sources import Source
 
 logger = logging.getLogger(__name__)
@@ -340,6 +344,9 @@ async def fetch_hsreplay_battlegrounds_heroes(source: Source) -> dict[str, Any]:
                 "time_range": "CURRENT_BATTLEGROUNDS_PATCH",
             },
         }
+    except HsReplayQueryProcessingError:
+        # The rendered page reads the same cold HSReplay query.
+        raise
     except Exception as exc:
         logger.warning(
             "HSReplay BG heroes JSON path failed; trying rendered-page fallback (%s)",

@@ -55,7 +55,7 @@ from .routers.system import canonical_router as canonical_system_v1_router
 from .routers.system import router as system_v1_router
 from .source_contracts import HSREPLAY_META_FRESHNESS_GATED_SOURCE_IDS
 from .source_state import SourceState
-from .sources import SOURCE_BY_ID, SOURCES
+from .sources import SOURCE_BY_ID, SOURCES, STATUS_ONLY_SOURCE_IDS
 from .storage import load_dataset, load_status, root_dir, save_dataset, save_status
 from .trinket_slices import (
     DEFAULT_TRINKET_MMR,
@@ -1954,6 +1954,8 @@ def upload_dataset(
 ) -> dict:
     if source_id not in SOURCE_BY_ID:
         raise HTTPException(status_code=404, detail="Unknown source")
+    if source_id in STATUS_ONLY_SOURCE_IDS:
+        raise HTTPException(status_code=409, detail="Source publishes no dataset")
     source = SOURCE_BY_ID[source_id]
     fetched_at = datetime.now(UTC).isoformat()
     dataset = {
