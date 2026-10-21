@@ -204,7 +204,12 @@ export function deckTile(row: Row, cardType = 'constructed') {
     background,
     legendary,
     image: mediaUrl(row.horizontal_image_url),
+    image2x: mediaUrl(row.horizontal_image_2x_url),
   };
+}
+/** Font scale for a tile name: about 18 characters fit at full size; truncation is the last resort. */
+export function tileNameScale(name: string): number {
+  return Math.round(Math.min(1, Math.max(0.72, 18 / Math.max(1, [...name].length))) * 100) / 100;
 }
 export function imagesFrom(row: Row): { label: string; url: string }[] {
   const images: { label: string; url: string }[] = [];

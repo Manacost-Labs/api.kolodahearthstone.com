@@ -1,42 +1,50 @@
 # Horizontal art for deck tiles
 
-`horizontal_image_url` points to a 320×64 WebP with alpha transparency.
-Recipe `7-game-cuts-trimmed-art` preserves the subject on the right and fades
-the artwork into a transparent text area on the left. Set the tile's background
-color to the card's rarity; the image does not contain a fixed background color.
+`horizontal_image_url` (`images.horizontal`) points to a 320×64 WebP with alpha
+transparency; `horizontal_image_2x_url` (`images.horizontal_2x`) is the same
+frame at 640×128 for dense screens. Use both in `srcset`. Recipe
+`8-hires-focus-2x` crops the subject from the full illustration without
+distortion, places it on the right and fades the artwork into a transparent
+text area on the left. Set the tile's background color to the card's rarity;
+the image does not contain a fixed background color.
 
-Card sources are pure artwork only:
+Every source is a clean illustration: no card frame, text, rarity gem or hero
+portrait ring. Rendered cards and crops of them are never used; without clean
+art the field is `null`.
 
-| Card collection | Source fields, in priority order |
+| Entity | Sources, in priority order |
 | --- | --- |
-| Battlegrounds | `art_image` |
-| Constructed | HearthstoneJSON game tile, `local_wiki_full_art_url`, `wiki_full_art_url`, HearthstoneJSON original art by card ID |
-| Battlegrounds library | `local_full_art_url`, `full_art_source_url` |
-| Timewarped | `art_image_url` |
+| Constructed | local wiki full art, HearthstoneJSON original texture (`orig`) of the card and of the original card of a Core/Classic/Legacy reprint, remote wiki full art, official reveal strip for temporary `blizzard:<dbf>` IDs, HearthstoneJSON game tile (low resolution, last resort) |
+| Battlegrounds, timewarped | local art, HearthstoneJSON original texture |
+| Battlegrounds library | local full art, its source URL, HearthstoneJSON original texture |
+| Hero, hero skin, coin | HearthstoneJSON original texture, then wiki full art |
+| Pet | end-of-game scene; pets without it have no art |
 
-New revealed cards can have temporary IDs such as `blizzard:128090` before
-HearthstoneJSON publishes their game CardID. For these records, the generator
-uses the official illustration strip (`cropImage`) retained in the Blizzard
-or reveal payload, restricted to the publisher's Hearthstone asset CDN.
-This strip contains artwork, not the rendered card. Generic `crop_image_url`
-and local framed crops remain excluded. Core, Classic and Legacy reprints try
-their own game tile, then the corresponding tile without the prefix, before
-falling back to full artwork. Original-art fallbacks also try both IDs.
+**Framing.** Uniform white, gray, black or transparent padding is trimmed on
+all four edges first: Unity textures of new cards pad portrait art with white
+columns, older ones carry gray packing bars. Constructed cards appear in decks,
+so their in-game deck tile (HearthstoneJSON `tiles`) is located in the full
+art by normalized cross-correlation; the designers' framing, usually the face,
+sets the focus when the match is reliable (score ≥ 0.85). Other entity types
+use a deterministic detail and skin-tone heuristic that keeps a portrait's
+focus in the upper torso. Entries in `panel/data/horizontal_art_focus.json`
+override the focus for individual cards. The crop has the art area's aspect
+3.5 : 1, spans the full width of portrait art and keeps the subject out of the
+text fade.
 
-The [game tiles](https://hearthstonejson.com/docs/images.html#card-tiles) use
-the crop coordinates embedded in Hearthstone's Unity assets. The generator
-preserves the entire illustration strip instead of cropping it a second time.
-Continuous near-white padding on all four edges is removed before positioning
-or selecting a crop; bright objects that occupy only part of an edge remain.
+**Checks.** Each rendition is rejected, and the next source tried, when its
+fully visible part is blank, has transparent holes, a white margin or a black
+block. The job summary counts focus methods and lists flagged images.
 
-The generator excludes rendered card images and crops derived from them for
-these collections. When no full art exists, it leaves the tile without an image
-instead of using a framed card. Other entity types retain their existing source
-selection.
-
-Keep the image's 5:1 aspect ratio. For example, a 64px row displays the art at
-320×64px, anchored to the right beside the quantity. Stretching it across a wide
-row distorts characters; `cover` can crop their faces vertically.
+**Rollout and rollback.** Recipe 8 writes to `/uploads/horizontal-art/r8/…`
+next to, never over, older files. A row switches to its new URL only after both
+renditions exist, so the API never points to a missing file. Rows that fail
+keep their previous asset. To roll back, restore `local_image_url`,
+`recipe_version`, `source_*`, `status` and `generated_at` from a backup of
+`horizontal_art_assets`; the old files are untouched. A scheduled run renders
+at most 2,500 assets with three workers (`--max-generate`, `--workers`); a
+complete run, without `--entity`, `--id` or `--limit`, also hides remaining
+legacy card or crop assets.
 
 Use [horizontal-art-tiles.css](../examples/horizontal-art-tiles.css) for a grid
 of three rows and five columns: supply exactly 15 cards. Each tile aligns cost,
@@ -63,7 +71,8 @@ and Next bundles it under `/_next/static/media/`.
 <div class="deck-grid-viewport">
   <div class="deck-grid" role="list">
     <div class="deck-tile" lang="en" role="listitem" style="--rarity: #503961">
-      <img class="deck-tile__art" src="HORIZONTAL_IMAGE_URL" alt="">
+      <img class="deck-tile__art" src="HORIZONTAL_IMAGE_URL"
+        srcset="HORIZONTAL_IMAGE_URL 1x, HORIZONTAL_IMAGE_2X_URL 2x" alt="">
       <span class="deck-tile__cost">4</span>
       <span class="deck-tile__name">Ancient Augur</span>
       <span class="deck-tile__quantity">2</span>
@@ -78,21 +87,10 @@ and Next bundles it under `/_next/static/media/`.
 ```
 
 The empty `alt` avoids repeating the visible card name. Omit the image when the
-API returns `null`; the tile's color and text still render. Long names truncate
-visually while retaining their full text in the DOM.
-
-After deploying the code, the existing horizontal-art synchronization job
-regenerates assets with an older recipe. Its version check skips current assets.
-The public field, file paths and dimensions remain the same; `generated_at`
-updates the existing URL cache version. This source change alone does not modify
-production files or database rows.
-
-After generating replacements, a real synchronization marks remaining `ready`
-card assets with `source_kind` other than `art` as `unavailable`. This covers
-missing full art and failed replacements; API readers already exclude these
-statuses, so `horizontal_image_url` becomes `null`. Pure art assets and other
-entity types keep their existing status. The original media files are preserved.
-The summary reports `framed_assets_disabled`; a dry run does not disable assets.
+API returns `null`; the tile's color and text still render. Set `--name-scale`
+(0.72…1) to shrink long names; they truncate visually only below that size and
+retain their full text in the DOM. The quantity sits on a short fade to the
+rarity color; an empty quantity column is not reserved.
 
 Use the full art synchronization jobs to populate missing source fields. The
 renderer cannot reconstruct illustration details from a framed crop.

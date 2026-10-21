@@ -37,7 +37,7 @@
   border-radius: 3px;
   background: var(--tile-background, var(--rarity, #606367));
   color: #fff;
-  font: 700 21px/1 "Hearthstone Belwe", Georgia, serif;
+  font: 700 18px/1 "Hearthstone Belwe", Georgia, serif;
   text-shadow: -1px 0 #18130f, 1px 0 #18130f, 0 -1px #18130f, 0 1px #18130f, 0 2px 3px #000;
 }
 
@@ -49,8 +49,8 @@
   position: absolute;
   z-index: -1;
   top: 0;
-  /* Cover compressed edge pixels under the 36px quantity column. */
-  right: 34px;
+  /* The 640x128 art (srcset 2x) reaches the right edge. */
+  right: 0;
   height: 100%;
   width: auto;
   max-width: none;
@@ -67,7 +67,22 @@
 }
 
 .deck-tile__quantity {
-  background: var(--rarity, #606367);
+  position: relative;
+  isolation: isolate;
+}
+
+/* A fade instead of a solid column keeps the quantity or star legible. */
+.deck-tile__quantity:not(:empty)::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0 0 0 -24px;
+  background: linear-gradient(90deg, transparent, var(--rarity, #606367) 50%);
+}
+
+/* Without a quantity, the name may use the right column. */
+.deck-tile:has(.deck-tile__quantity:empty) {
+  grid-template-columns: 40px minmax(0, 1fr) 8px;
 }
 
 .deck-tile__cost {
@@ -91,6 +106,8 @@
 
 .deck-tile__name {
   min-width: 0;
+  /* Set --name-scale (0.72…1) for long names; truncation is the last resort. */
+  font-size: calc(18px * var(--name-scale, 1));
   padding-left: 8px;
   overflow: hidden;
   white-space: nowrap;

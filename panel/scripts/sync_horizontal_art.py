@@ -2,13 +2,11 @@
 from __future__ import annotations
 
 import argparse
-import base64
 import concurrent.futures
 import hashlib
 import json
 import os
 import re
-import subprocess
 import tempfile
 import urllib.error
 import urllib.parse
@@ -18,31 +16,47 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pymysql
 from backfill_constructed_images import connect_db, load_php_config
+from PIL import Image
 
 APP_ROOT = Path(
     os.environ.get("KOLODAHS_APP_ROOT") or Path(__file__).resolve().parents[1]
 )
 UPLOAD_ROOT = APP_ROOT / "uploads"
-OUTPUT_DIRNAME = "horizontal-art"
-OUTPUT_WIDTH = 320
-OUTPUT_HEIGHT = 64
-SOURCE_CROP_WIDTH = 243
-SOURCE_CROP_HEIGHT = 64
-VISIBLE_CROP_X = 52
-VISIBLE_CROP_WIDTH = SOURCE_CROP_WIDTH - VISIBLE_CROP_X
-ART_X = OUTPUT_WIDTH - VISIBLE_CROP_WIDTH
-FADE_WIDTH = 96
-RECIPE_VERSION = "7-game-cuts-trimmed-art"
-ART_ONLY_CARD_TYPES = (
+# Each recipe writes beside, never over, the files of the previous one: the
+# database row switches to the new URL only after both renditions exist, and
+# restoring the old rows rolls the API back to the untouched old files.
+OUTPUT_DIRNAME = "horizontal-art/r8"
+OUTPUT_WIDTH = 640
+OUTPUT_HEIGHT = 128
+SMALL_WIDTH = 320
+SMALL_HEIGHT = 64
+ART_X = 192
+ART_WIDTH = OUTPUT_WIDTH - ART_X
+ART_ASPECT = ART_WIDTH / OUTPUT_HEIGHT
+FADE_END = 384
+MAX_SOURCE_PIXELS = 24_000_000
+TILE_PLACEHOLDER_FRACTION = 0.25
+TILE_MATCH_MIN_SCORE = 0.85
+RECIPE_VERSION = "8-hires-focus-2x"
+SOURCE_KINDS = ("art", "strip", "tile")
+HSJ_ART = "https://art.hearthstonejson.com/v1/"
+FOCUS_OVERRIDES_PATH = APP_ROOT / "data" / "horizontal_art_focus.json"
+ENTITY_TYPES = (
     "battleground_card",
+    "coin",
     "constructed_card",
+    "hero",
+    "hero_skin",
     "library_card",
+    "pet",
     "timewarped_card",
 )
 USER_AGENT = "db.kolodahs.ru-horizontal-art/1.0"
 SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+REPRINT_PREFIXES = ("CORE_", "VAN_", "LEG_")
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +67,8 @@ class Candidate:
     source_url: str
     source_kind: str
     fallback_sources: tuple[tuple[str, str], ...] = ()
+    # In-game deck tiles locate the subject that designers framed for decks.
+    focus_tiles: tuple[str, ...] = ()
 
 
 def ensure_schema(conn) -> None:
@@ -93,17 +109,6 @@ def query_rows(conn, sql: str) -> list[dict[str, Any]]:
         raise
 
 
-def first_source(
-    row: dict[str, Any],
-    candidates: list[tuple[str, str]],
-) -> tuple[str, str] | None:
-    for column, source_kind in candidates:
-        value = str(row.get(column) or "").strip()
-        if value:
-            return value, source_kind
-    return None
-
-
 def available_sources(
     row: dict[str, Any], candidates: list[tuple[str, str]]
 ) -> list[tuple[str, str]]:
@@ -117,102 +122,101 @@ def available_sources(
     return result
 
 
-def candidate_from_sources(
+def game_card_ids(card_id: str) -> list[str]:
+    """The card itself, then the original card of a Core/Classic/Legacy reprint."""
+    if not card_id or not SAFE_ID_RE.fullmatch(card_id):
+        return []
+    ids = [card_id]
+    for prefix in REPRINT_PREFIXES:
+        if card_id.startswith(prefix) and len(card_id) > len(prefix):
+            ids.append(card_id[len(prefix) :])
+            break
+    return ids
+
+
+def hsj_original_art(card_ids: list[str]) -> list[tuple[str, str]]:
+    # HearthstoneJSON's original textures are the game's own illustrations,
+    # without a frame, text or rarity gem.
+    return [
+        (HSJ_ART + "orig/" + urllib.parse.quote(card_id, safe="") + ".png", "art")
+        for card_id in card_ids
+    ]
+
+
+def hsj_tiles(card_ids: list[str]) -> list[str]:
+    return [
+        HSJ_ART + "tiles/" + urllib.parse.quote(card_id, safe="") + ".webp"
+        for card_id in card_ids
+    ]
+
+
+def official_strips(payload_json: Any) -> list[tuple[str, str]]:
+    """Illustration strips retained from reveal data of not yet released cards."""
+    try:
+        payload = json.loads(payload_json or "{}")
+    except (ValueError, TypeError):
+        return []
+    result: list[tuple[str, str]] = []
+    if not isinstance(payload, dict):
+        return result
+    for key in (
+        "official_reveal_en",
+        "official_reveal_ru",
+        "blizzard_en",
+        "blizzard_ru",
+    ):
+        item = payload.get(key)
+        url = item.get("cropImage") if isinstance(item, dict) else None
+        if not isinstance(url, str):
+            continue
+        parsed = urllib.parse.urlparse(url)
+        if (
+            parsed.scheme == "https"
+            and parsed.netloc == "d15f34w2p8l1cc.cloudfront.net"
+            and parsed.path.startswith("/hearthstone/")
+            and (url, "strip") not in result
+        ):
+            result.append((url, "strip"))
+    return result
+
+
+def make_candidate(
     entity_type: str,
     entity_id: str,
     dbf: int | None,
     sources: list[tuple[str, str]],
+    focus_tiles: list[str] | None = None,
 ) -> Candidate | None:
-    if entity_type in ART_ONLY_CARD_TYPES:
-        sources = [(url, kind) for url, kind in sources if kind == "art"]
-    if not sources:
+    unique: list[tuple[str, str]] = []
+    for source in sources:
+        if source[1] in SOURCE_KINDS and source not in unique:
+            unique.append(source)
+    if not unique:
         return None
     return Candidate(
         entity_type,
         entity_id,
         dbf,
-        sources[0][0],
-        sources[0][1],
-        tuple(sources[1:]),
+        unique[0][0],
+        unique[0][1],
+        tuple(unique[1:]),
+        tuple(focus_tiles or ()),
     )
 
 
-def fetch_blizzard_crop_urls() -> dict[int, str]:
-    client_id = os.environ.get("BLIZZARD_CLIENT_ID", "").strip()
-    client_secret = os.environ.get("BLIZZARD_CLIENT_SECRET", "").strip()
-    if not client_id or not client_secret:
-        return {}
+def collect_candidates(conn) -> list[Candidate]:
+    """List clean illustration sources; rendered cards are never a source.
 
-    token_request = urllib.request.Request(
-        "https://oauth.battle.net/token",
-        data=urllib.parse.urlencode({"grant_type": "client_credentials"}).encode(),
-        headers={
-            "Authorization": "Basic "
-            + base64.b64encode(f"{client_id}:{client_secret}".encode()).decode(),
-            "User-Agent": USER_AGENT,
-        },
-    )
-    with urllib.request.urlopen(token_request, timeout=45) as response:
-        token = str(json.load(response).get("access_token") or "")
-    if not token:
-        raise RuntimeError("Blizzard token response does not contain access_token")
-
-    region = os.environ.get("BLIZZARD_REGION", "us")
-    locale = os.environ.get("BLIZZARD_LOCALE", "ru_RU")
-    result: dict[int, str] = {}
-    page = 1
-    while True:
-        query = urllib.parse.urlencode(
-            {
-                "locale": locale,
-                "gameMode": "battlegrounds",
-                "pageSize": 500,
-                "page": page,
-            }
-        )
-        request = urllib.request.Request(
-            f"https://{region}.api.blizzard.com/hearthstone/cards?{query}",
-            headers={"Authorization": f"Bearer {token}", "User-Agent": USER_AGENT},
-        )
-        with urllib.request.urlopen(request, timeout=90) as response:
-            payload = json.load(response)
-        for card in payload.get("cards", []):
-            if not isinstance(card, dict):
-                continue
-            dbf = int(card.get("id") or 0)
-            battlegrounds = card.get("battlegrounds")
-            if not isinstance(battlegrounds, dict):
-                battlegrounds = {}
-            crop_url = battlegrounds.get("cropImage") or card.get("cropImage")
-            if dbf and crop_url:
-                result[dbf] = str(crop_url)
-        if page >= int(payload.get("pageCount") or page):
-            break
-        page += 1
-    return result
-
-
-def collect_candidates(conn, blizzard_crops: dict[int, str]) -> list[Candidate]:
+    Local and wiki full art come first because of their resolution, then the
+    512px HearthstoneJSON texture. A constructed card's in-game deck tile is the
+    last-resort, low-resolution source and also locates the subject in the full
+    art. Other entity types do not appear in decks; their tiles use a generic
+    framing and are not used.
+    """
     candidates: list[Candidate] = []
 
-    for row in query_rows(
-        conn,
-        """
-        SELECT card_id, dbf, art_image
-          FROM battlegrounds_cards
-         WHERE COALESCE(art_image, '') <> ''
-        """,
-    ):
-        dbf = int(row["dbf"]) if row.get("dbf") is not None else None
-        sources = available_sources(
-            row,
-            [("art_image", "art")],
-        )
-        candidate = candidate_from_sources(
-            "battleground_card", str(row["card_id"]), dbf, sources
-        )
-        if candidate:
-            candidates.append(candidate)
+    def dbf_of(row: dict[str, Any]) -> int | None:
+        return int(row["dbf"]) if row.get("dbf") is not None else None
 
     for row in query_rows(
         conn,
@@ -223,178 +227,89 @@ def collect_candidates(conn, blizzard_crops: dict[int, str]) -> list[Candidate]:
           FROM constructed_cards
         """,
     ):
-        sources = available_sources(
-            row,
-            [
-                ("local_wiki_full_art_url", "art"),
-                ("wiki_full_art_url", "art"),
-            ],
-        )
         card_id = str(row["card_id"])
-        if not card_id.startswith("blizzard:"):
-            tile_ids = [card_id]
-            for prefix in ("CORE_", "VAN_", "LEG_"):
-                if card_id.startswith(prefix):
-                    tile_ids.append(card_id[len(prefix) :])
-                    break
-            # These are pure illustration strips, cut using the game's own
-            # coordinates, not rendered cards or frame-derived thumbnails.
-            sources = [
-                (
-                    "https://art.hearthstonejson.com/v1/tiles/"
-                    + urllib.parse.quote(tile_id, safe="")
-                    + ".webp",
-                    "art",
-                )
-                for tile_id in tile_ids
-            ] + sources
+        ids = game_card_ids(card_id)
+        sources = available_sources(row, [("local_wiki_full_art_url", "art")])
+        sources += hsj_original_art(ids)
+        sources += available_sources(row, [("wiki_full_art_url", "art")])
         if card_id.startswith("blizzard:"):
-            try:
-                payload = json.loads(row.get("source_payload_json") or "{}")
-            except (ValueError, TypeError):
-                payload = {}
-            if isinstance(payload, dict):
-                for key in (
-                    "official_reveal_en",
-                    "official_reveal_ru",
-                    "blizzard_en",
-                    "blizzard_ru",
-                ):
-                    item = payload.get(key)
-                    if not isinstance(item, dict):
-                        continue
-                    url = item.get("cropImage")
-                    if not isinstance(url, str):
-                        continue
-                    parsed = urllib.parse.urlparse(url)
-                    if (
-                        parsed.scheme == "https"
-                        and parsed.netloc == "d15f34w2p8l1cc.cloudfront.net"
-                        and parsed.path.startswith("/hearthstone/")
-                        and (url, "art") not in sources
-                    ):
-                        sources.append((url, "art"))
-        else:
-            sources.append(
-                (
-                    "https://art.hearthstonejson.com/v1/orig/"
-                    + urllib.parse.quote(card_id, safe="")
-                    + ".png",
-                    "art",
-                )
-            )
-        for prefix in ("CORE_", "VAN_", "LEG_"):
-            if str(row["card_id"]).startswith(prefix):
-                sources.append(
-                    (
-                        "https://art.hearthstonejson.com/v1/orig/"
-                        + urllib.parse.quote(
-                            str(row["card_id"])[len(prefix) :], safe=""
-                        )
-                        + ".png",
-                        "art",
-                    )
-                )
-                break
-        dbf = int(row["dbf"]) if row.get("dbf") is not None else None
-        candidate = candidate_from_sources(
-            "constructed_card", str(row["card_id"]), dbf, sources
+            sources += official_strips(row.get("source_payload_json"))
+        sources += [(url, "tile") for url in hsj_tiles(ids)]
+        candidate = make_candidate(
+            "constructed_card", card_id, dbf_of(row), sources, hsj_tiles(ids)
         )
-        if candidate:
-            candidates.append(candidate)
-
-    for row in query_rows(
-        conn,
-        """
-        SELECT library, card_id, dbf, local_full_art_url, full_art_source_url
-          FROM battlegrounds_library_cards
-         WHERE COALESCE(NULLIF(local_full_art_url, ''), full_art_source_url, '') <> ''
-        """,
-    ):
-        sources = available_sources(
-            row,
-            [
-                ("local_full_art_url", "art"),
-                ("full_art_source_url", "art"),
-            ],
-        )
-        dbf = int(row["dbf"]) if row.get("dbf") is not None else None
-        entity_id = f"{row['library']}:{row['card_id']}"
-        candidate = candidate_from_sources("library_card", entity_id, dbf, sources)
-        if candidate:
-            candidates.append(candidate)
-
-    for row in query_rows(
-        conn,
-        """
-        SELECT card_id, dbf, hero_full_art_url, hero_image_url
-          FROM battlegrounds_heroes
-         WHERE COALESCE(hero_full_art_url, hero_image_url, '') <> ''
-        """,
-    ):
-        dbf = int(row["dbf"]) if row.get("dbf") is not None else None
-        sources = available_sources(
-            row,
-            [("hero_full_art_url", "art"), ("hero_image_url", "card")],
-        )
-        if dbf in blizzard_crops:
-            sources.insert(0, (blizzard_crops[dbf], "crop"))
-        candidate = candidate_from_sources("hero", str(row["card_id"]), dbf, sources)
         if candidate:
             candidates.append(candidate)
 
     query_specs = [
         (
-            "hero_skin",
-            (
-                "SELECT card_id AS entity_id, dbf, full_art_url, static_image_url "
-                "FROM hero_skins "
-                "WHERE COALESCE(full_art_url, static_image_url, '') <> ''"
-            ),
-            [("full_art_url", "art"), ("static_image_url", "card")],
-            lambda row: str(row["entity_id"]),
+            "battleground_card",
+            "SELECT card_id, card_id AS game_id, dbf, art_image FROM battlegrounds_cards",
+            ["art_image"],
+            lambda row: str(row["card_id"]),
         ),
         (
+            "library_card",
+            (
+                "SELECT library, card_id, card_id AS game_id, dbf, local_full_art_url, "
+                "full_art_source_url FROM battlegrounds_library_cards"
+            ),
+            ["local_full_art_url", "full_art_source_url"],
+            lambda row: f"{row['library']}:{row['card_id']}",
+        ),
+        (
+            "hero",
+            (
+                "SELECT card_id, card_id AS game_id, dbf, hero_full_art_url "
+                "FROM battlegrounds_heroes"
+            ),
+            ["hero_full_art_url"],
+            lambda row: str(row["card_id"]),
+        ),
+        (
+            "hero_skin",
+            "SELECT card_id, card_id AS game_id, dbf, full_art_url FROM hero_skins",
+            ["full_art_url"],
+            lambda row: str(row["card_id"]),
+        ),
+        (
+            # Pets have no HearthstoneJSON texture; their end-of-game scene is
+            # the only frameless illustration. Card renders are excluded.
             "pet",
             (
-                "SELECT variant_id, card_id, dbf, end_screen_background_url, "
-                "card_image_url FROM hearthstone_pets "
-                "WHERE COALESCE(end_screen_background_url, card_image_url, '') <> ''"
+                "SELECT variant_id, card_id, NULL AS game_id, dbf, "
+                "end_screen_background_url FROM hearthstone_pets"
             ),
-            [("end_screen_background_url", "art"), ("card_image_url", "card")],
+            ["end_screen_background_url"],
             lambda row: str(row.get("card_id") or f"variant:{row['variant_id']}"),
         ),
         (
+            # The coin wiki image and image_url are rendered coins.
             "coin",
-            (
-                "SELECT card_id AS entity_id, dbf, crop_image_url, wiki_image_url, "
-                "image_url FROM hearthstone_coins "
-                "WHERE COALESCE(crop_image_url, wiki_image_url, image_url, '') <> ''"
-            ),
-            [
-                ("crop_image_url", "crop"),
-                ("wiki_image_url", "art"),
-                ("image_url", "card"),
-            ],
-            lambda row: str(row["entity_id"]),
+            "SELECT card_id, card_id AS game_id, dbf FROM hearthstone_coins",
+            [],
+            lambda row: str(row["card_id"]),
         ),
         (
             "timewarped_card",
             (
-                "SELECT card_id AS entity_id, dbf, art_image_url "
-                "FROM battlegrounds_timewarped_cards "
-                "WHERE COALESCE(art_image_url, '') <> ''"
+                "SELECT card_id, card_id AS game_id, dbf, art_image_url "
+                "FROM battlegrounds_timewarped_cards"
             ),
-            [("art_image_url", "art")],
-            lambda row: str(row["entity_id"]),
+            ["art_image_url"],
+            lambda row: str(row["card_id"]),
         ),
     ]
-    for entity_type, sql, source_fields, entity_id_for in query_specs:
+    for entity_type, sql, columns, entity_id_for in query_specs:
         for row in query_rows(conn, sql):
-            sources = available_sources(row, source_fields)
-            dbf = int(row["dbf"]) if row.get("dbf") is not None else None
-            candidate = candidate_from_sources(
-                entity_type, entity_id_for(row), dbf, sources
+            sources = available_sources(row, [(column, "art") for column in columns])
+            game_art = hsj_original_art(game_card_ids(str(row.get("game_id") or "")))
+            # Wiki hero art is sometimes a wide promotional panorama; the game
+            # texture keeps the portrait the hero is recognized by.
+            remote = sources and not sources[0][0].startswith("/uploads/")
+            sources = game_art + sources if remote else sources + game_art
+            candidate = make_candidate(
+                entity_type, entity_id_for(row), dbf_of(row), sources
             )
             if candidate:
                 candidates.append(candidate)
@@ -410,112 +325,219 @@ def utc_now() -> str:
 
 
 def identify_size(path: Path) -> tuple[int, int]:
-    result = subprocess.run(
-        ["identify", "-format", "%w %h", str(path)],
-        check=True,
-        capture_output=True,
-        text=True,
+    with Image.open(path) as image:
+        return image.size
+
+
+def load_focus_overrides() -> dict[str, tuple[float, float]]:
+    """Manual subject positions for artwork the heuristics frame poorly."""
+    try:
+        data = json.loads(FOCUS_OVERRIDES_PATH.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    result = {}
+    for key, value in (data.get("focus") or {}).items():
+        x, y = float(value["x"]), float(value["y"])
+        if not (0 <= x <= 1 and 0 <= y <= 1):
+            raise ValueError(f"Focus override {key} is outside the artwork")
+        result[str(key)] = (x, y)
+    return result
+
+
+def load_art(path: Path) -> Image.Image:
+    with Image.open(path) as image:
+        image.load()
+        if image.width < 2 or image.height < 2:
+            raise RuntimeError(
+                f"Source image is too small: {image.width}x{image.height}"
+            )
+        if image.width * image.height > MAX_SOURCE_PIXELS:
+            image.thumbnail((4096, 4096), Image.Resampling.LANCZOS)
+        return image.convert("RGBA")
+
+
+def trim_padding(image: Image.Image) -> Image.Image:
+    """Remove uniform white, gray, black or transparent padding on every edge.
+
+    Unity textures of new cards pad portrait art with white columns; older
+    textures contain gray packing bars. A row or column is padding when most of
+    its pixels are neutral light, black or transparent and these pixels share
+    one color; bright subjects touching an edge are colorful or textured.
+    """
+    pixels = np.asarray(image, dtype=np.float32)
+    rgb, alpha = pixels[..., :3], pixels[..., 3]
+    low, high = rgb.min(-1), rgb.max(-1)
+    pad = (alpha < 16) | ((low >= 196) & (high - low <= 14)) | (high <= 10)
+
+    def padding(line_pad: np.ndarray, line_rgb: np.ndarray) -> bool:
+        if line_pad.size == 0 or line_pad.mean() < 0.6:
+            return False
+        colors = line_rgb[line_pad]
+        return colors.size == 0 or float(colors.std(0).max()) <= 14
+
+    height, width = pad.shape
+    top, bottom, left, right = 0, height, 0, width
+    while top < height * 0.35 and padding(pad[top, left:right], rgb[top, left:right]):
+        top += 1
+    while bottom > height * 0.65 and padding(
+        pad[bottom - 1, left:right], rgb[bottom - 1, left:right]
+    ):
+        bottom -= 1
+    while left < width * 0.35 and padding(pad[top:bottom, left], rgb[top:bottom, left]):
+        left += 1
+    while right > width * 0.65 and padding(
+        pad[top:bottom, right - 1], rgb[top:bottom, right - 1]
+    ):
+        right -= 1
+    # Texture edges often carry a one-pixel light or dark seam.
+    inset_x = max(1, round((right - left) * 0.006))
+    inset_y = max(1, round((bottom - top) * 0.006))
+    return image.crop(
+        (left + inset_x, top + inset_y, right - inset_x, bottom - inset_y)
     )
-    width, height = result.stdout.strip().split()
-    return int(width), int(height)
 
 
-def subject_focus(source: Path) -> tuple[float, float]:
-    """Find a deterministic high-detail subject area without an ML model."""
-    sample_size = 96
-    result = subprocess.run(
-        [
-            "convert",
-            str(source),
-            "-auto-orient",
-            "-resize",
-            f"{sample_size}x{sample_size}!",
-            "-colorspace",
-            "sRGB",
-            "-depth",
-            "8",
-            "rgb:-",
-        ],
-        check=True,
-        capture_output=True,
+def gray(image: Image.Image, size: tuple[int, int]) -> np.ndarray:
+    return np.asarray(
+        image.convert("L").resize(size, Image.Resampling.BOX), dtype=np.float32
     )
-    expected_bytes = sample_size * sample_size * 3
-    if len(result.stdout) != expected_bytes:
-        raise RuntimeError("Unable to sample source artwork")
 
-    pixels = list(result.stdout)
-    luminance = [0.0] * (sample_size * sample_size)
-    colorfulness = [0.0] * (sample_size * sample_size)
-    skin_likelihood = [0.0] * (sample_size * sample_size)
-    skin_target = (0.44, 0.32, 0.24)
-    for index in range(sample_size * sample_size):
-        red, green, blue = pixels[index * 3 : index * 3 + 3]
-        luminance[index] = red * 0.299 + green * 0.587 + blue * 0.114
-        colorfulness[index] = max(red, green, blue) - min(red, green, blue)
-        channel_total = max(1, red + green + blue)
-        normalized = (
-            red / channel_total,
-            green / channel_total,
-            blue / channel_total,
+
+def normalized_correlation(art: np.ndarray, template: np.ndarray) -> np.ndarray:
+    """Normalized cross-correlation of a template at every valid position."""
+    art_height, art_width = art.shape
+    height, width = template.shape
+    centered = template - template.mean()
+    template_norm = float(np.sqrt((centered * centered).sum())) + 1e-6
+    integral = np.pad(art, ((1, 0), (1, 0))).cumsum(0).cumsum(1)
+    integral_sq = np.pad(art * art, ((1, 0), (1, 0))).cumsum(0).cumsum(1)
+
+    def window_sum(table: np.ndarray) -> np.ndarray:
+        return (
+            table[height:, width:]
+            - table[:-height, width:]
+            - table[height:, :-width]
+            + table[:-height, :-width]
         )
-        brightness = luminance[index]
-        if 45 <= brightness <= 245 and colorfulness[index] >= 12:
-            distance = (
-                sum(
-                    (normalized[channel] - skin_target[channel]) ** 2
-                    for channel in range(3)
+
+    total, total_sq = window_sum(integral), window_sum(integral_sq)
+    variance = np.maximum(total_sq - total * total / (height * width), 1e-3)
+    shape = (art_height + height, art_width + width)
+    correlation = np.fft.irfft2(
+        np.fft.rfft2(art, shape) * np.conj(np.fft.rfft2(centered, shape)), shape
+    )[: art_height - height + 1, : art_width - width + 1]
+    return correlation / (np.sqrt(variance) * template_norm)
+
+
+def locate_game_tile(
+    art: Image.Image, tile: Image.Image
+) -> tuple[float, float, float, float, float]:
+    """Find the in-game deck tile inside the full illustration.
+
+    Returns the normalized x, y, width and height of the tile's region and the
+    correlation score. The tile is a stretched view, so width and height are
+    searched independently. New HearthstoneJSON tiles carry a white placeholder
+    on the left; only the remainder is compared.
+    """
+    skip = TILE_PLACEHOLDER_FRACTION
+    tile = tile.crop((round(tile.width * skip), 0, tile.width, tile.height))
+    best = (-2.0, 0.0, 0.0, 0.0, 0.0)
+    size = 96
+    coarse = gray(art, (size, size))
+    for width_fraction in np.linspace(0.30, 1.0, 29):
+        width = round(size * width_fraction * (1 - skip))
+        for height_fraction in np.linspace(0.08, 0.55, 24):
+            height = round(size * height_fraction)
+            if height < 5 or width < 8:
+                continue
+            scores = normalized_correlation(coarse, gray(tile, (width, height)))
+            y, x = np.unravel_index(int(np.argmax(scores)), scores.shape)
+            if scores[y, x] > best[0]:
+                best = (
+                    float(scores[y, x]),
+                    x / size,
+                    y / size,
+                    width / size,
+                    height / size,
                 )
-                ** 0.5
-            )
-            skin_likelihood[index] = max(0.0, 1.0 - distance / 0.19)
 
-    detail = [0.0] * (sample_size * sample_size)
-    for y in range(1, sample_size - 1):
-        row = y * sample_size
-        for x in range(1, sample_size - 1):
-            index = row + x
-            horizontal = abs(luminance[index + 1] - luminance[index - 1])
-            vertical = abs(
-                luminance[index + sample_size] - luminance[index - sample_size]
-            )
-            edge_strength = horizontal + vertical
-            detail[index] = (
-                edge_strength
-                + colorfulness[index] * 0.10
-                + skin_likelihood[index] * min(1.0, edge_strength / 28.0) * 240.0
-            )
+    size = 288
+    fine_art = gray(art, (size, size))
+    _, best_x, best_y, best_width, best_height = best
+    fine = best
+    for width_delta in range(-6, 7, 2):
+        width = round(best_width * size) + width_delta
+        for height_delta in range(-6, 7, 2):
+            height = round(best_height * size) + height_delta
+            if width < 8 or height < 5:
+                continue
+            left = max(0, int(best_x * size) - 9)
+            top = max(0, int(best_y * size) - 9)
+            window = fine_art[
+                top : min(size, int(best_y * size) + height + 9),
+                left : min(size, int(best_x * size) + width + 9),
+            ]
+            if window.shape[0] < height or window.shape[1] < width:
+                continue
+            scores = normalized_correlation(window, gray(tile, (width, height)))
+            y, x = np.unravel_index(int(np.argmax(scores)), scores.shape)
+            if scores[y, x] > fine[0]:
+                fine = (
+                    float(scores[y, x]),
+                    (left + x) / size,
+                    (top + y) / size,
+                    width / size,
+                    height / size,
+                )
+    score, x, y, width, height = fine
+    full_width = width / (1 - skip)
+    return x - full_width * skip, y, full_width, height, score
 
-    source_width, source_height = identify_size(source)
-    expected_y = 0.31 if source_height >= source_width else 0.44
-    radius_x = 8
-    radius_y = 8
-    best_score = -1.0
-    best_x = sample_size // 2
-    best_y = round(expected_y * (sample_size - 1))
-    maximum_center_y = 36 if source_height >= source_width else 70
-    for center_y in range(12, maximum_center_y, 2):
-        for center_x in range(12, 84, 2):
-            score = 0.0
-            for y in range(center_y - radius_y, center_y + radius_y + 1):
-                y_weight = radius_y + 1 - abs(y - center_y)
-                row = y * sample_size
-                for x in range(center_x - radius_x, center_x + radius_x + 1):
-                    x_weight = radius_x + 1 - abs(x - center_x)
-                    score += detail[row + x] * x_weight * y_weight
 
-            normalized_y = center_y / (sample_size - 1)
-            y_prior = max(0.48, 1.0 - abs(normalized_y - expected_y) * 1.22)
-            normalized_x = center_x / (sample_size - 1)
-            x_prior = max(0.88, 1.0 - abs(normalized_x - 0.5) * 0.16)
-            score *= y_prior * x_prior
-            if score > best_score:
-                best_score = score
-                best_x = center_x
-                best_y = center_y
+def subject_focus(image: Image.Image) -> tuple[float, float]:
+    """Find a deterministic high-detail subject area without an ML model."""
+    size = 96
+    pixels = np.asarray(
+        image.convert("RGB").resize((size, size), Image.Resampling.BOX),
+        dtype=np.float32,
+    )
+    luminance = pixels @ np.array([0.299, 0.587, 0.114], dtype=np.float32)
+    colorfulness = pixels.max(-1) - pixels.min(-1)
+    normalized = pixels / np.maximum(1.0, pixels.sum(-1, keepdims=True))
+    skin_distance = np.sqrt(
+        ((normalized - np.array([0.44, 0.32, 0.24], dtype=np.float32)) ** 2).sum(-1)
+    )
+    skin = np.where(
+        (luminance >= 45) & (luminance <= 245) & (colorfulness >= 12),
+        np.maximum(0.0, 1.0 - skin_distance / 0.19),
+        0.0,
+    )
+    edges = np.zeros_like(luminance)
+    edges[1:-1, 1:-1] = np.abs(luminance[1:-1, 2:] - luminance[1:-1, :-2]) + np.abs(
+        luminance[2:, 1:-1] - luminance[:-2, 1:-1]
+    )
+    detail = np.zeros_like(luminance)
+    detail[1:-1, 1:-1] = (
+        edges + colorfulness * 0.10 + skin * np.minimum(1.0, edges / 28.0) * 240.0
+    )[1:-1, 1:-1]
 
-    focus_x = best_x / (sample_size - 1)
-    focus_y = best_y / (sample_size - 1)
-    if source_height >= source_width:
+    radius = 8
+    weights = (radius + 1 - np.abs(np.arange(-radius, radius + 1))).astype(np.float32)
+    padded = np.pad(detail, radius)
+    rows = sum(padded[:, i : i + size] * weights[i] for i in range(2 * radius + 1))
+    windows = sum(rows[i : i + size, :] * weights[i] for i in range(2 * radius + 1))
+
+    portrait = image.height >= image.width
+    expected_y = 0.31 if portrait else 0.44
+    axis = np.arange(size) / (size - 1)
+    prior = np.maximum(0.48, 1.0 - np.abs(axis - expected_y) * 1.22)[:, None]
+    prior = prior * np.maximum(0.88, 1.0 - np.abs(axis - 0.5) * 0.16)[None, :]
+    scores = np.full_like(windows, -1.0)
+    bottom = 36 if portrait else 70
+    scores[12:bottom, 12:84] = (windows * prior)[12:bottom, 12:84]
+    y, x = np.unravel_index(int(np.argmax(scores)), scores.shape)
+    focus_x, focus_y = x / (size - 1), y / (size - 1)
+    if portrait:
         # Portrait Hearthstone art normally keeps the face in the upper torso.
         # Salient weapons, hands and spell effects below it must not steal focus.
         focus_x = max(0.30, min(0.58, focus_x))
@@ -523,274 +545,132 @@ def subject_focus(source: Path) -> tuple[float, float]:
     return focus_x, focus_y
 
 
-def trim_light_art_margins(source: Path, target: Path) -> None:
-    """Remove continuous near-white padding without trimming bright subjects."""
-    width, height = identify_size(source)
-    sample_width, sample_height = min(width, 512), min(height, 512)
-    result = subprocess.run(
-        [
-            "convert",
-            str(source),
-            "-auto-orient",
-            "-resize",
-            f"{sample_width}x{sample_height}!",
-            "-depth",
-            "8",
-            "rgba:-",
-        ],
-        check=True,
-        capture_output=True,
-    )
-    pixels = result.stdout
-    if len(pixels) != sample_width * sample_height * 4:
-        raise RuntimeError("Unable to inspect artwork margins")
-
-    def white(x: int, y: int) -> bool:
-        offset = (y * sample_width + x) * 4
-        red, green, blue, alpha = pixels[offset : offset + 4]
-        return alpha >= 250 and min(red, green, blue) >= 245
-
-    def column(x: int) -> bool:
-        return sum(white(x, y) for y in range(sample_height)) >= sample_height * 0.99
-
-    def row(y: int) -> bool:
-        return sum(white(x, y) for x in range(sample_width)) >= sample_width * 0.99
-
-    left, right, top, bottom = 0, sample_width, 0, sample_height
-    while left < sample_width // 4 and column(left):
-        left += 1
-    while right > sample_width * 3 // 4 and column(right - 1):
-        right -= 1
-    while top < sample_height // 4 and row(top):
-        top += 1
-    while bottom > sample_height * 3 // 4 and row(bottom - 1):
-        bottom -= 1
-    x = round(left * width / sample_width)
-    y = round(top * height / sample_height)
-    crop_width = round(right * width / sample_width) - x
-    crop_height = round(bottom * height / sample_height) - y
-    subprocess.run(
-        [
-            "convert",
-            str(source),
-            "-auto-orient",
-            "-crop",
-            f"{crop_width}x{crop_height}+{x}+{y}",
-            "+repage",
-            str(target),
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-
-
-def normalized_crop(source: Path, target: Path, source_kind: str) -> None:
-    width, height = identify_size(source)
-    if width < 2 or height < 2:
-        raise RuntimeError(f"Source image is too small: {width}x{height}")
-
-    if source_kind == "crop" and width * 100 < height * 250:
-        source_kind = "art"
-
-    if source_kind == "art" and width >= height * 3:
-        # Keep the complete game-selected strip: a second cover crop can cut
-        # off a face placed close to its edge. The small aspect adjustment
-        # also avoids letterboxing in the final tile.
-        command = [
-            "convert",
-            str(source),
-            "-auto-orient",
-            "-resize",
-            f"{SOURCE_CROP_WIDTH}x{SOURCE_CROP_HEIGHT}!",
-            str(target),
-        ]
-    elif source_kind == "crop":
-        command = [
-            "convert",
-            str(source),
-            "-auto-orient",
-            "-resize",
-            f"{SOURCE_CROP_WIDTH}x{SOURCE_CROP_HEIGHT}^",
-            "-gravity",
-            "center",
-            "-background",
-            "none",
-            "-extent",
-            f"{SOURCE_CROP_WIDTH}x{SOURCE_CROP_HEIGHT}",
-            str(target),
-        ]
-    elif source_kind == "card":
-        crop_width = min(width, max(1, round(width * 0.602)))
-        crop_height = min(height, max(1, round(height * 0.115)))
-        crop_x = min(width - crop_width, max(0, round(width * 0.198)))
-        crop_y = min(height - crop_height, max(0, round(height * 0.125)))
-        command = [
-            "convert",
-            str(source),
-            "-auto-orient",
-            "-crop",
-            f"{crop_width}x{crop_height}+{crop_x}+{crop_y}",
-            "+repage",
-            "-resize",
-            f"{SOURCE_CROP_WIDTH}x{SOURCE_CROP_HEIGHT}!",
-            str(target),
-        ]
-    elif source_kind == "art":
-        focus_x, focus_y = subject_focus(source)
-        crop_width = min(width, max(1, width * 25 // 32))
-        crop_height = max(1, round(crop_width * SOURCE_CROP_HEIGHT / SOURCE_CROP_WIDTH))
-        if crop_height > height:
-            crop_height = height
-            crop_width = min(
-                width,
-                max(1, round(crop_height * SOURCE_CROP_WIDTH / SOURCE_CROP_HEIGHT)),
-            )
-
-        crop_x = max(
-            0,
-            min(width - crop_width, round(focus_x * width - crop_width * 0.5)),
-        )
-        crop_y = max(
-            0,
-            min(height - crop_height, round(focus_y * height - crop_height * 0.5)),
-        )
-        command = [
-            "convert",
-            str(source),
-            "-auto-orient",
-            "-crop",
-            f"{crop_width}x{crop_height}+{crop_x}+{crop_y}",
-            "+repage",
-            "-resize",
-            f"{SOURCE_CROP_WIDTH}x{SOURCE_CROP_HEIGHT}!",
-            str(target),
-        ]
+def plan_crop(
+    width: int, height: int, focus_x: float, focus_y: float
+) -> tuple[float, float, float, float]:
+    """Choose an undistorted crop of the art area's aspect around the subject."""
+    subject_x, subject_y = focus_x * width, focus_y * height
+    if width / height > ART_ASPECT:
+        crop_height = float(height)
+        crop_width = crop_height * ART_ASPECT
     else:
+        crop_width = float(width)
+        crop_height = crop_width / ART_ASPECT
+        # A subject on the far left would sit under the text fade: zoom in.
+        if subject_x / crop_width < 0.45:
+            crop_width = max(width * 0.62, subject_x / 0.5)
+            crop_height = crop_width / ART_ASPECT
+    left = min(max(0.0, subject_x - crop_width * 0.6), width - crop_width)
+    top = min(max(0.0, subject_y - crop_height * 0.45), height - crop_height)
+    return left, top, crop_width, crop_height
+
+
+def compose(art: Image.Image, crop: tuple[float, float, float, float]) -> Image.Image:
+    left, top, crop_width, crop_height = crop
+    region = art.resize(
+        (ART_WIDTH, OUTPUT_HEIGHT),
+        Image.Resampling.LANCZOS,
+        box=(left, top, left + crop_width, top + crop_height),
+    )
+    canvas = Image.new("RGBA", (OUTPUT_WIDTH, OUTPUT_HEIGHT), (0, 0, 0, 0))
+    canvas.paste(region, (ART_X, 0))
+    pixels = np.asarray(canvas, dtype=np.float32).copy()
+    # Fade the artwork's alpha, rather than painting a black overlay.
+    # Smoothstep has flat ends, so the tile background has no hard seam.
+    fade = np.clip(
+        (np.arange(OUTPUT_WIDTH, dtype=np.float32) - ART_X) / (FADE_END - ART_X), 0, 1
+    )
+    pixels[..., 3] *= (fade * fade * (3 - 2 * fade))[None, :]
+    return Image.fromarray(np.clip(pixels + 0.5, 0, 255).astype(np.uint8), "RGBA")
+
+
+def quality_report(image: Image.Image) -> dict[str, float]:
+    """Measure artifacts in the fully visible part of a rendered image."""
+    pixels = np.asarray(image, dtype=np.float32)[:, FADE_END:]
+    rgb, alpha = pixels[..., :3], pixels[..., 3]
+    low, high = rgb.min(-1), rgb.max(-1)
+    luminance = rgb @ np.array([0.299, 0.587, 0.114], dtype=np.float32)
+    return {
+        "transparent": round(float((alpha < 250).mean()), 4),
+        "white_columns": round(float(((low >= 235).mean(0) >= 0.92).mean()), 4),
+        "black_columns": round(float(((high <= 6).mean(0) >= 0.95).mean()), 4),
+        "detail": round(float(luminance.std()), 2),
+    }
+
+
+def check_quality(report: dict[str, float]) -> None:
+    if report["detail"] < 4:
+        raise RuntimeError("Horizontal art is blank")
+    if report["transparent"] > 0.02:
+        raise RuntimeError("Horizontal art has transparent holes")
+    if report["white_columns"] > 0.05:
+        raise RuntimeError("Horizontal art has a white margin")
+    if report["black_columns"] > 0.25:
+        raise RuntimeError("Horizontal art has a black block")
+
+
+def retina_path(path: Path) -> Path:
+    """The 640x128 rendition lives beside the 320x64 public file."""
+    return path.with_name(path.name.removesuffix(".webp") + "@2x.webp")
+
+
+def render_horizontal_art(
+    source: Path,
+    target: Path,
+    source_kind: str,
+    *,
+    tile: Path | None = None,
+    focus: tuple[float, float] | None = None,
+) -> dict[str, Any]:
+    """Write the 320x64 target and its 2x companion; return the framing report."""
+    if source_kind not in SOURCE_KINDS:
         raise ValueError(f"Unsupported source kind: {source_kind}")
+    art = trim_padding(load_art(source))
+    method = "override" if focus else "subject"
+    score = None
+    if focus is None and tile is not None and source_kind == "art":
+        x, y, width, height, score = locate_game_tile(art, load_art(tile))
+        if score >= TILE_MATCH_MIN_SCORE:
+            focus = (
+                min(1.0, max(0.0, x + width / 2)),
+                min(1.0, max(0.0, y + height / 2)),
+            )
+            method = "game_tile"
+    if focus is None and source_kind in ("strip", "tile"):
+        # Illustration strips are already framed around the subject; the left
+        # quarter of game tiles holds the placeholder and the text gradient.
+        focus = (0.62, 0.5)
+        method = "strip"
+    if focus is None:
+        focus = subject_focus(art)
+    image = compose(art, plan_crop(art.width, art.height, *focus))
+    report = quality_report(image)
+    check_quality(report)
 
-    subprocess.run(command, check=True, capture_output=True, text=True)
-    if identify_size(target) != (SOURCE_CROP_WIDTH, SOURCE_CROP_HEIGHT):
-        raise RuntimeError("Normalized crop has unexpected dimensions")
-    remove_uniform_light_right_edge(target)
-
-
-def remove_uniform_light_right_edge(path: Path) -> None:
-    result = subprocess.run(
-        [
-            "convert",
-            str(path),
-            "-colorspace",
-            "gray",
-            "-threshold",
-            "95%",
-            "-scale",
-            f"{SOURCE_CROP_WIDTH}x1!",
-            "-depth",
-            "8",
-            "gray:-",
-        ],
-        check=True,
-        capture_output=True,
-    )
-    columns = list(result.stdout)
-    if len(columns) != SOURCE_CROP_WIDTH:
-        raise RuntimeError("Unable to inspect normalized crop edges")
-    if all(value >= 250 for value in columns):
-        raise RuntimeError("Normalized crop is blank")
-
-    light_edge_width = 0
-    for value in reversed(columns):
-        if value < 190:
-            break
-        light_edge_width += 1
-    content_right = SOURCE_CROP_WIDTH - light_edge_width
-    if light_edge_width <= 2 or content_right < SOURCE_CROP_WIDTH // 2:
-        return
-
-    temporary = path.with_suffix(".edge-fixed.png")
-    subprocess.run(
-        [
-            "convert",
-            str(path),
-            "-crop",
-            f"{content_right}x{SOURCE_CROP_HEIGHT}+0+0",
-            "+repage",
-            "-resize",
-            f"{SOURCE_CROP_WIDTH}x{SOURCE_CROP_HEIGHT}!",
-            str(temporary),
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    os.replace(temporary, path)
-
-
-def render_horizontal_art(source: Path, target: Path, source_kind: str) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="horizontal-art-") as tmp_dir:
-        if source_kind == "art":
-            trimmed = Path(tmp_dir) / "trimmed.png"
-            trim_light_art_margins(source, trimmed)
-            source = trimmed
-        normalized = Path(tmp_dir) / "normalized.png"
-        normalized_crop(source, normalized, source_kind)
-        width, height = identify_size(source)
-        if source_kind == "art":
-            art_x = (
-                OUTPUT_WIDTH - SOURCE_CROP_WIDTH
-                if width >= height * 3
-                else round(OUTPUT_WIDTH * 0.76 - SOURCE_CROP_WIDTH * 0.5)
-            )
-        else:
-            focus_x, _ = subject_focus(normalized)
-            subject_x = round(focus_x * (SOURCE_CROP_WIDTH - 1))
-            art_x = max(
-                OUTPUT_WIDTH - SOURCE_CROP_WIDTH,
-                min(ART_X, round(OUTPUT_WIDTH * 0.76 - subject_x)),
-            )
-        temporary = Path(tmp_dir) / "output.webp"
-        subprocess.run(
-            [
-                "convert",
-                "-size",
-                f"{OUTPUT_WIDTH}x{OUTPUT_HEIGHT}",
-                "xc:none",
-                "(",
-                str(normalized),
-                ")",
-                "-gravity",
-                "northwest",
-                "-geometry",
-                f"+{art_x}+0",
-                "-compose",
-                "over",
-                "-composite",
-                # Fade the artwork's alpha, rather than painting a black overlay.
-                # Smoothstep has flat ends, so the tile background has no hard seam.
-                "-alpha",
-                "on",
-                "-channel",
-                "A",
-                "-fx",
-                f"fade=max(0,min(1,(i-{ART_X})/{FADE_WIDTH}));u.a*fade*fade*(3-2*fade)",
-                "+channel",
-                "-strip",
-                "-quality",
-                "88",
-                "-define",
-                "webp:method=6",
-                str(temporary),
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        if identify_size(temporary) != (OUTPUT_WIDTH, OUTPUT_HEIGHT):
-            raise RuntimeError("Horizontal art has unexpected dimensions")
-        os.chmod(temporary, 0o644)
-        os.replace(temporary, target)
+    for path, rendition in (
+        (retina_path(target), image),
+        (target, image.resize((SMALL_WIDTH, SMALL_HEIGHT), Image.Resampling.LANCZOS)),
+    ):
+        # The temporary file must share the target's filesystem: renaming from
+        # /tmp onto an upload path fails with EXDEV.
+        with tempfile.NamedTemporaryFile(
+            dir=path.parent, prefix=".tmp-", suffix=".webp", delete=False
+        ) as handle:
+            temporary = Path(handle.name)
+        try:
+            rendition.save(temporary, "WEBP", quality=88, method=6)
+            os.chmod(temporary, 0o644)
+            os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
+    return {
+        "focus_method": method,
+        "focus": [round(focus[0], 3), round(focus[1], 3)],
+        "tile_score": None if score is None else round(score, 3),
+        "art_size": [art.width, art.height],
+        **report,
+    }
 
 
 def output_filename(entity_id: str) -> str:
@@ -829,7 +709,9 @@ def local_source_path(source_url: str) -> Path | None:
     return candidate if candidate.is_file() and candidate.stat().st_size > 0 else None
 
 
-def source_signature(candidate: Candidate) -> str:
+def source_signature(
+    candidate: Candidate, focus: tuple[float, float] | None = None
+) -> str:
     source_values = []
     for source_url, source_kind in (
         (candidate.source_url, candidate.source_kind),
@@ -843,6 +725,9 @@ def source_signature(candidate: Candidate) -> str:
             )
         else:
             source_values.append(f"remote:{source_url}:{source_kind}")
+    source_values += [f"tile:{url}" for url in candidate.focus_tiles]
+    if focus is not None:
+        source_values.append(f"focus:{focus[0]:.4f},{focus[1]:.4f}")
     value = "|".join((*source_values, RECIPE_VERSION))
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
@@ -904,24 +789,40 @@ def load_existing_assets(conn) -> dict[tuple[str, str], dict[str, Any]]:
         }
 
 
+def fetch_to(source_url: str, directory: Path, name: str) -> Path:
+    local = local_source_path(source_url)
+    if local is not None:
+        return local
+    downloaded = directory / name
+    download_source(source_url, downloaded)
+    return downloaded
+
+
 def process_candidate(
     candidate: Candidate,
     existing: dict[str, Any] | None,
     *,
     force: bool,
     dry_run: bool,
+    focus_overrides: dict[str, tuple[float, float]] | None = None,
 ) -> dict[str, Any]:
     public_path = output_public_path(candidate)
     target = local_upload_path(public_path)
-    signature = source_signature(candidate)
+    focus = (focus_overrides or {}).get(
+        f"{candidate.entity_type}:{candidate.entity_id}"
+    )
+    signature = source_signature(candidate, focus)
     if (
         not force
         and existing is not None
         and str(existing.get("status") or "") == "ready"
         and str(existing.get("source_signature") or "") == signature
         and str(existing.get("recipe_version") or "") == RECIPE_VERSION
-        and target.is_file()
-        and target.stat().st_size > 0
+        and str(existing.get("local_image_url") or "") == public_path
+        and all(
+            path.is_file() and path.stat().st_size > 0
+            for path in (target, retina_path(target))
+        )
     ):
         return {"action": "unchanged", "candidate": candidate}
 
@@ -941,32 +842,34 @@ def process_candidate(
         (candidate.source_url, candidate.source_kind),
         *candidate.fallback_sources,
     )
-    for source_url, source_kind in sources:
-        local_source = local_source_path(source_url)
-        try:
-            if local_source is not None:
-                render_horizontal_art(local_source, target, source_kind)
-            else:
-                with tempfile.TemporaryDirectory(
-                    prefix="horizontal-source-"
-                ) as tmp_dir:
-                    downloaded = Path(tmp_dir) / "source"
-                    download_source(source_url, downloaded)
-                    render_horizontal_art(downloaded, target, source_kind)
-            target.chmod(0o644)
-            return {
-                "action": "generated",
-                "candidate": candidate,
-                "source_url": source_url,
-                "source_kind": source_kind,
-                "source_signature": signature,
-                "public_path": public_path,
-                "image_sha256": sha256_file(target),
-            }
-        except Exception as exc:  # noqa: BLE001 -- try the next trusted art source
-            if isinstance(exc, urllib.error.HTTPError) and exc.code == 404:
-                not_found_count += 1
-            failures.append(f"{source_url}: {exc}")
+    with tempfile.TemporaryDirectory(prefix="horizontal-source-") as tmp_dir:
+        tile = None
+        for tile_url in candidate.focus_tiles:
+            try:
+                tile = fetch_to(tile_url, Path(tmp_dir), "tile")
+                break
+            except Exception:  # noqa: BLE001, S112 -- the subject heuristic still applies
+                continue
+        for index, (source_url, source_kind) in enumerate(sources):
+            try:
+                source = fetch_to(source_url, Path(tmp_dir), f"source-{index}")
+                report = render_horizontal_art(
+                    source, target, source_kind, tile=tile, focus=focus
+                )
+                return {
+                    "action": "generated",
+                    "candidate": candidate,
+                    "source_url": source_url,
+                    "source_kind": source_kind,
+                    "source_signature": signature,
+                    "public_path": public_path,
+                    "image_sha256": sha256_file(target),
+                    "report": report,
+                }
+            except Exception as exc:  # noqa: BLE001 -- try the next trusted art source
+                if isinstance(exc, urllib.error.HTTPError) and exc.code == 404:
+                    not_found_count += 1
+                failures.append(f"{source_url}: {exc}")
     return {
         "action": "unavailable" if not_found_count == len(sources) else "error",
         "candidate": candidate,
@@ -1057,21 +960,35 @@ def persist_result(
 
 
 def disable_framed_card_assets(conn) -> int:
-    """Hide legacy card/crop assets when a pure art replacement is unavailable."""
-    placeholders = ", ".join("%s" for _ in ART_ONLY_CARD_TYPES)
+    """Hide legacy assets cut from rendered cards or crops of unknown framing."""
+    placeholders = ", ".join("%s" for _ in SOURCE_KINDS)
     with conn.cursor() as cur:
         cur.execute(
             "UPDATE horizontal_art_assets "
             "SET status = 'unavailable', last_error = %s, recipe_version = %s "
-            "WHERE status = 'ready' AND source_kind <> 'art' "
-            f"AND entity_type IN ({placeholders})",
+            f"WHERE status = 'ready' AND source_kind NOT IN ({placeholders})",
             (
                 "Pure artwork required; framed card/crop sources disabled",
                 RECIPE_VERSION,
-                *ART_ONLY_CARD_TYPES,
+                *SOURCE_KINDS,
             ),
         )
         return int(cur.rowcount)
+
+
+def is_current(
+    candidate: Candidate,
+    existing: dict[str, Any] | None,
+    focus: tuple[float, float] | None,
+) -> bool:
+    return (
+        existing is not None
+        and str(existing.get("status") or "") == "ready"
+        and str(existing.get("recipe_version") or "") == RECIPE_VERSION
+        and str(existing.get("local_image_url") or "") == output_public_path(candidate)
+        and str(existing.get("source_signature") or "")
+        == source_signature(candidate, focus)
+    )
 
 
 def main() -> int:
@@ -1081,29 +998,57 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--limit", type=int)
-    parser.add_argument("--workers", type=int, default=12)
+    parser.add_argument("--entity", choices=ENTITY_TYPES, action="append")
+    parser.add_argument("--id", action="append", dest="ids", help="entity ID")
+    # Rendering is CPU-bound: keep the scheduled job small and bounded, so it
+    # neither starves the server nor holds the global sync lock for hours.
+    parser.add_argument("--workers", type=int, default=3)
+    parser.add_argument(
+        "--max-generate",
+        type=int,
+        default=2500,
+        help="render at most this many outdated assets per run (0: no limit)",
+    )
     args = parser.parse_args()
 
     conn = connect_db(load_php_config())
     try:
         ensure_schema(conn)
-        try:
-            blizzard_crops = fetch_blizzard_crop_urls()
-            blizzard_error = None
-        except (
-            OSError,
-            urllib.error.URLError,
-            urllib.error.HTTPError,
-            RuntimeError,
-        ) as exc:
-            blizzard_crops = {}
-            blizzard_error = str(exc)
-
-        candidates = collect_candidates(conn, blizzard_crops)
+        focus_overrides = load_focus_overrides()
+        candidates = collect_candidates(conn)
+        complete = not (args.entity or args.ids or args.limit is not None)
+        if args.entity:
+            candidates = [
+                item for item in candidates if item.entity_type in args.entity
+            ]
+        if args.ids:
+            candidates = [item for item in candidates if item.entity_id in args.ids]
         if args.limit is not None:
             candidates = candidates[: max(0, args.limit)]
         existing_assets = load_existing_assets(conn)
+
+        def key(candidate: Candidate) -> tuple[str, str]:
+            return candidate.entity_type, candidate.entity_id
+
+        def override(candidate: Candidate) -> tuple[float, float] | None:
+            return focus_overrides.get(f"{candidate.entity_type}:{candidate.entity_id}")
+
+        pending = [
+            candidate
+            for candidate in candidates
+            if args.force
+            or not is_current(
+                candidate, existing_assets.get(key(candidate)), override(candidate)
+            )
+        ]
+        deferred = 0
+        if args.max_generate > 0 and len(pending) > args.max_generate:
+            deferred = len(pending) - args.max_generate
+            pending = pending[: args.max_generate]
+            complete = False
+
         results: list[dict[str, Any]] = []
+        unpersisted = 0
         with concurrent.futures.ThreadPoolExecutor(
             max_workers=max(1, args.workers)
         ) as executor:
@@ -1111,35 +1056,51 @@ def main() -> int:
                 executor.submit(
                     process_candidate,
                     candidate,
-                    existing_assets.get((candidate.entity_type, candidate.entity_id)),
+                    existing_assets.get(key(candidate)),
                     force=args.force,
                     dry_run=args.dry_run,
+                    focus_overrides=focus_overrides,
                 )
-                for candidate in candidates
+                for candidate in pending
             ]
             for future in concurrent.futures.as_completed(futures):
-                results.append(future.result())
+                result = future.result()
+                results.append(result)
+                if args.dry_run:
+                    continue
+                # Each row switches to its new URL as soon as both files exist.
+                persist_result(
+                    conn, result, existing_assets.get(key(result["candidate"]))
+                )
+                unpersisted += 1
+                if unpersisted >= 100:
+                    conn.commit()
+                    unpersisted = 0
 
         framed_assets_disabled = 0
         if not args.dry_run:
-            for result in results:
-                candidate = result["candidate"]
-                persist_result(
-                    conn,
-                    result,
-                    existing_assets.get((candidate.entity_type, candidate.entity_id)),
-                )
-            framed_assets_disabled = disable_framed_card_assets(conn)
+            if complete:
+                framed_assets_disabled = disable_framed_card_assets(conn)
             conn.commit()
 
-        counts: dict[str, int] = {}
+        counts: dict[str, int] = {
+            "unchanged": len(candidates) - len(pending) - deferred
+        }
         errors = []
         by_type: dict[str, int] = {}
+        focus_methods: dict[str, int] = {}
+        quality_flags = []
         for result in results:
             action = str(result["action"])
             counts[action] = counts.get(action, 0) + 1
             candidate = result["candidate"]
             by_type[candidate.entity_type] = by_type.get(candidate.entity_type, 0) + 1
+            report = result.get("report")
+            if report:
+                method = str(report["focus_method"])
+                focus_methods[method] = focus_methods.get(method, 0) + 1
+                if report["white_columns"] or report["black_columns"]:
+                    quality_flags.append({"entity_id": candidate.entity_id, **report})
             if action == "error":
                 errors.append(
                     {
@@ -1153,11 +1114,12 @@ def main() -> int:
             "dry_run": args.dry_run,
             "recipe_version": RECIPE_VERSION,
             "candidates": len(candidates),
+            "deferred": deferred,
             "framed_assets_disabled": framed_assets_disabled,
             "counts": counts,
             "by_type": dict(sorted(by_type.items())),
-            "blizzard_crop_urls": len(blizzard_crops),
-            "blizzard_error": blizzard_error,
+            "focus_methods": focus_methods,
+            "quality_flags": quality_flags[:50],
             "errors": errors[:100],
         }
         print(json.dumps(summary, ensure_ascii=False, sort_keys=True))

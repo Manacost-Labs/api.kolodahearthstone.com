@@ -1,0 +1,9 @@
+{
+  "_comment": "Manual subject positions (0..1 of the trimmed source art) for horizontal art the heuristics frame poorly. Key: entity_type:entity_id.",
+  "focus": {
+    "hero:TB_BaconShop_HERO_56": {
+      "x": 0.38,
+      "y": 0.33
+    }
+  }
+}

@@ -65,14 +65,21 @@ function card_tile_layout(array $row, string $entityType): array
         'version'=>1, 'reference_size'=>['width'=>320,'height'=>64], 'min_width'=>200,
         'corner_radius'=>3, 'vertical_alignment'=>'center',
         'background'=>['color'=>end($colors), 'gradient'=>$stops ? ['angle_deg'=>110,'stops'=>$stops] : null],
-        'art'=>['url'=>$row['horizontal_image_url'] ?? null, 'aspect_ratio'=>5, 'anchor'=>'right', 'end_inset'=>34, 'fit'=>'contain'],
+        // 640x128 art for dense screens; the art reaches the right edge.
+        'art'=>['url'=>$row['horizontal_image_url'] ?? null, 'url_2x'=>$row['horizontal_image_2x_url'] ?? null,
+            'aspect_ratio'=>5, 'anchor'=>'right', 'end_inset'=>0, 'fit'=>'contain'],
         'text_style'=>['outline_color'=>'#18130f','outline_width'=>1,'shadow'=>['color'=>'#000000','offset_y'=>2,'blur'=>2]],
         'cost'=>['text'=>$cost,'color'=>$textColor,'column_width'=>40,'font_url'=>$assets.'hearthstone-belwe.ttf?v=1','font_size'=>28,
             'outline_color'=>$bg ? '#392008' : '#102746',
             'icon'=>!$bg && $cost !== '—' ? ['url'=>$assets.'mana-crystal.png?v=1','width'=>40,'height'=>42] : null],
         'title'=>['text'=>$name,'color'=>'#ffffff','font_url'=>$assets.(preg_match('/[А-Яа-яЁё]/u',$name) ? 'hearthstone-benguiat.ttf' : 'hearthstone-belwe.ttf').'?v=1',
-            'font_size'=>21,'font_weight'=>700,'inset_start'=>48,'inset_end'=>36,'max_lines'=>1,'overflow'=>'ellipsis'],
+            // Long names shrink to min_font_size before the ellipsis applies.
+            'font_size'=>18,'min_font_size'=>13,'font_weight'=>700,'inset_start'=>48,'inset_end'=>$price === '' ? 8 : 36,
+            'max_lines'=>1,'overflow'=>'ellipsis'],
+        // Without a badge the column is not reserved; with one, a 60px fade
+        // from transparent to the background color sits under it.
         'badge'=>['text'=>$price,'kind'=>$bg ? ($price === '' ? 'none' : 'gold') : ($legendary ? 'legendary' : 'none'),
+            'backdrop'=>$price === '' ? null : ['kind'=>'fade','width'=>60,'color'=>end($colors)],
             'color'=>$textColor,'column_width'=>36,'font_url'=>$assets.'hearthstone-benguiat.ttf?v=1','font_size'=>27,
             'icon'=>!$bg && $legendary ? ['url'=>$assets.'legendary-star.png?v=1','width'=>32,'height'=>32] : null],
     ];

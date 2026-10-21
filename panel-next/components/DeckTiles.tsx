@@ -1,6 +1,6 @@
 'use client';
 import type { CSSProperties } from 'react';
-import { deckTile, type normalizedCard } from '@/lib/model';
+import { deckTile, tileNameScale, type normalizedCard } from '@/lib/model';
 import type { Row } from '@/lib/types';
 
 export function DeckTiles({
@@ -34,9 +34,15 @@ export function DeckTiles({
               key={card.id}
               className="deck-tile"
               lang={/[А-Яа-яЁё]/.test(card.name) ? 'ru' : 'en'}
-              style={{ '--rarity': tile.color, '--tile-background': tile.background } as CSSProperties}
+              style={
+                {
+                  '--rarity': tile.color,
+                  '--tile-background': tile.background,
+                  '--name-scale': tileNameScale(card.name),
+                } as CSSProperties
+              }
               onClick={() => onSelect(card.row)}
-              // Long names are cut with an ellipsis on the tile; the tooltip shows them whole.
+              // Long names shrink first and are cut only below 72%; the tooltip shows them whole.
               title={card.name}
               aria-label={[card.name, costLabel, priceLabel].filter(Boolean).join(', ') + '. Открыть детали'}
             >
@@ -44,6 +50,7 @@ export function DeckTiles({
                 <img
                   className="deck-tile__art"
                   src={tile.image}
+                  srcSet={tile.image2x ? `${tile.image} 1x, ${tile.image2x} 2x` : undefined}
                   alt=""
                   width={320}
                   height={64}

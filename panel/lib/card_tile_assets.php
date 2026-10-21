@@ -1,13 +1,24 @@
 <?php
 declare(strict_types=1);
 
-const CARD_TILE_RECIPE = '1-app-png';
+const CARD_TILE_RECIPE = '2-hires-fit-title';
+// Tiles of the previous recipe stay valid until the sync job replaces them.
+const CARD_TILE_LEGACY_RECIPES = ['1-app-png'];
 const CARD_TILE_FIELDS = [
     'name', 'name_ru', 'name_en', 'name_russian', 'pet_name_ru', 'variant_name',
     'pet_name', 'coin_name_ru', 'coin_name_en', 'card_type', 'tavern_tier', 'tier',
     'mana_cost', 'cost', 'rarity', 'creature_type', 'creature_types', 'races',
     'minion_type', 'race', '_tile_art_path', '_tile_art_version',
 ];
+
+/** Recipe 8 stores a 640x128 rendition beside each 320x64 file. */
+function horizontal_art_2x_path(?string $path): ?string
+{
+    $path = (string)$path;
+    return preg_match('~^/uploads/horizontal-art/r\d+/[A-Za-z0-9_]+/[A-Za-z0-9_.-]+\.webp$~D', $path)
+        ? substr($path, 0, -5) . '@2x.webp'
+        : null;
+}
 
 function card_tile_response_mtime(?int $modified = null): int
 {
@@ -16,11 +27,11 @@ function card_tile_response_mtime(?int $modified = null): int
     return $mtime;
 }
 
-function card_tile_signature(array $row, string $entityType, array $art): string
+function card_tile_signature(array $row, string $entityType, array $art, string $recipe = CARD_TILE_RECIPE): string
 {
     $row['_tile_art_path'] = $art['local_image_url'] ?? '';
     $row['_tile_art_version'] = $art['generated_at'] ?? '';
-    $values = [CARD_TILE_RECIPE, $entityType];
+    $values = [$recipe, $entityType];
     foreach (CARD_TILE_FIELDS as $field) {
         $value = $row[$field] ?? '';
         $values[] = is_scalar($value) ? (string)$value : '';
@@ -57,7 +68,11 @@ function card_tile_asset_url(array $row, string $entityType, string $id, array $
     if (!is_array($entry) || !is_string($entry['signature'] ?? null) || !is_string($entry['path'] ?? null)) {
         return null;
     }
-    if (!hash_equals(card_tile_signature($row, $entityType, $art), (string)$entry['signature'])) {
+    $current = false;
+    foreach (array_merge([CARD_TILE_RECIPE], CARD_TILE_LEGACY_RECIPES) as $recipe) {
+        $current = $current || hash_equals(card_tile_signature($row, $entityType, $art, $recipe), (string)$entry['signature']);
+    }
+    if (!$current) {
         return null;
     }
     $path = (string)$entry['path'];

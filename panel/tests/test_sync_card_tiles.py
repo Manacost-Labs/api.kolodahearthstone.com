@@ -48,6 +48,9 @@ class CardTileTest(unittest.TestCase):
                     self.assertEqual((layout['cost']['text'], layout['badge']['text'], layout['background']['color']), (model['cost'], model['price'], model['color']))
                     self.assertEqual(layout['title']['text'], actual['name'])
                     self.assertEqual(layout['title']['overflow'], 'ellipsis')
+                    self.assertEqual((layout['title']['font_size'], layout['title']['min_font_size']), (tiles.TITLE_SIZE, tiles.TITLE_MIN_SIZE))
+                    self.assertEqual(layout['art']['end_inset'], 0)
+                    self.assertEqual(layout['badge']['backdrop'] is None, actual['price'] == '')
                     self.assertNotIn('width', layout['title'], 'The app chooses the title width')
                     self.assertEqual(layout['art']['aspect_ratio'], 5)
                     self.assertEqual(bool(layout['cost']['icon']), not actual['bg'] and actual['cost'] != '—')
@@ -66,12 +69,19 @@ class CardTileTest(unittest.TestCase):
             self.assertEqual(picture.size, (640, 128))
             self.assertEqual(picture.mode, 'RGBA')
             self.assertLess(picture.getpixel((0, 0))[3], 4)
-            self.assertEqual(picture.getpixel((575, 10))[:3], (113, 80, 34))
-            # The legendary marker is a white star, including its pointed top.
+            # The art reaches the edge; the star sits on a fade to the rarity color.
+            self.assertEqual(picture.getpixel((500, 12))[:3], (26, 194, 221))
+            self.assertLess(max(abs(a - b) for a, b in zip(picture.getpixel((634, 12))[:3], (113, 80, 34))), 16)
             self.assertTrue(all(c > 200 for c in picture.getpixel((604, 45))[:3]))
             self.assertTrue(all(c > 200 for c in picture.getpixel((604, 64))[:3]))
-            self.assertEqual(picture.getpixel((582, 40))[:3], (113, 80, 34))
-            self.assertEqual(picture.getpixel((560, 12))[:3], (26, 194, 221))
+            # Recipe 8 art has a 640x128 companion that tiles use as is.
+            retina = root / 'uploads/horizontal@2x.webp'
+            sharp = Image.new('RGBA', (640, 128), '#1ac2dd')
+            sharp.putpixel((300, 40), (255, 0, 0, 255))
+            sharp.save(retina, lossless=True)
+            self.assertEqual(tiles.local_art(row, root), retina)
+            self.assertEqual(Image.open(io.BytesIO(tiles.render(dict(row, name_ru='А'), 'constructed_card', root))).getpixel((300, 40))[:3], (255, 0, 0))
+            retina.unlink()
             manifest = root / 'uploads/card-tiles/constructed_card/manifest.json'
             tiles.atomic_write(manifest, json.dumps({'assets': {'test:card': asset}}).encode())
             code = "require $argv[1]; $r=json_decode(stream_get_contents(STDIN),true); $a=['local_image_url'=>$r['_tile_art_path'],'generated_at'=>$r['_tile_art_version']]; echo json_encode([card_tile_signature($r,'constructed_card',$a),card_tile_asset_url($r,'constructed_card','test:card',$a,$argv[2])]);"
@@ -111,8 +121,21 @@ class CardTileTest(unittest.TestCase):
             root = Path(directory)
             (root / 'uploads').mkdir()
             Image.new('RGB', (1, 1)).save(root / 'uploads/bad.png')
-            with self.assertRaisesRegex(ValueError, '320x64'):
+            with self.assertRaisesRegex(ValueError, '320x64 or 640x128'):
                 tiles.render({'_tile_art_path': '/uploads/bad.png'}, 'constructed_card', root)
+
+    def test_long_names_shrink_before_truncation(self):
+        root = ROOT
+        short, face = tiles.fit_title(root, 'Огненный шар', 236 * tiles.SCALE)
+        self.assertEqual((short, face.size), ('Огненный шар', tiles.TITLE_SIZE * tiles.SCALE))
+        name = 'Зиллиакс Делюкс 3000'
+        fitted, face = tiles.fit_title(root, name, 236 * tiles.SCALE)
+        self.assertEqual(fitted, name)
+        self.assertLess(face.size, tiles.TITLE_SIZE * tiles.SCALE)
+        very_long = 'Невероятно длинное название карты, которое не помещается'
+        fitted, face = tiles.fit_title(root, very_long, 236 * tiles.SCALE)
+        self.assertTrue(fitted.endswith('…'))
+        self.assertEqual(face.size, tiles.TITLE_MIN_SIZE * tiles.SCALE)
 
     def test_gradient_and_unknown_costs(self):
         image = tiles.gradient(['#49633f', '#28675f', '#75475a', '#605273'], (1280, 256))
