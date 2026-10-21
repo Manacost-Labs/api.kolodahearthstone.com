@@ -197,7 +197,7 @@ def test_scrape_do_retry_telemetry_keeps_recovered_502_attempt() -> None:
     )
     recovered = scrape_do_result(
         html=valid_small_hsguru_html(),
-        super_proxy=False,
+        super_proxy=True,
         source=HSGURU_SOURCE,
     )
 
@@ -219,10 +219,10 @@ def test_scrape_do_retry_telemetry_keeps_recovered_502_attempt() -> None:
             failure_observer=failures.append,
         )
 
-    # HSGuru HTML escalates from the cheap profile to the 5-credit datacenter
-    # render instead of retrying it or jumping to residential profiles.
-    assert result.backend == "scrape_do"
-    assert attempts == [("scrape_do", True)]
+    # HSGuru HTML escalates from the 5-credit datacenter render to the
+    # 10-credit anonymous residential profile instead of retrying it.
+    assert result.backend == "scrape_do_super"
+    assert attempts == [("scrape_do_super", True)]
     assert failures == [
         {
             "backend": "scrape_do",
@@ -238,17 +238,13 @@ def test_scrape_do_retry_telemetry_keeps_recovered_502_attempt() -> None:
     ]
     assert result.metadata["scrapeDoAttempts"] == 2
     assert result.metadata["scrapeDoProfileAttempt"] == 1
-    assert result.metadata["scrapeDoRender"] is True
+    assert result.metadata["scrapeDoRender"] is False
+    assert result.metadata["scrapeDoSuperProxy"] is True
 
 
 def test_scrape_do_terminal_retry_reports_each_http_attempt_once() -> None:
     failures: list[dict[str, object]] = []
     errors = [
-        ScrapeDoTransientError(
-            "ROTATION_FAILED",
-            status_code=502,
-            super_proxy=False,
-        ),
         ScrapeDoTransientError(
             "ROTATION_FAILED",
             status_code=502,
@@ -279,12 +275,11 @@ def test_scrape_do_terminal_retry_reports_each_http_attempt_once() -> None:
             failure_observer=failures.append,
         )
 
-    # One attempt per HSGuru profile, cheapest first: plain, datacenter render,
-    # super, then rendered super.
-    assert [event["http_status"] for event in failures] == [502, 502, 429, 502]
-    assert [event["provider_attempt"] for event in failures] == [1, 2, 3, 4]
+    # One attempt per HSGuru profile, cheapest working first: datacenter
+    # render, anonymous super, then rendered super. Plain is never tried.
+    assert [event["http_status"] for event in failures] == [502, 429, 502]
+    assert [event["provider_attempt"] for event in failures] == [1, 2, 3]
     assert [event["error_code"] for event in failures] == [
-        "ROTATION_FAILED",
         "ROTATION_FAILED",
         "CONCURRENT_REQUEST_LIMIT",
         "ROTATION_FAILED",
@@ -292,7 +287,7 @@ def test_scrape_do_terminal_retry_reports_each_http_attempt_once() -> None:
     assert [
         (item.kwargs["render"], item.kwargs["super_proxy"])
         for item in scrape.call_args_list
-    ] == [(False, False), (True, False), (False, True), (True, True)]
+    ] == [(True, False), (False, True), (True, True)]
 
 
 def test_scrapfly_runs_after_scrape_do_firecrawl_and_unavailable_brightdata() -> None:
