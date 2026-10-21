@@ -2977,7 +2977,6 @@ html[data-mode='dark'] .provider-usage {
   -webkit-line-clamp: 3;
   line-clamp: 3;
   overflow: hidden;
-  min-width: 220px;
 }
 .analytics-main .table-scroll {
   max-height: min(72vh, 900px);
