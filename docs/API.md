@@ -533,6 +533,9 @@ curl -s "https://api.kolodahearthstone.com/api/db/bg/minions/98592/history" | jq
 
 ## HSReplay Battlegrounds Minion Statistics
 
+Подробное описание с параметрами, всеми полями, формулами, ошибками и примерами:
+[BG_MINION_STATS.md](BG_MINION_STATS.md).
+
 Источник `hsreplay_battlegrounds_minion_stats` (pipeline). Раз в сутки
 (`hs-data-api-docker-refresh-bg-minion-stats.timer`, 16:20 Europe/Warsaw)
 CLI `python -m app.cli refresh-bg-minion-stats --scheduled` забирает четыре
