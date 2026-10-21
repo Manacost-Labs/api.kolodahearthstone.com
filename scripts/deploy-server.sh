@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Деплой hs-data-api из git: pull -> сборка образа -> перезапуск -> проверка.
+# Образ собирается только из чистого дерева, совпадающего с origin/<branch>,
+# и получает label org.opencontainers.image.revision=<полный SHA>.
 #
 # Заменяет копирование файлов через deploy-local.sh. Разница принципиальная:
 # после копирования сервер не помнил, какая версия на нём стоит, потому что
@@ -20,14 +22,15 @@ HOST_TIMER_EXPORT_UNIT="${HOST_TIMER_EXPORT_UNIT:-hs-data-api-docker-export-time
 HOST_TIMER_SNAPSHOT="$INSTALL_DIR/data/parser-control-systemd.json"
 STAMP_FILE="$INSTALL_DIR/.deployed-commit"
 
-ALLOW_DIRTY=0
 DRY_RUN=0
 for arg in "$@"; do
   case "$arg" in
-    --allow-dirty) ALLOW_DIRTY=1 ;;
+    --allow-dirty)
+      echo "ОШИБКА: --allow-dirty больше не поддерживается: образ собирается только из чистого origin/$BRANCH" >&2
+      exit 2 ;;
     --dry-run) DRY_RUN=1 ;;
     -h|--help)
-      sed -n '2,12p' "$0"; exit 0 ;;
+      sed -n '2,14p' "$0"; exit 0 ;;
     *) echo "Неизвестный аргумент: $arg" >&2; exit 2 ;;
   esac
 done
@@ -55,7 +58,7 @@ ensure_host_services_can_read_source() {
 rollback_api() {
   if docker image inspect "hs-data-api:rollback-$OLD_COMMIT" >/dev/null 2>&1; then
     docker image tag "hs-data-api:rollback-$OLD_COMMIT" hs-data-api:local
-    docker compose -f "$COMPOSE_FILE" up -d api
+    docker compose -f "$COMPOSE_FILE" up -d --no-deps --no-build api
     echo "Откат на $OLD_COMMIT выполнен. Код в рабочем каталоге остался новым: $COMMIT" >&2
   fi
 }
@@ -75,15 +78,16 @@ verify_host_timer_export() {
 cd "$INSTALL_DIR"
 
 # Ручные правки прямо на сервере — это то, от чего мы уходим. Молча затирать
-# их нельзя, поэтому деплой останавливается и показывает, что именно мешает.
-if [[ -n "$(git status --porcelain)" ]]; then
-  if [[ "$ALLOW_DIRTY" -eq 1 ]]; then
-    say "рабочее дерево изменено, продолжаю по --allow-dirty"
-  else
+# их нельзя, а собирать из них образ — значит снова получить prod, которого нет
+# ни в одном коммите. Поэтому деплой останавливается и показывает, что мешает.
+require_clean_tree() {
+  if [[ -n "$(git status --porcelain)" ]]; then
     git status --short
-    die "рабочее дерево изменено. Перенесите правки в репозиторий или запустите с --allow-dirty"
+    die "рабочее дерево изменено. Перенесите правки в репозиторий (patch/ветка) и повторите"
   fi
-fi
+}
+
+require_clean_tree
 
 OLD_COMMIT="$(git rev-parse --short HEAD)"
 say "текущий коммит: $OLD_COMMIT"
@@ -106,6 +110,12 @@ fi
 
 git pull --ff-only --quiet origin "$BRANCH"
 COMMIT="$(git rev-parse --short HEAD)"
+REVISION="$(git rev-parse HEAD)"
+# Сборка только из дерева, которое ровно равно origin/$BRANCH: не отстаёт,
+# не опережает локальными коммитами и не содержит правок.
+[[ "$REVISION" == "$(git rev-parse "origin/$BRANCH")" ]] \
+  || die "HEAD $COMMIT не совпадает с origin/$BRANCH; сборка отменена"
+require_clean_tree
 ensure_host_services_can_read_source
 
 # Тег на прежний образ, чтобы откат не зависел от повторной сборки.
@@ -114,11 +124,21 @@ if docker image inspect hs-data-api:local >/dev/null 2>&1; then
   docker image tag hs-data-api:local "hs-data-api:rollback-$OLD_COMMIT"
 fi
 
-say "собираю образ"
-docker compose -f "$COMPOSE_FILE" build api
+say "собираю образ из $REVISION"
+HS_IMAGE_REVISION="$REVISION" docker compose -f "$COMPOSE_FILE" build api
+built_revision="$(docker image inspect hs-data-api:local \
+  --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')"
+if [[ "$built_revision" != "$REVISION" ]]; then
+  # Тег :local не должен указывать на непроверенный образ: следующий
+  # `docker compose up` запустил бы его.
+  if docker image inspect "hs-data-api:rollback-$OLD_COMMIT" >/dev/null 2>&1; then
+    docker image tag "hs-data-api:rollback-$OLD_COMMIT" hs-data-api:local
+  fi
+  die "у собранного образа revision=$built_revision вместо $REVISION; контейнер не перезапущен"
+fi
 
 say "перезапускаю"
-docker compose -f "$COMPOSE_FILE" up -d api
+docker compose -f "$COMPOSE_FILE" up -d --no-build api
 
 say "проверяю здоровье: $HEALTH_URL"
 API_HEALTHY=0

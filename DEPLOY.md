@@ -138,10 +138,28 @@ sudo /srv/hs-data-api/scripts/deploy-server.sh
 sudo /srv/hs-data-api/scripts/deploy-server.sh --dry-run
 ```
 
-Деплой останавливается, если в рабочем каталоге есть незакоммиченные правки.
-Это намеренно: править код прямо на сервере нельзя, изменения нужно провести
-через репозиторий. Обойти можно флагом `--allow-dirty`, но тогда версия в
-проде перестаёт совпадать с коммитом.
+Деплой останавливается, если в рабочем каталоге есть незакоммиченные правки
+или `HEAD` после `pull` не равен `origin/main`. Это намеренно: править код
+прямо на сервере нельзя, изменения нужно провести через репозиторий. Флага
+обхода нет: сохраните правку как patch или ветку и проведите её через PR.
+
+Образ получает label `org.opencontainers.image.revision=<полный SHA>`; скрипт
+сверяет его после сборки и не перезапускает контейнер при несовпадении.
+Проверить, из какого коммита собран работающий контейнер:
+
+```bash
+docker inspect hs-data-api --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}'
+```
+
+Ручной откат на прежний образ без пересборки:
+
+```bash
+cd /srv/hs-data-api
+docker image tag hs-data-api:rollback-<коммит> hs-data-api:local
+docker compose up -d --no-deps --no-build api
+```
+
+Единственная compose-конфигурация — `docker-compose.yml`.
 
 `scripts/deploy-local.sh` (rsync) предназначен для отдельных тестовых
 установок и отказывается работать с `/srv/hs-data-api`: копирование исключает

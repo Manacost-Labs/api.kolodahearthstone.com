@@ -3,6 +3,11 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      labels:
+        # scripts/deploy-server.sh передаёт полный SHA origin/main и
+        # проверяет label после сборки. Ручная сборка честно получает unknown.
+        org.opencontainers.image.revision: ${HS_IMAGE_REVISION:-unknown}
+        org.opencontainers.image.source: https://github.com/Manacost-Labs/api.kolodahearthstone.com
     image: hs-data-api:local
     container_name: hs-data-api
     restart: unless-stopped

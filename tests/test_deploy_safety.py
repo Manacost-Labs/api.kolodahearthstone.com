@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -37,6 +38,41 @@ def test_server_deploy_checks_host_timer_export_before_marking_success() -> None
     post_deploy = script[script.index('say "проверяю host-side exporter расписаний"') :]
     assert post_deploy.index("verify_host_timer_export") < post_deploy.index(
         'printf \'%s\\n\' "$COMMIT" > "$STAMP_FILE"'
+    )
+
+
+def test_server_deploy_rejects_the_dirty_tree_escape_hatch() -> None:
+    result = subprocess.run(
+        ["bash", str(ROOT / "scripts" / "deploy-server.sh"), "--allow-dirty"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 2
+    assert "--allow-dirty больше не поддерживается" in result.stderr
+
+
+def test_server_deploy_builds_only_origin_head_and_verifies_revision_label() -> None:
+    script = (ROOT / "scripts" / "deploy-server.sh").read_text(encoding="utf-8")
+
+    build = script.index('docker compose -f "$COMPOSE_FILE" build api')
+    head_check = script.index('"$REVISION" == "$(git rev-parse "origin/$BRANCH")"')
+    second_clean_check = script.index("require_clean_tree", head_check)
+    label_check = script.index('"$built_revision" != "$REVISION"')
+    restart = script.index('docker compose -f "$COMPOSE_FILE" up -d --no-build api')
+
+    assert head_check < second_clean_check < build < label_check < restart
+    assert 'HS_IMAGE_REVISION="$REVISION" docker compose' in script
+    assert "ALLOW_DIRTY" not in script
+
+
+def test_compose_is_the_single_config_and_labels_the_revision() -> None:
+    compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+
+    assert not (ROOT / "docker-compose.prod.yml").exists()
+    assert (
+        "org.opencontainers.image.revision: ${HS_IMAGE_REVISION:-unknown}" in compose
     )
 
 
