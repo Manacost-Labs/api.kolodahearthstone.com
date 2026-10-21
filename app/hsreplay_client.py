@@ -38,6 +38,7 @@ from .refresh_context import (
     set_cached_hsreplay_json,
 )
 from .refresh_log import log_action
+from . import provider_usage
 from .scrape_do_backend import ScrapeDoContentError, ScrapeDoRequestError, scrape_url
 from .scrapers.http_resilience import (
     DEFAULT_BACKOFF_SECONDS,
@@ -747,13 +748,14 @@ async def _fetch_text_via_scrape_do(url: str, *, source_id: str) -> str:
             async with _scrape_do_gate():
                 _reserve_scrape_do_request()
                 try:
-                    result = await scrape_url(
-                        url,
-                        render=False,
-                        super_proxy=False,
-                        headers=headers,
-                        forward_headers=False,
-                    )
+                    with provider_usage.usage_source(source_id):
+                        result = await scrape_url(
+                            url,
+                            render=False,
+                            super_proxy=False,
+                            headers=headers,
+                            forward_headers=False,
+                        )
                 except ScrapeDoRequestError as exc:
                     _account_scrape_do_actual_cost(exc.request_cost)
                     raise

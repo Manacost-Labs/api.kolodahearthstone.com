@@ -658,6 +658,7 @@ curl -L "https://api.kolodahearthstone.com/api/bg/compositions/screenshot/latest
 | `GET` | `/health/premium` | Проверка локального premium auth состояния. |
 | `GET` | `/health/premium?live=true` | Live-probe HSReplay/VS premium endpoints. |
 | `GET` | `/ops/summary` | Сводка событий refresh за период. |
+| `GET` | `/ops/provider-usage` | Учёт вызовов платных провайдеров парсинга по дням. |
 | `GET` | `/ops/events` | Журнал событий refresh с фильтрами. |
 | `GET` | `/ops/trace/{trace_id}` | Timeline одного source trace. |
 | `GET` | `/ops/run/{run_id}` | Timeline одного refresh run. |
@@ -750,6 +751,31 @@ Query parameters:
 curl -s -H "X-API-Key: ${HS_API_KEY}" \
   "https://api.kolodahearthstone.com/ops/summary?since_hours=48" | jq .
 ```
+
+### `GET /ops/provider-usage`
+
+Сводка по каждому вызову Decodo, Scrape.do, Firecrawl и Scrapfly из
+`data/provider-usage.sqlite3` (хранение 90 дней, сутки в UTC). Вызов считается
+успешным, если провайдер вернул 2xx и ответ прошёл проверку содержимого
+каскада; иначе он неудачный с кодом причины (`http_429`, `target_403`,
+`content_rejected`, `blocked_content`, `timeout`…). В учёт попадают хост и
+усечённый SHA-256 адреса, но не сам URL, ключи или тело ответа.
+
+| Parameter | Type | Default | Описание |
+| --- | --- | --- | --- |
+| `days` | int | `30` | Окно от `1` до `90` суток, включая текущие. |
+| `provider` | enum | — | `decodo`, `scrape_do`, `firecrawl` или `scrapfly`. |
+| `source_id` | string | — | Только вызовы одного источника. |
+
+Ответ: `totals`, `providers` и `daily` (всего, успешных, неудачных,
+`success_rate`, `avg_ms`, `p95_ms`, `bytes`, `cost_units`, `cost_usd`,
+`usd_per_1k_success`), `sources`, `failure_reasons` и `pricing`. Стоимость
+хранится в единицах провайдера: кредиты Scrape.do из заголовка
+`scrape.do-request-cost`, кредиты Firecrawl и Scrapfly из ответа, у Decodo —
+один оплачиваемый запрос за доставленный 2xx. Перевод в доллары использует
+`HS_DECODO_USD_PER_UNIT`, `HS_SCRAPE_DO_USD_PER_UNIT`,
+`HS_FIRECRAWL_USD_PER_UNIT` и `HS_SCRAPFLY_USD_PER_UNIT`; без них берутся
+цены по умолчанию (`pricing.*.basis = "default"`).
 
 ### `GET /ops/events`
 

@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+from . import provider_usage
 from .config import scrapfly_timeout_seconds
 from .scrapfly_keys import (
     acquire_scrapfly_key,
@@ -34,6 +37,7 @@ class ScrapflyScrape:
     key_label: str | None = None
     key_fingerprint: str | None = None
     key_rotation: dict | None = None
+    usage_call_id: int | None = None
 
     @property
     def content_length(self) -> int:
@@ -52,6 +56,16 @@ def _header_int(headers: Mapping[str, str], name: str) -> int | None:
         return int(float(value))
     except (TypeError, ValueError):
         return None
+
+
+def _failure_reason(exc: Exception) -> tuple[str, int | None]:
+    # Scrapfly errors are metadata-only by construction; keep just the code.
+    match = re.search(r"HTTP (\d{3})", str(exc))
+    if match:
+        return f"http_{match.group(1)}", int(match.group(1))
+    if is_scrapfly_credit_error(exc):
+        return "credit_limit", None
+    return type(exc).__name__, None
 
 
 def _scrape_once(
@@ -204,6 +218,14 @@ def scrape_url_sync(
     attempt_limit = max(4, len(parse_scrapfly_api_keys()) or 1)
     for _ in range(attempt_limit):
         lease = acquire_scrapfly_key()
+        usage = {
+            "url": url,
+            "started": time.monotonic(),
+            "profile": f"{'render' if render_js or screenshot else 'plain'}"
+            f"{'+asp' if asp else ''}",
+            "render": bool(render_js or screenshot),
+            "account": lease.key.label,
+        }
         try:
             scraped = _scrape_once(
                 url,
@@ -217,12 +239,23 @@ def scrape_url_sync(
                 full_screenshot=full_screenshot,
             )
         except Exception as exc:
+            reason, status = _failure_reason(exc)
+            provider_usage.record_call(
+                "scrapfly", status=status, outcome="failed", reason=reason, **usage
+            )
             if is_scrapfly_credit_error(exc):
                 mark_scrapfly_key_exhausted(lease.key.label, reason=str(exc))
                 errors.append(f"{lease.key.label}: {exc}")
                 continue
             raise
 
+        call_id = provider_usage.record_call(
+            "scrapfly",
+            status=getattr(scraped, "status_code", None),
+            content=getattr(scraped, "html", None),
+            cost=getattr(scraped, "request_cost", 0),
+            **usage,
+        )
         rotation = record_scrapfly_credits(lease.key.label, scraped.request_cost)
         return ScrapflyScrape(
             html=scraped.html,
@@ -236,6 +269,7 @@ def scrape_url_sync(
             key_label=lease.key.label,
             key_fingerprint=lease.key.fingerprint,
             key_rotation=rotation,
+            usage_call_id=call_id,
         )
 
     detail = "; ".join(errors) if errors else "no available keys"

@@ -445,6 +445,7 @@ URL детерминированного crop `320×64` в WebP. Исходно�
 | --- | --- | --- | --- |
 | GET | `/ops/health` | — | Полная диагностика sources и storage |
 | GET | `/ops/summary` | `since_hours` | Сводка freshness/jobs |
+| GET | `/ops/provider-usage` | `days`, `provider`, `source_id` | Учёт вызовов Decodo, Scrape.do, Firecrawl и Scrapfly: успешность, время ответа, трафик и расход по дням |
 | GET | `/ops/events` | `limit`, `source_id`, `event`, `action`, `action_group`, `level`, `trace_id`, `run_id`, `since_hours` | Фильтрованные события |
 | GET | `/ops/trace/{trace_id}` | — | События trace |
 | GET | `/ops/run/{run_id}` | — | Состояние job run |
