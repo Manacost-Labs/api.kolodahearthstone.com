@@ -80,10 +80,11 @@ await call('Network.setCookie', {
 const root = 'http://127.0.0.1:4180/';
 const checks = {};
 await viewport(1487, 1058);
-await navigate(root, 'document.querySelectorAll(".card-tile").length===8');
+// Cards open 15 to a page (three full rows of five), the table 25 rows; the fixture has 24 cards.
+await navigate(root, 'document.querySelectorAll(".card-tile").length===15');
 await screenshot('catalog-desktop.png');
 checks.catalog = await evaluate(
-  '({cards:document.querySelectorAll(".card-tile").length,overflow:document.documentElement.scrollWidth>innerWidth})',
+  '({cards:document.querySelectorAll(".card-tile").length,overflow:document.documentElement.scrollWidth>innerWidth,columns:getComputedStyle(document.querySelector(".card-grid")).gridTemplateColumns.split(" ").length})',
 );
 await click('.card-tile');
 await waitFor('!!document.querySelector("dialog[open]")');
@@ -135,7 +136,7 @@ await waitFor('new URLSearchParams(location.search).get("card")==="BG_FIXTURE_3"
 checks.flip = await evaluate(
   '({same:document.querySelector("dialog[open]").dataset.qa==="inspector",position:document.querySelector(".inspector-nav span").textContent,focus:document.activeElement.getAttribute("aria-label")})',
 );
-assert.deepEqual(checks.flip, { same: true, position: '3 из 8', focus: 'Следующая запись' });
+assert.deepEqual(checks.flip, { same: true, position: '3 из 15', focus: 'Следующая запись' });
 async function pressEscape() {
   await call('Input.dispatchKeyEvent', {
     type: 'keyDown',
@@ -161,7 +162,7 @@ await navigate(root + '?card=BG_FIXTURE_20', '!!document.querySelector("dialog[o
 checks.deepLink = await evaluate('document.querySelector("dialog h2").textContent.length>0');
 await pressEscape();
 await waitFor('!document.querySelector("dialog[open]") && !new URLSearchParams(location.search).has("card")');
-await navigate(root, 'document.querySelectorAll(".card-tile").length===8');
+await navigate(root, 'document.querySelectorAll(".card-tile").length===15');
 await call('Input.dispatchKeyEvent', {
   type: 'keyDown',
   key: '/',
@@ -227,10 +228,10 @@ await waitFor(
 checks.paletteOpensCard = true;
 await pressEscape();
 await waitFor('!document.querySelector("dialog[open]")');
-await navigate(root, 'document.querySelectorAll(".card-tile").length===8');
+await navigate(root, 'document.querySelectorAll(".card-tile").length===15');
 await click('.pagination [aria-label="Страница 2"]');
 await waitFor(
-  'location.search.includes("page=2") && document.querySelector(".card-copy code").textContent==="BG_FIXTURE_9"',
+  'location.search.includes("page=2") && document.querySelector(".card-copy code").textContent==="BG_FIXTURE_16"',
 );
 checks.pagination = true;
 await navigate(root);
@@ -242,8 +243,8 @@ await navigate(root + '?q=NOT_FOUND');
 checks.empty = await evaluate('!!document.querySelector(".empty")&&!document.querySelector(".card-tile")');
 await navigate(root);
 await click('.view-switch [role="radio"]:nth-child(3)');
-await waitFor('document.querySelectorAll("tbody tr").length===8');
-checks.list = await evaluate('document.querySelectorAll("tbody tr").length===8');
+await waitFor('document.querySelectorAll("tbody tr").length===24');
+checks.list = await evaluate('document.querySelectorAll("tbody tr").length===24');
 checks.tableColumns = await evaluate(
   '[...document.querySelectorAll(".catalog-table thead th")].map(th=>th.textContent).join("|")',
 );
@@ -263,9 +264,9 @@ checks.tableMobileOverflow = await evaluate('document.documentElement.scrollWidt
 assert.equal(checks.tableMobileOverflow, false);
 await viewport(1487, 1058);
 await navigate(root);
-checks.savedView = await evaluate('document.querySelectorAll("tbody tr").length===8');
+checks.savedView = await evaluate('document.querySelectorAll("tbody tr").length===24');
 await click('.view-switch [role="radio"]:nth-child(2)');
-await waitFor('document.querySelectorAll(".card-tile").length===8');
+await waitFor('document.querySelectorAll(".card-tile").length===15');
 await viewport(390, 844);
 await navigate(root);
 await screenshot('catalog-mobile.png');
@@ -330,7 +331,7 @@ for (const action of ['analytics', 'parsers', 'api_tokens']) {
   await screenshot(action + '-mobile.png');
 }
 checks.errors = errors;
-assert.deepEqual(checks.catalog, { cards: 8, overflow: false });
+assert.deepEqual(checks.catalog, { cards: 15, overflow: false, columns: 5 });
 assert.equal(checks.details.focus, 'Закрыть');
 assert.equal(checks.focusRestored, true);
 assert.equal(checks.deepLink, true);
