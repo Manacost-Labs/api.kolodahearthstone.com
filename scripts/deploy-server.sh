@@ -128,8 +128,14 @@ say "собираю образ из $REVISION"
 HS_IMAGE_REVISION="$REVISION" docker compose -f "$COMPOSE_FILE" build api
 built_revision="$(docker image inspect hs-data-api:local \
   --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')"
-[[ "$built_revision" == "$REVISION" ]] \
-  || die "у собранного образа revision=$built_revision вместо $REVISION; контейнер не перезапущен"
+if [[ "$built_revision" != "$REVISION" ]]; then
+  # Тег :local не должен указывать на непроверенный образ: следующий
+  # `docker compose up` запустил бы его.
+  if docker image inspect "hs-data-api:rollback-$OLD_COMMIT" >/dev/null 2>&1; then
+    docker image tag "hs-data-api:rollback-$OLD_COMMIT" hs-data-api:local
+  fi
+  die "у собранного образа revision=$built_revision вместо $REVISION; контейнер не перезапущен"
+fi
 
 say "перезапускаю"
 docker compose -f "$COMPOSE_FILE" up -d --no-build api

@@ -59,7 +59,7 @@ def test_server_deploy_builds_only_origin_head_and_verifies_revision_label() -> 
     build = script.index('docker compose -f "$COMPOSE_FILE" build api')
     head_check = script.index('"$REVISION" == "$(git rev-parse "origin/$BRANCH")"')
     second_clean_check = script.index("require_clean_tree", head_check)
-    label_check = script.index('"$built_revision" == "$REVISION"')
+    label_check = script.index('"$built_revision" != "$REVISION"')
     restart = script.index('docker compose -f "$COMPOSE_FILE" up -d --no-build api')
 
     assert head_check < second_clean_check < build < label_check < restart
