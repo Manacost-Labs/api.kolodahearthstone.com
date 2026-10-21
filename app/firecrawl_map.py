@@ -7,6 +7,7 @@ from typing import Any
 from urllib.parse import urlsplit
 from xml.etree import ElementTree
 
+from . import provider_usage
 from .config import (
     data_dir,
     firecrawl_map_hsreplay_limit,
@@ -166,15 +167,20 @@ def _fetch_sitemap(url: str) -> tuple[str, int, bool, int]:
     def fetch(*, super_proxy: bool):
         nonlocal total_cost, transport_requests
         transport_requests += 1
-        result = scrape_url_sync(
-            url,
-            render=False,
-            super_proxy=super_proxy,
-            timeout_ms=60_000,
-            retry_timeout_ms=55_000,
-        )
+        with provider_usage.usage_source("hsreplay_sitemap"):
+            result = scrape_url_sync(
+                url,
+                render=False,
+                super_proxy=super_proxy,
+                timeout_ms=60_000,
+                retry_timeout_ms=55_000,
+            )
         total_cost += result.request_cost
-        _sitemap_locations(result.html)
+        try:
+            _sitemap_locations(result.html)
+        except SitemapContentError:
+            provider_usage.mark_rejected(getattr(result, "usage_call_id", None))
+            raise
         return result
 
     try:

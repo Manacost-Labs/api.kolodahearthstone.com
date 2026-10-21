@@ -6,6 +6,7 @@ import { queryHref, text } from '@/lib/model';
 import type { AnalyticsData, AnalyticsModule, Row } from '@/lib/types';
 import { DataTable } from './DataTable';
 import { RecordDetails } from './Details';
+import { ProviderUsage } from './ProviderUsage';
 import { Reliability } from './Reliability';
 import { EmptyState, KpiCard, StatusBadge, Time, Value } from './ui';
 import { ArrowClockwiseIcon } from '@phosphor-icons/react/dist/ssr/ArrowClockwise';
@@ -29,7 +30,18 @@ export function Analytics({
   const go = (changes: Record<string, string | number | null>) =>
     start(() => router.push(queryHref(query, changes)));
   const extras = Object.entries(data).filter(
-    ([key]) => !['ok', 'module', 'title', 'description', 'summary', 'columns', 'rows', 'meta'].includes(key),
+    ([key]) =>
+      ![
+        'ok',
+        'module',
+        'title',
+        'description',
+        'summary',
+        'columns',
+        'rows',
+        'meta',
+        'provider_usage',
+      ].includes(key),
   );
   return (
     <section aria-busy={pending}>
@@ -131,6 +143,7 @@ export function Analytics({
               </span>
             )}
           </div>
+          {'provider_usage' in data && <ProviderUsage data={data.provider_usage} />}
           {data.rows?.length ? (
             <DataTable key={module} rows={data.rows} columns={data.columns} onDetail={setSelected} />
           ) : (

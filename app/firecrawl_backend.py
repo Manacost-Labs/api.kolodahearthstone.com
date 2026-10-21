@@ -16,6 +16,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 from bs4 import BeautifulSoup, NavigableString
 
+from . import provider_usage
 from .brightdata_backend import (
     BrightDataPolicyError,
     BrightDataRequestError,
@@ -429,6 +430,7 @@ def _scrape_via_scrapfly(
             "scrapflyKeyLabel": scraped.key_label,
             "scrapflyKeyFingerprint": scraped.key_fingerprint,
             "scrapflyKeyRotation": scraped.key_rotation,
+            "usageCallId": getattr(scraped, "usage_call_id", None),
             "providerPolicy": _PROVIDER_POLICY,
             "firecrawlFallbackReason": reason[:500],
         },
@@ -501,6 +503,9 @@ def _scrape_via_scrape_do(
                         accept_result=accept_result,
                     )
                     if not accepted:
+                        provider_usage.mark_rejected(
+                            getattr(scraped, "usage_call_id", None)
+                        )
                         if attempt_observer is not None:
                             attempt_observer(candidate, False)
                         validate_attempt(scraped.acquisition_id, False)
@@ -510,6 +515,9 @@ def _scrape_via_scrape_do(
                         )
                         break
                 if is_session_blocked(scraped.status_code, scraped.html):
+                    provider_usage.mark_rejected(
+                        getattr(scraped, "usage_call_id", None), "blocked_content"
+                    )
                     if attempt_observer is not None:
                         attempt_observer(
                             _scrape_do_result(
@@ -688,6 +696,7 @@ def _scrape_do_result(
             "scrapeDoProfileAttempt": profile_attempt,
             "scrapeDoSuperProxy": scraped.super_proxy,
             "scrapeDoRender": render,
+            "usageCallId": getattr(scraped, "usage_call_id", None),
             "providerPolicy": _PROVIDER_POLICY,
             "providerChainReason": reason[:500],
             "firecrawlFallbackReason": reason[:500],
@@ -776,6 +785,7 @@ def _scrape_via_firecrawl(
     attempt_limit = max(8, len(parse_firecrawl_api_keys()) or 1)
     for _ in range(attempt_limit):
         lease = acquire_firecrawl_key()
+        started = time.monotonic()
         try:
             scraped = _scrape_once(
                 source,
@@ -788,6 +798,25 @@ def _scrape_via_firecrawl(
                 timeout_ms=timeout_ms,
             )
         except Exception as exc:
+            status_match = re.search(r"Firecrawl HTTP (\d{3})", str(exc))
+            provider_usage.record_call(
+                "firecrawl",
+                url=source.url,
+                outcome="failed",
+                started=started,
+                status=int(status_match.group(1)) if status_match else None,
+                reason=(
+                    f"http_{status_match.group(1)}"
+                    if status_match
+                    else "credit_limit"
+                    if is_firecrawl_credit_error(exc)
+                    else type(exc).__name__
+                ),
+                profile="scrape",
+                render=True,
+                account=lease.key.label,
+                source_id=source.id,
+            )
             if is_firecrawl_credit_error(exc):
                 mark_firecrawl_key_exhausted(lease.key.label, reason=str(exc))
                 errors.append(f"{lease.key.label}: {exc}")
@@ -800,7 +829,21 @@ def _scrape_via_firecrawl(
         except (TypeError, ValueError):
             credits_int = 1
         rotation = record_firecrawl_credits(lease.key.label, credits_int)
+        call_id = provider_usage.record_call(
+            "firecrawl",
+            url=source.url,
+            started=started,
+            status=getattr(scraped, "status_code", None),
+            profile="scrape",
+            render=True,
+            content=getattr(scraped, "html", None),
+            cost=credits_int,
+            cost_basis="reported" if credits is not None else "estimated",
+            account=lease.key.label,
+            source_id=source.id,
+        )
         metadata = dict(scraped.metadata)
+        metadata["usageCallId"] = call_id
         metadata["firecrawl_key_label"] = lease.key.label
         metadata["firecrawl_key_fingerprint"] = lease.key.fingerprint
         metadata["firecrawl_key_rotation"] = rotation
@@ -968,6 +1011,12 @@ def _require_accepted_provider_result(
         accept_html=accept_html,
         accept_result=accept_result,
     )
+    if not accepted:
+        provider_usage.mark_rejected(
+            scraped.metadata.get("usageCallId")
+            if isinstance(scraped.metadata, dict)
+            else None
+        )
     if attempt_observer is not None:
         try:
             attempt_observer(scraped, accepted)
@@ -996,6 +1045,42 @@ def _scrape_sync(
     failure_observer: ProviderFailureObserver | None = None,
 ) -> FirecrawlScrape:
     """Try cheap HSGuru HTML, Decodo, then paid escalation and reserves."""
+    with provider_usage.usage_source(source.id):
+        return _scrape_cascade(
+            source,
+            formats=formats,
+            only_main_content=only_main_content,
+            headers=headers,
+            max_age_ms=max_age_ms,
+            wait_ms=wait_ms,
+            timeout_ms=timeout_ms,
+            skip_providers=skip_providers,
+            brightdata_accept_html=brightdata_accept_html,
+            brightdata_render=brightdata_render,
+            brightdata_anonymous_fallback=brightdata_anonymous_fallback,
+            accept_result=accept_result,
+            attempt_observer=attempt_observer,
+            failure_observer=failure_observer,
+        )
+
+
+def _scrape_cascade(
+    source: Source,
+    *,
+    formats: list[Any] | None,
+    only_main_content: bool,
+    headers: dict[str, str] | None,
+    max_age_ms: int | None,
+    wait_ms: int | None,
+    timeout_ms: int | None,
+    skip_providers: frozenset[str] | set[str] | None,
+    brightdata_accept_html: Callable[[str], bool] | None,
+    brightdata_render: bool,
+    brightdata_anonymous_fallback: bool,
+    accept_result: ProviderResultValidator | None,
+    attempt_observer: ProviderAttemptObserver | None,
+    failure_observer: ProviderFailureObserver | None,
+) -> FirecrawlScrape:
     errors: list[str] = []
     skip = frozenset(skip_providers or ())
 
@@ -1037,6 +1122,7 @@ def _scrape_sync(
                         "decodoSuperProxy": super_proxy,
                         "decodoRequests": 1,
                         "decodoCostKnown": False,
+                        "usageCallId": getattr(result, "usage_call_id", None),
                     },
                     status_code=result.status_code,
                     final_url=result.final_url,

@@ -21,6 +21,17 @@ function analytics_module_registry(): array
             'ttl' => 30,
             'params' => [],
         ],
+        'providers' => [
+            'title' => 'Провайдеры',
+            'description' => 'Каждый вызов Decodo, Scrape.do, Firecrawl и Scrapfly: успешность, время ответа, трафик и расход по дням (UTC).',
+            'composite' => true,
+            'ttl' => 0,
+            'params' => [
+                'provider' => ['type' => 'enum', 'values' => ['all', 'decodo', 'scrape_do', 'firecrawl', 'scrapfly'], 'default' => 'all'],
+                'days' => ['type' => 'enum', 'values' => ['7', '30'], 'default' => '30'],
+                'source_id' => ['type' => 'token', 'max' => 160],
+            ],
+        ],
         'meta' => [
             'title' => 'Мета Standard / Wild',
             'description' => 'Архетипы HSGuru: винрейт, популярность, число игр и скорость подъёма.',
@@ -2214,6 +2225,236 @@ function analytics_card_statistics(array $definition, array $query): array
     ];
 }
 
+const ANALYTICS_PROVIDER_LABELS = [
+    'decodo' => 'Decodo',
+    'scrape_do' => 'Scrape.do',
+    'firecrawl' => 'Firecrawl',
+    'scrapfly' => 'Scrapfly',
+];
+
+/**
+ * The provider ledger is admin-only: it is fetched with the panel's scoped
+ * service token from one fixed path and is never cached on disk.
+ */
+function analytics_provider_usage_fetch(array $query): array
+{
+    require_once __DIR__ . '/parser_control.php';
+    $config = panel_parser_control_config();
+    if ($config === null) {
+        throw new RuntimeException('Служебный токен панели не настроен.');
+    }
+    $remote = ['days' => (int)($query['days'] ?? 30)];
+    if (($query['provider'] ?? 'all') !== 'all') {
+        $remote['provider'] = (string)$query['provider'];
+    }
+    if (($query['source_id'] ?? '') !== '') {
+        $remote['source_id'] = (string)$query['source_id'];
+    }
+    $baseUrl = rtrim((string)(getenv('HS_DATA_API_INTERNAL_URL') ?: PANEL_PARSER_CONTROL_BASE_URL), '/');
+    $handle = curl_init($baseUrl . '/ops/provider-usage?' . http_build_query($remote, '', '&', PHP_QUERY_RFC3986));
+    if ($handle === false) {
+        throw new RuntimeException('Не удалось инициализировать запрос к API.');
+    }
+    curl_setopt_array($handle, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_FOLLOWLOCATION => false,
+        CURLOPT_CONNECTTIMEOUT => 2,
+        CURLOPT_TIMEOUT => 10,
+        CURLOPT_NOSIGNAL => true,
+        CURLOPT_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS,
+        CURLOPT_HTTPHEADER => [
+            'Accept: application/json',
+            'Authorization: Bearer ' . $config['token'],
+        ],
+        CURLOPT_USERAGENT => 'api.kolodahearthstone.com-analytics/1.0',
+    ]);
+    $body = curl_exec($handle);
+    $status = (int)curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
+    curl_close($handle);
+    if (!is_string($body) || strlen($body) > PANEL_PARSER_CONTROL_MAX_RESPONSE_BYTES) {
+        throw new RuntimeException('Сервис учёта провайдеров не ответил.');
+    }
+    if ($status === 401 || $status === 403) {
+        throw new RuntimeException('Служебный токен панели не имеет доступа к учёту провайдеров.');
+    }
+    if ($status < 200 || $status >= 300) {
+        throw new RuntimeException('Сервис учёта провайдеров недоступен: HTTP ' . $status . '.');
+    }
+
+    return analytics_decode_json($body);
+}
+
+function analytics_provider_number($value): ?float
+{
+    return is_int($value) || is_float($value) ? (float)$value : null;
+}
+
+function analytics_provider_stats($raw): array
+{
+    $raw = is_array($raw) ? $raw : [];
+    $count = static fn($value): int => is_int($value) && $value >= 0 ? $value : 0;
+    return [
+        'total' => $count($raw['total'] ?? null),
+        'success' => $count($raw['success'] ?? null),
+        'failed' => $count($raw['failed'] ?? null),
+        'success_rate' => analytics_provider_number($raw['success_rate'] ?? null),
+        'avg_ms' => analytics_provider_number($raw['avg_ms'] ?? null),
+        'p95_ms' => analytics_provider_number($raw['p95_ms'] ?? null),
+        'bytes' => $count($raw['bytes'] ?? null),
+        'cost_units' => analytics_provider_number($raw['cost_units'] ?? null),
+        'cost_usd' => analytics_provider_number($raw['cost_usd'] ?? null) ?? 0.0,
+        'usd_per_1k_success' => analytics_provider_number($raw['usd_per_1k_success'] ?? null),
+    ];
+}
+
+function analytics_provider_key($value): ?string
+{
+    return is_string($value) && isset(ANALYTICS_PROVIDER_LABELS[$value]) ? $value : null;
+}
+
+function analytics_normalize_provider_usage(array $payload): array
+{
+    $providers = [];
+    foreach (is_array($payload['providers'] ?? null) ? $payload['providers'] : [] as $item) {
+        $key = analytics_provider_key($item['provider'] ?? null);
+        if ($key !== null) {
+            $providers[] = ['provider' => $key, 'label' => ANALYTICS_PROVIDER_LABELS[$key], 'cost_unit' => (string)($item['cost_unit'] ?? '')] + analytics_provider_stats($item);
+        }
+    }
+    $daily = [];
+    foreach (is_array($payload['daily'] ?? null) ? $payload['daily'] : [] as $item) {
+        $key = analytics_provider_key($item['provider'] ?? null);
+        $day = $item['day'] ?? null;
+        if ($key !== null && is_string($day) && preg_match('/^\d{4}-\d{2}-\d{2}$/D', $day) === 1) {
+            $daily[] = ['day' => $day, 'provider' => $key] + analytics_provider_stats($item);
+        }
+    }
+    $reasons = [];
+    foreach (is_array($payload['failure_reasons'] ?? null) ? $payload['failure_reasons'] : [] as $item) {
+        $key = analytics_provider_key($item['provider'] ?? null);
+        if ($key !== null && is_string($item['reason'] ?? null) && is_int($item['count'] ?? null)) {
+            $reasons[] = ['provider' => $key, 'reason' => mb_substr($item['reason'], 0, 64, 'UTF-8'), 'count' => $item['count']];
+        }
+    }
+    $sources = [];
+    foreach (is_array($payload['sources'] ?? null) ? $payload['sources'] : [] as $item) {
+        $sourceId = $item['source_id'] ?? null;
+        $sources[] = ['source_id' => is_string($sourceId) ? mb_substr($sourceId, 0, 160, 'UTF-8') : null] + analytics_provider_stats($item);
+    }
+    $pricing = [];
+    foreach (is_array($payload['pricing'] ?? null) ? $payload['pricing'] : [] as $key => $item) {
+        if (analytics_provider_key($key) !== null && is_array($item)) {
+            $pricing[$key] = [
+                'unit' => (string)($item['unit'] ?? ''),
+                'usd_per_unit' => analytics_provider_number($item['usd_per_unit'] ?? null),
+                'basis' => ($item['basis'] ?? '') === 'configured' ? 'configured' : 'default',
+            ];
+        }
+    }
+    $date = static fn($value): ?string => is_string($value) && preg_match('/^\d{4}-\d{2}-\d{2}/', $value) === 1 ? $value : null;
+
+    return [
+        'days' => is_int($payload['days'] ?? null) ? $payload['days'] : null,
+        'from' => $date($payload['from'] ?? null),
+        'to' => $date($payload['to'] ?? null),
+        'generated_at' => $date($payload['generated_at'] ?? null),
+        'first_recorded_at' => $date($payload['first_recorded_at'] ?? null),
+        'retention_days' => is_int($payload['retention_days'] ?? null) ? $payload['retention_days'] : null,
+        'totals' => analytics_provider_stats($payload['totals'] ?? null),
+        'providers' => $providers,
+        'daily' => $daily,
+        'failure_reasons' => $reasons,
+        'sources' => $sources,
+        'pricing' => $pricing,
+    ];
+}
+
+function analytics_format_bytes(int $bytes): string
+{
+    $units = ['Б', 'КБ', 'МБ', 'ГБ'];
+    $value = (float)$bytes;
+    $unit = 0;
+    while ($value >= 1024 && $unit < count($units) - 1) {
+        $value /= 1024;
+        $unit++;
+    }
+    return ($unit === 0 ? (string)$bytes : number_format($value, 1, ',', ' ')) . ' ' . $units[$unit];
+}
+
+function analytics_format_usd(?float $value): string
+{
+    return $value === null ? '—' : '$' . number_format($value, $value > 0 && $value < 0.1 ? 4 : 2, '.', ' ');
+}
+
+function analytics_provider_usage(array $definition, array $query): array
+{
+    $error = null;
+    try {
+        $usage = analytics_normalize_provider_usage(analytics_provider_usage_fetch($query));
+    } catch (Throwable $exception) {
+        $error = $exception->getMessage();
+        $usage = analytics_normalize_provider_usage([]);
+    }
+    $totals = $usage['totals'];
+    $rows = [];
+    foreach (array_reverse($usage['daily']) as $item) {
+        $rows[] = [
+            'day' => $item['day'],
+            'provider' => ANALYTICS_PROVIDER_LABELS[$item['provider']],
+            'total' => $item['total'],
+            'success' => $item['success'],
+            'failed' => $item['failed'],
+            'success_rate' => $item['success_rate'],
+            'avg_ms' => $item['avg_ms'],
+            'p95_ms' => $item['p95_ms'],
+            'traffic' => analytics_format_bytes($item['bytes']),
+            'cost_units' => $item['cost_units'],
+            'cost_usd' => analytics_format_usd($item['cost_usd']),
+        ];
+    }
+
+    return [
+        'ok' => true,
+        'module' => 'providers',
+        'title' => $definition['title'],
+        'description' => $definition['description'],
+        'summary' => [
+            ['label' => 'Всего запросов', 'value' => $totals['total']],
+            ['label' => 'Успешных', 'value' => $totals['success'], 'tone' => 'good'],
+            ['label' => 'Неудачных', 'value' => $totals['failed'], 'tone' => $totals['failed'] > 0 ? 'bad' : 'neutral'],
+            ['label' => 'Успешность', 'value' => $totals['success_rate'] === null ? '—' : number_format($totals['success_rate'], 1, ',', ' ') . ' %'],
+            ['label' => 'Среднее время ответа', 'value' => $totals['avg_ms'] === null ? '—' : number_format($totals['avg_ms'] / 1000, 2, ',', ' ') . ' с'],
+            ['label' => 'Трафик', 'value' => analytics_format_bytes($totals['bytes'])],
+            ['label' => 'Расход', 'value' => analytics_format_usd($totals['cost_usd'])],
+            ['label' => '1000 успешных', 'value' => analytics_format_usd($totals['usd_per_1k_success'])],
+        ],
+        'columns' => [
+            analytics_column('day', 'День (UTC)'),
+            analytics_column('provider', 'Провайдер'),
+            analytics_column('total', 'Всего', 'number'),
+            analytics_column('success', 'Успешных', 'number'),
+            analytics_column('failed', 'Неудачных', 'number'),
+            analytics_column('success_rate', 'Успешность', 'percent'),
+            analytics_column('avg_ms', 'Среднее, мс', 'number'),
+            analytics_column('p95_ms', 'p95, мс', 'number'),
+            analytics_column('traffic', 'Трафик'),
+            analytics_column('cost_units', 'Расход, ед.', 'number'),
+            analytics_column('cost_usd', 'Расход, $'),
+        ],
+        'rows' => $rows,
+        'provider_usage' => $usage + ['error' => $error],
+        'meta' => [
+            'total' => count($rows),
+            'updated_at' => $usage['generated_at'] ?? gmdate(DATE_ATOM),
+            'source_id' => 'provider_usage',
+            'stale' => $error !== null,
+            'cached' => false,
+            'stale_cache' => false,
+            'cache_age' => null,
+        ],
+    ];
+}
+
 function analytics_module_response(string $module, array $input): array
 {
     $registry = analytics_module_registry();
@@ -2234,6 +2475,9 @@ function analytics_module_response(string $module, array $input): array
         }
         if ($module === 'bg_minions') {
             return analytics_bg_minions($definition, $query);
+        }
+        if ($module === 'providers') {
+            return analytics_provider_usage($definition, $query);
         }
         return analytics_card_statistics($definition, $query);
     }

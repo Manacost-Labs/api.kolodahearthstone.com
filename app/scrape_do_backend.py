@@ -12,6 +12,7 @@ import urllib.request
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
+from . import provider_usage
 from .config import scrape_do_timeout_seconds, scrape_do_token
 
 _lab_receipt: ContextVar[dict | None] = ContextVar("scrape_do_lab_receipt", default=None)
@@ -86,6 +87,7 @@ class ScrapeDoScrape:
     target_headers: dict[str, str] = field(default_factory=dict)
     acquisition_id: str | None = None
     cost_basis: str = "estimated"
+    usage_call_id: int | None = None
 
     @property
     def content_length(self) -> int:
@@ -325,6 +327,71 @@ def _scrape_url_sync(
     )
 
 
+def _recorded_scrape_url_sync(url: str, **kwargs) -> ScrapeDoScrape:
+    """One Scrape.do HTTP call plus its provider-usage ledger row."""
+    if not scrape_do_token():
+        return _scrape_url_sync(url, **kwargs)
+    render = bool(kwargs.get("render", True))
+    super_proxy = bool(kwargs.get("super_proxy", False))
+    usage = {
+        "url": url,
+        "started": time.monotonic(),
+        "profile": f"{'super' if super_proxy else 'standard'}"
+        f"{'+render' if render else ''}",
+        "render": render,
+    }
+    try:
+        result = _scrape_url_sync(url, **kwargs)
+    except ScrapeDoContentError as exc:
+        scrape = getattr(exc, "scrape", None)
+        provider_usage.record_call(
+            "scrape_do",
+            status=getattr(scrape, "status_code", None),
+            outcome="failed",
+            reason="content_error",
+            content=getattr(scrape, "html", None),
+            cost=getattr(scrape, "request_cost", 0),
+            **usage,
+        )
+        raise
+    except ScrapeDoRequestError as exc:
+        reason = (
+            f"http_{exc.status_code}"
+            if exc.status_code
+            else "timeout"
+            if isinstance(exc.__cause__, TimeoutError)
+            else "transport"
+        )
+        provider_usage.record_call(
+            "scrape_do",
+            status=exc.status_code,
+            outcome="failed",
+            reason=reason,
+            cost=exc.request_cost,
+            **usage,
+        )
+        raise
+    except Exception as exc:
+        provider_usage.record_call(
+            "scrape_do", outcome="failed", reason=type(exc).__name__, **usage
+        )
+        raise
+    call_id = provider_usage.record_call(
+        "scrape_do",
+        status=getattr(result, "status_code", None),
+        content=getattr(result, "html", None),
+        cost=getattr(result, "request_cost", 0),
+        cost_basis=str(getattr(result, "cost_basis", "estimated")),
+        **usage,
+    )
+    if call_id is None:
+        return result
+    try:
+        return replace(result, usage_call_id=call_id)
+    except TypeError:
+        return result
+
+
 @wraps(_scrape_url_sync)
 def scrape_url_sync(url: str, **kwargs) -> ScrapeDoScrape:
     from .meta_intelligence.budget import begin_attempt, finish_attempt
@@ -333,13 +400,13 @@ def scrape_url_sync(url: str, **kwargs) -> ScrapeDoScrape:
         return _scrape_url_sync(url, **kwargs)
     identity = begin_attempt(url)
     if identity is None:
-        return _scrape_url_sync(url, **kwargs)
+        return _recorded_scrape_url_sync(url, **kwargs)
     receipt: dict = {}
     token = _lab_receipt.set(receipt)
     started = time.monotonic()
     outcome = "error"
     try:
-        result = _scrape_url_sync(url, **kwargs)
+        result = _recorded_scrape_url_sync(url, **kwargs)
         receipt.update(credits=result.request_cost, basis=result.cost_basis, status=result.status_code)
         outcome = "response"
         return replace(result, acquisition_id=identity)

@@ -5,7 +5,7 @@ import threading
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import (
     Body,
@@ -595,6 +595,21 @@ def ops_run(run_id: str) -> dict:
 @app.get("/ops/health", dependencies=[Depends(require_admin)])
 def ops_health() -> dict:
     return cached_health_diagnostics()
+
+
+@app.get("/ops/provider-usage", dependencies=[Depends(require_admin)])
+def ops_provider_usage(
+    response: Response,
+    days: int = Query(30, ge=1, le=90),
+    provider: Literal["decodo", "scrape_do", "firecrawl", "scrapfly"] | None = None,
+    source_id: str | None = Query(
+        None, min_length=1, max_length=160, pattern=r"^[A-Za-z0-9_.:-]+$"
+    ),
+) -> dict:
+    from .provider_usage import summary
+
+    response.headers["Cache-Control"] = "private, no-store"
+    return summary(days=days, provider=provider, source_id=source_id)
 
 
 @app.get("/demo/overview")

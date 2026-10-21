@@ -352,6 +352,9 @@ const paramLabels: Record<string, string> = {
   order: 'Порядок',
   sort: 'Сортировка',
   tavern_tier: 'Уровень таверны',
+  provider: 'Провайдер',
+  days: 'Период',
+  source_id: 'Источник',
 };
 
 const optionLabels: Record<string, Record<string, string>> = {
@@ -378,6 +381,14 @@ const optionLabels: Record<string, Record<string, string>> = {
   card_period: { '1d': '24 часа', '3d': '3 дня', '7d': '7 дней', '14d': '14 дней', patch: 'Текущий патч' },
   order: { asc: 'По возрастанию', desc: 'По убыванию' },
   sort: { games: 'Игры', winrate: 'Винрейт', popularity: 'Популярность', name: 'Название' },
+  provider: {
+    all: 'Все провайдеры',
+    decodo: 'Decodo',
+    scrape_do: 'Scrape.do',
+    firecrawl: 'Firecrawl',
+    scrapfly: 'Scrapfly',
+  },
+  days: { '7': '7 дней', '30': '30 дней' },
 };
 
 export function paramLabel(key: string): string {
