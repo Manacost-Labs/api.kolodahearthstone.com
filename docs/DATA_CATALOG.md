@@ -247,7 +247,7 @@ GET /datasets/firestone_standard
 | `hsguru_meta_standard_diamond_4to1` | Standard Diamond 4–1. |
 | `hsguru_meta_standard_top_5k` | Standard Top 5K. |
 | `hsguru_meta_standard_top_legend` | Standard Top Legend. |
-| `hsguru_meta_matrix` | Unified twelve-hourly matrix: Standard/Wild, nine ranks, four rolling periods, the latest patch, named release windows (`violet_hold`, `most_wanted`), Any Player and local 100–5000 game thresholds. It also contains the current Standard/Wild archetype catalog (minimum 50 games), cached builds and time-series statistics. |
+| `hsguru_meta_matrix` | Unified twelve-hourly matrix: Standard/Wild, nine ranks, seven rolling periods (`past_3_hours` … `past_30_days`), the latest patch, the current expansion window (`black_empire`), Any Player and local 100–5000 game thresholds. It also contains the current Standard/Wild archetype catalog (minimum 50 games), cached builds and time-series statistics. |
 | `hsguru_meta_wild_legend` | Wild Legend. |
 | `hsguru_meta_wild_diamond_4to1` | Wild Diamond 4–1. |
 | `hsguru_meta_wild_top_5k` | Wild Top 5K. |
