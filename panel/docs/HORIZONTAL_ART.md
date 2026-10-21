@@ -35,6 +35,8 @@ text fade.
 **Checks.** Each rendition is rejected, and the next source tried, when its
 fully visible part is blank, has transparent holes, a white margin or a black
 block. The job summary counts focus methods and lists flagged images.
+Failures that leave the previous asset in place, such as a wiki outage, are
+listed under `kept_previous` and do not fail the job or skip the tiles.
 
 **Rollout and rollback.** Recipe 8 writes to `/uploads/horizontal-art/r8/…`
 next to, never over, older files. A row switches to its new URL only after both
