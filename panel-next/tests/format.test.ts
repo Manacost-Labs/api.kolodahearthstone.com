@@ -130,3 +130,24 @@ test('classes read in Russian from Blizzard slugs and HearthstoneJSON codes', ()
   assert.equal(classLabel('mage'), 'Маг');
   assert.equal(classLabel('unknown'), 'unknown');
 });
+
+test('table rows: attention follows status tones and search folds case and ё', async () => {
+  const { cellTone, rowMatches, rowNeedsAttention } = await import('../lib/format.ts');
+  const columns = [
+    { key: 'source', type: 'code' },
+    { key: 'description', type: 'text' },
+    { key: 'age', type: 'status' },
+  ];
+  const stale = { source: 'vs_radars', description: 'Радары колод', age: 'Устарело', age_tone: 'warning' };
+  const fresh = { source: 'hsguru', description: 'Мета', age: 'Актуально · 3 ч назад', age_tone: 'neutral' };
+  assert.equal(cellTone(stale, 'age'), 'warning');
+  assert.equal(cellTone({ state: 'failed' }, 'state'), 'bad');
+  assert.equal(rowNeedsAttention(stale, columns), true);
+  assert.equal(rowNeedsAttention(fresh, columns), false);
+  // Without a declared type the column name decides whether it is a status.
+  assert.equal(rowNeedsAttention({ state: 'error' }, [{ key: 'state' }]), true);
+  assert.equal(rowMatches(stale, columns, '  РАДАРЫ '), true);
+  assert.equal(rowMatches({ description: 'Ёлка' }, columns, 'елка'), true);
+  assert.equal(rowMatches(fresh, columns, 'radars'), false);
+  assert.equal(rowMatches(fresh, columns, ''), true);
+});

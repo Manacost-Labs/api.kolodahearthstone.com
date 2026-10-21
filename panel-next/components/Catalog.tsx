@@ -5,7 +5,7 @@ import { ArrowCounterClockwiseIcon } from '@phosphor-icons/react/dist/ssr/ArrowC
 import { SlidersHorizontalIcon } from '@phosphor-icons/react/dist/ssr/SlidersHorizontal';
 import { PanelLink } from './WorkspaceNavigation';
 import { useCatalogQuery } from './useCatalogQuery';
-import { catalogHref, catalogView } from '@/lib/catalog-state';
+import { catalogHref, catalogView, pageSizes } from '@/lib/catalog-state';
 import { countLabel, formatDay } from '@/lib/format';
 import { SquaresFourIcon } from '@phosphor-icons/react/dist/ssr/SquaresFour';
 import { RowsIcon } from '@phosphor-icons/react/dist/ssr/Rows';
@@ -245,7 +245,9 @@ export function Catalog({
               size="sm"
               value={String(params.get('per_page') || data.perPage)}
               onValueChange={value => go({ per_page: value })}
-              options={[8, 12, 15, 25, 50, 100, 150].map(n => ({ value: String(n), label: String(n) }))}
+              options={[...new Set([...pageSizes, Number(params.get('per_page') || data.perPage)])]
+                .sort((a, b) => a - b)
+                .map(n => ({ value: String(n), label: String(n) }))}
             />
           </div>
         )}

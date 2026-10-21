@@ -48,6 +48,10 @@ const sectionNames: Record<string, string> = {
   new: 'Новая карта',
 };
 
+// The shortcut hint names the key the visitor actually has; the server renders the non-Mac form.
+const subscribeNever = () => () => {};
+const isApple = () => /Mac|iPhone|iPad/.test(navigator.platform);
+
 export function Shell(props: ShellProps) {
   return (
     <WorkspaceNavigation>
@@ -58,6 +62,7 @@ export function Shell(props: ShellProps) {
 
 function ShellContent({ user, logoutCsrf, categories, children }: ShellProps) {
   const mode = useSyncExternalStore(subscribeThemePreference, readThemeMode, serverThemeMode);
+  const apple = useSyncExternalStore(subscribeNever, isApple, () => false);
   const params = useSearchParams();
   const action = params.get('action') || 'list';
   const type = params.get('card_type') || '';
@@ -219,7 +224,7 @@ function ShellContent({ user, logoutCsrf, categories, children }: ShellProps) {
             >
               <MagnifyingGlassIcon size={16} aria-hidden="true" />
               <span>Поиск…</span>
-              <kbd>Ctrl K</kbd>
+              <kbd>{apple ? '⌘K' : 'Ctrl K'}</kbd>
             </button>
           </div>
         }

@@ -116,7 +116,34 @@ const snapshot = {
     },
   ],
   activeRun: null,
-  recentRuns: [],
+  recentRuns: [
+    {
+      id: 'fixture-run-2',
+      status: 'partial',
+      sourceIds: ['hsguru', 'replay', 'cards'],
+      requestedBy: 'trigger.dev',
+      reason: 'scheduled refresh',
+      createdAt: '2026-10-02T11:59:58Z',
+      startedAt: '2026-10-02T12:00:00Z',
+      finishedAt: '2026-10-02T12:01:05Z',
+      totalSources: 3,
+      completedSources: 2,
+      failedSources: 1,
+    },
+    {
+      id: 'fixture-run-1',
+      status: 'succeeded',
+      sourceIds: ['hsguru'],
+      requestedBy: 'UI fixture',
+      reason: 'manual',
+      createdAt: '2026-10-01T09:00:00Z',
+      startedAt: '2026-10-01T09:00:01Z',
+      finishedAt: '2026-10-01T09:00:13Z',
+      totalSources: 1,
+      completedSources: 1,
+      failedSources: 0,
+    },
+  ],
 };
 export const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://127.0.0.1:18768');
@@ -151,6 +178,67 @@ export const server = http.createServer(async (req, res) => {
       input.action === 'run' ? 202 : 200,
     );
   }
+  if (url.pathname === '/analytics.php' && url.searchParams.get('module') === 'providers') {
+    const days = Array.from({ length: 7 }, (_, i) => `2026-10-${String(15 + i).padStart(2, '0')}`);
+    const providers = [
+      ['decodo', 420, 401, 0.62, 'request', 0.0015],
+      ['scrape_do', 260, 236, 1.3, 'credit', 0.00029],
+    ];
+    return send({
+      ok: true,
+      module: 'providers',
+      title: 'Провайдеры',
+      description: 'Расход, успешность и скорость платных провайдеров по дням.',
+      summary: [
+        { label: 'Вызовов', value: 680 },
+        { label: 'Успешных', value: 637, tone: 'good' },
+        { label: 'Расход', value: '$1.92' },
+      ],
+      columns: [],
+      rows: [],
+      meta: { updated_at: '2026-10-21T08:00:00Z', cached: false, stale: false },
+      provider_usage: {
+        from: days[0],
+        to: days[6],
+        first_recorded_at: '2026-10-15T00:00:00Z',
+        retention_days: 90,
+        providers: providers.map(([provider, total, success, cost, unit, price]) => ({
+          provider,
+          total,
+          success,
+          failed: total - success,
+          success_rate: (100 * success) / total,
+          avg_ms: provider === 'decodo' ? 2400 : 5100,
+          p95_ms: provider === 'decodo' ? 6100 : 12800,
+          bytes: total * 180_000,
+          cost_usd: cost,
+          cost_units: Math.round(cost / price),
+          cost_unit: unit,
+          usd_per_1k_success: (1000 * cost) / success,
+        })),
+        daily: days.flatMap((day, i) =>
+          providers.map(([provider, total, success, cost]) => ({
+            day,
+            provider,
+            total: Math.round(total / 7 + (i % 3) * 6),
+            success_rate: (100 * success) / total - (i % 2) * 3,
+            avg_ms: 2000 + i * 300,
+            bytes: 9_000_000 + i * 800_000,
+            cost_usd: cost / 7,
+          })),
+        ),
+        pricing: {
+          decodo: { usd_per_unit: 0.0015, basis: 'configured' },
+          scrape_do: { usd_per_unit: 0.00029, basis: 'list' },
+        },
+        failure_reasons: [
+          { provider: 'scrape_do', reason: 'blocked_content', count: 17 },
+          { provider: 'decodo', reason: 'timeout', count: 12 },
+        ],
+        sources: [{ source_id: 'hsguru_meta_matrix', total: 300, success_rate: 96.5, cost_usd: 0.9 }],
+      },
+    });
+  }
   if (url.pathname === '/analytics.php')
     return send({
       ok: true,
@@ -163,7 +251,8 @@ export const server = http.createServer(async (req, res) => {
         { label: 'Требуют внимания', value: 1 },
       ],
       columns: [
-        { key: 'source_id', label: 'Источник' },
+        { key: 'source_id', label: 'Источник', type: 'code' },
+        { key: 'description', label: 'Что загружается', type: 'text' },
         { key: 'state', label: 'Состояние' },
         { key: 'rows', label: 'Строк' },
         { key: 'updated_at', label: 'Обновлено' },
@@ -171,6 +260,15 @@ export const server = http.createServer(async (req, res) => {
       rows: [
         { source_id: 'hsguru', state: 'ok', rows: 120, updated_at: '2026-10-02T12:00:00Z' },
         { source_id: 'hsreplay', state: 'warning', rows: 20, updated_at: '2026-10-01T12:00:00Z' },
+        ...Array.from({ length: 10 }, (_, i) => ({
+          source_id: 'fixture_source_' + (i + 1),
+          description:
+            'Тестовый источник для проверки длинных описаний: таблица показывает три строки текста, ' +
+            'а полный текст остаётся в подсказке и в деталях записи.',
+          state: 'ok',
+          rows: 10 * (i + 1),
+          updated_at: '2026-10-02T10:00:00Z',
+        })),
       ],
       meta: { total: 2, updated_at: '2026-10-02T12:00:00Z', cached: false, stale: false },
       parsing_reliability: { windows: [], message: 'Накапливаем статистику' },
@@ -241,6 +339,11 @@ export const server = http.createServer(async (req, res) => {
           title: 'Статистика карты',
           description: 'Карты',
           params: { q: { type: 'string', max: 120 } },
+        },
+        providers: {
+          title: 'Провайдеры',
+          description: 'Расход и успешность платных провайдеров',
+          params: { days: { type: 'enum', values: ['7', '30'], default: '7' } },
         },
         meta: {
           title: 'Мета Standard / Wild',

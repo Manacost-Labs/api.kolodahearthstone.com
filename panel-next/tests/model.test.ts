@@ -115,3 +115,16 @@ test('catalogue tags show readable tribe or category names instead of slugs', ()
   assert.equal(normalizedCard({ card_type: 'hero' }, 'hero', {}).tribe, 'Герой');
   assert.equal(normalizedCard({}, '', {}).tribe, 'Существо');
 });
+
+test('token state flags revoked, expired and soon-expiring tokens', async () => {
+  const { tokenState } = await import('../lib/model.ts');
+  const now = Date.parse('2026-10-21T12:00:00Z');
+  assert.deepEqual(tokenState({ revoked_at: '2026-10-01', expires_at: '2027-01-01' }, now), {
+    key: 'revoked',
+    days: 0,
+  });
+  assert.equal(tokenState({ expires_at: '2026-10-20T00:00:00Z' }, now).key, 'expired');
+  assert.deepEqual(tokenState({ expires_at: '2026-10-28T12:00:00Z' }, now), { key: 'expiring', days: 7 });
+  assert.equal(tokenState({ expires_at: '2027-10-08T11:37:00Z' }, now).key, 'active');
+  assert.equal(tokenState({ expires_at: null }, now).key, 'active');
+});

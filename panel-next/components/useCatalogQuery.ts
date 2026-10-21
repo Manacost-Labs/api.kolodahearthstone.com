@@ -1,6 +1,12 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { catalogHref, catalogPreferenceCookie, catalogView, type CatalogView } from '@/lib/catalog-state';
+import {
+  catalogHref,
+  catalogPreferenceCookie,
+  catalogView,
+  defaultPageSize,
+  type CatalogView,
+} from '@/lib/catalog-state';
 import { useWorkspaceNavigation } from './WorkspaceNavigation';
 
 export function useCatalogQuery(query: string) {
@@ -55,7 +61,8 @@ export function useCatalogQuery(query: string) {
   const mode = (value: CatalogView) => {
     // biome-ignore lint/suspicious/noDocumentCookie: a plain preference cookie; the server reads it on first render
     document.cookie = catalogPreferenceCookie(value);
-    go({ view: value }, true);
+    // Each view starts at its own page size: a 25-row table page would leave a ragged card grid.
+    go({ view: value, per_page: defaultPageSize(value) }, true);
   };
   const params = new URLSearchParams(draftQuery);
   // Pending includes the debounce interval: an older request settling must not

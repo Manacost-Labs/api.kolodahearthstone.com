@@ -1691,12 +1691,13 @@ time[title] {
     flex: none;
     min-height: 46px;
   }
-  .filter-row {
+  /* Only the catalogue folds its filters behind a toggle; statistics filters stay visible. */
+  .catalog-filters .filter-row {
     display: none;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: var(--space-2);
   }
-  .filter-row[data-open] {
+  .catalog-filters .filter-row[data-open] {
     display: grid;
   }
   .filter-field {
@@ -2794,4 +2795,307 @@ html[data-mode='dark'] .provider-usage {
 .provider-breakdowns td:last-child,
 .provider-breakdowns th:last-child {
   text-align: right;
+}
+
+/* Sources: KPI cards double as status filters, problems explain themselves, rows become cards on phones. */
+.summary-grid > .kpi-filter {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  display: grid;
+  gap: var(--space-1);
+  align-content: start;
+  text-align: left;
+  font: inherit;
+  color: var(--text);
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background-color 0.15s ease;
+}
+.summary-grid > .kpi-filter:hover {
+  border-color: color-mix(in srgb, var(--text) 24%, var(--line));
+  background: color-mix(in srgb, var(--soft) 50%, var(--surface));
+}
+.summary-grid > .kpi-filter[aria-pressed='true'] {
+  border-color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--text);
+}
+.toolbar-count {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+.sources-table th[scope='row'],
+.runs-table th[scope='row'] {
+  padding: 10px 14px;
+  border-top: 1px solid var(--line);
+  border-bottom: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: var(--text-sm);
+  white-space: normal;
+  vertical-align: top;
+  min-width: 200px;
+}
+.sources-table th[scope='row'] small,
+.runs-table th[scope='row'] small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-weight: 400;
+}
+.sources-table .num,
+.runs-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+/* A thin tone marker on the first cell makes problem rows findable while scrolling. */
+@media (min-width: 641px) {
+  .sources-table tr[data-tone='warning'] th[scope='row'] {
+    box-shadow: inset 2px 0 0 var(--warn);
+  }
+  .sources-table tr[data-tone='bad'] th[scope='row'] {
+    box-shadow: inset 2px 0 0 var(--bad);
+  }
+}
+.sources-table thead th,
+.runs-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.run-history {
+  margin-top: var(--space-6, 24px);
+}
+.run-history h2 {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.muted-note {
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+@media (max-width: 640px) {
+  .sources-table,
+  .sources-table tbody,
+  .runs-table,
+  .runs-table tbody {
+    display: block;
+  }
+  .sources-table thead,
+  .runs-table thead {
+    display: none;
+  }
+  .sources-table tr,
+  .runs-table tr {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px 12px;
+    padding: 12px 14px;
+    border-top: 1px solid var(--line);
+  }
+  .sources-table tr:first-child,
+  .runs-table tr:first-child {
+    border-top: 0;
+  }
+  .sources-table th[scope='row'],
+  .runs-table th[scope='row'],
+  .sources-table td,
+  .runs-table td {
+    padding: 0;
+    border: 0;
+    min-width: 0;
+    max-width: none;
+    text-align: left;
+    background: transparent;
+  }
+  .sources-table th[scope='row'],
+  .runs-table th[scope='row'] {
+    grid-column: 1 / -1;
+    order: -2;
+  }
+  .sources-table .num,
+  .runs-table .num {
+    text-align: left;
+  }
+  .sources-table .row-actions {
+    flex-direction: row;
+    justify-content: space-between;
+  }
+  .runs-table td:first-child {
+    order: -1;
+  }
+  .sources-table td[data-label='Состояние'],
+  .sources-table td:last-child,
+  .runs-table td:last-child {
+    grid-column: 1 / -1;
+  }
+  .sources-table td[data-label]::before,
+  .runs-table td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 2px;
+    color: var(--muted);
+    font-size: var(--text-xs);
+  }
+  .sources-table td[data-label='Состояние']::before {
+    content: none;
+  }
+  .sources-table tr[data-tone='warning'] {
+    box-shadow: inset 2px 0 0 var(--warn);
+  }
+  .sources-table tr[data-tone='bad'] {
+    box-shadow: inset 2px 0 0 var(--bad);
+  }
+  .sources-table tr:hover td {
+    background: transparent;
+  }
+  .toolbar-count {
+    margin-left: 0;
+  }
+}
+
+/* Statistics tables: search, attention filter, clamped long text and a header that stays visible. */
+.table-tools {
+  flex-wrap: wrap;
+}
+.table-search {
+  flex: 1 1 240px;
+  max-width: 360px;
+}
+.table-count {
+  font-variant-numeric: tabular-nums;
+}
+.cell-clamp {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+  min-width: 220px;
+}
+.analytics-main .table-scroll {
+  max-height: min(72vh, 900px);
+}
+.analytics-main .table-scroll thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.analytics-main td .value-code {
+  white-space: nowrap;
+}
+
+/* Card grid: five columns once there is room, matching the page sizes (15, 25, 50…). */
+.catalog-results {
+  container-type: inline-size;
+}
+@container (min-width: 1000px) {
+  .card-grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+}
+
+/* API tokens: lifecycle badges, a quiet revoke action and cards on phones. */
+.tokens-table th[scope='row'] {
+  padding: 10px 14px;
+  border-top: 1px solid var(--line);
+  border-bottom: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: var(--text-sm);
+  white-space: normal;
+  vertical-align: top;
+  min-width: 180px;
+}
+.tokens-table th[scope='row'] code {
+  display: block;
+  margin: 4px 0 6px;
+  color: var(--muted);
+  font-weight: 400;
+}
+.tokens-table tr[data-state='revoked'] > *:not(:last-child),
+.tokens-table tr[data-state='expired'] > *:not(:last-child) {
+  opacity: 0.6;
+}
+.revoke-link {
+  color: var(--muted);
+}
+.revoke-link:hover,
+.revoke-link:focus-visible,
+.tokens-table tr:hover .revoke-link {
+  color: var(--bad);
+}
+@media (max-width: 640px) {
+  .tokens-table,
+  .tokens-table tbody {
+    display: block;
+  }
+  .tokens-table thead {
+    display: none;
+  }
+  .tokens-table tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px 12px;
+    padding: 12px 14px;
+    border-top: 1px solid var(--line);
+  }
+  .tokens-table tr:first-child {
+    border-top: 0;
+  }
+  .tokens-table th[scope='row'],
+  .tokens-table td {
+    padding: 0;
+    border: 0;
+    min-width: 0;
+    max-width: none;
+    background: transparent;
+  }
+  .tokens-table th[scope='row'],
+  .tokens-table td[data-label='Права'] {
+    grid-column: 1 / -1;
+  }
+  .tokens-table td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 2px;
+    color: var(--muted);
+    font-size: var(--text-xs);
+  }
+  .tokens-table tr:hover td {
+    background: transparent;
+  }
+  .tokens-table td time {
+    white-space: normal;
+  }
+  /* Issuing is occasional; on a phone the existing tokens come first. */
+  .token-layout {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .token-layout > .table-scroll {
+    order: -1;
+    margin-top: 0;
+  }
+}
+
+/* Provider usage on phones: the metric switch scrolls instead of widening the page. */
+.provider-usage,
+.provider-chart {
+  min-width: 0;
+}
+.provider-chart > .data-status {
+  flex-wrap: wrap;
+}
+.provider-chart .ui-segmented-control {
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
 }

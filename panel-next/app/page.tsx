@@ -2,7 +2,7 @@ import { getPage, getSession, serverData } from '@/lib/backend';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { matchesCard } from '@/lib/card-detail';
-import { catalogView } from '@/lib/catalog-state';
+import { catalogView, defaultPageSize } from '@/lib/catalog-state';
 import { Catalog } from '@/components/Catalog';
 import { Analytics } from '@/components/Analytics';
 import { Parsers } from '@/components/Parsers';
@@ -30,6 +30,8 @@ export default async function Page({
     }
   }
   if (action === 'list' && query.get('view') === 'tiles') query.set('per_page', '15');
+  if (action === 'list' && !query.has('per_page'))
+    query.set('per_page', String(defaultPageSize(catalogView(query.get('view')))));
   if (action === 'analytics') {
     const registry = await serverData<{ modules: Record<string, AnalyticsModule> }>(
       'panel',
@@ -40,6 +42,9 @@ export default async function Page({
     const statsQuery = new URLSearchParams(query);
     statsQuery.delete('action');
     statsQuery.delete('stats');
+    // Client-side table filters (DataTable) never reach the analytics backend.
+    statsQuery.delete('rows_q');
+    statsQuery.delete('rows');
     statsQuery.set('module', moduleKey);
     const statsSearch = statsQuery.get('stats_q');
     if (statsSearch !== null) {
@@ -60,7 +65,14 @@ export default async function Page({
   if (action === 'parsers') {
     const session = await getSession();
     const response = await serverData<{ data: Row }>('parsers', new URLSearchParams());
-    return <Parsers initial={response.data} csrf={session.parserCsrf} />;
+    // Keyed by the filters so a link to another filtered view (e.g. from Ctrl+K) starts from that URL.
+    return (
+      <Parsers
+        key={['q', 'status', 'section'].map(key => query.get(key) || '').join('|')}
+        initial={response.data}
+        csrf={session.parserCsrf}
+      />
+    );
   }
   const allowed = ['list', 'edit', 'new', 'api_tokens', 'wiki_terms'];
   if (!allowed.includes(action)) query.set('action', 'list');

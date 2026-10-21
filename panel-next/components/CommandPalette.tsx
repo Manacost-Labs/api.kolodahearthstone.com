@@ -6,9 +6,12 @@ import { ChartBarIcon } from '@phosphor-icons/react/dist/ssr/ChartBar';
 import { DatabaseIcon } from '@phosphor-icons/react/dist/ssr/Database';
 import { KeyIcon } from '@phosphor-icons/react/dist/ssr/Key';
 import { PlugsConnectedIcon } from '@phosphor-icons/react/dist/ssr/PlugsConnected';
+import { PlusIcon } from '@phosphor-icons/react/dist/ssr/Plus';
+import { WarningIcon } from '@phosphor-icons/react/dist/ssr/Warning';
 import { SquaresFourIcon } from '@phosphor-icons/react/dist/ssr/SquaresFour';
 import { TranslateIcon } from '@phosphor-icons/react/dist/ssr/Translate';
 import { cardHref, cardKey } from '@/lib/card-detail';
+import { catalogHref } from '@/lib/catalog-state';
 import { apiPath } from '@/lib/client';
 import { normalizedCard } from '@/lib/model';
 import type { Row } from '@/lib/types';
@@ -16,7 +19,15 @@ import { Artwork } from './Artwork';
 import { Modal } from './Modal';
 import { PanelLink } from './WorkspaceNavigation';
 
-type Item = { key: string; label: string; hint?: string; href: string; images?: string[]; catalog?: boolean };
+type Item = {
+  key: string;
+  label: string;
+  hint?: string;
+  href: string;
+  images?: string[];
+  catalog?: boolean;
+  icon?: 'search' | 'plus' | 'warning';
+};
 type Search = { status: 'idle' | 'loading' | 'done' | 'error'; items: Item[] };
 
 const sectionIcons = [
@@ -25,12 +36,68 @@ const sectionIcons = [
   ['action=api_tokens', KeyIcon],
   ['action=wiki_terms', TranslateIcon],
 ] as const;
+const actionIcons = { search: MagnifyingGlassIcon, plus: PlusIcon, warning: WarningIcon };
 function SectionIcon({ item }: { item: Item }) {
-  const Icon = item.catalog
-    ? DatabaseIcon
-    : (sectionIcons.find(([needle]) => item.href.includes(needle))?.[1] ?? SquaresFourIcon);
+  const Icon = item.icon
+    ? actionIcons[item.icon]
+    : item.catalog
+      ? DatabaseIcon
+      : (sectionIcons.find(([needle]) => item.href.includes(needle))?.[1] ?? SquaresFourIcon);
   return <Icon size={16} aria-hidden="true" />;
 }
+
+// Statistics modules come from the analytics registry; one request per page load is enough.
+let registryRequest: Promise<[string, string][]> | null = null;
+function loadStatsModules(): Promise<[string, string][]> {
+  registryRequest ??= fetch(`${apiPath}?action=analytics_registry`, { cache: 'no-store' })
+    .then(response => response.json())
+    .then(payload =>
+      Object.entries((payload?.modules ?? {}) as Record<string, { title?: string }>).map(
+        ([key, module]): [string, string] => [key, module.title || key],
+      ),
+    )
+    .catch(() => {
+      registryRequest = null;
+      return [];
+    });
+  return registryRequest;
+}
+function useStatsModules(): [string, string][] {
+  const [modules, setModules] = useState<[string, string][]>([]);
+  useEffect(() => {
+    let live = true;
+    void loadStatsModules().then(list => {
+      if (live) setModules(list);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+  return modules;
+}
+
+const quickActions: Item[] = [
+  { key: 'action:new', label: 'Добавить карту', href: '/?action=new', icon: 'plus' },
+  {
+    key: 'action:fallback',
+    label: 'Источники на резерве',
+    hint: 'API отдаёт прошлый успешный набор',
+    href: '/?action=parsers&status=fallback',
+    icon: 'warning',
+  },
+  {
+    key: 'action:unavailable',
+    label: 'Источники без данных',
+    href: '/?action=parsers&status=unavailable',
+    icon: 'warning',
+  },
+  {
+    key: 'action:attention',
+    label: 'Статистика: требуют внимания',
+    href: '/?action=analytics&rows=attention',
+    icon: 'warning',
+  },
+];
 
 const normalize = (value: string) => value.toLowerCase().replace(/ё/g, 'е').trim();
 const MIN_QUERY = 2;
@@ -102,11 +169,64 @@ export function CommandPalette({
   const list = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const cards = useCardSearch(query, cardType);
+  const modules = useStatsModules();
   const needle = normalize(query);
-  const sectionItems: Item[] = sections
-    .filter(([, name]) => normalize(name).includes(needle))
-    .map(([href, name]) => ({ key: 'section:' + href, label: name, href, catalog: href === catalogUrl }));
-  const items = [...sectionItems, ...cards.items];
+  const trimmed = query.trim();
+  const sectionItems: Item[] = [
+    ...sections.map(([href, name]): Item => ({
+      key: 'section:' + href,
+      label: name,
+      href,
+      catalog: href === catalogUrl,
+    })),
+    // Statistics modules join once the visitor types, so the opening list stays short.
+    ...(needle ? modules : []).map(([key, title]): Item => ({
+      key: 'stats:' + key,
+      label: title,
+      hint: 'Статистика',
+      href: '/?action=analytics&stats=' + encodeURIComponent(key),
+    })),
+  ].filter(item => normalize(item.label).includes(needle));
+  // With a query, offer to run it in each list that has its own search; without one, shortcuts.
+  const actionItems: Item[] =
+    trimmed.length >= MIN_QUERY
+      ? [
+          {
+            key: 'find:catalog',
+            label: `Найти «${trimmed}» в каталоге`,
+            hint: categoryName,
+            href: catalogHref(catalogUrl.split('?')[1] || '', { q: trimmed }),
+            icon: 'search',
+          },
+          {
+            key: 'find:parsers',
+            label: `Найти «${trimmed}» в источниках`,
+            href: '/?action=parsers&q=' + encodeURIComponent(trimmed),
+            icon: 'search',
+          },
+          {
+            key: 'find:stats',
+            label: `Найти «${trimmed}» в реестре источников`,
+            hint: 'Статистика',
+            href: '/?action=analytics&rows_q=' + encodeURIComponent(trimmed),
+            icon: 'search',
+          },
+        ]
+      : quickActions;
+  // Without a query the shortcuts lead; with one, matches lead and "search everywhere" closes the list.
+  const groups = (
+    trimmed
+      ? [
+          { id: 'sections', title: 'Разделы', items: sectionItems },
+          { id: 'cards', title: `Карты · ${categoryName}`, items: cards.items },
+          { id: 'actions', title: 'Искать везде', items: actionItems },
+        ]
+      : [
+          { id: 'actions', title: 'Быстрые действия', items: actionItems },
+          { id: 'sections', title: 'Разделы', items: sectionItems },
+        ]
+  ).filter(group => group.items.length > 0);
+  const items = groups.flatMap(group => group.items);
   const current = Math.min(active, Math.max(0, items.length - 1));
   const optionId = (index: number) => `${id}-option-${index}`;
 
@@ -212,22 +332,17 @@ export function CommandPalette({
           </button>
         </label>
         <div className="palette-list" id={`${id}-list`} role="listbox" aria-label="Результаты" ref={list}>
-          {sectionItems.length > 0 && (
-            <div role="group" aria-labelledby={`${id}-sections`}>
-              <div className="palette-group" id={`${id}-sections`} role="presentation">
-                Разделы
+          {groups.map((group, groupIndex) => {
+            const offset = groups.slice(0, groupIndex).reduce((total, g) => total + g.items.length, 0);
+            return (
+              <div key={group.id} role="group" aria-labelledby={`${id}-${group.id}`}>
+                <div className="palette-group" id={`${id}-${group.id}`} role="presentation">
+                  {group.title}
+                </div>
+                {group.items.map((item, index) => option(item, offset + index))}
               </div>
-              {sectionItems.map((item, index) => option(item, index))}
-            </div>
-          )}
-          {cards.items.length > 0 && (
-            <div role="group" aria-labelledby={`${id}-cards`}>
-              <div className="palette-group" id={`${id}-cards`} role="presentation">
-                Карты · {categoryName}
-              </div>
-              {cards.items.map((item, index) => option(item, sectionItems.length + index))}
-            </div>
-          )}
+            );
+          })}
         </div>
         <p className="palette-status" role="status">
           {status}

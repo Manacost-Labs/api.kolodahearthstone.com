@@ -5,5 +5,7 @@ declare const model: {
   buildSummary(snapshot:Row):{total:number;fresh:number;fallback:number;unavailable:number;disabled:number;issues:number;nextRunAt:string|null;activeRun:Row|null};
   statusMeta(value:unknown):{key:string;label:string;tone:string};
   runProgress(run:Row):{total:number;done:number;percent:number};
+  errorSummary(value:unknown):string;
+  formatNumber(value:unknown):string;
 };
 export = model;

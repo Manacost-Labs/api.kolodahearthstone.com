@@ -1,22 +1,25 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiPath } from '@/lib/client';
-import { formatDateTime, toneOf } from '@/lib/format';
+import { countLabel, formatDateTime, toneOf } from '@/lib/format';
+import { formatDuration } from '@/lib/provider-usage';
 import { record, text } from '@/lib/model';
 import type { Row } from '@/lib/types';
 import parserView from '@/lib/vendor/parser-control-view.cjs';
 import { Modal } from './Modal';
 import { RecordDetails } from './Details';
-import { KpiCard, StatusBadge, Time } from './ui';
+import { EmptyState, KpiCard, StatusBadge, Time } from './ui';
+import { useUrlState } from './useUrlState';
 import { MagnifyingGlassIcon } from '@phosphor-icons/react/dist/ssr/MagnifyingGlass';
 import { ArrowClockwiseIcon } from '@phosphor-icons/react/dist/ssr/ArrowClockwise';
 import { Select } from './varylo-ui/forms/Select';
 import { Tabs } from './varylo-ui/navigation/Tabs';
 export function Parsers({ initial, csrf }: { initial: Row; csrf: string }) {
   const [snapshot, setSnapshot] = useState(initial);
-  const [query, setQuery] = useState('');
-  const [section, setSection] = useState('all');
-  const [status, setStatus] = useState('all');
+  // Filters live in the address bar: a link to "sources on fallback" opens exactly that list.
+  const [query, setQuery] = useUrlState('q');
+  const [section, setSection] = useUrlState('section', 'all');
+  const [status, setStatus] = useUrlState('status', 'all');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [detail, setDetail] = useState<Row | null>(null);
@@ -50,6 +53,10 @@ export function Parsers({ initial, csrf }: { initial: Row; csrf: string }) {
   const sources = parserView.flattenSources(snapshot);
   const summary = parserView.buildSummary(snapshot);
   const sections = Array.isArray(snapshot.sections) ? snapshot.sections.map(record) : [];
+  const labels = new Map(sources.map(source => [text(source.id), text(source.label || source.id)]));
+  const filterTo = (value: string) => setStatus(status === value ? 'all' : value);
+  const statusCount = (value: string) =>
+    sources.filter(source => parserView.sourcePresentation(source).filter === value).length;
   const rows = sources.filter(
     source =>
       (section === 'all' || source.sectionId === section) &&
@@ -95,16 +102,27 @@ export function Parsers({ initial, csrf }: { initial: Row; csrf: string }) {
         </p>
       )}
       <div className="summary-grid">
-        <KpiCard label="Свежие наборы" value={summary.fresh} tone="good" />
+        <KpiCard
+          label="Свежие наборы"
+          value={summary.fresh}
+          tone="good"
+          pressed={status === 'fresh'}
+          onSelect={() => filterTo('fresh')}
+        />
         <KpiCard
           label="На резерве"
           value={summary.fallback}
           tone={Number(summary.fallback) > 0 ? 'warning' : undefined}
+          hint={Number(summary.fallback) > 0 ? 'API отдаёт прошлый успешный набор' : undefined}
+          pressed={status === 'fallback'}
+          onSelect={() => filterTo('fallback')}
         />
         <KpiCard
           label="Без данных"
           value={summary.unavailable}
           tone={Number(summary.unavailable) > 0 ? 'bad' : undefined}
+          pressed={status === 'unavailable'}
+          onSelect={() => filterTo('unavailable')}
         />
         <KpiCard
           label="Следующий запуск"
@@ -136,13 +154,28 @@ export function Parsers({ initial, csrf }: { initial: Row; csrf: string }) {
           value={status}
           onValueChange={setStatus}
           options={[
-            { value: 'all', label: 'Все состояния' },
-            { value: 'fresh', label: 'Свежие данные' },
-            { value: 'fallback', label: 'На резерве' },
-            { value: 'unavailable', label: 'Данных нет' },
-            { value: 'disabled', label: 'Отключены' },
+            { value: 'all', label: `Все состояния · ${sources.length}` },
+            { value: 'fresh', label: `Свежие данные · ${statusCount('fresh')}` },
+            { value: 'fallback', label: `На резерве · ${statusCount('fallback')}` },
+            { value: 'unavailable', label: `Данных нет · ${statusCount('unavailable')}` },
+            { value: 'disabled', label: `Отключены · ${statusCount('disabled')}` },
           ]}
         />
+        {(status !== 'all' || query) && (
+          <button
+            type="button"
+            className="link-button"
+            onClick={() => {
+              setStatus('all');
+              setQuery('');
+            }}
+          >
+            Сбросить
+          </button>
+        )}
+        <span className="toolbar-count" role="status">
+          {countLabel(rows.length, { one: 'источник', few: 'источника', many: 'источников' })}
+        </span>
       </div>
       <Tabs
         className="section-tabs"
@@ -151,7 +184,11 @@ export function Parsers({ initial, csrf }: { initial: Row; csrf: string }) {
         onValueChange={setSection}
         items={[
           { value: 'all', label: 'Все', badge: sources.length },
-          ...sections.map(item => ({ value: text(item.id), label: text(item.label || item.id) })),
+          ...sections.map(item => ({
+            value: text(item.id),
+            label: text(item.label || item.id),
+            badge: sources.filter(source => source.sectionId === item.id).length,
+          })),
         ]}
       />
       {section !== 'all' && (
@@ -189,36 +226,48 @@ export function Parsers({ initial, csrf }: { initial: Row; csrf: string }) {
           </button>
         </div>
       )}
-      <div className="table-scroll">
-        <table>
+      {/* biome-ignore lint/a11y/noNoninteractiveTabindex: scrollable regions must be reachable by keyboard */}
+      <div className="table-scroll" role="region" tabIndex={0} aria-label="Источники">
+        <table className="sources-table">
           <thead>
             <tr>
-              <th>Источник</th>
-              <th>Состояние данных</th>
-              <th>Строк</th>
-              <th>Последний успех</th>
-              <th>Следующий запуск</th>
-              <th>Действия</th>
+              <th scope="col">Источник</th>
+              <th scope="col">Состояние данных</th>
+              <th scope="col" className="num">
+                Строк
+              </th>
+              <th scope="col">Последний успех</th>
+              <th scope="col">Следующий запуск</th>
+              <th scope="col">
+                <span className="sr-only">Действия</span>
+              </th>
             </tr>
           </thead>
           <tbody>
             {rows.map(source => {
               const presentation = parserView.sourcePresentation(source);
+              // Healthy rows stay quiet; only a problem explains itself, with the parser's reason.
+              const reason =
+                presentation.filter === 'fresh'
+                  ? ''
+                  : parserView.errorSummary(source.lastError) || presentation.description;
               return (
-                <tr key={text(source.id)}>
-                  <td>
+                <tr key={text(source.id)} data-tone={toneOf(presentation.tone)}>
+                  <th scope="row">
                     <strong>{text(source.label || source.name || source.id)}</strong>
                     <small>{text(source.sectionLabel)}</small>
-                  </td>
-                  <td>
+                  </th>
+                  <td data-label="Состояние">
                     <StatusBadge tone={toneOf(presentation.tone)} label={presentation.label} />
-                    <small>{presentation.description}</small>
+                    {reason && <small>{reason}</small>}
                   </td>
-                  <td>{text(source.rowsTotal)}</td>
-                  <td>
+                  <td className="num" data-label="Строк">
+                    {parserView.formatNumber(source.rowsTotal)}
+                  </td>
+                  <td data-label="Последний успех">
                     <Time value={source.lastSuccessAt} relative />
                   </td>
-                  <td>
+                  <td data-label="Следующий запуск">
                     <Time value={source.nextRunAt} relative />
                   </td>
                   <td>
@@ -246,12 +295,15 @@ export function Parsers({ initial, csrf }: { initial: Row; csrf: string }) {
             })}
           </tbody>
         </table>
-        {!rows.length && <p className="empty table-empty">Источники не найдены.</p>}
+        {!rows.length && (
+          <EmptyState title="Источники не найдены">Измените запрос или выберите другое состояние.</EmptyState>
+        )}
       </div>
-      <details className="extra-data">
-        <summary>История запусков</summary>
-        <pre>{JSON.stringify(snapshot.recentRuns || snapshot.runs || [], null, 2)}</pre>
-      </details>
+      <RunHistory
+        runs={(Array.isArray(snapshot.recentRuns) ? snapshot.recentRuns : []).map(record)}
+        labels={labels}
+        onDetail={setDetail}
+      />
       {detail && (
         <RecordDetails row={detail} title={text(detail.label || detail.id)} onClose={() => setDetail(null)} />
       )}
@@ -267,6 +319,87 @@ export function Parsers({ initial, csrf }: { initial: Row; csrf: string }) {
             </button>
           </div>
         </Modal>
+      )}
+    </section>
+  );
+}
+
+function RunHistory({
+  runs,
+  labels,
+  onDetail,
+}: {
+  runs: Row[];
+  labels: Map<string, string>;
+  onDetail: (run: Row) => void;
+}) {
+  return (
+    <section className="run-history" aria-labelledby="run-history-title">
+      <h2 id="run-history-title">Последние запуски</h2>
+      {runs.length ? (
+        // biome-ignore lint/a11y/noNoninteractiveTabindex: scrollable regions must be reachable by keyboard
+        <div className="table-scroll" role="region" tabIndex={0} aria-label="Последние запуски">
+          <table className="runs-table">
+            <thead>
+              <tr>
+                <th scope="col">Результат</th>
+                <th scope="col">Источники</th>
+                <th scope="col">Начат</th>
+                <th scope="col" className="num">
+                  Длительность
+                </th>
+                <th scope="col">Инициатор</th>
+                <th scope="col">
+                  <span className="sr-only">Действия</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {runs.map(run => {
+                const ids = (Array.isArray(run.sourceIds) ? run.sourceIds : []).map(id => text(id));
+                const names = ids.slice(0, 2).map(id => labels.get(id) || id);
+                const progress = parserView.runProgress(run);
+                const started = Date.parse(text(run.startedAt || run.createdAt, ''));
+                const finished = Date.parse(text(run.finishedAt, ''));
+                return (
+                  <tr key={text(run.id)}>
+                    <td data-label="Результат">
+                      <StatusBadge value={run.status} />
+                      {Number(run.failedSources) > 0 && (
+                        <small>
+                          Ошибок: {text(run.failedSources)} из {progress.total}
+                        </small>
+                      )}
+                    </td>
+                    <th scope="row">
+                      <strong>{names.join(', ') || '—'}</strong>
+                      {ids.length > names.length && <small>и ещё {ids.length - names.length}</small>}
+                    </th>
+                    <td data-label="Начат">
+                      <Time value={run.startedAt || run.createdAt} relative />
+                    </td>
+                    <td className="num" data-label="Длительность">
+                      {Number.isFinite(started) && Number.isFinite(finished)
+                        ? formatDuration(finished - started)
+                        : '—'}
+                    </td>
+                    <td data-label="Инициатор">
+                      {text(run.requestedBy)}
+                      {Boolean(run.reason) && <small>{text(run.reason)}</small>}
+                    </td>
+                    <td>
+                      <button type="button" className="link-button" onClick={() => onDetail(run)}>
+                        Детали
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="muted-note">Запусков пока не было.</p>
       )}
     </section>
   );

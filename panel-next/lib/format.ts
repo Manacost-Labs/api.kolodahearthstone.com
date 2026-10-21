@@ -434,3 +434,31 @@ export function classLabel(value: unknown): string {
     ] ?? String(value)
   );
 }
+
+type TableColumn = { key: string; type?: string };
+
+/** Tone of a status cell: an explicit `<key>_tone` from the backend wins over the wording. */
+export function cellTone(row: Record<string, unknown>, key: string): Tone {
+  const explicit = row[key + '_tone'];
+  return isBlank(explicit) ? statusMeta(row[key]).tone : toneOf(explicit);
+}
+
+/** A row needs attention when any of its status columns reads as a warning or an error. */
+export function rowNeedsAttention(row: Record<string, unknown>, columns: TableColumn[]): boolean {
+  return columns.some(
+    column =>
+      (column.type === 'status' || (!column.type && inferKind(column.key) === 'status')) &&
+      ['bad', 'warning'].includes(cellTone(row, column.key)),
+  );
+}
+
+/** Case- and ё-insensitive match against the plain values of the given columns. */
+export function rowMatches(row: Record<string, unknown>, columns: TableColumn[], query: string): boolean {
+  const fold = (value: string) => value.toLowerCase().replace(/ё/g, 'е');
+  const needle = fold(query.trim());
+  if (!needle) return true;
+  return columns.some(column => {
+    const value = row[column.key];
+    return !isBlank(value) && typeof value !== 'object' && fold(String(value)).includes(needle);
+  });
+}

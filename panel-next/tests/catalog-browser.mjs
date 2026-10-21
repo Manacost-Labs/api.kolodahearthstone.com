@@ -24,7 +24,7 @@ export default async function verify(page, root, output) {
   await page.waitForFunction(
     () => document.querySelector('.catalog-results')?.getAttribute('aria-busy') === 'true',
   );
-  ensure((await page.locator('.card-tile').count()) === 8, 'Old results disappeared during refresh');
+  ensure((await page.locator('.card-tile').count()) === 15, 'Old results disappeared during refresh');
   ensure(
     await page.evaluate(() => document.activeElement === window.uxInput),
     'Search lost focus while refreshing',
