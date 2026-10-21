@@ -38,6 +38,7 @@
 | [INTEGRATION_GUIDE.md](INTEGRATION_GUIDE.md) | Выбор REST/GraphQL, pagination, ошибки, кеширование и migration checklist |
 | [API.md](API.md) | Полный REST reference: параметры, ответы и admin/ops endpoints |
 | [GRAPHQL_API.md](GRAPHQL_API.md) | Query roots, фильтры, полная база, лимиты и error contract |
+| [BG_MINION_STATS.md](BG_MINION_STATS.md) | Статистика существ Полей сражений с HSReplay: эндпоинты, поля, формулы, срезы, история |
 | [API_TOKENS.md](API_TOKENS.md) | Scopes, выпуск, проверка, ротация и отзыв токенов |
 | [SDK.md](SDK.md) | TypeScript и C# clients, Persisted Queries и cursor helpers |
 | [HSREPLAY_ARCHETYPE_DATABASE.md](HSREPLAY_ARCHETYPE_DATABASE.md) | Детальная HSReplay база архетипов и связанные endpoints |
