@@ -76,6 +76,7 @@ _SAFE_TARGET_RESPONSE_HEADERS = frozenset(
 )
 _MAX_TARGET_HEADER_VALUE_LENGTH = 512
 _QUERY_PROCESSING_MARKER = "query is processing"
+_MIN_QUERY_PROCESSING_RETRY_AFTER_SECONDS = 5.0
 _MAX_QUERY_PROCESSING_RETRY_AFTER_SECONDS = 60.0
 
 
@@ -124,6 +125,7 @@ class _HsReplayTransportState:
     scrape_do_requests_reserved: int = 0
     scrape_do_credits_reserved: int = 0
     query_processing_deadline: float | None = None
+    query_processing_failed_keys: set[str] = field(default_factory=set)
     json_cache_transports: dict[str, str] = field(default_factory=dict)
     json_cache_target_headers: dict[str, dict[str, str]] = field(default_factory=dict)
     json_key_locks: dict[str, asyncio.Lock] = field(default_factory=dict)
@@ -1062,7 +1064,10 @@ def _query_processing_delay(retry_after: str | None) -> float:
     # Only delta-seconds are honoured; an HTTP-date falls back to the default.
     raw = (retry_after or "").strip()
     if raw.isdigit():
-        return min(float(raw), _MAX_QUERY_PROCESSING_RETRY_AFTER_SECONDS)
+        return min(
+            max(float(raw), _MIN_QUERY_PROCESSING_RETRY_AFTER_SECONDS),
+            _MAX_QUERY_PROCESSING_RETRY_AFTER_SECONDS,
+        )
     return hsreplay_query_processing_delay_seconds()
 
 
@@ -1113,6 +1118,16 @@ async def _fetch_hsreplay_json_serialized(
         )
         return cached
 
+    state = _current_transport_state()
+    with state.lock:
+        processing_failed = key in state.query_processing_failed_keys
+    if processing_failed:
+        # Waiters on the same key must not repeat the exhausted poll loop.
+        raise HsReplayQueryProcessingError(
+            "HSReplay analytics query still processing in this refresh "
+            "(upstream_processing)"
+        )
+
     attempts = hsreplay_query_processing_attempts()
     attempt = 0
     while True:
@@ -1158,6 +1173,8 @@ async def _fetch_hsreplay_json_serialized(
         level="error",
         extra={"reason": "upstream_processing", "api_url": api_url},
     )
+    with state.lock:
+        state.query_processing_failed_keys.add(key)
     raise HsReplayQueryProcessingError(detail)
 
 

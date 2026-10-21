@@ -947,9 +947,14 @@ def _attach_failure_class(
         status["proxy_status"] = exc.status_code
     elif isinstance(exc, ParsesUnixTransportRejected):
         status["failure_reason_code"] = exc.evidence.failure_reason_code
-    elif isinstance(exc, HsReplayQueryProcessingError):
-        status["failure_reason_code"] = exc.failure_reason_code
-        status["upstream_state"] = exc.upstream_state
+    else:
+        # Specialised parsers may wrap the client error in their own message.
+        cause: BaseException | None = exc
+        while cause is not None and not isinstance(cause, HsReplayQueryProcessingError):
+            cause = cause.__cause__ or cause.__context__
+        if isinstance(cause, HsReplayQueryProcessingError):
+            status["failure_reason_code"] = cause.failure_reason_code
+            status["upstream_state"] = cause.upstream_state
     return status
 
 

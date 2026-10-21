@@ -1486,13 +1486,17 @@ def main(argv: list[str] | None = None) -> int:
             extract_bg_comps_from_links,
             extract_ranked_cards_from_links,
         )
-        from .sources import SOURCES
+        from .sources import SOURCES, STATUS_ONLY_SOURCE_IDS
         from .storage import load_dataset, save_dataset
         from .structured import build_structured
 
         ids = args.source or []
         if args.all_hsreplay:
-            ids = [s.id for s in SOURCES if s.site == "hsreplay"]
+            ids = [
+                s.id
+                for s in SOURCES
+                if s.site == "hsreplay" and s.id not in STATUS_ONLY_SOURCE_IDS
+            ]
         if not ids:
             print("Use --source ID or --all-hsreplay", file=sys.stderr)
             return 2

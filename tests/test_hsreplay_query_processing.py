@@ -120,7 +120,10 @@ def test_processing_202_until_attempts_run_out_raises_upstream_processing() -> N
     assert route_fail[0].kwargs["extra"]["reason"] == "upstream_processing"
 
 
-@pytest.mark.parametrize(("retry_after", "expected"), [("5", 5.0), ("600", 60.0)])
+@pytest.mark.parametrize(
+    ("retry_after", "expected"),
+    [("0", 5.0), ("12", 12.0), ("600", 60.0)],
+)
 def test_processing_wait_honours_bounded_retry_after(
     retry_after: str,
     expected: float,
@@ -131,6 +134,52 @@ def test_processing_wait_honours_bounded_retry_after(
     )
 
     sleep.assert_awaited_once_with(expected)
+
+
+def test_exhausted_key_fails_fast_for_later_callers_in_same_refresh() -> None:
+    _result, _calls, _sleep, _cache_set, _log = _run_fetch([PROCESSING] * 4)
+
+    result, calls, sleep, _cache_set, _log = _run_fetch([READY])
+
+    assert isinstance(result, HsReplayQueryProcessingError)
+    calls.assert_not_called()
+    sleep.assert_not_awaited()
+
+
+def test_wrapped_processing_error_still_marks_upstream_processing() -> None:
+    try:
+        try:
+            raise HsReplayQueryProcessingError("upstream_processing")
+        except HsReplayQueryProcessingError as exc:
+            raise RuntimeError("HSReplay Arena advanced API unavailable") from exc
+    except RuntimeError as wrapped:
+        status = _attach_failure_class({}, wrapped)
+
+    assert status == {
+        "failure_reason_code": "unavailable",
+        "upstream_state": "upstream_processing",
+    }
+
+
+def test_bg_heroes_processing_skips_rendered_page_fallback() -> None:
+    from app.hsreplay_bg_heroes import fetch_hsreplay_battlegrounds_heroes
+
+    rendered = AsyncMock()
+    with (
+        patch(
+            "app.hsreplay_bg_heroes.fetch_hsreplay_json",
+            AsyncMock(side_effect=HsReplayQueryProcessingError("upstream_processing")),
+        ),
+        patch("app.hsreplay_bg_heroes.fetch_text_via_flaresolverr", rendered),
+        pytest.raises(HsReplayQueryProcessingError),
+    ):
+        asyncio.run(
+            fetch_hsreplay_battlegrounds_heroes(
+                SOURCE_BY_ID["hsreplay_battlegrounds_heroes"]
+            )
+        )
+
+    rendered.assert_not_awaited()
 
 
 def test_processing_waits_stop_at_refresh_budget(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -248,3 +297,14 @@ def test_status_only_freshness_ignores_orphaned_legacy_dataset() -> None:
     assert stale == []
     assert row["fetched_at"] == captured_at.isoformat()
     assert row["stale"] is False
+
+
+def test_admin_upload_rejects_status_only_source() -> None:
+    from fastapi import HTTPException
+
+    from app.main import upload_dataset
+
+    with pytest.raises(HTTPException) as caught:
+        upload_dataset(SCREENSHOT.id, {"structured": {}})
+
+    assert caught.value.status_code == 409
