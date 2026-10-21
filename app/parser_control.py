@@ -1779,6 +1779,10 @@ async def _run_pipeline_source(source_id: str) -> dict[str, Any]:
         from .hsreplay_bg_screenshots import capture_compositions_screenshot
 
         result = await capture_compositions_screenshot()
+    elif source_id == "hsreplay_battlegrounds_minion_stats":
+        from .hsreplay_bg_minion_stats import refresh_bg_minion_stats
+
+        result = await refresh_bg_minion_stats()
     elif source_id == "hsreplay_battlegrounds_minions":
         from .hsreplay_bg_minions_db import refresh_bg_minion_database_sync
 
@@ -1818,6 +1822,7 @@ async def _run_pipeline_source(source_id: str) -> dict[str, Any]:
             "hsguru_meta_matrix": ("logical_slices",),
             "hsreplay_archetypes": ("archetypes_ok",),
             "hsreplay_battlegrounds_hero_details": ("heroes",),
+            "hsreplay_battlegrounds_minion_stats": ("minions",),
             "hsguru_fun_decks": ("fun_retained",),
             "hsguru_archetype_analysis": ("archetypes",),
             "hsreplay_battlegrounds_minions": ("minions_ok", "minions_total"),

@@ -1049,6 +1049,58 @@ class Query:
         )
 
     @strawberry.field(
+        description=(
+            "Full HSReplay statistics of one Battlegrounds minion for an MMR/time-range "
+            "slice: normal and golden totals, per-round arrays, board positions, copy "
+            "purchase rates and median stats. Same shape as REST "
+            "/v1/battlegrounds/minions/{minion}/stats."
+        )
+    )
+    async def battleground_minion_stats(
+        self,
+        info: Info[GraphQLContext, None],
+        minion: str,
+        mmr_percentile: str = "TOP_50_PERCENT",
+        time_range: str = "LAST_7_DAYS",
+        composition_id: int = 0,
+    ) -> JSON | None:
+        from ..hsreplay_bg_minion_stats import (
+            assemble_mirrored_stats,
+            normalize_mmr,
+            normalize_time_range,
+            resolve_minion,
+        )
+
+        try:
+            mmr = normalize_mmr(mmr_percentile)
+            period = normalize_time_range(time_range)
+        except ValueError as exc:
+            raise _validation_error(str(exc)) from None
+        if not 0 <= composition_id <= 10_000:
+            raise _validation_error("compositionId must be between 0 and 10000")
+        dbf_id = await asyncio.to_thread(resolve_minion, _normalize_text(minion, "minion", 40) or "")
+        if dbf_id is None:
+            return None
+        repository = _repository(info)
+        rows = await _call_repository(
+            repository.battleground_minion_stats(
+                dbf_id=dbf_id,
+                mmr_percentile=mmr,
+                time_range=period,
+                composition_id=composition_id,
+            )
+        )
+        if not rows:
+            return None
+        try:
+            catalog = await repository.battleground_cards_by_dbf([dbf_id])
+        except (RepositoryUnavailable, RepositoryValidationError):
+            catalog = {}  # names and images are optional, as in REST
+        return assemble_mirrored_stats(
+            rows, dbf_id=dbf_id, composition_id=composition_id, catalog=catalog.get(dbf_id)
+        )
+
+    @strawberry.field(
         description="Integrated data sources and their last refresh state."
     )
     async def sources(

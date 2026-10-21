@@ -253,6 +253,9 @@ LOAD DATABASE
                                  'archetype_refresh_runs', 'archetype_snapshots',
                                  'archetype_time_series', 'bg_minion_refresh_runs',
                                  'bg_minion_round_stats', 'bg_minion_snapshots',
+                                 'bg_minion_stat_medians', 'bg_minion_stat_positions',
+                                 'bg_minion_stat_purchases', 'bg_minion_stat_rounds',
+                                 'bg_minion_stat_snapshots', 'bg_minion_stat_summaries',
                                  'bg_minions', 'card_popularity_history', 'decks',
                                  'fetch_log', 'hearthstone_patches',
                                  'hsguru_archetype_history', 'hsreplay_archetypes'

@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Full HSReplay Battlegrounds minion statistics for every minion: new pipeline
+  source `hsreplay_battlegrounds_minion_stats` reads the four analytics queries
+  behind the HSReplay minion page (`battlegrounds_minion_list`, `_minion_position`,
+  `_purchase_rates_by_turn`, `_minion_stats`) for six slices (TOP_50, TOP_20 and
+  ALL × last 7 days and current patch; positions for TOP_50) once a
+  day, validates each slice and keeps its previous snapshot on any failure. History
+  is stored in SQLite `bg_minion_stat_*` and mirrored to PostgreSQL
+  `analytics.bg_minion_stat_*` (migration 016). Header popularity and board
+  positions now use HSReplay's own formulas, so 104551 shows 1.9 % / 0.2 %
+  popularity and the site's position split instead of our earlier approximation.
+  New REST `/v1/battlegrounds/minions/stats`, `/stats/slices`,
+  `/{minion}/stats`, `/{minion}/stats/history` and GraphQL
+  `battlegroundMinionStats`.
 - HSGuru Scrape.do requests follow a measured ladder: datacenter render
   (5 credits) waiting for the LiveView root instead of a fixed delay, then the
   anonymous 10-credit residential profile with Scrape.do's free retries left

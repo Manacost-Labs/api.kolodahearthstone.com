@@ -135,6 +135,7 @@ class ParserControlScheduleTest(unittest.TestCase):
                     for command in (
                         "app.cli refresh-hsreplay-archetypes",
                         "app.cli refresh-bg-hero-details",
+                        "app.cli refresh-bg-minion-stats",
                         "app.cli refresh-bg-minions-db",
                     )
                 ) and " --scheduled" not in line:

@@ -176,6 +176,17 @@ function compareSqliteCounts(): array
         'fetch_log',
         'hsguru_archetype_history',
     ];
+    // The daily minion-statistics writer can add a snapshot or prune expired
+    // detail rows between staging and this check. Either direction converges
+    // on the next incremental run, so a difference is lag, not a mismatch.
+    $retentionTables = [
+        'bg_minion_stat_medians',
+        'bg_minion_stat_positions',
+        'bg_minion_stat_purchases',
+        'bg_minion_stat_rounds',
+        'bg_minion_stat_snapshots',
+        'bg_minion_stat_summaries',
+    ];
     $sourceTotal = 0;
     $targetTotal = 0;
     $tables = analyticsSourceTables();
@@ -189,7 +200,9 @@ function compareSqliteCounts(): array
         $sourceTotal += $sourceCount;
         $targetTotal += $targetCount;
         if ($sourceCount !== $targetCount) {
-            if (in_array($table, $appendOnlyTables, true) && $targetCount <= $sourceCount) {
+            if (in_array($table, $retentionTables, true)) {
+                $warnings[] = "analytics.{$table}: shadow lag=" . ($sourceCount - $targetCount);
+            } elseif (in_array($table, $appendOnlyTables, true) && $targetCount <= $sourceCount) {
                 $warnings[] = "analytics.{$table}: shadow lag=" . ($sourceCount - $targetCount);
             } else {
                 $mismatches[] = "analytics.{$table}: source={$sourceCount}, target={$targetCount}";

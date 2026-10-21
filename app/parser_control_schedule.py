@@ -20,7 +20,7 @@ from .source_tiers import LIGHT_API_IDS, MEDIUM_API_IDS
 from .sources import SOURCE_BY_ID
 
 SCHEDULE_INVENTORY_SCHEMA_VERSION = 2
-SCHEDULE_INVENTORY_VERSION = "2026-10-20.2"
+SCHEDULE_INVENTORY_VERSION = "2026-10-21.1"
 SCHEDULE_TIMEZONE = "Europe/Warsaw"
 
 _SYSTEMCTL_SEARCH_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
@@ -248,6 +248,15 @@ _SCHEDULES: tuple[_ScheduleSpec, ...] = (
         recurrence="weekly",
         local_times=_times((3, 45)),
         weekdays=(0, 3),
+    ),
+    _ScheduleSpec(
+        id="refresh-bg-minion-stats",
+        label="Ежедневно в 16:20 — полная статистика существ",
+        systemd_unit="hs-data-api-docker-refresh-bg-minion-stats.timer",
+        on_calendar=("*-*-* 16:20:00 Europe/Warsaw",),
+        source_ids=frozenset({"hsreplay_battlegrounds_minion_stats"}),
+        recurrence="daily",
+        local_times=_times((16, 20)),
     ),
     _ScheduleSpec(
         id="refresh-bg-hero-details",

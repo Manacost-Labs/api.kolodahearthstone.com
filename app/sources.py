@@ -417,6 +417,22 @@ SOURCES: tuple[Source, ...] = (
         kind="pipeline",
     ),
     Source(
+        id="hsreplay_battlegrounds_minion_stats",
+        url="https://hsreplay.net/battlegrounds/minions/",
+        site="hsreplay",
+        category="battlegrounds",
+        description=(
+            "Full HSReplay Battlegrounds minion statistics (impact, combat win rate and "
+            "popularity per combat round for normal and golden versions, board positions "
+            "by composition, copy purchase rates, median attack/health) for every minion. "
+            "Four analytics JSON queries per MMR/time-range slice, refreshed daily by "
+            "hs-data-api-docker-refresh-bg-minion-stats.timer (16:20 Europe/Warsaw) into "
+            "SQLite snapshot history mirrored to PostgreSQL; stale_hours = 24h + 24h slack."
+        ),
+        stale_hours=48,
+        kind="pipeline",
+    ),
+    Source(
         id="hsreplay_archetypes",
         url="https://hsreplay.net/meta/",
         site="hsreplay",

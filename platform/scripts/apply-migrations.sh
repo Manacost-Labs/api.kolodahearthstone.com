@@ -30,7 +30,8 @@ for migration in \
   "${platform_dir}/sql/012_bartender_catalog.sql" \
   "${platform_dir}/sql/013_hsguru_deck_radar.sql" \
   "${platform_dir}/sql/014_card_version_media.sql" \
-  "${platform_dir}/sql/015_full_card_catalog.sql"
+  "${platform_dir}/sql/015_full_card_catalog.sql" \
+  "${platform_dir}/sql/016_bg_minion_stats.sql"
 do
   sudo -n docker compose --project-directory "${compose_dir}" -f "${compose_dir}/docker-compose.yml" exec -T postgres \
     sh -eu -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d hs_data' \
