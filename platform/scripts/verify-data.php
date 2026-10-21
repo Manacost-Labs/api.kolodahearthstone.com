@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/sync-context.php';
+require_once __DIR__ . '/raw-datasets-contract.php';
 
 const PLATFORM_DIR = __DIR__ . '/..';
 const CATALOG_CONFIG = '/etc/api-kolodahearthstone/panel-config.php';
@@ -269,8 +270,14 @@ try {
         "AND data_type <> 'jsonb';"
     );
     $hubRows = (int)targetScalar('SELECT COUNT(*) FROM hub.card_catalog;');
-    $rawSources = (int)targetScalar('SELECT COUNT(DISTINCT source_id) FROM raw.datasets;');
-    $datasetFiles = count(glob('/srv/hs-data-api/data/datasets/*.json') ?: []);
+    $rawSourceIds = array_values(array_filter(explode(PHP_EOL, targetScalar(
+        "SELECT string_agg(DISTINCT source_id, E'\\n' ORDER BY source_id) FROM raw.datasets;"
+    ))));
+    $fileSourceIds = datasetFileSources('/srv/hs-data-api/data/datasets');
+    $rawSources = count($rawSourceIds);
+    $datasetFiles = count($fileSourceIds);
+    [$rawErrors, $rawWarnings] = compareRawDatasets($fileSourceIds, $rawSourceIds);
+    $warnings = array_merge($warnings, $rawWarnings);
 
     $errors = array_merge($catalogMismatches, $analyticsMismatches, $keyMismatches);
     if ($jsonTypeErrors > 0) {
@@ -279,9 +286,7 @@ try {
     if ($hubRows <= 0) {
         $errors[] = 'hub.card_catalog is empty';
     }
-    if ($rawSources !== $datasetFiles) {
-        $errors[] = "raw datasets: files={$datasetFiles}, imported sources={$rawSources}";
-    }
+    $errors = array_merge($errors, $rawErrors);
 
     printf("Catalog: %d tables, %d/%d rows\n", $catalogTables, $catalogTarget, $catalogSource);
     printf("Analytics: %d tables, %d/%d rows\n", $analyticsTables, $analyticsTarget, $analyticsSource);
