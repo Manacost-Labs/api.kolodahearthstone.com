@@ -80,6 +80,10 @@ Authorization: Bearer khs_v1_<token-id>_<secret>
 | `GET` | `/v1/constructed/archetypes` | Последние успешные snapshots архетипов. |
 | `GET` | `/v1/battlegrounds/heroes` | Solo/duos герои с пагинацией. |
 | `GET` | `/v1/battlegrounds/minions` | Последний успешный snapshot существ. |
+| `GET` | `/v1/battlegrounds/minions/stats` | Полная статистика HSReplay по всем существам среза: итоги обычной и золотой версии. |
+| `GET` | `/v1/battlegrounds/minions/stats/slices` | Какие срезы MMR/периода сохранены и когда обновлены. |
+| `GET` | `/v1/battlegrounds/minions/{minion}/stats` | Страница существа как на HSReplay: по ходам, позиции, покупки, медианы. |
+| `GET` | `/v1/battlegrounds/minions/{minion}/stats/history` | История итогов существа по снимкам («как изменилось»). |
 | `GET` | `/v1/arena/classes` | Классы арены из выбранного кешированного источника. |
 | `GET` | `/v1/sources` | Типизированный каталог источников. |
 | `GET` | `/v1/datasets` | Состояние кешей всех источников. |
@@ -526,6 +530,164 @@ curl -s "https://api.kolodahearthstone.com/api/db/bg/minions/98592" | jq .
 ```bash
 curl -s "https://api.kolodahearthstone.com/api/db/bg/minions/98592/history" | jq .
 ```
+
+## HSReplay Battlegrounds Minion Statistics
+
+Источник `hsreplay_battlegrounds_minion_stats` (pipeline). Раз в сутки
+(`hs-data-api-docker-refresh-bg-minion-stats.timer`, 16:20 Europe/Warsaw)
+CLI `python -m app.cli refresh-bg-minion-stats --scheduled` забирает четыре
+analytics-запроса HSReplay. Каждый отдаёт сразу все существа среза:
+
+| Запрос | Что хранится |
+| --- | --- |
+| `battlegrounds_minion_list` | Итоги и ходы 1–16 обычной и золотой версии: игры с существом и без, суммы мест, победы/поражения боёв, `at_least_one`. |
+| `battlegrounds_minion_position` | Позиции 1–7 на доске (обычная и с провокацией), суммированные по составу. |
+| `battlegrounds_purchase_rates_by_turn` | Сколько раз существо предлагали и брали при 0, 1, 2 копиях, включая «Раскопку». |
+| `battlegrounds_minion_stats` | Медианные атака и здоровье по ходам. |
+
+Запросы идут прямо в JSON HSReplay через `app.hsreplay_client` с Premium-сессией
+(FlareSolverr, затем Scrape.do без рендеринга как запасной канал). Платные вызовы
+пишутся в provider-usage.
+
+**Срезы.** Позиции весят около 24 МБ на срез, поэтому их собирает только
+основной MMR:
+
+| `mmr` | `period` | Позиции |
+| --- | --- | --- |
+| `TOP_50_PERCENT` | `LAST_7_DAYS` (по умолчанию) | да |
+| `TOP_50_PERCENT` | `CURRENT_BATTLEGROUNDS_PATCH` | да |
+| `TOP_20_PERCENT`, `ALL` | `LAST_7_DAYS`, `CURRENT_BATTLEGROUNDS_PATCH` | нет (`positions: null`) |
+
+`TOP_5_PERCENT` и `TOP_1_PERCENT` HSReplay для этих запросов не отдаёт
+(`not supported or enabled for query`), поэтому API их не принимает (`422`).
+
+**Проверки перед публикацией.** Каждый срез проверяется отдельно:
+
+- схема каждого ответа (типы, раунды 1–16, суммы мест 1–8 на игру, пары победа/поражение, дубликаты);
+- не меньше 150 существ и падение не больше 35 % к прошлому снимку;
+- популярность заполнена у 80 % существ;
+- покрытие: покупки у 75 % существ, медианы у 80 %, позиции у 80 %.
+
+Срез с ошибкой не пишется: API продолжает отдавать его прошлый снимок
+(last-known-good, `serving_cached_dataset` в статусе источника). Если
+`as_of` всех запросов не изменился, новый снимок не создаётся.
+
+**Хранение и история.** SQLite `bg_minion_stat_snapshots`, `_summaries`,
+`_rounds`, `_positions`, `_purchases`, `_medians` (одна транзакция на
+снимок). Инкрементальная теневая синхронизация зеркалит их в PostgreSQL
+`analytics.bg_minion_stat_*`; там же представления `hub.bg_minion_stat_latest` и
+`hub.bg_minion_stat_history`. Снимки и итоги хранятся бессрочно. Ходы хранятся
+60 дней (`HS_BG_MINION_STATS_ROUND_RETENTION_DAYS`). Позиции, покупки и медианы
+хранятся 30 дней (`HS_BG_MINION_STATS_DETAIL_RETENTION_DAYS`, минимум 7).
+Последний снимок каждого среза ретенция не трогает.
+
+**Формулы** повторяют страницу HSReplay (проверено на dbf 104551, поле
+`methodology` в ответе). Вес хода r: `distinct_games / pct_players_remaining[r]`.
+
+- `popularity` = Σ `at_least_one`·вес / Σ вес.
+- `impact` = Σ (среднее место без − с) · `games_with`/`pct_remaining` / Σ `games_with`/`pct_remaining`.
+- `combat_winrate` = 100·победы/(победы+поражения).
+
+Итог равен `null`, если выборка меньше 30. По ходам: влияние и популярность
+скрыты, когда игр с существом или без него меньше 30; доля побед скрыта при
+боях < 30. Частота покупки k‑й копии: `picked_{k-1}/offered_{k-1}`, если
+предложений > 30. Позиции: `composition=0` суммирует все строки существа, как
+«Все составы» на сайте; иначе суммируются строки этого состава. Влияние
+позиции скрыто при < 200 появлений. HSReplay отдаёт и строки‑итоги
+(состав или соперник `-1`), а сайт суммирует их вместе с остальными. Поэтому
+`occurrences` при `composition=0` больше реального числа досок. Доли и влияние
+от этого не меняются. Рядом с каждым производным значением отдаются исходные
+счётчики. PostgreSQL хранит значения как `real`, поэтому GraphQL может
+отличаться от REST в последнем знаке.
+
+Если пул существ легитимно сократился больше чем на 35 % (ротация), разовый
+прогон с `HS_BG_MINION_STATS_ALLOW_POOL_DROP=1` снимает защиту от регрессии.
+Деградированный ответ без каталога (`images: null`) приходит с
+`Cache-Control: no-store`. Старый `snapshot_id`, у которого детали уже удалены
+ретенцией, отдаёт `404`; итоги таких снимков есть в `/stats/history`.
+
+### `GET /v1/battlegrounds/minions/{minion}/stats`
+
+`minion` — dbf (`104551`) или card id (`BG28_300`; золотой `BG28_300_G`
+приводится к обычному). Параметры: `mmr`, `period`, `composition` (id состава
+для позиций, `0` — все), `snapshot_id` (старый снимок того же среза). Имена и
+картинки берутся из нашего каталога `catalog.battlegrounds_cards` по dbf.
+Если PostgreSQL недоступен, имена берутся из HearthstoneJSON, а `images` будет `null`.
+
+```json
+{
+  "data": {
+    "minion": {
+      "dbf_id": 104551, "card_id": "BG28_300", "name": "Harmless Bonehead",
+      "name_ru": "Безобидная черепушка", "tavern_tier": 1, "minion_types": ["UNDEAD"],
+      "golden_dbf_id": 104554, "catalog": true,
+      "images": {
+        "card": "https://api.kolodahearthstone.com/uploads/framed/BG28_300.png",
+        "card_golden": "https://api.kolodahearthstone.com/uploads/golden/BG28_300-….png",
+        "art": "https://api.kolodahearthstone.com/uploads/art/BG28_300.jpg",
+        "horizontal": null
+      }
+    },
+    "slice": {
+      "snapshot_id": 1, "mmr_percentile": "TOP_50_PERCENT", "time_range": "LAST_7_DAYS",
+      "fetched_at": "2026-10-21T16:30:00+00:00",
+      "as_of": {"minion_list": "2026-10-20T21:02:05Z", "positions": "2026-10-21T13:41:22Z",
+                "purchases": "2026-10-21T13:41:24Z", "medians": "2026-10-21T07:17:54Z"}
+    },
+    "normal": {"impact": -0.0144, "combat_winrate": 56.83, "popularity": 1.885,
+               "games_with_minion": 18161, "games_without_minion": 974046, "wins": 16625, "losses": 12629},
+    "golden": {"impact": -0.0874, "combat_winrate": 51.724, "popularity": 0.217, "...": "..."},
+    "rounds": [
+      {"combat_round": 1,
+       "normal": {"impact": 0.021, "combat_winrate": 61.9, "popularity": 6.01,
+                  "games_with_minion": 7905, "games_without_minion": 191262, "distinct_games": 108824,
+                  "wins": 2409, "losses": 1484, "at_least_one": 6.01},
+       "golden": null}
+    ],
+    "positions": {
+      "composition_id": 0, "default_board": "normal",
+      "normal": {"occurrences": 50688, "positions": [
+        {"position": 1, "popularity": 6.739, "impact": -0.2602, "occurrences": 3416, "sum_placement": 21132}
+      ]},
+      "taunt": {"occurrences": 1687, "positions": ["..."]},
+      "compositions": [{"composition_id": 2, "name": "…"}, {"composition_id": 47, "name": "…"}]
+    },
+    "purchases": [
+      {"recruitment_round": 1, "first_copy": 20.874, "second_copy": null, "third_copy": null,
+       "discover": {"first_copy": 27.651, "second_copy": null, "third_copy": null},
+       "counts": {"times_offered_0_owned": 124122, "times_picked_0_owned": 25909, "...": 0}}
+    ],
+    "medians": [{"combat_round": 16, "normal": {"attack": 8.0, "health": 1.0},
+                 "golden": {"attack": 67.0, "health": 21.0}}],
+    "methodology": {"formula_source": "hsreplay.net minion page bundle, verified 2026-10-21 on dbf 104551"}
+  },
+  "meta": {"source_id": "hsreplay_battlegrounds_minion_stats", "fetched_at": "…", "stale": false, "count": 1}
+}
+```
+
+`404`: неизвестное существо или нет снимка для среза. `422`: неверный `mmr` или `period`.
+
+### `GET /v1/battlegrounds/minions/stats`
+
+Сводка по всем существам последнего снимка среза: `dbf_id`, `card_id`,
+`name`, `name_ru`, `tavern_tier`, `images`, `normal`, `golden`. Параметры:
+`mmr`, `period`, `tavern_tier`, `sort` (`popularity`, `impact`,
+`combat_winrate`, `games_with_minion`, `tavern_tier`; по обычной версии),
+`limit` ≤ 500, `offset`. `meta.count` — число существ в срезе.
+
+### `GET /v1/battlegrounds/minions/{minion}/stats/history`
+
+Точки по снимкам (`snapshot_id`, `fetched_at`, `as_of`, `normal`, `golden` с
+`impact`, `combat_winrate`, `popularity`, `games_with_minion`, `wins`, `losses`)
+для страниц «как изменилось». `limit` ≤ 1000 последних снимков.
+
+### `GET /v1/battlegrounds/minions/stats/slices`
+
+Последний снимок каждого сохранённого среза: `snapshot_id`, `fetched_at`,
+`list_as_of`, `has_positions`, `minions_total`.
+
+GraphQL: `battlegroundMinionStats(minion, mmrPercentile, timeRange, compositionId)`
+возвращает тот же объект, что `data` REST, из зеркала PostgreSQL.
 
 ## HSReplay Battlegrounds Hero Details
 

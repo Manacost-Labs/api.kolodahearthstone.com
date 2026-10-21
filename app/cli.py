@@ -456,6 +456,26 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Skip this scheduled pipeline when its admin section is disabled.",
     )
     bg_minions.add_argument("--schedule-id")
+    bg_minion_stats = sub.add_parser(
+        "refresh-bg-minion-stats",
+        help=(
+            "Refresh full HSReplay Battlegrounds minion statistics (per-round, positions, "
+            "purchases, medians) for every configured MMR/time-range slice."
+        ),
+    )
+    bg_minion_stats.add_argument(
+        "--slice",
+        action="append",
+        default=None,
+        metavar="MMR:TIME_RANGE",
+        help="Diagnostic: refresh only this slice (repeatable), e.g. TOP_50_PERCENT:LAST_7_DAYS.",
+    )
+    bg_minion_stats.add_argument(
+        "--scheduled",
+        action="store_true",
+        help="Skip this scheduled pipeline when its admin section is disabled.",
+    )
+    bg_minion_stats.add_argument("--schedule-id")
     bg_hero_details = sub.add_parser(
         "refresh-bg-hero-details",
         help="Refresh HSReplay Battlegrounds hero detail statistics and duos hero tier list.",
@@ -624,6 +644,9 @@ def main(argv: list[str] | None = None) -> int:
         "refresh-bg-minions-db": frozenset({"hsreplay_battlegrounds_minions"}),
         "refresh-bg-hero-details": frozenset(
             {"hsreplay_battlegrounds_hero_details"}
+        ),
+        "refresh-bg-minion-stats": frozenset(
+            {"hsreplay_battlegrounds_minion_stats"}
         ),
         "refresh-hsguru-meta-matrix": frozenset({"hsguru_meta_matrix"}),
         "refresh-fun-decks": frozenset({"hsguru_fun_decks"}),
@@ -1163,6 +1186,41 @@ def main(argv: list[str] | None = None) -> int:
             result = refresh_bg_minion_database_sync()
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0 if result.get("ok") else 1
+    if args.command == "refresh-bg-minion-stats":
+        source_id = "hsreplay_battlegrounds_minion_stats"
+        if args.scheduled:
+            from .parser_control import is_source_scheduled_enabled
+
+            if not is_source_scheduled_enabled(source_id):
+                result = _run_pipeline_command_with_telemetry(
+                    source_id,
+                    lambda: {
+                        "ok": True,
+                        "skipped": True,
+                        "reason": "section_disabled",
+                        "source_id": source_id,
+                    },
+                    refresh_window_id=dedicated_refresh_window_id,
+                )
+                print(json.dumps(result, ensure_ascii=False, indent=2))
+                return 0
+        from .hsreplay_bg_minion_stats import refresh_bg_minion_stats, slices_from_cli
+
+        selected_slices = slices_from_cli(args.slice)
+        result = _run_pipeline_command_with_telemetry(
+            source_id,
+            lambda: asyncio.run(refresh_bg_minion_stats(slices=selected_slices)),
+            diagnostic=args.slice is not None,
+            refresh_window_id=dedicated_refresh_window_id,
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        if args.scheduled and result.get("state") == "locked":
+            return int(ExitCode.DEGRADED)
+        if args.scheduled and result.get("serving_cached_dataset"):
+            return int(ExitCode.DEGRADED)
+        if result.get("ok") and result.get("published"):
+            return int(ExitCode.OK)
+        return int(ExitCode.ERROR)
     if args.command == "refresh-bg-hero-details":
         if args.scheduled:
             from .parser_control import is_source_scheduled_enabled

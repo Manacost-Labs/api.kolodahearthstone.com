@@ -162,6 +162,9 @@ assert_contains scripts/apply-migrations.sh '012_bartender_catalog\.sql' 'the mi
 assert_contains sql/015_full_card_catalog.sql 'catalog.hearthstone_card_catalog' 'the full card catalogue must be mirrored before shadow merge'
 assert_contains sql/015_full_card_catalog.sql 'dbf bigint NOT NULL UNIQUE' 'catalogue dbf must match the loader type and stay unique'
 assert_contains scripts/apply-migrations.sh '015_full_card_catalog\.sql' 'the migration runner must install the full card catalogue'
+assert_contains sql/016_bg_minion_stats.sql 'analytics.bg_minion_stat_positions' 'minion statistics detail tables must exist before the analytics delta stages them'
+assert_contains scripts/apply-migrations.sh '016_bg_minion_stats\.sql' 'the migration runner must install the minion statistics tables'
+assert_contains scripts/stage-analytics.py "'bg_minion_stat_snapshots'" 'minion statistics snapshots must be mirrored by the analytics delta'
 
 assert_contains systemd/kolodahs-card-history-media.service 'flock -E 75 -w 900' 'a busy sync lock must end the card history turn with a distinct code'
 assert_contains systemd/kolodahs-card-history-media.service 'SuccessExitStatus=75' 'a skipped card history turn must not mark the unit failed'

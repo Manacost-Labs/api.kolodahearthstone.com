@@ -303,6 +303,16 @@ Dataset `hsreplay_battlegrounds_minions` дополнительно содерж
 `win_share`, `avg_placement_with`, `avg_placement_without`, games with/without
 minion и `combat_rounds`.
 
+Полная статистика как на странице существа HSReplay — pipeline
+`hsreplay_battlegrounds_minion_stats` (dataset `bg_minion_stats` со сводкой
+срезов; история в SQLite `bg_minion_stat_*` и PostgreSQL
+`analytics.bg_minion_stat_*`, см. [API.md](API.md#hsreplay-battlegrounds-minion-statistics)):
+
+- `/v1/battlegrounds/minions/stats` — итоги обычной и золотой версии всех существ среза `mmr`/`period`;
+- `/v1/battlegrounds/minions/{minion}/stats` — по ходам 1–16, позиции по составу, покупка копий, медианные статы;
+- `/v1/battlegrounds/minions/{minion}/stats/history` — итоги по снимкам;
+- `/v1/battlegrounds/minions/stats/slices` — сохранённые срезы.
+
 Исторические endpoints:
 
 - `/api/db/bg/minions/{dbfId}` — последний snapshot и combat-round stats;

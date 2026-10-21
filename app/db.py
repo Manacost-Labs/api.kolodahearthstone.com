@@ -355,8 +355,10 @@ def init_db() -> None:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_bg_minion_snapshots_tier ON bg_minion_snapshots(tavern_tier, popularity);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_bg_minion_round_stats_snapshot ON bg_minion_round_stats(snapshot_id, combat_round);")
             from .hsguru_deck_radar import ensure_deck_radar_schema
+            from .bg_minion_stats_store import ensure_bg_minion_stats_schema
 
             ensure_deck_radar_schema(conn)
+            ensure_bg_minion_stats_schema(conn)
             
             logger.info("SQLite database tables initialized successfully.")
     except Exception as e:

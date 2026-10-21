@@ -34,6 +34,7 @@ PIPELINE_IDS = (
     "hsguru_meta_matrix",
     "hsreplay_battlegrounds_compositions_screenshot",
     "hsreplay_battlegrounds_hero_details",
+    "hsreplay_battlegrounds_minion_stats",
     "hsreplay_archetypes",
 )
 

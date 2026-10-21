@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh full HSReplay Battlegrounds minion statistics daily
+
+[Timer]
+OnCalendar=*-*-* 16:20:00 Europe/Warsaw
+AccuracySec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

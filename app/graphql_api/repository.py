@@ -57,6 +57,14 @@ class GraphQLRepository(Protocol):
 
     async def battleground_minions(self, **filters: Any) -> PageResult: ...
 
+    async def battleground_cards_by_dbf(
+        self, dbf_ids: list[int]
+    ) -> dict[int, dict[str, Any]]: ...
+
+    async def battleground_minion_stats(
+        self, *, dbf_id: int, mmr_percentile: str, time_range: str, composition_id: int
+    ) -> dict[str, Any] | None: ...
+
     async def sources(self, **filters: Any) -> PageResult: ...
 
     async def search(self, **filters: Any) -> PageResult: ...
@@ -737,6 +745,93 @@ class PostgresGraphQLRepository:
                 ]
             },
         )
+
+    async def _fetch_all(self, query: Any, params: dict[str, Any]) -> list[dict[str, Any]]:
+        try:
+            pool = await self._get_pool()
+            async with (
+                pool.connection() as connection,
+                connection.cursor() as cursor,
+            ):
+                await cursor.execute(query, params)
+                return list(await cursor.fetchall())
+        except RepositoryUnavailable:
+            raise
+        except Exception as exc:
+            raise RepositoryUnavailable("Central PostgreSQL query failed") from exc
+
+    async def battleground_cards_by_dbf(self, dbf_ids: list[int]) -> dict[int, dict[str, Any]]:
+        """Catalog identity and media of base Battlegrounds cards and their golden twin."""
+
+        if not dbf_ids:
+            return {}
+        rows = await self._fetch_all(
+            """
+            SELECT base.dbf, base.card_id, base.name AS name_ru, base.name_en,
+                   base.tavern_tier, base.creature_type, base.in_pool,
+                   base.framed_image, base.card_image, base.art_image, base.golden_image,
+                   golden.dbf AS golden_dbf, golden.card_id AS golden_card_id,
+                   golden.framed_image AS golden_framed_image,
+                   CASE
+                       WHEN art.local_image_url LIKE 'http%%' THEN art.local_image_url
+                       WHEN art.local_image_url IS NOT NULL THEN
+                           'https://api.kolodahearthstone.com' || art.local_image_url
+                           || '?v=' || extract(epoch FROM art.generated_at)::bigint
+                       ELSE NULL
+                   END AS horizontal_image_url
+            FROM catalog.battlegrounds_cards AS base
+            LEFT JOIN catalog.battlegrounds_cards AS golden
+              ON golden.variant_kind = 'golden' AND golden.base_dbf = base.dbf
+            LEFT JOIN catalog.horizontal_art_assets AS art
+              ON art.entity_type = 'battleground_card'
+             AND art.entity_id = base.card_id
+             AND art.status = 'ready'
+            WHERE base.variant_kind = 'base' AND base.dbf = ANY(%(dbf_ids)s)
+            """,
+            {"dbf_ids": [int(value) for value in dbf_ids]},
+        )
+        return {int(row["dbf"]): dict(row) for row in rows}
+
+    async def battleground_minion_stats(
+        self, *, dbf_id: int, mmr_percentile: str, time_range: str, composition_id: int
+    ) -> dict[str, Any] | None:
+        """Stored rows of one minion in the latest mirrored snapshot of a slice."""
+
+        snapshot = await self._fetch_one(
+            """
+            SELECT * FROM analytics.bg_minion_stat_snapshots
+            WHERE mmr_percentile = %(mmr)s AND time_range = %(time_range)s
+            ORDER BY id DESC LIMIT 1
+            """,
+            {"mmr": mmr_percentile, "time_range": time_range},
+        )
+        if not snapshot:
+            return None
+        params = {"snapshot_id": snapshot["id"], "dbf_id": dbf_id, "composition_id": composition_id}
+        where = "snapshot_id = %(snapshot_id)s AND dbf_id = %(dbf_id)s"
+        out: dict[str, Any] = {"snapshot": dict(snapshot)}
+        for key, table, extra, order in (
+            ("summaries", "bg_minion_stat_summaries", "", "variant"),
+            ("rounds", "bg_minion_stat_rounds", "", "variant, combat_round"),
+            (
+                "positions",
+                "bg_minion_stat_positions",
+                " AND composition_id = %(composition_id)s",
+                "board",
+            ),
+            ("purchases", "bg_minion_stat_purchases", "", "recruitment_round"),
+            ("medians", "bg_minion_stat_medians", "", "variant, combat_round"),
+        ):
+            out[key] = await self._fetch_all(
+                f"SELECT * FROM analytics.{table} WHERE {where}{extra} ORDER BY {order}",
+                params,
+            )
+        compositions = await self._fetch_all(
+            f"SELECT DISTINCT composition_id FROM analytics.bg_minion_stat_positions WHERE {where}",
+            params,
+        )
+        out["position_compositions"] = [int(row["composition_id"]) for row in compositions]
+        return out
 
     async def sources(
         self,

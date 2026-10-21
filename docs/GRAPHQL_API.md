@@ -29,6 +29,7 @@ to the new hostname first and adopt GraphQL separately.
 | `compareStatisticPatches` | Before/after values and deltas for two patches |
 | `archetypes` | Latest archetype data split by rank, format and region |
 | `battlegroundMinions` | Minion performance split by tier, MMR and time range |
+| `battlegroundMinionStats` | Full HSReplay statistics of one minion (`minion`: dbf or card id; `mmrPercentile`, `timeRange`, `compositionId`): normal/golden totals, per-round arrays, board positions, copy purchase rates and medians; JSON with the same shape as REST `/v1/battlegrounds/minions/{minion}/stats` |
 | `sources` | Integrated sources and their last update state |
 | `search` | One search across cards, minions, heroes, archetypes and sources |
 | `datasets` | Latest imported version and payload size for each source |

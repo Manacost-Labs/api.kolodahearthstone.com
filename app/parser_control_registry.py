@@ -149,6 +149,7 @@ SECTIONS: tuple[ParserSection, ...] = (
         description="Существа и заклинания по уровням таверны.",
         source_ids=(
             "hsreplay_battlegrounds_minions",
+            "hsreplay_battlegrounds_minion_stats",
             "firestone_battlegrounds_cards",
             "firestone_battlegrounds_spells",
         ),
@@ -260,6 +261,7 @@ SOURCE_LABELS_RU: dict[str, str] = {
     "vicious_syndicate_radars": "Vicious Syndicate · радары колод",
     "vicious_syndicate_live_beta": "Vicious Syndicate Live · Standard",
     "hsreplay_battlegrounds_hero_details": "HSReplay · подробности героев (служебная задача)",
+    "hsreplay_battlegrounds_minion_stats": "HSReplay · полная статистика существ по ходам (служебная задача)",
     "hsreplay_archetypes": "HSReplay · база архетипов (служебная задача)",
 }
 

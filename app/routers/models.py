@@ -108,3 +108,64 @@ def timestamp_is_stale(fetched_at: str | None, *, max_age_hours: float = 24.0) -
     return (
         datetime.now(UTC) - parsed.astimezone(UTC)
     ).total_seconds() > max_age_hours * 3600
+
+
+class BgMinionStatsVariant(BaseModel):
+    impact: float | None = None
+    combat_winrate: float | None = None
+    popularity: float | None = None
+    games_with_minion: int | None = None
+    games_without_minion: int | None = None
+    avg_placement_with: float | None = None
+    avg_placement_without: float | None = None
+    wins: int | None = None
+    losses: int | None = None
+
+
+class BgMinionCardImages(BaseModel):
+    card: str | None = None
+    card_golden: str | None = None
+    art: str | None = None
+    horizontal: str | None = None
+
+
+class BgMinionStatsRow(BaseModel):
+    dbf_id: int
+    card_id: str | None = None
+    name: str | None = None
+    name_ru: str | None = None
+    tavern_tier: int | None = None
+    images: BgMinionCardImages | None = None
+    normal: BgMinionStatsVariant | None = None
+    golden: BgMinionStatsVariant | None = None
+
+
+class BgMinionStatsDetail(BaseModel):
+    """One minion page: identity, slice, totals, per-round arrays, positions, purchases, medians."""
+
+    minion: dict[str, Any]
+    slice: dict[str, Any]
+    normal: BgMinionStatsVariant | None = None
+    golden: BgMinionStatsVariant | None = None
+    rounds: list[dict[str, Any]]
+    positions: dict[str, Any] | None = None
+    purchases: list[dict[str, Any]]
+    medians: list[dict[str, Any]]
+    methodology: dict[str, Any]
+
+
+class BgMinionStatsHistory(BaseModel):
+    dbf_id: int
+    mmr_percentile: str
+    time_range: str
+    points: list[dict[str, Any]]
+
+
+class BgMinionStatsSlice(BaseModel):
+    mmr_percentile: str
+    time_range: str
+    snapshot_id: int
+    fetched_at: str
+    list_as_of: str | None = None
+    has_positions: bool
+    minions_total: int

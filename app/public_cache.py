@@ -14,6 +14,9 @@ from .storage import load_dataset
 
 PUBLIC_CACHE_CONTROL = "public, max-age=300, stale-while-revalidate=600"
 NO_STORE_CACHE_CONTROL = "no-store"
+# A handler sets this on a degraded body (e.g. optional enrichment failed) so
+# the revision ETag never pins it; the header itself is not sent to clients.
+DEGRADED_RESPONSE_HEADER = "x-hs-degraded-response"
 
 
 def _no_store_path(path: str) -> bool:
@@ -150,6 +153,12 @@ def _db_revision(path: str) -> str | None:
 
             run = latest_run() or {}
             return str(run.get("completed_at") or run.get("started_at") or "") or None
+        if path.startswith("/v1/battlegrounds/minions") and (
+            path.endswith(("/stats", "/stats/history", "/stats/slices"))
+        ):
+            from .hsreplay_bg_minion_stats import latest_revision
+
+            return latest_revision()
         if path.startswith(
             (
                 "/v1/bg/minions",
@@ -260,6 +269,13 @@ class PublicCacheMiddleware:
                 and 200 <= int(message.get("status") or 0) < 300
             ):
                 headers = MutableHeaders(scope=message)
+                if DEGRADED_RESPONSE_HEADER in headers:
+                    del headers[DEGRADED_RESPONSE_HEADER]
+                    headers["Cache-Control"] = NO_STORE_CACHE_CONTROL
+                    if "etag" in headers:
+                        del headers["etag"]
+                    await send(message)
+                    return
                 headers["Cache-Control"] = PUBLIC_CACHE_CONTROL
                 headers["ETag"] = etag
                 if requested_not_modified:
