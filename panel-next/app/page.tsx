@@ -65,7 +65,14 @@ export default async function Page({
   if (action === 'parsers') {
     const session = await getSession();
     const response = await serverData<{ data: Row }>('parsers', new URLSearchParams());
-    return <Parsers initial={response.data} csrf={session.parserCsrf} />;
+    // Keyed by the filters so a link to another filtered view (e.g. from Ctrl+K) starts from that URL.
+    return (
+      <Parsers
+        key={['q', 'status', 'section'].map(key => query.get(key) || '').join('|')}
+        initial={response.data}
+        csrf={session.parserCsrf}
+      />
+    );
   }
   const allowed = ['list', 'edit', 'new', 'api_tokens', 'wiki_terms'];
   if (!allowed.includes(action)) query.set('action', 'list');
