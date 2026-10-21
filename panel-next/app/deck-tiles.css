@@ -10,10 +10,23 @@
 .deck-grid-viewport {
   padding: 4px;
 }
-/* The shared example keeps five fixed deck columns; the panel fits its workspace instead of scrolling sideways. */
+/* A tiles page holds 15 cards, so the grid uses 1, 3 or 5 columns: every row is full, none is left hanging. */
+.deck-grid-viewport {
+  container-type: inline-size;
+}
 .deck-grid {
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 256px), 1fr));
+  grid-template-columns: minmax(0, 1fr);
   min-width: 0;
+}
+@container (min-width: 600px) {
+  .deck-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@container (min-width: 1100px) {
+  .deck-grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
 }
 button.deck-tile {
   width: 100%;

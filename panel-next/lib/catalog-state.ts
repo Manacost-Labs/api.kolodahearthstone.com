@@ -5,6 +5,13 @@ export function catalogView(value: string | null): CatalogView {
   return value === 'tiles' || value === 'list' ? value : 'grid';
 }
 
+// Page sizes the PHP bridge accepts that are multiples of five: the card grid runs five columns on
+// desktop and tiles one, three or five, so a page always ends on a full row.
+export const pageSizes = [15, 25, 50, 100, 150] as const;
+export function defaultPageSize(view: CatalogView): number {
+  return view === 'list' ? 25 : 15;
+}
+
 // Keep the URL authoritative, and discard filters that the destination cannot expose.
 export function catalogHref(query: string, changes: Record<string, string | number | null>) {
   const next = new URLSearchParams(queryHref(query, { page: null, ...changes }).slice(2));

@@ -36,6 +36,8 @@ export function DeckTiles({
               lang={/[А-Яа-яЁё]/.test(card.name) ? 'ru' : 'en'}
               style={{ '--rarity': tile.color, '--tile-background': tile.background } as CSSProperties}
               onClick={() => onSelect(card.row)}
+              // Long names are cut with an ellipsis on the tile; the tooltip shows them whole.
+              title={card.name}
               aria-label={[card.name, costLabel, priceLabel].filter(Boolean).join(', ') + '. Открыть детали'}
             >
               {tile.image && (

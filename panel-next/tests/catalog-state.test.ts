@@ -47,3 +47,13 @@ test('all three explicit view modes are accepted and unknown values use cards', 
     'grid',
   ]);
 });
+test('page sizes are accepted by the PHP bridge and fill five-column rows', async () => {
+  const { defaultPageSize, pageSizes } = await import('../lib/catalog-state.ts');
+  for (const size of pageSizes) {
+    assert.equal(size % 5, 0);
+    assert.ok([8, 12, 15, 25, 50, 100, 150].includes(size));
+  }
+  assert.equal(defaultPageSize('tiles'), 15);
+  assert.equal(defaultPageSize('grid'), 15);
+  assert.equal(defaultPageSize('list'), 25);
+});

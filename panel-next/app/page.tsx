@@ -2,7 +2,7 @@ import { getPage, getSession, serverData } from '@/lib/backend';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { matchesCard } from '@/lib/card-detail';
-import { catalogView } from '@/lib/catalog-state';
+import { catalogView, defaultPageSize } from '@/lib/catalog-state';
 import { Catalog } from '@/components/Catalog';
 import { Analytics } from '@/components/Analytics';
 import { Parsers } from '@/components/Parsers';
@@ -30,6 +30,8 @@ export default async function Page({
     }
   }
   if (action === 'list' && query.get('view') === 'tiles') query.set('per_page', '15');
+  if (action === 'list' && !query.has('per_page'))
+    query.set('per_page', String(defaultPageSize(catalogView(query.get('view')))));
   if (action === 'analytics') {
     const registry = await serverData<{ modules: Record<string, AnalyticsModule> }>(
       'panel',

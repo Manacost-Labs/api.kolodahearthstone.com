@@ -2989,3 +2989,13 @@ html[data-mode='dark'] .provider-usage {
 .analytics-main td .value-code {
   white-space: nowrap;
 }
+
+/* Card grid: five columns once there is room, matching the page sizes (15, 25, 50…). */
+.catalog-results {
+  container-type: inline-size;
+}
+@container (min-width: 1000px) {
+  .card-grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+}
