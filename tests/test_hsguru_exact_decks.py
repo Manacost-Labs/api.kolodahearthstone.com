@@ -349,7 +349,9 @@ def test_all_rank_catalog_records_valid_zero_sample_without_failing() -> None:
     assert write_catalog.call_args.kwargs["sample_state"] == "sparse_post_patch"
 
 
-def test_all_rank_retry_budget_advances_across_two_runs() -> None:
+def test_all_rank_retry_budget_advances_across_two_runs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     existing = [
         {
             "archetype": "Covered Mage",
@@ -357,6 +359,8 @@ def test_all_rank_retry_budget_advances_across_two_runs() -> None:
             "deck_code": EVENLOCK_CODE,
         }
     ]
+    # The queue arithmetic below is written for a 64-target nightly cap.
+    monkeypatch.setattr(hsguru_decks, "_ALL_CATALOG_EXACT_RETRY_LIMIT", 64)
     unresolved = [f"Quiet Deck {index}" for index in range(100)]
     targets = ["Covered Mage", *unresolved]
     empty_fetch = (
@@ -829,3 +833,77 @@ def test_exact_fetch_accepts_explicit_empty_result() -> None:
         )
 
     assert rows == []
+
+
+def test_unreadable_local_page_is_rendered_again_through_scrape_do() -> None:
+    # The local browser handed over deck cards without their copy buttons; one
+    # such page used to fail the whole wild catalog every night.
+    unrendered = hsguru_decks._CatalogPage(
+        html='<div id="deck_stats-42"><div class="decklist-info warlock"></div></div>',
+        backend="flaresolverr",
+        request_credits=0,
+    )
+    rendered = hsguru_decks._CatalogPage(
+        html=_card("Evenlock", "warlock", EVENLOCK_CODE, 692, 55.0),
+        backend="scrape_do",
+        request_credits=5,
+    )
+    fetch_page = AsyncMock(side_effect=[unrendered, rendered])
+    with (
+        patch.object(hsguru_decks, "_fetch_catalog_page", fetch_page),
+        patch.object(hsguru_decks, "_canonicalize_catalog_archetypes", AsyncMock()),
+    ):
+        rows, credits, backend, _attempts = asyncio.run(
+            hsguru_decks._fetch_catalog_chunk(
+                "wild",
+                ["Evenlock", "Yogg Rogue"],
+                batch_number=1,
+                period="black_empire",
+            )
+        )
+
+    assert [row["deck_code"] for row in rows] == [EVENLOCK_CODE]
+    assert credits == 5
+    assert backend == "scrape_do"
+    assert fetch_page.await_args_list[0].kwargs["prefer_local_solver"] is True
+    assert (
+        fetch_page.await_args_list[1].kwargs.get("prefer_local_solver", False) is False
+    )
+
+
+def test_crowded_shared_page_asks_for_each_archetype_on_its_own() -> None:
+    crowded = hsguru_decks._CatalogPage(
+        html=_card("Yogg Rogue", "rogue", EVENLOCK_CODE, 1345, 55.0)
+        + _card("Yogg Rogue", "rogue", SECOND_EVENLOCK_CODE, 1211, 54.0),
+        backend="flaresolverr",
+        request_credits=0,
+    )
+    quiet = hsguru_decks._CatalogPage(
+        html=_card("Evenlock", "warlock", SECOND_EVENLOCK_CODE, 84, 51.0),
+        backend="flaresolverr",
+        request_credits=0,
+    )
+    prolific = hsguru_decks._CatalogPage(
+        html=crowded.html, backend="flaresolverr", request_credits=0
+    )
+    fetch_page = AsyncMock(side_effect=[crowded, prolific, quiet])
+    with (
+        patch.object(hsguru_decks, "_fetch_catalog_page", fetch_page),
+        patch.object(hsguru_decks, "_canonicalize_catalog_archetypes", AsyncMock()),
+    ):
+        rows, _credits, _backend, _attempts = asyncio.run(
+            hsguru_decks._fetch_catalog_chunk(
+                "wild",
+                ["Yogg Rogue", "Evenlock"],
+                batch_number=1,
+                period="black_empire",
+                limit=2,
+            )
+        )
+
+    # The shared page reached its limit, so each archetype got its own page
+    # with the lower 10-game threshold.
+    assert fetch_page.await_count == 3
+    split_urls = [call_args.args[0].url for call_args in fetch_page.await_args_list[1:]]
+    assert all("min_games=10" in url and "limit=30" in url for url in split_urls)
+    assert {row["archetype"] for row in rows} >= {"Evenlock"}

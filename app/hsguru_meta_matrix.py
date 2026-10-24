@@ -63,7 +63,9 @@ ROLLING_PERIODS = (
 # Rolling windows short enough that high-rank slices can legitimately be empty.
 SHORT_ROLLING_PERIODS = ("past_3_hours", "past_6_hours")
 DEFAULT_PATCH_PERIOD = "patch_36.6.3"
-NAMED_PERIODS = ("black_empire",)
+# ``black_empire_ban`` is HSGuru's "Bans" window: games since the Black Empire
+# ban update. It is scraped like the release window but never becomes current.
+NAMED_PERIODS = ("black_empire", "black_empire_ban")
 # Named windows are not ordinary patch identifiers. When HSGuru advertises one
 # of these release windows, it is a more precise current-catalog boundary than
 # the preceding patch_* window (for example, the Black Empire expansion is
@@ -71,7 +73,12 @@ NAMED_PERIODS = ("black_empire",)
 # windows (violet_hold, most_wanted) are no longer advertised and not scraped.
 CURRENT_NAMED_PERIODS = ("black_empire",)
 PERIODS = (*ROLLING_PERIODS, DEFAULT_PATCH_PERIOD, *NAMED_PERIODS)
-COINS = ("any_player",)
+COINS = ("any_player", "on_coin", "going_first")
+# HSGuru's ``player_has_coin`` filter: second with the Coin, or first.
+_COIN_QUERY = {"on_coin": "yes", "going_first": "no"}
+# The coin split triples the request count, so it covers only the ranks the
+# HearthPulse meta table offers; the other ranks stay Any Player only.
+COIN_RANKS = ("all", "diamond", "diamond_to_legend", "legend", "top_5k", "top_legend")
 MIN_GAMES = (100, 250, 500, 1000, 2500, 5000)
 CURRENT_MIN_GAMES = 50
 # Scrape.do can legitimately need more than an hour for the full matrix. The
@@ -221,7 +228,12 @@ def _record_lab_verdict(acquisition_id: str | None, valid: bool) -> None:
 
 def _empty_base_slice_allowed(spec: SliceSpec) -> bool:
     """Allow an empty table only for documented low-sample rank windows."""
-    return (spec.format, spec.rank, spec.period) in EMPTY_BASE_SLICE_ALLOWLIST
+    if (spec.format, spec.rank, spec.period) in EMPTY_BASE_SLICE_ALLOWLIST:
+        return True
+    # A coin side or the young Bans window holds a fraction of the games; only
+    # ALL over a full window must have rows there.
+    narrow = spec.coin != "any_player" or spec.period == "black_empire_ban"
+    return narrow and (spec.rank != "all" or spec.period in SHORT_ROLLING_PERIODS)
 
 
 def _load_refresh_checkpoint(
@@ -351,11 +363,14 @@ def named_periods_from_html(page_html: str) -> tuple[str, ...]:
 def iter_slice_specs(periods: tuple[str, ...] = PERIODS) -> tuple[SliceSpec, ...]:
     specs = []
     for format_name, rank, period, coin in product(FORMATS, RANKS, periods, COINS):
+        if coin != "any_player" and rank not in COIN_RANKS:
+            continue
         params = {
             "format": _FORMAT_QUERY[format_name],
             "rank": rank,
             "period": period,
             "min_games": MIN_GAMES[0],
+            **({"player_has_coin": _COIN_QUERY[coin]} if coin in _COIN_QUERY else {}),
         }
         query = urlencode(params)
         key = "|".join((format_name, rank, period, coin))

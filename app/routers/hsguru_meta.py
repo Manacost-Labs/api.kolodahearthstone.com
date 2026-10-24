@@ -81,7 +81,7 @@ def hsguru_meta(
         "top_100",
     ] = "all",
     period: str = Query("past_day", min_length=1, max_length=64),
-    coin: Literal["any_player"] = "any_player",
+    coin: Literal["any_player", "on_coin", "going_first"] = "any_player",
     min_games: int = Query(100),
 ) -> dict:
     if min_games not in MIN_GAMES:
