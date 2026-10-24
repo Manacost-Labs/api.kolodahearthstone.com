@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- HSGuru meta matrix adds the "Bans" window (`period=black_empire_ban`) and
+  the coin split back (`coin=on_coin` / `going_first`, HSGuru
+  `player_has_coin=yes|no`) for the six ranks HearthPulse serves (ALL,
+  Diamond, Diamond–Legend, Legend, Top 5K, Top Legend). A twelve-hour run grows
+  from 164 to 422 Scrape.do pages (about 2,100 credits) and runs with
+  concurrency 5. Coin and Bans slices may be empty except ALL over a full
+  window.
+- HSGuru all-rank deck catalogs no longer stall: a local-browser page whose deck
+  cards cannot be read is rendered again through Scrape.do instead of failing
+  the whole catalog (the Wild catalog had not refreshed since 21 October). A
+  shared 20-archetype page that reaches its limit asks for each archetype on its
+  own (10-game builds, up to 30 each), and the nightly exact retries cover up to
+  200 build-less archetypes. The nightly job may run for up to two hours.
+
 - Full HSReplay Battlegrounds minion statistics for every minion: new pipeline
   source `hsreplay_battlegrounds_minion_stats` reads the four analytics queries
   behind the HSReplay minion page (`battlegrounds_minion_list`, `_minion_position`,

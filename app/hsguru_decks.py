@@ -31,7 +31,13 @@ _CATALOG_MAX_AGE_SECONDS = 24 * 60 * 60
 _ALL_CATALOG_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
 _ALL_CATALOG_BATCH_SIZE = 20
 _ALL_CATALOG_BATCH_CONCURRENCY = 2
-_ALL_CATALOG_EXACT_RETRY_LIMIT = 64
+# Exact one-archetype retries run on the free local browser first; the cap
+# covers a whole catalog's builds-less archetypes in one night.
+_ALL_CATALOG_EXACT_RETRY_LIMIT = 200
+# A shared page that reaches its limit was crowded by prolific archetypes; each
+# of its archetypes is then asked for on its own, down to 10-game builds.
+_CROWDED_SPLIT_MIN_GAMES = 10
+_CROWDED_SPLIT_LIMIT = 30
 # Quiet archetypes can have aggregate stats but no single build with a sample
 # in the current window. Their builds come from these wider windows, tried in
 # order, and every row keeps the window it was sampled from.
@@ -53,6 +59,7 @@ _HSGURU_SEMANTIC_QUERY_KEYS = frozenset(
 )
 _SCRAPE_DO_CIRCUIT_THRESHOLD = 2
 _SCRAPE_DO_CIRCUIT_SECONDS = 5 * 60
+_DECK_CARD_MARKER = re.compile(r"id=[\"']deck_stats-")
 _HSGURU_EMPTY_CATALOG_PATTERN = re.compile(
     r"\bno\s+decks\s+available\s+for\s+these\s+filters\b",
     flags=re.IGNORECASE,
@@ -635,7 +642,7 @@ def _validate_parsed_catalog_rows(
 ) -> None:
     if rows:
         return
-    if re.search(r"id=[\"']deck_stats-", page.html):
+    if _DECK_CARD_MARKER.search(page.html):
         raise RuntimeError("HSGuru deck cards were present but could not be parsed")
     if not _HSGURU_EMPTY_CATALOG_PATTERN.search(page.html):
         raise RuntimeError("HSGuru empty deck catalog could not be verified")
@@ -980,12 +987,34 @@ async def _fetch_catalog_chunk(
         # page. Interactive/exact requests keep the remote-first policy.
         prefer_local_solver=True,
     )
-    rows = parse_hsguru_decks_html(
-        page.html,
-        archetype=archetypes[0] if len(archetypes) == 1 else "",
-        format_name=format_name,
-        trust_exact_filter=len(archetypes) == 1,
-    )
+    def parse(candidate: _CatalogPage) -> list[dict[str, Any]]:
+        return parse_hsguru_decks_html(
+            candidate.html,
+            archetype=archetypes[0] if len(archetypes) == 1 else "",
+            format_name=format_name,
+            trust_exact_filter=len(archetypes) == 1,
+        )
+
+    rows = parse(page)
+    credits = page.request_credits
+    attempts = list(page.acquisition)
+    if (
+        not rows
+        and page.backend == "flaresolverr"
+        and _DECK_CARD_MARKER.search(page.html)
+    ):
+        # The local browser can hand over deck cards before their copy buttons
+        # render. One unreadable page used to fail the whole catalog for days;
+        # Scrape.do renders that page again instead.
+        page = await _fetch_catalog_page(
+            source,
+            max_age_ms=0,
+            wait_ms=3_000,
+            timeout_ms=25_000,
+        )
+        rows = parse(page)
+        credits += page.request_credits
+        attempts.extend(page.acquisition)
     _validate_parsed_catalog_rows(page, rows)
     if len(archetypes) > 1:
         await _canonicalize_catalog_archetypes(rows)
@@ -995,9 +1024,27 @@ async def _fetch_catalog_chunk(
             "batch": batch_number,
             "archetype_count": len(archetypes),
         }
-        for attempt in page.acquisition
+        for attempt in attempts
     ]
-    return rows, page.request_credits, page.backend, acquisition
+    if len(archetypes) > 1 and len(rows) >= limit:
+        for name in archetypes:
+            (
+                single_rows,
+                single_credits,
+                _,
+                single_attempts,
+            ) = await _fetch_catalog_chunk(
+                format_name,
+                [name],
+                batch_number=batch_number,
+                period=period,
+                min_games=_CROWDED_SPLIT_MIN_GAMES,
+                limit=_CROWDED_SPLIT_LIMIT,
+            )
+            rows.extend(single_rows)
+            credits += single_credits
+            acquisition.extend(single_attempts)
+    return rows, credits, page.backend, acquisition
 
 
 async def _fetch_catalog_chunks(

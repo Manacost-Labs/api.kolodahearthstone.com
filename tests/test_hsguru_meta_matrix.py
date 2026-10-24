@@ -85,15 +85,17 @@ def _valid_current_acquisition(format_name: str, rows: int = 1) -> dict:
     }
 
 
-def test_matrix_has_162_remote_slices_and_six_local_min_game_filters() -> None:
+def test_matrix_has_420_remote_slices_and_six_local_min_game_filters() -> None:
     from app.hsguru_meta_matrix import MIN_GAMES, iter_slice_specs
 
     specs = list(iter_slice_specs())
 
     assert MIN_GAMES == (100, 250, 500, 1000, 2500, 5000)
     assert 7500 not in MIN_GAMES
-    assert len(specs) == 162
-    assert len({spec.key for spec in specs}) == 162
+    # Any Player for 9 ranks, plus both coin sides for the 6 ranks the site
+    # serves: 2 formats x 10 periods x (9 + 6 * 2).
+    assert len(specs) == 420
+    assert len({spec.key for spec in specs}) == 420
     assert all("min_games=100" in spec.url for spec in specs)
     assert all("7500" not in spec.url for spec in specs)
     assert {spec.period for spec in specs} == {
@@ -106,6 +108,7 @@ def test_matrix_has_162_remote_slices_and_six_local_min_game_filters() -> None:
         "past_30_days",
         "patch_36.6.3",
         "black_empire",
+        "black_empire_ban",
     }
     assert {spec.rank for spec in specs} == {
         "all",
@@ -118,8 +121,26 @@ def test_matrix_has_162_remote_slices_and_six_local_min_game_filters() -> None:
         "top_500",
         "top_100",
     }
-    assert {spec.coin for spec in specs} == {"any_player"}
-    assert all("player_has_coin=" not in spec.url for spec in specs)
+    assert {spec.coin for spec in specs} == {"any_player", "on_coin", "going_first"}
+    assert all(
+        "player_has_coin=" not in spec.url
+        for spec in specs
+        if spec.coin == "any_player"
+    )
+    assert all(
+        "player_has_coin=yes" in spec.url for spec in specs if spec.coin == "on_coin"
+    )
+    assert all(
+        "player_has_coin=no" in spec.url for spec in specs if spec.coin == "going_first"
+    )
+    assert {spec.rank for spec in specs if spec.coin != "any_player"} == {
+        "all",
+        "diamond",
+        "diamond_to_legend",
+        "legend",
+        "top_5k",
+        "top_legend",
+    }
 
 
 def test_hsguru_table_parser_preserves_game_count_for_local_filtering() -> None:
@@ -430,7 +451,7 @@ def test_deck_catalog_join_skips_while_matrix_resource_is_locked(tmp_path) -> No
     save_dataset.assert_not_called()
 
 
-def test_refresh_publishes_one_unified_dataset_after_162_firecrawl_pages() -> None:
+def test_refresh_publishes_one_unified_dataset_after_420_firecrawl_pages() -> None:
     from app.firecrawl_backend import FirecrawlScrape
     from app.hsguru_meta_matrix import refresh_hsguru_meta_matrix
 
@@ -495,11 +516,11 @@ def test_refresh_publishes_one_unified_dataset_after_162_firecrawl_pages() -> No
         )
 
     assert result["ok"] is True
-    assert result["base_slices"] == 162
-    assert result["logical_slices"] == 972
-    assert result["firecrawl_credits_used"] == 164
+    assert result["base_slices"] == 420
+    assert result["logical_slices"] == 2520
+    assert result["firecrawl_credits_used"] == 422
     assert result["current_catalog_archetypes"] == 2
-    assert len(calls) == 162
+    assert len(calls) == 420
     save_dataset.assert_called_once()
     dataset = save_dataset.call_args.args[1]
     assert dataset["data"]["structured"]["dimensions"]["min_games"] == [
@@ -510,7 +531,11 @@ def test_refresh_publishes_one_unified_dataset_after_162_firecrawl_pages() -> No
         2500,
         5000,
     ]
-    assert dataset["data"]["structured"]["dimensions"]["coins"] == ["any_player"]
+    assert dataset["data"]["structured"]["dimensions"]["coins"] == [
+        "any_player",
+        "on_coin",
+        "going_first",
+    ]
     assert dataset["data"]["structured"]["current_catalog"]["criteria"] == {
         "period": "patch_36.0.3",
         "rank": "all",
@@ -519,9 +544,9 @@ def test_refresh_publishes_one_unified_dataset_after_162_firecrawl_pages() -> No
     }
     save_status.assert_called_once()
     status = save_status.call_args.args[1]
-    assert status["rows_total"] == 972
-    assert status["base_slices"] == 162
-    assert status["fresh_base_slices"] == 162
+    assert status["rows_total"] == 2520
+    assert status["base_slices"] == 420
+    assert status["fresh_base_slices"] == 420
     assert status["cached_base_slices"] == 0
 
 
@@ -1829,6 +1854,7 @@ def test_runtime_periods_replace_previous_patch_with_discovered_patch() -> None:
         "past_30_days",
         "patch_36.0.4",
         "black_empire",
+        "black_empire_ban",
     )
     html = """
     <a href="/meta?format=2&amp;period=patch_36.0.3&amp;rank=all">36.0.3</a>
@@ -2043,10 +2069,9 @@ def test_v1_hsguru_meta_rejects_removed_min_games_value() -> None:
     assert response.status_code == 422
 
 
-@pytest.mark.parametrize("coin", ["going_first", "on_coin"])
-def test_v1_hsguru_meta_rejects_removed_coin_modes(coin: str) -> None:
+def test_v1_hsguru_meta_rejects_unknown_coin_mode() -> None:
     response = client.get(
-        f"/v1/hsguru/meta?format=standard&rank=legend&period=past_day&coin={coin}&min_games=100"
+        "/v1/hsguru/meta?format=standard&rank=legend&period=past_day&coin=second&min_games=100"
     )
 
     assert response.status_code == 422
@@ -2116,9 +2141,7 @@ def test_v1_hsguru_meta_accepts_extended_diamond_ranks(rank: str) -> None:
     assert response.json()["data"]["rank"] == rank
 
 
-@pytest.mark.parametrize(
-    "period", ["patch_36.0.3", "violet_hold", "most_wanted"]
-)
+@pytest.mark.parametrize("period", ["patch_36.0.3", "violet_hold", "most_wanted"])
 def test_v1_hsguru_meta_accepts_extended_periods(period: str) -> None:
     fetched_at = datetime.now(UTC).isoformat()
     dataset = {
@@ -2195,3 +2218,50 @@ def test_v1_hsguru_meta_rejects_period_outside_published_dimensions() -> None:
         "past_day",
         "patch_36.0.3",
     ]
+
+
+def test_coin_and_bans_slices_may_be_empty_except_all_over_a_full_window() -> None:
+    from app.hsguru_meta_matrix import _empty_base_slice_allowed, iter_slice_specs
+
+    specs = {spec.key: spec for spec in iter_slice_specs()}
+
+    assert _empty_base_slice_allowed(specs["standard|top_legend|past_week|on_coin"])
+    assert _empty_base_slice_allowed(specs["wild|all|past_3_hours|going_first"])
+    assert _empty_base_slice_allowed(
+        specs["standard|legend|black_empire_ban|any_player"]
+    )
+    assert not _empty_base_slice_allowed(specs["standard|all|past_week|on_coin"])
+    assert not _empty_base_slice_allowed(
+        specs["standard|all|black_empire_ban|any_player"]
+    )
+    assert not _empty_base_slice_allowed(specs["standard|legend|past_week|any_player"])
+
+
+def test_v1_hsguru_meta_serves_a_coin_slice() -> None:
+    fetched_at = datetime.now(UTC).isoformat()
+    dataset = {
+        "source_id": "hsguru_meta_matrix",
+        "fetched_at": fetched_at,
+        "data": {
+            "structured": {
+                "slices": [
+                    {
+                        "key": "standard|legend|black_empire_ban|going_first",
+                        "source_url": "https://www.hsguru.com/meta?format=2&rank=legend&period=black_empire_ban&min_games=100&player_has_coin=no",
+                        "rows": [
+                            {"archetype": "Zoolock", "games": 7732, "winrate": 56.1}
+                        ],
+                    }
+                ],
+                "dimensions": {"periods": ["past_day", "black_empire_ban"]},
+            }
+        },
+    }
+    with patch("app.routers.hsguru_meta.load_dataset", return_value=dataset):
+        response = client.get(
+            "/v1/hsguru/meta?format=standard&rank=legend&period=black_empire_ban&coin=going_first&min_games=100"
+        )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["coin"] == "going_first"
+    assert [row["archetype"] for row in response.json()["data"]["items"]] == ["Zoolock"]

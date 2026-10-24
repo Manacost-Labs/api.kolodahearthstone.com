@@ -395,8 +395,9 @@ SOURCES: tuple[Source, ...] = (
         description=(
             "Unified Standard/Wild HSGuru matrix refreshed every twelve hours: nine ranks "
             "(including ALL, Top-500 and Top-100), seven rolling periods (3 hours to 30 "
-            "days), the latest patch, the black_empire expansion window, Any Player, "
-            "and six locally "
+            "days), the latest patch, the black_empire expansion window, the Bans "
+            "window (black_empire_ban), Any Player plus On Coin and Going First for "
+            "the six ranks HearthPulse serves, and six locally "
             "derived min-games filters. It also publishes the current 50-game archetype "
             "catalog with cached HSGuru builds and history."
         ),
