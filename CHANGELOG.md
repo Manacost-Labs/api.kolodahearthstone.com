@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- A HSGuru deck page whose cards all rendered but hold no usable deck (one
+  "Highlander Warrior" card with a one-card code) now means "no builds" instead
+  of failing the whole Wild all-rank catalog. Only cards without copy text count
+  as an unrendered page.
+
 - HSGuru meta matrix adds the "Bans" window (`period=black_empire_ban`) and
   the coin split back (`coin=on_coin` / `going_first`, HSGuru
   `player_has_coin=yes|no`) for the six ranks HearthPulse serves (ALL,
