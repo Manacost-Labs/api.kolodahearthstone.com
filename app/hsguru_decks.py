@@ -636,6 +636,14 @@ def parse_hsguru_decks_html(
     )
 
 
+def _unrendered_deck_cards(page_html: str) -> bool:
+    """Whether a deck card has no copy text yet: the page is not fully rendered."""
+    if not _DECK_CARD_MARKER.search(page_html):
+        return False
+    cards = BeautifulSoup(page_html, "lxml").select('[id^="deck_stats-"]')
+    return any(card.select_one("button[data-clipboard-text]") is None for card in cards)
+
+
 def _validate_parsed_catalog_rows(
     page: _CatalogPage,
     rows: list[dict[str, Any]],
@@ -643,7 +651,12 @@ def _validate_parsed_catalog_rows(
     if rows:
         return
     if _DECK_CARD_MARKER.search(page.html):
-        raise RuntimeError("HSGuru deck cards were present but could not be parsed")
+        if _unrendered_deck_cards(page.html):
+            raise RuntimeError("HSGuru deck cards were present but could not be parsed")
+        # Every card rendered but none is a usable deck (an invalid or one-card
+        # deck code): the archetype has no builds. One such card used to fail
+        # the whole wild catalog every night.
+        return
     if not _HSGURU_EMPTY_CATALOG_PATTERN.search(page.html):
         raise RuntimeError("HSGuru empty deck catalog could not be verified")
 
@@ -1001,7 +1014,7 @@ async def _fetch_catalog_chunk(
     if (
         not rows
         and page.backend == "flaresolverr"
-        and _DECK_CARD_MARKER.search(page.html)
+        and _unrendered_deck_cards(page.html)
     ):
         # The local browser can hand over deck cards before their copy buttons
         # render. One unreadable page used to fail the whole catalog for days;

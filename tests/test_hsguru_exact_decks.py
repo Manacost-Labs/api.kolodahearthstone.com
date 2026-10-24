@@ -907,3 +907,34 @@ def test_crowded_shared_page_asks_for_each_archetype_on_its_own() -> None:
     split_urls = [call_args.args[0].url for call_args in fetch_page.await_args_list[1:]]
     assert all("min_games=10" in url and "limit=30" in url for url in split_urls)
     assert {row["archetype"] for row in rows} >= {"Evenlock"}
+
+
+def test_rendered_page_without_a_usable_deck_has_no_builds() -> None:
+    # HSGuru listed one "Highlander Warrior" card whose code holds a single
+    # card; it is not a deck, and the wild catalog must not fail over it.
+    junk = hsguru_decks._CatalogPage(
+        html=(
+            '<div id="deck_stats-7076269"><div class="decklist-info warrior">'
+            '<button data-clipboard-text="### Highlander Warrior\n'
+            "AAEBAQcBrYoDAAAA\n### You can view this deck at "
+            'https://www.hsguru.com/deck/7076269\n"></button></div></div>'
+        ),
+        backend="scrape_do",
+        request_credits=5,
+    )
+    with patch.object(
+        hsguru_decks, "_fetch_catalog_page", AsyncMock(return_value=junk)
+    ) as fetch_page:
+        rows, _credits, _backend, _attempts = asyncio.run(
+            hsguru_decks._fetch_catalog_chunk(
+                "wild",
+                ["Highlander Warrior"],
+                batch_number=1,
+                period="black_empire",
+                min_games=10,
+                limit=20,
+            )
+        )
+
+    assert rows == []
+    assert fetch_page.await_count == 1
