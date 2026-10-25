@@ -562,6 +562,8 @@ class ScrapeDoClient:
     credit_cap: int
     concurrency: int = MAX_CONCURRENCY
     call: JsonFetcher | None = None
+    # Provider usage is booked to this source (other HSReplay collectors reuse the client).
+    usage_source: str = SOURCE_ID
     requests: int = 0
     credits: int = 0
     _in_flight: int = 0
@@ -619,7 +621,7 @@ class ScrapeDoClient:
             # scrape_url sends it as Sd-Cookie; the value is never logged.
             headers["Cookie"] = cookie
         try:
-            with provider_usage.usage_source(SOURCE_ID):
+            with provider_usage.usage_source(self.usage_source):
                 scraped = await scrape_url(
                     url,
                     render=False,

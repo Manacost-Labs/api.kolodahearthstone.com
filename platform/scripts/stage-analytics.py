@@ -36,6 +36,8 @@ TABLES = (
     'hsguru_streamers', 'hsreplay_archetypes', 'hsreplay_mulligan_cards',
     'hsreplay_mulligan_decks', 'hsreplay_mulligan_groups', 'hsreplay_mulligan_runs',
     'hsreplay_mulligan_snapshots', 'hsreplay_mulligan_targets',
+    'hsreplay_card_choice_rows', 'hsreplay_card_choice_runs',
+    'hsreplay_card_choice_snapshots', 'hsreplay_card_choice_targets',
 )
 APPEND_ONLY = frozenset((
     'archetype_deck_cards', 'archetype_decks', 'archetype_matchups',

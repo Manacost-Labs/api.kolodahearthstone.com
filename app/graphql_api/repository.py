@@ -72,6 +72,8 @@ class GraphQLRepository(Protocol):
         self, query: str, params: dict[str, Any]
     ) -> list[dict[str, Any]]: ...
 
+    async def hsreplay_card_choices(self, **selector: Any) -> dict[str, Any]: ...
+
     async def sources(self, **filters: Any) -> PageResult: ...
 
     async def search(self, **filters: Any) -> PageResult: ...
@@ -998,6 +1000,71 @@ class PostgresGraphQLRepository:
             raise RepositoryValidationError("Unexpected streamer query")
         converted = re.sub(r"(?<![:\w]):([a-z_][a-z0-9_]*)", r"%(\1)s", query)
         return await self._fetch_all(converted, params)
+
+    async def hsreplay_card_choices(
+        self, *, card_id: str, format_name: str, rank: str
+    ) -> dict[str, Any]:
+        """The mirrored latest HSReplay pick rows of one card, format and rank.
+
+        Same keys as ``app.hsreplay_card_choices._load_stored`` so one assembler
+        (``assemble``) answers REST and GraphQL alike.
+        """
+
+        from ..hsreplay_mulligan import premium_session_from_run
+
+        run = await self._fetch_one(
+            """
+            SELECT * FROM analytics.hsreplay_card_choice_runs
+            WHERE finished_at IS NOT NULL ORDER BY id DESC LIMIT 1
+            """,
+            {},
+        )
+        if run:
+            run = dict(run)
+            detail = run.pop("detail_json", None)
+            run["detail"] = json.loads(detail) if isinstance(detail, str) else detail or {}
+        targets = await self._fetch_all(
+            """
+            SELECT * FROM analytics.hsreplay_card_choice_targets
+            WHERE card_id = %(card_id)s ORDER BY format, rank
+            """,
+            {"card_id": card_id},
+        )
+        found: dict[str, Any] = {
+            "premium_session": premium_session_from_run(run),
+            "available": [
+                {"format": row["format"], "rank": row["rank"]}
+                for row in targets
+                if row.get("latest_snapshot_id") is not None
+            ],
+        }
+        target = next(
+            (
+                dict(row)
+                for row in targets
+                if row["format"] == format_name and row["rank"] == rank
+            ),
+            None,
+        )
+        if target is None:
+            return found
+        found["target"] = target
+        if target.get("latest_snapshot_id") is not None:
+            snapshot = await self._fetch_one(
+                "SELECT * FROM analytics.hsreplay_card_choice_snapshots WHERE id = %(id)s",
+                {"id": target["latest_snapshot_id"]},
+            )
+            found["snapshot"] = dict(snapshot) if snapshot else None
+            if snapshot:
+                found["rows"] = await self._fetch_all(
+                    """
+                    SELECT position, dbf_id, card_id, popularity, win_rate
+                    FROM analytics.hsreplay_card_choice_rows
+                    WHERE snapshot_id = %(id)s ORDER BY position
+                    """,
+                    {"id": snapshot["id"]},
+                )
+        return found
 
     async def sources(
         self,

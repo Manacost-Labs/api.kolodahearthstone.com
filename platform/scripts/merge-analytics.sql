@@ -39,7 +39,9 @@ DECLARE
         'hsguru_streamer_live', 'hsguru_streamer_runs', 'hsguru_streamer_vods',
         'hsguru_streamers', 'hsreplay_archetypes', 'hsreplay_mulligan_cards',
         'hsreplay_mulligan_decks', 'hsreplay_mulligan_groups', 'hsreplay_mulligan_runs',
-        'hsreplay_mulligan_snapshots', 'hsreplay_mulligan_targets'
+        'hsreplay_mulligan_snapshots', 'hsreplay_mulligan_targets',
+        'hsreplay_card_choice_rows', 'hsreplay_card_choice_runs',
+        'hsreplay_card_choice_snapshots', 'hsreplay_card_choice_targets'
     ];
     append_only_tables text[] := ARRAY[
         'archetype_deck_cards', 'archetype_decks', 'archetype_matchups',

@@ -225,6 +225,15 @@ _SCHEDULES: tuple[_ScheduleSpec, ...] = (
         ),
     ),
     _ScheduleSpec(
+        id="refresh-hsreplay-card-choices",
+        label="Ежедневно в 04:35 — что берут из Раскопки (HSReplay)",
+        systemd_unit="hs-data-api-docker-refresh-hsreplay-card-choices.timer",
+        on_calendar=("*-*-* 04:35:00 Europe/Warsaw",),
+        source_ids=frozenset({"hsreplay_card_choices"}),
+        recurrence="daily",
+        local_times=_times((4, 35)),
+    ),
+    _ScheduleSpec(
         id="recover-hsguru-archetype-analysis",
         label="Каждый час в :45 — восстановление checkpoint",
         systemd_unit="hs-data-api-docker-recover-hsguru-archetype-analysis.timer",

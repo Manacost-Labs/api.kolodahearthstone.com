@@ -1,0 +1,1553 @@
+{
+"standard_sets": [
+"BE",
+"CATACLYSM",
+"CORE",
+"EMERALD_DREAM",
+"ESCAPEFROM_VIOLET_HOLD",
+"THE_LOST_CITY",
+"TIME_TRAVEL"
+],
+"cards": [
+{
+"id": "CORE_YOP_001",
+"dbfId": 97377,
+"name": "Illidari Studies",
+"set": "CORE",
+"type": "SPELL",
+"cardClass": "DEMONHUNTER",
+"cost": 1,
+"rarity": "COMMON",
+"mechanics": [
+"DISCOVER"
+],
+"referencedTags": [
+"OUTCAST"
+],
+"text": "<b>Discover</b> an <b>Outcast</b> card. Your next one costs (1) less.",
+"collectible": true
+},
+{
+"id": "CORE_DS1_184",
+"dbfId": 69545,
+"name": "Tracking",
+"set": "CORE",
+"type": "SPELL",
+"cardClass": "HUNTER",
+"cost": 1,
+"rarity": "RARE",
+"mechanics": [
+"DISCOVER"
+],
+"text": "<b>Discover</b> a card from your deck.",
+"collectible": true
+},
+{
+"id": "Core_LOE_115",
+"dbfId": 113109,
+"name": "Raven Idol",
+"set": "CORE",
+"type": "SPELL",
+"cardClass": "DRUID",
+"cost": 1,
+"rarity": "COMMON",
+"mechanics": [
+"CHOOSE_ONE",
+"DISCOVER"
+],
+"text": "<b>Choose One -</b>\n<b>Discover</b> a minion; or <b>Discover</b> a spell.",
+"collectible": true
+},
+{
+"id": "CORE_AT_037",
+"dbfId": 76289,
+"name": "Living Roots",
+"set": "CORE",
+"type": "SPELL",
+"cardClass": "DRUID",
+"cost": 1,
+"rarity": "COMMON",
+"mechanics": [
+"CHOOSE_ONE"
+],
+"spellSchool": "NATURE",
+"text": "<b>Choose One -</b> Deal $2 damage; or Summon two 1/1 Saplings.",
+"collectible": true
+},
+{
+"id": "AT_037",
+"dbfId": 2792,
+"name": "Living Roots",
+"set": "TGT",
+"type": "SPELL",
+"cardClass": "DRUID",
+"cost": 1,
+"rarity": "COMMON",
+"mechanics": [
+"CHOOSE_ONE"
+],
+"spellSchool": "NATURE",
+"text": "<b>Choose One -</b> Deal $2 damage; or Summon two 1/1 Saplings.",
+"collectible": true
+},
+{
+"id": "AT_037a",
+"dbfId": 2789,
+"name": "Grasping Roots",
+"set": "TGT",
+"type": "SPELL",
+"cardClass": "DRUID",
+"cost": 1,
+"spellSchool": "NATURE",
+"text": "Deal $2 damage."
+},
+{
+"id": "AT_037b",
+"dbfId": 2791,
+"name": "One, Two, Trees!",
+"set": "TGT",
+"type": "SPELL",
+"cardClass": "DRUID",
+"cost": 1,
+"spellSchool": "NATURE",
+"text": "Summon two 1/1 Saplings."
+},
+{
+"id": "UNG_001",
+"dbfId": 41076,
+"name": "Pterrordax Hatchling",
+"set": "UNGORO",
+"type": "MINION",
+"cardClass": "NEUTRAL",
+"cost": 3,
+"rarity": "COMMON",
+"mechanics": [
+"BATTLECRY"
+],
+"referencedTags": [
+"ADAPT"
+],
+"races": [
+"BEAST"
+],
+"race": "BEAST",
+"text": "<b><b>Battlecry:</b> Adapt</b>.",
+"collectible": true
+},
+{
+"id": "DEEP_033",
+"dbfId": 102728,
+"name": "Fossilized Kaleidosaur",
+"set": "WILD_WEST",
+"type": "MINION",
+"cardClass": "PALADIN",
+"cost": 4,
+"rarity": "RARE",
+"mechanics": [
+"BATTLECRY",
+"EXCAVATE"
+],
+"races": [
+"UNDEAD",
+"BEAST"
+],
+"race": "BEAST",
+"text": "<b>Battlecry:</b> Gain two\nrandom <b>Bonus Effects</b>.\n<b>Excavate</b> a treasure.",
+"collectible": true
+},
+{
+"id": "CORE_BT_801",
+"dbfId": 69740,
+"name": "Eye Beam",
+"set": "CORE",
+"type": "SPELL",
+"cardClass": "DEMONHUNTER",
+"cost": 3,
+"rarity": "EPIC",
+"mechanics": [
+"LIFESTEAL",
+"OUTCAST"
+],
+"spellSchool": "FEL",
+"text": "<b>Lifesteal</b>. Deal $3 damage to a minion.\n<b>Outcast:</b> This costs (1).",
+"collectible": true
+},
+{
+"id": "CORE_BT_035",
+"dbfId": 69558,
+"name": "Chaos Strike",
+"set": "CORE",
+"type": "SPELL",
+"cardClass": "DEMONHUNTER",
+"cost": 2,
+"rarity": "COMMON",
+"spellSchool": "FEL",
+"text": "Give your hero +2 Attack this turn. Draw a card.",
+"collectible": true
+},
+{
+"id": "CATA_614",
+"dbfId": 123385,
+"name": "Shadowed Informant",
+"set": "CATACLYSM",
+"type": "MINION",
+"cardClass": "NEUTRAL",
+"cost": 2,
+"rarity": "RARE",
+"mechanics": [
+"BATTLECRY",
+"DISCOVER"
+],
+"races": [
+"DRAGON"
+],
+"race": "DRAGON",
+"text": "[x]<b>Battlecry:</b> <b>Discover</b> a spell\nfrom your class. <i>(Swaps\nclass each turn!)</i>",
+"collectible": true
+},
+{
+"id": "EX1_165",
+"dbfId": 692,
+"name": "Druid of the Claw",
+"set": "EXPERT1",
+"type": "MINION",
+"cardClass": "DRUID",
+"cost": 6,
+"rarity": "COMMON",
+"mechanics": [
+"CHOOSE_ONE"
+],
+"referencedTags": [
+"RUSH",
+"TAUNT"
+],
+"text": "[x]<b>Choose One -</b> Transform\ninto a 7/6 with <b>Rush</b>;\nor a 4/9 with <b>Taunt</b>.",
+"collectible": true
+},
+{
+"id": "EX1_165a",
+"dbfId": 63,
+"name": "Cat Form",
+"set": "EXPERT1",
+"type": "MINION",
+"cardClass": "DRUID",
+"cost": 6,
+"rarity": "COMMON",
+"mechanics": [
+"RUSH"
+],
+"races": [
+"BEAST"
+],
+"race": "BEAST",
+"text": "<b>Rush</b>"
+},
+{
+"id": "EX1_165b",
+"dbfId": 99,
+"name": "Bear Form",
+"set": "EXPERT1",
+"type": "MINION",
+"cardClass": "DRUID",
+"cost": 6,
+"rarity": "COMMON",
+"mechanics": [
+"TAUNT"
+],
+"races": [
+"BEAST"
+],
+"race": "BEAST",
+"text": "<b>Taunt</b>"
+},
+{
+"id": "BAR_328",
+"dbfId": 63166,
+"name": "Vengeful Spirit",
+"set": "THE_BARRENS",
+"type": "MINION",
+"cardClass": "DEMONHUNTER",
+"cost": 4,
+"rarity": "EPIC",
+"mechanics": [
+"OUTCAST"
+],
+"referencedTags": [
+"DEATHRATTLE"
+],
+"races": [
+"UNDEAD"
+],
+"race": "UNDEAD",
+"text": "<b>Outcast:</b> Draw 2 <b>Deathrattle</b> minions.",
+"collectible": true
+},
+{
+"id": "BAR_333",
+"dbfId": 63260,
+"name": "Kurtrus Ashfallen",
+"set": "THE_BARRENS",
+"type": "MINION",
+"cardClass": "DEMONHUNTER",
+"cost": 4,
+"rarity": "LEGENDARY",
+"mechanics": [
+"BATTLECRY",
+"OUTCAST"
+],
+"referencedTags": [
+"IMMUNE"
+],
+"text": "[x]<b>Battlecry:</b> Attack the left and\nright-most enemy minions.\n<b>Outcast:</b> <b>Immune</b> this turn.",
+"collectible": true
+},
+{
+"id": "BE_264",
+"dbfId": 130785,
+"name": "Blind Harrower",
+"set": "BE",
+"type": "MINION",
+"cardClass": "DEMONHUNTER",
+"cost": 3,
+"rarity": "RARE",
+"mechanics": [
+"DEATHRATTLE",
+"OUTCAST"
+],
+"races": [
+"BEAST"
+],
+"race": "BEAST",
+"text": "[x]<b>Outcast and Deathrattle:</b>&\nGet a random <b>Outcast</b> card.",
+"collectible": true
+},
+{
+"id": "BT_480",
+"dbfId": 58170,
+"name": "Crimson Sigil Runner",
+"set": "BLACK_TEMPLE",
+"type": "MINION",
+"cardClass": "DEMONHUNTER",
+"cost": 1,
+"rarity": "COMMON",
+"mechanics": [
+"OUTCAST"
+],
+"text": "<b>Outcast:</b>& Draw a card.",
+"collectible": true
+},
+{
+"id": "BT_490",
+"dbfId": 58452,
+"name": "Consume Magic",
+"set": "DEMON_HUNTER_INITIATE",
+"type": "SPELL",
+"cardClass": "DEMONHUNTER",
+"cost": 1,
+"rarity": "COMMON",
+"mechanics": [
+"OUTCAST"
+],
+"referencedTags": [
+"SILENCE"
+],
+"spellSchool": "SHADOW",
+"text": "<b>Silence</b> an enemy minion.\n<b>Outcast:</b> Draw a card.",
+"collectible": true
+},
+{
+"id": "BT_491",
+"dbfId": 58453,
+"name": "Spectral Sight",
+"set": "BLACK_TEMPLE",
+"type": "SPELL",
+"cardClass": "DEMONHUNTER",
+"cost": 2,
+"rarity": "COMMON",
+"mechanics": [
+"OUTCAST"
+],
+"text": "[x]Draw a card.\n<b>Outcast:</b> Draw another.",
+"collectible": true
+},
+{
+"id": "BT_601",
+"dbfId": 58201,
+"name": "Skull of Gul'dan",
+"set": "BLACK_TEMPLE",
+"type": "SPELL",
+"cardClass": "DEMONHUNTER",
+"cost": 6,
+"rarity": "RARE",
+"mechanics": [
+"OUTCAST"
+],
+"text": "Draw 3 cards.\n<b>Outcast:</b> Reduce their Cost by (3).",
+"collectible": true
+},
+{
+"id": "BT_801",
+"dbfId": 58183,
+"name": "Eye Beam",
+"set": "DEMON_HUNTER_INITIATE",
+"type": "SPELL",
+"cardClass": "DEMONHUNTER",
+"cost": 3,
+"rarity": "EPIC",
+"mechanics": [
+"LIFESTEAL",
+"OUTCAST"
+],
+"spellSchool": "FEL",
+"text": "<b>Lifesteal</b>. Deal $3 damage to a minion.\n<b>Outcast:</b> This costs (1).",
+"collectible": true
+},
+{
+"id": "BT_814",
+"dbfId": 58524,
+"name": "Illidari Felblade",
+"set": "DEMON_HUNTER_INITIATE",
+"type": "MINION",
+"cardClass": "DEMONHUNTER",
+"cost": 4,
+"rarity": "RARE",
+"mechanics": [
+"OUTCAST",
+"RUSH"
+],
+"referencedTags": [
+"IMMUNE"
+],
+"text": "<b>Rush</b>\n<b>Outcast:</b> Gain <b>Immune</b> this turn.",
+"collectible": true
+},
+{
+"id": "CATA_533",
+"dbfId": 122995,
+"name": "Flash Flood",
+"set": "CATACLYSM",
+"type": "SPELL",
+"cardClass": "DEMONHUNTER",
+"cost": 5,
+"rarity": "RARE",
+"mechanics": [
+"OUTCAST"
+],
+"spellSchool": "FEL",
+"text": "[x]Deal $5 damage to\nyour opponent's left\n and right-most minions.\n<b>Outcast:</b> Do it again.",
+"collectible": true
+},
+{
+"id": "CORE_BT_480",
+"dbfId": 69683,
+"name": "Crimson Sigil Runner",
+"set": "CORE",
+"type": "MINION",
+"cardClass": "DEMONHUNTER",
+"cost": 1,
+"rarity": "COMMON",
+"mechanics": [
+"OUTCAST"
+],
+"text": "<b>Outcast:</b>& Draw a card.",
+"collectible": true
+},
+{
+"id": "CORE_BT_491",
+"dbfId": 69684,
+"name": "Spectral Sight",
+"set": "CORE",
+"type": "SPELL",
+"cardClass": "DEMONHUNTER",
+"cost": 2,
+"rarity": "COMMON",
+"mechanics": [
+"OUTCAST"
+],
+"text": "[x]Draw a card.\n<b>Outcast:</b> Draw another.",
+"collectible": true
+},
+{
+"id": "CORE_TSC_217",
+"dbfId": 111348,
+"name": "Wayward Sage",
+"set": "CORE_HIDDEN",
+"type": "MINION",
+"cardClass": "DEMONHUNTER",
+"cost": 2,
+"rarity": "EPIC",
+"mechanics": [
+"OUTCAST"
+],
+"races": [
+"NAGA"
+],
+"race": "NAGA",
+"text": "[x]<b>Outcast:</b> Reduce the Cost\nof the left and right-most\n cards in your hand by (1).",
+"collectible": true
+},
+{
+"id": "CS3_017",
+"dbfId": 64465,
+"name": "Gan'arg Glaivesmith",
+"set": "CORE_HIDDEN",
+"type": "MINION",
+"cardClass": "DEMONHUNTER",
+"cost": 3,
+"rarity": "COMMON",
+"mechanics": [
+"OUTCAST"
+],
+"races": [
+"DEMON"
+],
+"race": "DEMON",
+"text": "<b>Outcast:</b> Give your hero +3 Attack this turn.",
+"collectible": true
+},
+{
+"id": "DINO_136",
+"dbfId": 118503,
+"name": "Horn of Feasting",
+"set": "THE_LOST_CITY",
+"type": "SPELL",
+"cardClass": "DEMONHUNTER",
+"cost": 4,
+"rarity": "COMMON",
+"mechanics": [
+"OUTCAST"
+],
+"referencedTags": [
+"IMMUNE",
+"RUSH"
+],
+"text": "Summon three\n2/1 Raptors with <b>Rush</b>.\n<b>Outcast:</b> Give them <b>Immune</b>\nwhile attacking this turn.",
+"collectible": true
+},
+{
+"id": "DMF_227",
+"dbfId": 61133,
+"name": "Dreadlord's Bite",
+"set": "DARKMOON_FAIRE",
+"type": "WEAPON",
+"cardClass": "DEMONHUNTER",
+"cost": 3,
+"rarity": "COMMON",
+"mechanics": [
+"OUTCAST"
+],
+"text": "[x]<b>Outcast:</b> Deal 1 damage\nto all enemies.",
+"collectible": true
+},
+{
+"id": "END_005",
+"dbfId": 121060,
+"name": "Bygone Echoes",
+"set": "TIME_TRAVEL",
+"type": "SPELL",
+"classes": [
+"DEATHKNIGHT",
+"DEMONHUNTER"
+],
+"cost": 5,
+"rarity": "RARE",
+"mechanics": [
+"OUTCAST"
+],
+"spellSchool": "SHADOW",
+"text": "Summon a random 4-Cost minion. Spend 4\n<b>Corpses</b> to summon another.\n<b>Outcast:</b> And another.",
+"collectible": true
+},
+{
+"id": "ETC_411",
+"dbfId": 90612,
+"name": "SECURITY!!",
+"set": "BATTLE_OF_THE_BANDS",
+"type": "SPELL",
+"cardClass": "DEMONHUNTER",
+"cost": 2,
+"rarity": "COMMON",
+"mechanics": [
+"OUTCAST"
+],
+"referencedTags": [
+"RUSH"
+],
+"text": "Summon two 1/1 Illidari with <b>Rush</b>.\n<b>Outcast:</b> Summon\none more.",
+"collectible": true
+},
+{
+"id": "GDB_116",
+"dbfId": 110886,
+"name": "Eldritch Being",
+"set": "SPACE",
+"type": "MINION",
+"cardClass": "DEMONHUNTER",
+"cost": 1,
+"rarity": "EPIC",
+"mechanics": [
+"OUTCAST",
+"SPELLBURST"
+],
+"text": "<b>Outcast and <b>Spellburst</b>:</b> Shuffle your hand.",
+"collectible": true
+},
+{
+"id": "JAIL_892",
+"dbfId": 127159,
+"name": "Cosmic Manifestations",
+"set": "ESCAPEFROM_VIOLET_HOLD",
+"type": "SPELL",
+"cardClass": "DEMONHUNTER",
+"cost": 2,
+"rarity": "EPIC",
+"mechanics": [
+"OUTCAST"
+],
+"spellSchool": "SHADOW",
+"text": "[x]Deal $2 damage. Shuffle\na random Demon Hunter\nspell into your deck.\n<b>Outcast:</b> Do it again.",
+"collectible": true
+},
+{
+"id": "JAM_020",
+"dbfId": 95374,
+"name": "Tough Crowd",
+"set": "BATTLE_OF_THE_BANDS",
+"type": "MINION",
+"cardClass": "ROGUE",
+"classes": [
+"ROGUE",
+"DEMONHUNTER"
+],
+"cost": 3,
+"rarity": "COMMON",
+"mechanics": [
+"OUTCAST"
+],
+"races": [
+"DEMON"
+],
+"race": "DEMON",
+"text": "<b>Outcast:</b> Return a minion to its owner's hand.",
+"collectible": true
+},
+{
+"id": "LEG_CS3_017",
+"dbfId": 130584,
+"name": "Gan'arg Glaivesmith",
+"set": "LEGACY",
+"type": "MINION",
+"cardClass": "DEMONHUNTER",
+"cost": 3,
+"rarity": "COMMON",
+"mechanics": [
+"OUTCAST"
+],
+"races": [
+"DEMON"
+],
+"race": "DEMON",
+"text": "<b>Outcast:</b> Give your hero +3 Attack this turn.",
+"collectible": true,
+"countAsCopyOfDbfId": 64465
+},
+{
+"id": "RLK_207",
+"dbfId": 84232,
+"name": "Fierce Outsider",
+"set": "RETURN_OF_THE_LICH_KING",
+"type": "MINION",
+"cardClass": "DEMONHUNTER",
+"cost": 1,
+"rarity": "COMMON",
+"mechanics": [
+"OUTCAST",
+"RUSH"
+],
+"text": "<b>Rush</b>\n<b>Outcast:</b> Your next <b>Outcast</b> card costs (1) less.",
+"collectible": true
+},
+{
+"id": "SCH_356",
+"dbfId": 60153,
+"name": "Glide",
+"set": "SCHOLOMANCE",
+"type": "SPELL",
+"cardClass": "DEMONHUNTER",
+"cost": 4,
+"rarity": "RARE",
+"mechanics": [
+"OUTCAST"
+],
+"text": "[x]Shuffle your hand into\nyour deck. Draw 4 cards.\n<b>Outcast:</b> Your opponent\ndoes the same.",
+"collectible": true
+},
+{
+"id": "SCH_603",
+"dbfId": 59395,
+"name": "Star Student Stelina",
+"set": "SCHOLOMANCE",
+"type": "MINION",
+"cardClass": "DEMONHUNTER",
+"cost": 4,
+"rarity": "LEGENDARY",
+"mechanics": [
+"OUTCAST"
+],
+"text": "[x]<b>Outcast:</b> Look at 3 cards\nin your opponent's hand.\nShuffle one of them\ninto their deck.",
+"collectible": true
+},
+{
+"id": "SCH_702",
+"dbfId": 59726,
+"name": "Felosophy",
+"set": "SCHOLOMANCE",
+"type": "SPELL",
+"cardClass": "WARLOCK",
+"classes": [
+"WARLOCK",
+"DEMONHUNTER"
+],
+"cost": 1,
+"rarity": "EPIC",
+"mechanics": [
+"OUTCAST"
+],
+"spellSchool": "FEL",
+"text": "[x]Copy the lowest Cost\nDemon in your hand.\n<b>Outcast:</b> Give both +1/+1.",
+"collectible": true
+},
+{
+"id": "SCH_705",
+"dbfId": 59753,
+"name": "Vilefiend Trainer",
+"set": "SCHOLOMANCE",
+"type": "MINION",
+"cardClass": "DEMONHUNTER",
+"cost": 4,
+"rarity": "COMMON",
+"mechanics": [
+"OUTCAST"
+],
+"text": "<b>Outcast:</b> Summon two 1/1 Demons.",
+"collectible": true
+},
+{
+"id": "SW_452",
+"dbfId": 64665,
+"name": "Chaos Leech",
+"set": "STORMWIND",
+"type": "SPELL",
+"cardClass": "DEMONHUNTER",
+"cost": 3,
+"rarity": "RARE",
+"mechanics": [
+"LIFESTEAL",
+"OUTCAST"
+],
+"spellSchool": "FEL",
+"text": "<b>Lifesteal</b>. Deal $3 damage to a minion.\n<b>Outcast:</b> Deal $5 instead.",
+"collectible": true
+},
+{
+"id": "TIME_021",
+"dbfId": 120179,
+"name": "Doomsday Prepper",
+"set": "TIME_TRAVEL",
+"type": "MINION",
+"cardClass": "DEMONHUNTER",
+"cost": 5,
+"rarity": "EPIC",
+"mechanics": [
+"OUTCAST"
+],
+"referencedTags": [
+"IMMUNE"
+],
+"text": "<b>Outcast:</b>& Your hero is <b>Immune</b> until your\nnext turn.",
+"collectible": true
+},
+{
+"id": "TOY_640",
+"dbfId": 104507,
+"name": "Workshop Mishap",
+"set": "WHIZBANGS_WORKSHOP",
+"type": "SPELL",
+"cardClass": "DEMONHUNTER",
+"cost": 4,
+"rarity": "RARE",
+"mechanics": [
+"OUTCAST",
+"ImmuneToSpellpower"
+],
+"referencedTags": [
+"LIFESTEAL"
+],
+"spellSchool": "FEL",
+"text": "Deal $5 damage to a minion. Excess damages both neighbors.\n<b>Outcast:</b> Gain <b>Lifesteal</b>.",
+"collectible": true
+},
+{
+"id": "TOY_643",
+"dbfId": 104514,
+"name": "Blind Box",
+"set": "WHIZBANGS_WORKSHOP",
+"type": "SPELL",
+"cardClass": "DEMONHUNTER",
+"cost": 2,
+"rarity": "COMMON",
+"mechanics": [
+"DISCOVER",
+"OUTCAST"
+],
+"text": "Get 2 random Demons. <b>Outcast:</b> <b>Discover</b> them instead.",
+"collectible": true
+},
+{
+"id": "TOY_913",
+"dbfId": 103169,
+"name": "Ci'Cigi",
+"set": "WHIZBANGS_WORKSHOP",
+"type": "MINION",
+"cardClass": "DEMONHUNTER",
+"cost": 3,
+"rarity": "LEGENDARY",
+"mechanics": [
+"BATTLECRY",
+"DEATHRATTLE",
+"OUTCAST"
+],
+"text": "[x]<b>Battlecry, Outcast, and\nDeathrattle:</b> Get a random\n  first-edition Demon Hunter  \ncard <i>(in mint condition)</i>.",
+"collectible": true
+},
+{
+"id": "TSC_217",
+"dbfId": 73721,
+"name": "Wayward Sage",
+"set": "THE_SUNKEN_CITY",
+"type": "MINION",
+"cardClass": "DEMONHUNTER",
+"cost": 2,
+"rarity": "EPIC",
+"mechanics": [
+"OUTCAST"
+],
+"races": [
+"NAGA"
+],
+"race": "NAGA",
+"text": "[x]<b>Outcast:</b> Reduce the Cost\nof the left and right-most\n cards in your hand by (1).",
+"collectible": true
+},
+{
+"id": "VAC_928",
+"dbfId": 106591,
+"name": "Paraglide",
+"set": "ISLAND_VACATION",
+"type": "SPELL",
+"cardClass": "DEMONHUNTER",
+"cost": 3,
+"rarity": "RARE",
+"mechanics": [
+"OUTCAST"
+],
+"text": "[x]Both players\ndraw 3 cards.\n<b>Outcast:</b> Only you do.",
+"collectible": true
+},
+{
+"id": "WW_406",
+"dbfId": 100363,
+"name": "Midnight Wolf",
+"set": "WILD_WEST",
+"type": "MINION",
+"cardClass": "DEMONHUNTER",
+"cost": 6,
+"rarity": "COMMON",
+"mechanics": [
+"OUTCAST",
+"RUSH"
+],
+"races": [
+"BEAST"
+],
+"race": "BEAST",
+"text": "<b>Rush</b>\n<b>Outcast:</b> Summon a\ncopy of this.",
+"collectible": true
+},
+{
+"id": "UNG_999t10",
+"dbfId": 41054,
+"name": "Shrouding Mist",
+"set": "UNGORO",
+"type": "SPELL",
+"cardClass": "NEUTRAL",
+"cost": 0,
+"mechanics": [
+"STEALTH"
+],
+"text": "<b>Stealth</b> until your next turn."
+},
+{
+"id": "UNG_999t13",
+"dbfId": 41211,
+"name": "Poison Spit",
+"set": "UNGORO",
+"type": "SPELL",
+"cardClass": "NEUTRAL",
+"cost": 0,
+"mechanics": [
+"POISONOUS"
+],
+"text": "<b>Poisonous</b>"
+},
+{
+"id": "UNG_999t14",
+"dbfId": 41691,
+"name": "Volcanic Might",
+"set": "UNGORO",
+"type": "SPELL",
+"cardClass": "NEUTRAL",
+"cost": 0,
+"text": "+1/+1"
+},
+{
+"id": "UNG_999t2",
+"dbfId": 41057,
+"name": "Living Spores",
+"set": "UNGORO",
+"type": "SPELL",
+"cardClass": "NEUTRAL",
+"cost": 0,
+"mechanics": [
+"DEATHRATTLE"
+],
+"text": "<b>Deathrattle:</b> Summon two 1/1 Plants."
+},
+{
+"id": "UNG_999t3",
+"dbfId": 41058,
+"name": "Flaming Claws",
+"set": "UNGORO",
+"type": "SPELL",
+"cardClass": "NEUTRAL",
+"cost": 0,
+"text": "+3 Attack"
+},
+{
+"id": "UNG_999t4",
+"dbfId": 41059,
+"name": "Rocky Carapace",
+"set": "UNGORO",
+"type": "SPELL",
+"cardClass": "NEUTRAL",
+"cost": 0,
+"text": "+3 Health"
+},
+{
+"id": "UNG_999t5",
+"dbfId": 41060,
+"name": "Liquid Membrane",
+"set": "UNGORO",
+"type": "SPELL",
+"cardClass": "NEUTRAL",
+"cost": 0,
+"mechanics": [
+"ELUSIVE"
+],
+"text": "<b>Elusive</b>"
+},
+{
+"id": "UNG_999t6",
+"dbfId": 41061,
+"name": "Massive",
+"set": "UNGORO",
+"type": "SPELL",
+"cardClass": "NEUTRAL",
+"cost": 0,
+"mechanics": [
+"TAUNT"
+],
+"text": "<b>Taunt</b>"
+},
+{
+"id": "UNG_999t7",
+"dbfId": 41062,
+"name": "Lightning Speed",
+"set": "UNGORO",
+"type": "SPELL",
+"cardClass": "NEUTRAL",
+"cost": 0,
+"mechanics": [
+"WINDFURY"
+],
+"text": "<b>Windfury</b>"
+},
+{
+"id": "UNG_999t8",
+"dbfId": 41063,
+"name": "Crackling Shield",
+"set": "UNGORO",
+"type": "SPELL",
+"cardClass": "NEUTRAL",
+"cost": 0,
+"mechanics": [
+"DIVINE_SHIELD"
+],
+"text": "<b>Divine Shield</b>"
+},
+{
+"id": "DEEP_999t1",
+"dbfId": 104576,
+"name": "Heartblossom",
+"set": "WILD_WEST",
+"type": "SPELL",
+"cardClass": "NEUTRAL",
+"cost": 1,
+"rarity": "COMMON",
+"text": "Give a friendly minion +2/+2. Deal $2 damage to a random enemy minion."
+},
+{
+"id": "DEEP_999t2",
+"dbfId": 104578,
+"name": "Deepholm Geode",
+"set": "WILD_WEST",
+"type": "MINION",
+"cardClass": "NEUTRAL",
+"cost": 2,
+"rarity": "RARE",
+"mechanics": [
+"TRIGGER_VISUAL"
+],
+"races": [
+"ELEMENTAL"
+],
+"race": "ELEMENTAL",
+"text": "At the end of your turn, deal 2 damage to all enemies."
+},
+{
+"id": "DEEP_999t3",
+"dbfId": 104579,
+"name": "World Pillar Fragment",
+"set": "WILD_WEST",
+"type": "SPELL",
+"cardClass": "NEUTRAL",
+"cost": 3,
+"rarity": "EPIC",
+"mechanics": [
+"DISCOVER"
+],
+"text": "<b>Discover</b> an Elemental to summon. Add the others to your hand."
+},
+{
+"id": "DEEP_999t4",
+"dbfId": 104581,
+"name": "The Azerite Dragon",
+"set": "WILD_WEST",
+"type": "MINION",
+"cardClass": "PALADIN",
+"cost": 4,
+"rarity": "LEGENDARY",
+"mechanics": [
+"BATTLECRY"
+],
+"races": [
+"ELEMENTAL",
+"DRAGON"
+],
+"race": "ELEMENTAL",
+"text": "[x]<b>Battlecry:</b> Give all other\nminions in your hand, deck,\nand battlefield +3/+3."
+},
+{
+"id": "DEEP_999t5",
+"dbfId": 104584,
+"name": "The Azerite Murloc",
+"set": "WILD_WEST",
+"type": "MINION",
+"cardClass": "SHAMAN",
+"cost": 4,
+"rarity": "LEGENDARY",
+"mechanics": [
+"BATTLECRY"
+],
+"races": [
+"ELEMENTAL",
+"MURLOC"
+],
+"race": "ELEMENTAL",
+"text": "[x]<b>Battlecry:</b> Transform ALL\nyour other minions into ones\nthat cost (3) more <i>(keeping\ntheir original Costs).</i>"
+},
+{
+"id": "WW_001t",
+"dbfId": 98738,
+"name": "Rock",
+"set": "WILD_WEST",
+"type": "SPELL",
+"cardClass": "NEUTRAL",
+"cost": 1,
+"rarity": "COMMON",
+"text": "Deal $3 damage."
+},
+{
+"id": "WW_001t11",
+"dbfId": 98755,
+"name": "Ogrefist Boulder",
+"set": "WILD_WEST",
+"type": "LOCATION",
+"cardClass": "NEUTRAL",
+"cost": 3,
+"rarity": "EPIC",
+"text": "Set a minion's stats\nto 6/7."
+},
+{
+"id": "WW_001t12",
+"dbfId": 98759,
+"name": "Collapse!",
+"set": "WILD_WEST",
+"type": "SPELL",
+"cardClass": "NEUTRAL",
+"cost": 3,
+"rarity": "EPIC",
+"text": "Deal $3 damage\nto all enemies."
+},
+{
+"id": "WW_001t13",
+"dbfId": 98760,
+"name": "Steelhide Mole",
+"set": "WILD_WEST",
+"type": "MINION",
+"cardClass": "NEUTRAL",
+"cost": 3,
+"rarity": "EPIC",
+"mechanics": [
+"ELUSIVE",
+"REBORN",
+"TAUNT"
+],
+"races": [
+"BEAST"
+],
+"race": "BEAST",
+"text": "<b>Taunt</b>\n<b>Reborn</b>\n<b>Elusive</b>"
+},
+{
+"id": "WW_001t14",
+"dbfId": 98761,
+"name": "Azerite Gem",
+"set": "WILD_WEST",
+"type": "SPELL",
+"cardClass": "NEUTRAL",
+"cost": 3,
+"rarity": "EPIC",
+"mechanics": [
+"DISCOVER"
+],
+"text": "<b>Discover</b> a 5-Cost card.\nIt costs (0)."
+},
+{
+"id": "WW_001t16",
+"dbfId": 98744,
+"name": "Living Stone",
+"set": "WILD_WEST",
+"type": "MINION",
+"cardClass": "NEUTRAL",
+"cost": 2,
+"rarity": "RARE",
+"mechanics": [
+"DEATHRATTLE",
+"TAUNT"
+],
+"races": [
+"ELEMENTAL"
+],
+"race": "ELEMENTAL",
+"text": "[x]<b>Taunt</b>\n<b>Deathrattle:</b> Summon a\nrandom 2-Cost minion."
+},
+{
+"id": "WW_001t17",
+"dbfId": 98857,
+"name": "Motherlode Drake",
+"set": "WILD_WEST",
+"type": "MINION",
+"cardClass": "NEUTRAL",
+"cost": 3,
+"rarity": "EPIC",
+"mechanics": [
+"DIVINE_SHIELD",
+"LIFESTEAL",
+"RUSH"
+],
+"races": [
+"DRAGON"
+],
+"race": "DRAGON",
+"text": "<b>Rush</b>\n<b>Divine Shield</b>\n<b>Lifesteal</b>"
+},
+{
+"id": "WW_001t18",
+"dbfId": 98859,
+"name": "Pouch of Coins",
+"set": "WILD_WEST",
+"type": "SPELL",
+"cardClass": "NEUTRAL",
+"cost": 1,
+"rarity": "COMMON",
+"text": "Get two Coins."
+},
+{
+"id": "WW_001t2",
+"dbfId": 98739,
+"name": "Water Source",
+"set": "WILD_WEST",
+"type": "SPELL",
+"cardClass": "NEUTRAL",
+"cost": 1,
+"rarity": "COMMON",
+"text": "Restore #3 Health.\nDraw a card."
+},
+{
+"id": "WW_001t23",
+"dbfId": 102067,
+"name": "The Azerite Scorpion",
+"set": "WILD_WEST",
+"type": "MINION",
+"cardClass": "ROGUE",
+"cost": 4,
+"rarity": "LEGENDARY",
+"mechanics": [
+"BATTLECRY"
+],
+"referencedTags": [
+"EXCAVATE"
+],
+"races": [
+"ELEMENTAL",
+"BEAST"
+],
+"race": "ELEMENTAL",
+"text": "[x]<b>Battlecry</b>: Get 4 random spells.\nThey cost (1) less for each time\nyou've <b>Excavated</b> this game\n<i>(but not less than 1)</i>."
+},
+{
+"id": "WW_001t24",
+"dbfId": 102027,
+"name": "The Azerite Hawk",
+"set": "WILD_WEST",
+"type": "MINION",
+"cardClass": "MAGE",
+"cost": 4,
+"rarity": "LEGENDARY",
+"mechanics": [
+"BATTLECRY"
+],
+"referencedTags": [
+"TITAN"
+],
+"races": [
+"ELEMENTAL",
+"BEAST"
+],
+"race": "ELEMENTAL",
+"text": "<b>Battlecry:</b> Get a random <b>Titan</b>. It costs (1)."
+},
+{
+"id": "WW_001t25",
+"dbfId": 102068,
+"name": "The Azerite Snake",
+"set": "WILD_WEST",
+"type": "MINION",
+"cardClass": "WARLOCK",
+"cost": 4,
+"rarity": "LEGENDARY",
+"mechanics": [
+"BATTLECRY"
+],
+"races": [
+"ELEMENTAL",
+"BEAST"
+],
+"race": "ELEMENTAL",
+"text": "<b>Battlecry:</b> Your hero\nsteals 10 Health from\nthe enemy hero."
+},
+{
+"id": "WW_001t26",
+"dbfId": 102069,
+"name": "The Azerite Rat",
+"set": "WILD_WEST",
+"type": "MINION",
+"cardClass": "DEATHKNIGHT",
+"cost": 4,
+"rarity": "LEGENDARY",
+"mechanics": [
+"BATTLECRY"
+],
+"referencedTags": [
+"LIFESTEAL",
+"REBORN"
+],
+"races": [
+"ELEMENTAL",
+"BEAST"
+],
+"race": "ELEMENTAL",
+"text": "[x]<b>Battlecry:</b> Resurrect your\nhighest Cost minion.\nGive it +2/+2, <b>Reborn</b>,\nand <b>Lifesteal</b>."
+},
+{
+"id": "WW_001t27",
+"dbfId": 102039,
+"name": "The Azerite Ox",
+"set": "WILD_WEST",
+"type": "MINION",
+"cardClass": "WARRIOR",
+"cost": 4,
+"rarity": "LEGENDARY",
+"mechanics": [
+"BATTLECRY",
+"DISCOVER"
+],
+"races": [
+"ELEMENTAL",
+"BEAST"
+],
+"race": "ELEMENTAL",
+"text": "<b>Battlecry:</b> <b>Discover</b>\ntwo 8-Cost minions. Summon them."
+},
+{
+"id": "WW_001t3",
+"dbfId": 98740,
+"name": "Fool's Azerite",
+"set": "WILD_WEST",
+"type": "SPELL",
+"cardClass": "NEUTRAL",
+"cost": 1,
+"rarity": "COMMON",
+"mechanics": [
+"DISCOVER"
+],
+"text": "<b>Discover</b> a 2-Cost card.\nIt costs (0)."
+},
+{
+"id": "WW_001t4",
+"dbfId": 98741,
+"name": "Escaping Trogg",
+"set": "WILD_WEST",
+"type": "MINION",
+"cardClass": "NEUTRAL",
+"cost": 1,
+"rarity": "COMMON",
+"mechanics": [
+"RUSH"
+],
+"text": "<b>Rush</b>"
+},
+{
+"id": "WW_001t5",
+"dbfId": 98742,
+"name": "Falling Stalactite",
+"set": "WILD_WEST",
+"type": "SPELL",
+"cardClass": "NEUTRAL",
+"cost": 2,
+"rarity": "RARE",
+"text": "Deal $3 damage\nto a minion and the\nenemy hero."
+},
+{
+"id": "WW_001t7",
+"dbfId": 98747,
+"name": "Canary",
+"set": "WILD_WEST",
+"type": "MINION",
+"cardClass": "NEUTRAL",
+"cost": 2,
+"rarity": "RARE",
+"mechanics": [
+"BATTLECRY"
+],
+"races": [
+"BEAST"
+],
+"race": "BEAST",
+"text": "<b>Battlecry:</b> Return an\nenemy minion to its owner's hand."
+},
+{
+"id": "WW_001t8",
+"dbfId": 98748,
+"name": "Glowing Glyph",
+"set": "WILD_WEST",
+"type": "SPELL",
+"cardClass": "NEUTRAL",
+"cost": 2,
+"rarity": "RARE",
+"text": "Give a minion and its neighbors +1/+2."
+},
+{
+"id": "WW_001t9",
+"dbfId": 98749,
+"name": "Azerite Chunk",
+"set": "WILD_WEST",
+"type": "SPELL",
+"cardClass": "NEUTRAL",
+"cost": 2,
+"rarity": "RARE",
+"mechanics": [
+"DISCOVER"
+],
+"text": "<b>Discover</b> a 3-Cost card.\nIt costs (0)."
+},
+{
+"id": "CORE_BT_321",
+"dbfId": 129167,
+"name": "Netherwalker",
+"set": "CORE",
+"type": "MINION",
+"cardClass": "DEMONHUNTER",
+"cost": 2,
+"rarity": "COMMON",
+"mechanics": [
+"BATTLECRY",
+"DISCOVER"
+],
+"text": "<b>Battlecry:</b>& <b>Discover</b> a Demon.",
+"collectible": true,
+"countAsCopyOfDbfId": 56985
+},
+{
+"id": "CORE_EX1_506",
+"dbfId": 69557,
+"name": "Murloc Tidehunter",
+"set": "CORE",
+"type": "MINION",
+"cardClass": "NEUTRAL",
+"cost": 2,
+"rarity": "COMMON",
+"mechanics": [
+"BATTLECRY"
+],
+"races": [
+"MURLOC"
+],
+"race": "MURLOC",
+"text": "<b>Battlecry:</b> Summon a 1/1 Murloc Scout.",
+"collectible": true
+},
+{
+"id": "CORE_CS2_142",
+"dbfId": 69539,
+"name": "Kobold Geomancer",
+"set": "CORE_HIDDEN",
+"type": "MINION",
+"cardClass": "NEUTRAL",
+"cost": 2,
+"rarity": "COMMON",
+"mechanics": [
+"SPELLPOWER"
+],
+"text": "<b>Spell Damage +1</b>",
+"collectible": true
+},
+{
+"id": "CORE_BT_036",
+"dbfId": 69504,
+"name": "Coordinated Strike",
+"set": "CORE_HIDDEN",
+"type": "SPELL",
+"cardClass": "DEMONHUNTER",
+"cost": 3,
+"rarity": "COMMON",
+"referencedTags": [
+"RUSH"
+],
+"text": "Summon three 1/1 Illidari with <b>Rush</b>.",
+"collectible": true
+}
+],
+"names_ru": {
+"CORE_YOP_001": "Иллидариведение",
+"CORE_DS1_184": "Выслеживание",
+"Core_LOE_115": "Статуя ворона",
+"CORE_AT_037": "Живые корни",
+"AT_037": "Живые корни",
+"AT_037a": "Цепкие корни",
+"AT_037b": "Пара саженцев",
+"UNG_001": "Птенец терродактиля",
+"DEEP_033": "Окаменелый калейдозавр",
+"CORE_BT_801": "Пронзающий взгляд",
+"CORE_BT_035": "Удар Хаоса",
+"CATA_614": "Темный осведомитель",
+"EX1_165": "Друид когтя",
+"EX1_165a": "Облик кошки",
+"EX1_165b": "Облик медведя",
+"BAR_328": "Мстительный дух",
+"BAR_333": "Куртрус Ливень Пепла",
+"BE_264": "Слепой боронитель",
+"BT_480": "Гонец Кровавой Печати",
+"BT_490": "Поглощение магии",
+"BT_491": "Призрачное зрение",
+"BT_601": "Череп Гул'дана",
+"BT_801": "Пронзающий взгляд",
+"BT_814": "Клинок Скверны",
+"CATA_533": "Стремительные волны",
+"CORE_BT_480": "Гонец Кровавой Печати",
+"CORE_BT_491": "Призрачное зрение",
+"CORE_TSC_217": "Заплутавшая ведунья",
+"CS3_017": "Ган'арг-кузнец",
+"DINO_136": "Рог пиршества",
+"DMF_227": "Укус натрезима",
+"END_005": "Эхо прошлого",
+"ETC_411": "Охрана!",
+"GDB_116": "Зловещее создание",
+"JAIL_892": "Космические воплощения",
+"JAM_020": "Не наша публика",
+"LEG_CS3_017": "Ган'арг-кузнец",
+"RLK_207": "Яростный чужак",
+"SCH_356": "Планирование",
+"SCH_603": "Отличница Стелина",
+"SCH_702": "Сквернософия",
+"SCH_705": "Дрессировщица мерзотней",
+"SW_452": "Иссушение хаоса",
+"TIME_021": "Выживальщик судного дня",
+"TOY_640": "Авария в мастерской",
+"TOY_643": "Коробка с сюрпризом",
+"TOY_913": "Ки'киги",
+"TSC_217": "Заплутавшая ведунья",
+"VAC_928": "Прыжок с парапланом",
+"WW_406": "Полуночный волк",
+"UNG_999t10": "Клубящийся туман",
+"UNG_999t13": "Ядовитый плевок",
+"UNG_999t14": "Мощь вулкана",
+"UNG_999t2": "Живые споры",
+"UNG_999t3": "Пылающие когти",
+"UNG_999t4": "Каменный панцирь",
+"UNG_999t5": "Жидкая оболочка",
+"UNG_999t6": "Массивность",
+"UNG_999t7": "Молниеносность",
+"UNG_999t8": "Искрящий щит",
+"DEEP_999t1": "Цветущее сердце",
+"DEEP_999t2": "Жеода Подземья",
+"DEEP_999t3": "Фрагмент Столпа Мира",
+"DEEP_999t4": "Азеритовый дракон",
+"DEEP_999t5": "Азеритовый мурлок",
+"WW_001t": "Камень",
+"WW_001t11": "Скала огра-борца",
+"WW_001t12": "Обвал!",
+"WW_001t13": "Сталешкурый крот",
+"WW_001t14": "Азеритовая гемма",
+"WW_001t16": "Живой камень",
+"WW_001t17": "Рудниковый дракон",
+"WW_001t18": "Мешочек монет",
+"WW_001t2": "Бьющий ключ",
+"WW_001t23": "Азеритовый скорпион",
+"WW_001t24": "Азеритовый ястреб",
+"WW_001t25": "Азеритовая змея",
+"WW_001t26": "Азеритовая крыса",
+"WW_001t27": "Азеритовый буйвол",
+"WW_001t3": "Почти азерит",
+"WW_001t4": "Трогг-беглец",
+"WW_001t5": "Падающие сталактиты",
+"WW_001t7": "Канарейка",
+"WW_001t8": "Светящийся символ",
+"WW_001t9": "Глыба азерита",
+"CORE_BT_321": "Странница Пустоты",
+"CORE_EX1_506": "Мурлок-волнолов",
+"CORE_CS2_142": "Кобольд-геомант",
+"CORE_BT_036": "Скоординированная атака"
+}
+}

@@ -910,6 +910,35 @@ curl -s "https://api.kolodahearthstone.com/v1/hsreplay/mulligan?deck=5Tf8XCaMoKK
 формата колоды эфира), `streamer` (профиль или `null`) и `current_deck`
 (колода, сыгранная после начала эфира, или `null`).
 
+## HSReplay: что берут из Раскопки (card choices)
+
+Подробно (эндпоинт HSReplay, правила пулов, очередь, бюджет, все поля):
+[HSREPLAY_CARD_CHOICES.md](HSREPLAY_CARD_CHOICES.md).
+
+Источник `hsreplay_card_choices` (pipeline). Таймер
+`hs-data-api-docker-refresh-hsreplay-card-choices.timer` раз в сутки (04:35
+Europe/Warsaw) читает просроченные цели
+`https://hsreplay.net/analytics/query/single_card_choices_by_winrate_v2/` —
+50 самых играемых карт с выбором Стандарта и 10 Вольного на Легенде и
+Бронзе–Золоте. Цель перечитывается раз в неделю и один раз через сутки после
+патча. Scrape.do без рендера (1 кредит), не больше 5 параллельно, не больше
+40 кредитов за запуск и 60 в сутки (UTC).
+
+| Endpoint | Что возвращает |
+| --- | --- |
+| `GET /v1/hsreplay/card-choices` | `card` (id или dbf), `format` (`standard`/`wild`, по умолчанию Стандарт, если карта в нём), `rank` (`legend`, `bronze_gold`; `diamond_4to1`, `diamond` — если включены). `data.card` (вид выбора `kind`, `name_ru`, текст), `data.stats` (`state`: `ok`/`no_data`/`not_collected`/`not_tracked`/состояние цели, `checked_at`, `as_of`, `stale`, `source_url`), `data.options[]` (вариант HSReplay: `popularity` — как часто берут, когда предложен, сумма > 100%; `win_rate`; `low_sample`; `undervalued`; `in_pool`), `data.pool` (полный пул из базы карт: `resolved`, `reason`, `class_dependent`, `cards[]` с `has_stats`, `tiers[]` для Добычи), `data.available` (собранные формат/ранг) |
+| `GET /v1/hsreplay/card-choices/cards` | Все карты с выбором: `kind` (`discover`, `adapt`, `dredge`, `choose_one`, `excavate`), форматы, `has_hsreplay_stats`, собранные срезы |
+| `GET /v1/hsreplay/card-choices/coverage` | Цели с данными по формату и рангу, последний запуск с расходом Scrape.do (без кэша) |
+
+Неизвестная карта или карта без выбора — `404`. HSReplay не считает выборы
+«Выберите эффект» и Добычи (отвечает 204): для них `stats.state` =
+`not_tracked`, а пул (варианты, сокровища по уровням) отдаётся из базы карт.
+
+```bash
+curl -s "https://api.kolodahearthstone.com/v1/hsreplay/card-choices?card=CORE_YOP_001&rank=legend" \
+  | jq '.data | {state: .stats.state, top: [.options[:3][] | {name_ru, popularity, win_rate, undervalued}]}'
+```
+
 ## Official Blizzard Leaderboards
 
 Подробно (охват, частота, вежливость к API, хранение, поля):

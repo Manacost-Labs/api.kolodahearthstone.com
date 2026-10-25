@@ -1,0 +1,61 @@
+{
+ "render_as": "table",
+ "series": {
+  "metadata": {},
+  "data": {
+   "ALL": [
+    {
+     "dbf_id": 69740,
+     "popularity": 34.23,
+     "win_rate": 43.95
+    },
+    {
+     "dbf_id": 121060,
+     "popularity": 22.97,
+     "win_rate": 46.89
+    },
+    {
+     "dbf_id": 69684,
+     "popularity": 42.63,
+     "win_rate": 47.34
+    },
+    {
+     "dbf_id": 120179,
+     "popularity": 18.09,
+     "win_rate": 37.28
+    },
+    {
+     "dbf_id": 122995,
+     "popularity": 41.22,
+     "win_rate": 43.44
+    },
+    {
+     "dbf_id": 127159,
+     "popularity": 31.73,
+     "win_rate": 50.17
+    },
+    {
+     "dbf_id": 118503,
+     "popularity": 44.98,
+     "win_rate": 45.26
+    },
+    {
+     "dbf_id": 69683,
+     "popularity": 38.25,
+     "win_rate": 49.44
+    },
+    {
+     "dbf_id": 130785,
+     "popularity": 21.72,
+     "win_rate": 43.14
+    },
+    {
+     "dbf_id": null,
+     "popularity": 34.46,
+     "win_rate": 48.21
+    }
+   ]
+  }
+ },
+ "as_of": "2026-10-25T16:59:00Z"
+}

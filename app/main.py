@@ -54,6 +54,7 @@ from .routers.hsguru_meta import router as hsguru_meta_v1_router
 from .routers.hsguru_coverage import router as hsguru_coverage_v1_router
 from .routers.hsguru_stats import router as hsguru_stats_v1_router
 from .routers.hsreplay_mulligan import router as hsreplay_mulligan_v1_router
+from .routers.hsreplay_card_choices import router as hsreplay_card_choices_v1_router
 from .routers.hsguru_streamers import router as hsguru_streamers_v1_router
 from .routers.leaderboards import router as leaderboards_v1_router
 from .routers.material_search import router as material_search_router
@@ -216,6 +217,7 @@ app.include_router(hsguru_matchups_v1_router)
 app.include_router(hsguru_stats_v1_router)
 app.include_router(hsguru_coverage_v1_router)
 app.include_router(hsreplay_mulligan_v1_router)
+app.include_router(hsreplay_card_choices_v1_router)
 app.include_router(hsguru_streamers_v1_router)
 app.include_router(leaderboards_v1_router)
 app.include_router(api_tokens_router)

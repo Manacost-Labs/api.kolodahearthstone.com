@@ -26,6 +26,7 @@ def _no_store_path(path: str) -> bool:
             "/v1/hsguru/archetypes/analysis",
             "/v1/hsguru/mulligan/coverage",
             "/v1/hsreplay/mulligan/coverage",
+            "/v1/hsreplay/card-choices/coverage",
             "/v1/hsguru/streaming-now",
             "/v1/hsguru/streamers/coverage",
             "/v1/leaderboards/coverage",
@@ -55,6 +56,7 @@ def _cacheable_path(path: str) -> bool:
         (
             "/v1/hsguru/mulligan/coverage",
             "/v1/hsreplay/mulligan/coverage",
+            "/v1/hsreplay/card-choices/coverage",
             "/v1/leaderboards/coverage",
         )
     ):
@@ -187,6 +189,10 @@ def _db_revision(path: str) -> str | None:
             from .hsguru_mulligan import latest_revision as hsguru_stats_revision
 
             return hsguru_stats_revision()
+        if path.startswith("/v1/hsreplay/card-choices"):
+            from .hsreplay_card_choices import latest_revision as card_choices_revision
+
+            return card_choices_revision()
         if path.startswith("/v1/hsreplay/mulligan"):
             from .hsreplay_mulligan import latest_revision as hsreplay_mulligan_revision
 

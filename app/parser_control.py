@@ -1797,6 +1797,10 @@ async def _run_pipeline_source(source_id: str) -> dict[str, Any]:
         from .hsreplay_mulligan import refresh_hsreplay_mulligan
 
         result = await refresh_hsreplay_mulligan()
+    elif source_id == "hsreplay_card_choices":
+        from .hsreplay_card_choices import refresh_hsreplay_card_choices
+
+        result = await refresh_hsreplay_card_choices()
     elif source_id == "hsguru_matchups":
         from .hsguru_matchups import refresh_hsguru_matchups
 
@@ -1865,6 +1869,7 @@ async def _run_pipeline_source(source_id: str) -> dict[str, Any]:
             "hsguru_esports_points": ("rows",),
             "hsguru_esports_legacy": ("rows",),
             "hsreplay_mulligan": ("targets_with_data",),
+            "hsreplay_card_choices": ("targets_with_data",),
             "hsguru_matchups": ("slices_with_data",),
             "hsguru_streamers": ("decks",),
             "blizzard_leaderboards": ("rows",),

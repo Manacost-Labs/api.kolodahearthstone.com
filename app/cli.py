@@ -666,6 +666,30 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Skip datasets whose admin section is disabled.",
     )
     hsguru_esports.add_argument("--schedule-id")
+    card_choices = sub.add_parser(
+        "refresh-hsreplay-card-choices",
+        help=(
+            "Read due HSReplay card choice statistics (Discover/Adapt picks) through "
+            "Scrape.do within the run and UTC-day credit caps."
+        ),
+    )
+    card_choices.add_argument(
+        "--max-requests",
+        type=int,
+        default=None,
+        help="Extra credit cap for this run (on top of HS_CARD_CHOICES_* caps).",
+    )
+    card_choices.add_argument(
+        "--estimate",
+        action="store_true",
+        help="Print the planned targets and requests per week; fetch nothing.",
+    )
+    card_choices.add_argument(
+        "--scheduled",
+        action="store_true",
+        help="Skip this scheduled pipeline when its admin section is disabled.",
+    )
+    card_choices.add_argument("--schedule-id")
     hsguru_analysis = sub.add_parser(
         "refresh-hsguru-archetype-analysis",
         help="Refresh Legend class matchups and card stats for active HSGuru archetypes.",
@@ -805,6 +829,7 @@ def main(argv: list[str] | None = None) -> int:
         "refresh-hsguru-mulligan": frozenset({"hsguru_mulligan"}),
         "refresh-hsguru-streamers": frozenset({"hsguru_streamers"}),
         "refresh-hsreplay-mulligan": frozenset({"hsreplay_mulligan"}),
+        "refresh-hsreplay-card-choices": frozenset({"hsreplay_card_choices"}),
         "refresh-hsguru-matchups": frozenset({"hsguru_matchups"}),
         "refresh-hsguru-brawl": frozenset({"hsguru_brawl"}),
         "refresh-hsguru-esports": frozenset(
@@ -1779,6 +1804,49 @@ def main(argv: list[str] | None = None) -> int:
         if any(
             isinstance(item, dict) and item.get("ok") for item in results.values()
         ):
+            return int(ExitCode.DEGRADED)
+        return int(ExitCode.ERROR)
+    if args.command == "refresh-hsreplay-card-choices":
+        source_id = "hsreplay_card_choices"
+        if args.estimate:
+            from .card_choice_pools import load_card_base
+            from .hsreplay_card_choices import Settings, estimate_plan, plan_targets
+
+            result = estimate_plan(plan_targets(load_card_base(), Settings.from_env()))
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+        if args.scheduled:
+            from .parser_control import is_source_scheduled_enabled
+
+            if not is_source_scheduled_enabled(source_id):
+                result = _run_pipeline_command_with_telemetry(
+                    source_id,
+                    lambda: {
+                        "ok": True,
+                        "skipped": True,
+                        "reason": "section_disabled",
+                        "source_id": source_id,
+                    },
+                    refresh_window_id=dedicated_refresh_window_id,
+                )
+                print(json.dumps(result, ensure_ascii=False, indent=2))
+                return 0
+        from .hsreplay_card_choices import refresh_hsreplay_card_choices
+
+        result = _run_pipeline_command_with_telemetry(
+            source_id,
+            lambda: asyncio.run(
+                refresh_hsreplay_card_choices(max_requests=args.max_requests)
+            ),
+            diagnostic=args.max_requests is not None,
+            refresh_window_id=dedicated_refresh_window_id,
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        if args.scheduled and result.get("state") == "locked":
+            return int(ExitCode.DEGRADED)
+        if result.get("ok") and result.get("published"):
+            return int(ExitCode.OK)
+        if result.get("published"):
             return int(ExitCode.DEGRADED)
         return int(ExitCode.ERROR)
     if args.command == "refresh-hsguru-archetype-analysis":

@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- New pipeline `hsreplay_card_choices`: what players pick from Discover,
+  Adapt and Dredge cards. HSReplay's `single_card_choices_by_winrate_v2`
+  gives, per offered option, how often it is taken when offered
+  (`popularity`, the column sums to more than 100%) and the winrate after
+  taking it; it is read for the 50 most played choice cards of Standard and
+  10 of Wild at Legend and Bronze-Gold, weekly and once a day after a patch
+  (about 120 plain Scrape.do requests a week, at most 5 parallel, caps of 40
+  per run and 60 per UTC day). The full option pool of every choice card comes
+  from the card base: Discover text is parsed into type, minion type, school,
+  keyword, rarity, cost and class rules (pools that depend on the game are
+  reported as such instead of guessed), Choose One options, the ten
+  adaptations and Excavate treasures by tier (HSReplay answers 204 for Choose
+  One and Excavate). Options get `low_sample` and `undervalued` flags. REST
+  `/v1/hsreplay/card-choices`, `/card-choices/cards`, `/card-choices/coverage`;
+  GraphQL `hsreplayCardChoices`; SQLite `hsreplay_card_choice_*` mirrored to
+  PostgreSQL (migration 020); timer
+  `hs-data-api-docker-refresh-hsreplay-card-choices` daily at 04:35. See
+  docs/HSREPLAY_CARD_CHOICES.md.
+
 - New pipeline `blizzard_leaderboards` collects the official Blizzard
   leaderboards from the keyless community API: Standard, Wild, Battlegrounds
   solo and duos, Arena, Underground Arena and Twist for EU, US and AP, the

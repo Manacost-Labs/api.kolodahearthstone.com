@@ -202,6 +202,11 @@ function compareSqliteCounts(): array
         'hsreplay_mulligan_runs',
         'hsreplay_mulligan_snapshots',
         'hsreplay_mulligan_targets',
+        // HSReplay card choices: a daily writer that prunes old snapshots.
+        'hsreplay_card_choice_rows',
+        'hsreplay_card_choice_runs',
+        'hsreplay_card_choice_snapshots',
+        'hsreplay_card_choice_targets',
         // The HSGuru streamers writer runs every five minutes, replaces the
         // live table and prunes old VODs and runs.
         'hsguru_streamer_decks',
