@@ -24,8 +24,9 @@ from .analysis import (
     developer_posts,
     select_posts,
 )
-from .backtest import backtest_summary, load_backtest
+from .backtest import accuracy_block, backtest_summary, load_backtest
 from .clients import GetXApiClient, RedditApisClient
+from .editor import edit_texts, jobs_for_payload
 from .history import (
     ArchetypeStats,
     all_changes,
@@ -37,14 +38,16 @@ from .history import (
     timing_outlook,
 )
 from .http import SocialApiError
+from .localize import finalize, localize
 from .schema import SCHEMA_VERSION, ModelCandidate, RadarResult
 from .social import SocialBundle, SocialPost, collect_social, match_mentions
-from .stats import StatsBundle, build_stats
+from .stats import StatsBundle, _english_cards, build_stats
+from .translate import translate_posts
 
 logger = logging.getLogger(__name__)
 
 FORMATS = ("standard", "wild")
-TOP_POSTS = 5
+TOP_POSTS = 3
 # Precedents in the prompt: the strongest-scored candidates only, two each
 # (the response still gets up to three per candidate).
 PRECEDENT_REFS = 80
@@ -119,6 +122,7 @@ def _latest_patch() -> dict[str, Any] | None:
 def _post_view(post: SocialPost, cited: set[str]) -> dict[str, Any]:
     excerpt = (post.text or post.title or "").replace("\n", " ").strip()
     return {
+        "text": post.text or None,  # the full original; textRu is its translation
         "platform": post.platform,
         "kind": post.kind,
         "id": post.id,
@@ -388,7 +392,7 @@ def precedent_digest(
                 "id": f"precedent:{change['id']}",
                 "patch": change["patch"],
                 "date": change.get("date"),
-                "card": change.get("nameEn") or change.get("name"),
+                "card": change.get("name") or change.get("nameEn"),
                 "class": change.get("class"),
                 "direction": change["direction"],
                 "fields": [
@@ -597,10 +601,72 @@ def assemble_result(
             "droppedModelItems": analysis.dropped,
         },
         "history": history_block(balance_history, backtest),
+        "accuracy": accuracy_block(backtest),
         "timing": {**dict(timing), "outlook": analysis.output.timing_outlook or None}
         if timing
         else None,
     }
+
+
+def polish(
+    payload: dict[str, Any],
+    glossary: Any,
+    posts: Mapping[str, SocialPost],
+    *,
+    claude: Any = None,
+    translate: bool = True,
+    edit: bool = True,
+) -> None:
+    """Russian-only reader texts: glossary cleanup, translations, editor, markup."""
+    finalize(payload, glossary)
+    translations: dict[str, Any] = {}
+    if translate:
+        jobs = []
+        for side in ("nerfs", "buffs"):
+            for candidate in payload.get(side) or []:
+                for view in (candidate.get("social") or {}).get("topPosts") or []:
+                    post = posts.get(view["id"])
+                    if post is not None:
+                        jobs.append(
+                            {"id": post.id, "title": post.title, "text": post.text}
+                        )
+                for quote in candidate.get("quotes") or []:
+                    jobs.append(
+                        {
+                            "id": f"quote:{quote['postId']}:{quote['text'][:40]}",
+                            "title": None,
+                            "text": quote["text"],
+                        }
+                    )
+        unique = {job["id"]: job for job in jobs}
+        translations, translation_usage = translate_posts(
+            unique.values(), glossary_lines=glossary.as_lines(), claude=claude
+        )
+        payload["usage"]["translation"] = translation_usage
+    if edit:
+        originals = {"summary": payload.get("summary")}
+        results, report = edit_texts(
+            jobs_for_payload(payload, glossary), run_id=payload["runId"]
+        )
+        payload["editor"] = report
+        if results.get("summary") and results["summary"].applied:
+            payload["summary"] = results["summary"].text
+        payload["original"] = originals
+        for side in ("nerfs", "buffs"):
+            for candidate in payload.get(side) or []:
+                result = results.get(f"{side}:{candidate['ref']}:verdict")
+                if result is None:
+                    continue
+                candidate["editor"] = result.report()
+                if result.applied:
+                    candidate["original"] = {"verdict": candidate["verdict"]}
+                    candidate["verdict"] = result.text
+    finalize(payload, glossary, translations=translations)
+    payload["usage"]["totalCostUsd"] = round(
+        float(payload["usage"].get("totalCostUsd") or 0)
+        + float((payload["usage"].get("translation") or {}).get("costUsd") or 0),
+        4,
+    )
 
 
 def _local_stats() -> tuple[Any, Any]:
@@ -665,6 +731,9 @@ def run_balance_radar(
     db: Any = None,
     archetype_stats: Any = None,
     use_local_db: bool = True,
+    translate_names: bool = True,
+    translate: bool = True,
+    edit: bool = True,
 ) -> RunSummary:
     now = now or datetime.now(UTC)
     started_at = now.astimezone(UTC).isoformat(timespec="seconds")
@@ -708,6 +777,13 @@ def run_balance_radar(
     timing = timing_outlook(balance_history, now.date())
     calibration = ((balance_history or {}).get("patterns") or {}).get("calibration")
     backtest = load_backtest()
+    glossary = localize(
+        list(bundles.values()),
+        changes,
+        cards_en=cards_en if cards_en is not None else _english_cards(),
+        claude=claude,
+        translate=translate_names and not dry_run,
+    )
     requested = analysis_model()
     for name, stats in bundles.items():
         run_id = f"{now.strftime('%Y%m%dT%H%M%SZ')}-{name}-{uuid.uuid4().hex[:6]}"
@@ -746,6 +822,10 @@ def run_balance_radar(
             timing=timing,
             developer=developer,
         )
+        model_input["glossary"] = glossary.as_lines()
+        if model_input.get("history"):
+            # Past narratives were written with English names; the model copies them.
+            model_input["history"] = glossary.clean_tree(model_input["history"])
         digest = input_hash(model_input)
         if dry_run:
             if dry_run_dir is not None:
@@ -800,6 +880,14 @@ def run_balance_radar(
             )
             payload["changesSincePrevious"] = changes_since_previous(payload, previous)
             payload["counts"] = candidate_counts(payload)
+            polish(
+                payload,
+                glossary,
+                visible,
+                claude=claude,
+                translate=translate,
+                edit=edit,
+            )
             RadarResult.model_validate(payload)
         except (AnalysisError, ValueError) as exc:
             logger.error("balance radar %s analysis failed: %s", name, exc)

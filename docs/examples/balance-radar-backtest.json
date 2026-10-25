@@ -1,6 +1,6 @@
 {
   "data": {
-    "generatedAt": "2026-10-25T12:38:19+00:00",
+    "generatedAt": "2026-10-25T13:40:42+00:00",
     "historyGeneratedAt": "2026-10-25T12:29:41+00:00",
     "window": "7 days before each patch",
     "statistical": {
@@ -51,6 +51,60 @@
           "hits": 2,
           "predicted": 80,
           "actual": 11
+        }
+      },
+      "probability": {
+        "nerf": {
+          "brier": 0.0548,
+          "brierSkill": 0.064,
+          "baseRate": 0.062,
+          "predictions": 352,
+          "reliability": [
+            {
+              "band": "0-10%",
+              "predictions": 292,
+              "meanPredicted": 0.022,
+              "observedRate": 0.038
+            },
+            {
+              "band": "10-25%",
+              "predictions": 45,
+              "meanPredicted": 0.152,
+              "observedRate": 0.111
+            },
+            {
+              "band": "25-50%",
+              "predictions": 12,
+              "meanPredicted": 0.348,
+              "observedRate": 0.5
+            },
+            {
+              "band": "50-75%",
+              "predictions": 3,
+              "meanPredicted": 0.5,
+              "observedRate": 0.0
+            }
+          ]
+        },
+        "buff": {
+          "brier": 0.032,
+          "brierSkill": -0.057,
+          "baseRate": 0.031,
+          "predictions": 352,
+          "reliability": [
+            {
+              "band": "0-10%",
+              "predictions": 345,
+              "meanPredicted": 0.026,
+              "observedRate": 0.032
+            },
+            {
+              "band": "10-25%",
+              "predictions": 7,
+              "meanPredicted": 0.114,
+              "observedRate": 0.0
+            }
+          ]
         }
       },
       "perPatch": [
@@ -537,24 +591,24 @@
       "patches": 8,
       "nerf": {
         "@3": {
-          "precision": 0.292,
-          "recall": 0.318,
-          "hits": 7,
+          "precision": 0.25,
+          "recall": 0.273,
+          "hits": 6,
           "predicted": 24,
           "actual": 22
         },
         "@5": {
-          "precision": 0.325,
-          "recall": 0.591,
-          "hits": 13,
+          "precision": 0.275,
+          "recall": 0.5,
+          "hits": 11,
           "predicted": 40,
           "actual": 22
         },
         "@10": {
-          "precision": 0.27,
-          "recall": 0.773,
-          "hits": 17,
-          "predicted": 63,
+          "precision": 0.213,
+          "recall": 0.591,
+          "hits": 13,
+          "predicted": 61,
           "actual": 22
         }
       },
@@ -574,34 +628,34 @@
           "actual": 11
         },
         "@10": {
-          "precision": 0.067,
+          "precision": 0.065,
           "recall": 0.455,
           "hits": 5,
-          "predicted": 75,
+          "predicted": 77,
           "actual": 11
         }
       },
       "nerfCards": {
         "@3": {
-          "precision": 0.0,
-          "recall": 0.0,
-          "hits": 0,
-          "predicted": 19,
-          "actual": 9
+          "precision": 0.083,
+          "recall": 0.143,
+          "hits": 1,
+          "predicted": 12,
+          "actual": 7
         },
         "@5": {
-          "precision": 0.097,
-          "recall": 0.333,
-          "hits": 3,
-          "predicted": 31,
-          "actual": 9
+          "precision": 0.111,
+          "recall": 0.286,
+          "hits": 2,
+          "predicted": 18,
+          "actual": 7
         },
         "@10": {
-          "precision": 0.105,
-          "recall": 0.444,
-          "hits": 4,
-          "predicted": 38,
-          "actual": 9
+          "precision": 0.091,
+          "recall": 0.286,
+          "hits": 2,
+          "predicted": 22,
+          "actual": 7
         }
       },
       "buffCards": {
@@ -627,7 +681,67 @@
           "actual": 8
         }
       },
-      "costUsd": 0.2746,
+      "probability": {
+        "nerf": {
+          "brier": 0.0531,
+          "brierSkill": 0.094,
+          "baseRate": 0.062,
+          "predictions": 352,
+          "reliability": [
+            {
+              "band": "0-10%",
+              "predictions": 298,
+              "meanPredicted": 0.003,
+              "observedRate": 0.034
+            },
+            {
+              "band": "10-25%",
+              "predictions": 33,
+              "meanPredicted": 0.138,
+              "observedRate": 0.152
+            },
+            {
+              "band": "25-50%",
+              "predictions": 11,
+              "meanPredicted": 0.333,
+              "observedRate": 0.182
+            },
+            {
+              "band": "50-75%",
+              "predictions": 10,
+              "meanPredicted": 0.571,
+              "observedRate": 0.5
+            }
+          ]
+        },
+        "buff": {
+          "brier": 0.0325,
+          "brierSkill": -0.073,
+          "baseRate": 0.031,
+          "predictions": 352,
+          "reliability": [
+            {
+              "band": "0-10%",
+              "predictions": 327,
+              "meanPredicted": 0.014,
+              "observedRate": 0.034
+            },
+            {
+              "band": "10-25%",
+              "predictions": 21,
+              "meanPredicted": 0.124,
+              "observedRate": 0.0
+            },
+            {
+              "band": "25-50%",
+              "predictions": 4,
+              "meanPredicted": 0.312,
+              "observedRate": 0.0
+            }
+          ]
+        }
+      },
+      "costUsd": 0.2701,
       "errors": [],
       "perPatch": [
         {
@@ -654,26 +768,26 @@
           "nerfCards": {
             "3": [
               0,
-              3,
+              0,
               0
             ],
             "5": [
               0,
-              5,
+              0,
               0
             ],
             "10": [
               0,
-              5,
+              0,
               0
             ]
           },
           "nerfTop": [
             "Dragon Warrior",
-            "Bubble Paladin",
             "Spell Demon Hunter",
-            "Aggro Paladin",
-            "Herald Shaman"
+            "Bubble Paladin",
+            "Herald Shaman",
+            "Aggro Paladin"
           ],
           "nerfTruth": [
             "Dragon Warrior"
@@ -714,8 +828,8 @@
           },
           "buffTop": [
             "Quest Priest",
-            "Herald Death Knight",
             "Quest Mage",
+            "Herald Death Knight",
             "Imbue Rogue",
             "Control Priest"
           ],
@@ -746,23 +860,23 @@
             "3": [
               0,
               0,
-              1
+              0
             ],
             "5": [
               0,
               0,
-              1
+              0
             ],
             "10": [
               0,
               0,
-              1
+              0
             ]
           },
           "nerfTop": [
             "Aggro Druid",
-            "Broxigar Demon Hunter",
             "Herald Shaman",
+            "Broxigar Demon Hunter",
             "Aura Paladin",
             "Dragon Warrior"
           ],
@@ -805,8 +919,8 @@
           },
           "buffTop": [
             "Companion Hunter",
-            "Quest Priest",
             "Imbue Rogue",
+            "Quest Priest",
             "Herald Death Knight",
             "Quest Mage"
           ],
@@ -828,8 +942,8 @@
               9
             ],
             "10": [
-              6,
-              8,
+              3,
+              5,
               9
             ]
           },
@@ -846,14 +960,14 @@
             ],
             "10": [
               0,
-              9,
+              6,
               1
             ]
           },
           "nerfTop": [
             "Mug Shaman",
-            "Dragon Warrior",
             "Zee Shaman",
+            "Dragon Warrior",
             "Face Hunter",
             "Troublemaker Rogue"
           ],
@@ -881,7 +995,7 @@
             ],
             "10": [
               1,
-              8,
+              7,
               3
             ]
           },
@@ -906,8 +1020,8 @@
             "Quest Priest",
             "Rafaam Warlock",
             "Chef Druid",
-            "Quest Mage",
-            "Aura Paladin"
+            "Aura Paladin",
+            "Quest Mage"
           ],
           "buffTruth": [
             "Azalina Priest",
@@ -932,7 +1046,7 @@
             ],
             "10": [
               1,
-              7,
+              8,
               1
             ]
           },
@@ -949,15 +1063,15 @@
             ],
             "10": [
               1,
-              5,
+              7,
               1
             ]
           },
           "nerfTop": [
             "Zee Shaman",
             "Void Demon Hunter",
-            "Aggro Paladin",
             "Mug Shaman",
+            "Aggro Paladin",
             "Face Hunter"
           ],
           "nerfTruth": [
@@ -1000,9 +1114,9 @@
           "buffTop": [
             "Beatrix Paladin",
             "Control Warrior",
-            "Egg Paladin",
+            "Квест разбойник",
             "Herald Shaman",
-            "Attack Druid"
+            "Egg Paladin"
           ],
           "buffTruth": []
         },
@@ -1029,7 +1143,7 @@
           },
           "nerfCards": {
             "3": [
-              0,
+              1,
               3,
               3
             ],
@@ -1039,8 +1153,8 @@
               3
             ],
             "10": [
-              2,
-              7,
+              1,
+              6,
               3
             ]
           },
@@ -1071,7 +1185,7 @@
             ],
             "10": [
               2,
-              7,
+              10,
               5
             ]
           },
@@ -1097,7 +1211,7 @@
             "Broxigar Demon Hunter",
             "Coin Rogue",
             "Herald Warrior",
-            "Manastorm Mage"
+            "Egg Paladin"
           ],
           "buffTruth": [
             "Attack Druid",
@@ -1118,7 +1232,7 @@
               2
             ],
             "5": [
-              1,
+              0,
               5,
               2
             ],
@@ -1131,17 +1245,17 @@
           "nerfCards": {
             "3": [
               0,
-              1,
+              0,
               1
             ],
             "5": [
               0,
-              1,
+              0,
               1
             ],
             "10": [
               0,
-              1,
+              0,
               1
             ]
           },
@@ -1149,8 +1263,8 @@
             "Ramp Druid",
             "Dragon Warrior",
             "Quest Priest",
-            "Unholy Death Knight",
-            "Attack Druid"
+            "Cannon Warrior",
+            "Unholy Death Knight"
           ],
           "nerfTruth": [
             "Attack Druid",
@@ -1191,11 +1305,11 @@
             ]
           },
           "buffTop": [
-            "Broxigar Demon Hunter",
             "Herald Death Knight",
-            "Leyline Mage",
-            "Void Demon Hunter",
-            "Quest Mage"
+            "Imbue Priest",
+            "Herald Warrior",
+            "Face Hunter",
+            "Control Warrior"
           ],
           "buffTruth": []
         },
@@ -1205,17 +1319,17 @@
           "model": "claude-sonnet-5-5",
           "nerf": {
             "3": [
-              2,
+              1,
               3,
               3
             ],
             "5": [
-              2,
+              1,
               5,
               3
             ],
             "10": [
-              3,
+              2,
               10,
               3
             ]
@@ -1223,26 +1337,26 @@
           "nerfCards": {
             "3": [
               0,
-              3,
-              2
+              2,
+              1
             ],
             "5": [
-              1,
-              5,
-              2
+              0,
+              2,
+              1
             ],
             "10": [
-              1,
-              6,
-              2
+              0,
+              2,
+              1
             ]
           },
           "nerfTop": [
             "Dragon Warrior",
-            "Herald Warrior",
-            "Dragon Hunter",
             "Ramp Druid",
-            "Egg Warrior"
+            "Mug Shaman",
+            "Unholy Death Knight",
+            "Zee Shaman"
           ],
           "nerfTruth": [
             "Attack Druid",
@@ -1284,11 +1398,11 @@
             ]
           },
           "buffTop": [
-            "Quest Priest",
-            "Azalina Priest",
-            "Broxigar Demon Hunter",
-            "Coin Rogue",
-            "Herald Death Knight"
+            "Manastorm Mage",
+            "Companion Hunter",
+            "Control Priest",
+            "Imbue Rogue",
+            "Broxigar Demon Hunter"
           ],
           "buffTruth": []
         },
@@ -1316,26 +1430,26 @@
           "nerfCards": {
             "3": [
               0,
-              3,
+              1,
               0
             ],
             "5": [
               0,
-              5,
+              1,
               0
             ],
             "10": [
               0,
-              5,
+              1,
               0
             ]
           },
           "nerfTop": [
             "Dragon Warrior",
-            "Egg Warrior",
-            "Herald Warrior",
             "Cannon Warrior",
-            "Mug Shaman"
+            "Mug Shaman",
+            "Zee Shaman",
+            "Herald Warrior"
           ],
           "nerfTruth": [],
           "buff": {
@@ -1374,10 +1488,10 @@
           },
           "buffTop": [
             "Broxigar Demon Hunter",
-            "Coin Rogue",
-            "Companion Hunter",
+            "Herald Death Knight",
             "Herald Warrior",
-            "Herald Death Knight"
+            "Imbue Rogue",
+            "Companion Hunter"
           ],
           "buffTruth": [
             "Contraband Mage",
@@ -1386,11 +1500,12 @@
           ]
         }
       ]
-    }
+    },
+    "labelsHash": "5f1782a1d33f63498783150f28fe70c08550467374abc704bf846a40d5ea4972"
   },
   "meta": {
     "source_id": "balance_radar",
-    "fetched_at": "2026-10-25T12:38:19+00:00",
+    "fetched_at": "2026-10-25T13:40:42+00:00",
     "stale": false,
     "count": 8
   }

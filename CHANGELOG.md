@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Balance Radar: accurate, short, Russian-only texts. Archetypes use
+  HearthPulse's own labels (the rest translated once by Claude and cached);
+  cards use the ruRU localization. Every reader text is cleaned
+  deterministically (English names, English brackets, rank slang, pipeline
+  field names such as `history.patterns`). Mentions are marked up by `ref`
+  (`textEntities`, `summaryEntities`). Every shown Reddit/X post and quote
+  gets a full Russian translation (`titleRu`, `textRu`, cached). An optional
+  Editor Team pass (`RADAR_EDITOR_URL`, docker network `editorteam-clients`)
+  takes an edit only when it is accepted with all checks passed. Only real
+  candidates are listed now (no quota). The backtest adds Brier score and a
+  reliability table, and runs the Claude predictor automatically after a new
+  patch; the result reaches every payload as `accuracy`.
 - HSGuru mulligan parses a page with lxml into one tree, once: the provider
   cascade validates it twice and the run stores it, and all three now share
   one memoized result. BeautifulSoup built six trees per page (~140 ms of

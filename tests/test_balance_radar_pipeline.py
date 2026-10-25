@@ -235,7 +235,12 @@ def run(claude: FakeClaude, **kwargs: Any):
         cards_en=CARDS_EN,
         patch=PATCH,
         now=NOW,
-        **{"refresh_history": False, **kwargs},
+        **{
+            "refresh_history": False,
+            "translate_names": False,
+            "translate": False,
+            **kwargs,
+        },
     )
 
 

@@ -62,9 +62,11 @@ class ModelCandidate(BaseModel):
     )
     headline: str = Field(description="Короткий вывод в одну строку, по-русски")
     verdict: str = Field(
-        description="Подробный вердикт на русском, 3-6 предложений с цифрами"
+        description="Вердикт на русском, 1-2 предложения с ключевыми цифрами"
     )
-    reasons: list[str] = Field(description="2-5 конкретных причин на русском")
+    reasons: list[str] = Field(
+        description="2-3 короткие причины на русском, до 12 слов"
+    )
     suggested_change: str = Field(
         description="Правдоподобное конкретное изменение, по-русски"
     )
@@ -99,7 +101,9 @@ class ModelCandidate(BaseModel):
 class ModelOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    summary: str = Field(description="Общий вывод по формату на русском, 2-4 абзаца")
+    summary: str = Field(
+        description="Общий вывод по формату на русском, 2-3 предложения"
+    )
     nerfs: list[ModelCandidate] = Field(
         description="Кандидаты на нерф, от самого вероятного"
     )
@@ -221,6 +225,8 @@ class RadarCandidate(_Open):
     calibration: dict[str, Any] | None = None
     trend: dict[str, Any] | None = None
     confidenceHistory: list[dict[str, Any]] = Field(default_factory=list)
+    textEntities: list[dict[str, Any]] = Field(default_factory=list)
+    editor: dict[str, Any] | None = None
 
 
 class RadarSource(_Open):
@@ -252,3 +258,6 @@ class RadarResult(_Open):
     timing: dict[str, Any] | None = None
     changesSincePrevious: dict[str, Any] | None = None
     counts: dict[str, Any] | None = None
+    accuracy: dict[str, Any] | None = None
+    editor: dict[str, Any] | None = None
+    summaryEntities: list[dict[str, Any]] = Field(default_factory=list)

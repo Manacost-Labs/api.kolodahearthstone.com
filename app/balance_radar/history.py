@@ -1491,7 +1491,21 @@ def ensure_history(
         # The statistical backtest is free; keep it in step with the history.
         from .backtest import load_backtest, run_backtest, save_backtest
 
-        save_backtest(run_backtest(dataset, previous=load_backtest(), now=now))
+        previous_backtest = load_backtest()
+        # The Claude backtest (~$0.3) reruns only when the history changed.
+        llm = os.environ.get("RADAR_BACKTEST_LLM", "1") != "0" and (
+            not (previous_backtest or {}).get("model")
+            or (previous_backtest or {}).get("labelsHash") != dataset.get("labelsHash")
+        )
+        result = run_backtest(
+            dataset, previous=previous_backtest, now=now, llm=llm, claude=claude
+        )
+        result["labelsHash"] = (
+            dataset.get("labelsHash")
+            if llm
+            else (previous_backtest or {}).get("labelsHash")
+        )
+        save_backtest(result)
     except Exception as exc:  # noqa: BLE001 - the backtest only reports
         logger.warning("balance radar backtest skipped: %s", exc)
     return dataset
