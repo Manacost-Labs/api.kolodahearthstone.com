@@ -34,6 +34,8 @@ admin/ops endpoints и правила авторизации находятся 
 | Получить архив Masters Tour | `GET /v1/hsguru/esports/legacy/{table}` |
 | Получить муллиган колоды HSReplay (v2: монетка, класс соперника) | `GET /v1/hsreplay/mulligan` (колоды — `/v1/hsreplay/mulligan/decks`, срезы — `/v1/hsreplay/mulligan/slices`) |
 | Получить стримеров, их колоды и кто сейчас в эфире | `GET /v1/hsguru/streamers`, `/v1/hsguru/streamers/{streamer}/decks`, `/v1/hsguru/streaming-now` |
+| Получить официальную таблицу лидеров Blizzard | `GET /v1/leaderboards?mode=standard&region=EU` (пороги — `/v1/leaderboards/stats`) |
+| Получить историю игрока в таблицах лидеров | `GET /v1/leaderboards/player?region=EU&name=…` |
 | Получить BG-героев solo/duos | `GET /v1/battlegrounds/heroes` |
 | Получить BG-существ и их историю | `GET /v1/battlegrounds/minions` и `/api/db/bg/minions/*` |
 | Получить классы Арены | `GET /v1/arena/classes` |
@@ -267,6 +269,7 @@ GET /datasets/firestone_standard
 | `hsguru_matchups_diamond_4to1` | Та же matchup-матрица для Diamond 4–1. |
 | `hsguru_matchups` | Матрицы матчапов архетип против архетипа для каждого публичного среза HSGuru: Standard/Wild, 7 рангов, все периоды меню (включая баны и дополнение), с винрейтом и числом игр каждой ячейки; пороги применяются при запросе. Матрицы в SQLite `hsguru_matchup_slices`, dataset хранит только сводку срезов, см. [HSGURU_MATCHUPS.md](HSGURU_MATCHUPS.md). |
 | `hsguru_archetype_analysis` | Daily checkpointed Standard/Wild archetype analysis: class matchups and card mulligan/drawn/kept impact, with sparse post-patch samples distinguished from unavailable upstream data. |
+| `blizzard_leaderboards` | Официальные таблицы лидеров Blizzard (Standard, Wild, Поля сражений соло и дуо, Арена, Подземная арена, Twist) по EU/US/AP: снимок на таблицу и UTC-день в отдельной SQLite `blizzard_leaderboards.db`, см. [BLIZZARD_LEADERBOARDS.md](BLIZZARD_LEADERBOARDS.md). Dataset хранит только сводку покрытия. |
 | `hsguru_mulligan` | Муллиган (mulligan/drawn/not drawn/kept impact и count) и матчапы по классам для архетипов и колод по рангу, периоду (включая баны), монетке и классу соперника. История в SQLite `hsguru_*` и PostgreSQL `analytics.hsguru_*`, см. [HSGURU_MULLIGAN.md](HSGURU_MULLIGAN.md). Dataset хранит только сводку покрытия. |
 | `hsreplay_mulligan` | Муллиган HSReplay v2 по колодам (% оставляют, винрейт в стартовой руке, при доборе, при розыгрыше, ходов в руке, ход розыгрыша) для топ-колод Стандарта и Вольного на Легенде, Алмазе 4–1, Алмазе и Бронзе–Золоте, по монетке (`all`/`first`/`coin`), периоду и классу соперника (премиум). История в SQLite `hsreplay_mulligan_*` и PostgreSQL `analytics.hsreplay_mulligan_*`, см. [HSREPLAY_MULLIGAN.md](HSREPLAY_MULLIGAN.md). Dataset хранит сводку покрытия и статус премиум-сессии. |
 | `hsreplay_card_choices` | Что берут из Раскопки, Адаптации и Улова: по каждому варианту HSReplay «берут, когда предложен» (`popularity`, сумма > 100%) и винрейт для самых играемых карт Стандарта и Вольного на Легенде и Бронзе–Золоте; полный пул карты и сокровища Добычи — из базы карт. История в SQLite `hsreplay_card_choice_*` и PostgreSQL `analytics.hsreplay_card_choice_*`, см. [HSREPLAY_CARD_CHOICES.md](HSREPLAY_CARD_CHOICES.md). Dataset хранит сводку покрытия. |

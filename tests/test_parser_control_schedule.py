@@ -142,6 +142,7 @@ class ParserControlScheduleTest(unittest.TestCase):
                         "app.cli refresh-hsguru-esports",
                         "app.cli refresh-hsreplay-mulligan",
                         "app.cli refresh-hsreplay-card-choices",
+                        "app.cli refresh-blizzard-leaderboards",
                     )
                 ) and " --scheduled" not in line:
                     offenders.append(f"{path.name}: {line}")

@@ -5,7 +5,7 @@ import base64
 import binascii
 import hashlib
 import json
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
 from typing import Any
@@ -655,6 +655,17 @@ async def _hsguru_dataset_view(
         raise _validation_error(str(exc)) from None
     except LookupError:
         return None
+
+
+def _leaderboard_selector(region: str, mode: str, season: int | None) -> None:
+    from ..blizzard_leaderboards import MODES, REGIONS
+
+    if region not in REGIONS:
+        raise _validation_error(f"region must be one of {', '.join(REGIONS)}")
+    if mode not in MODES:
+        raise _validation_error(f"mode must be one of {', '.join(MODES)}")
+    if season is not None and not 0 <= season <= 100_000:
+        raise _validation_error("season is out of range")
 
 
 async def _hsreplay_card_choices(
@@ -1724,6 +1735,117 @@ class Query:
             "hsguru_esports_legacy",
             lambda structured: legacy(structured, table, selector=selector),
         )
+
+    @strawberry.field(
+        description=(
+            "Modes, regions and seasons of the official Blizzard leaderboards and what is "
+            "stored for each. Same shape as REST /v1/leaderboards/seasons data."
+        )
+    )
+    async def leaderboard_seasons(self) -> JSON:
+        from ..blizzard_leaderboards import get_catalog
+
+        return await asyncio.to_thread(get_catalog)
+
+    @strawberry.field(
+        description=(
+            "One page of an official Blizzard leaderboard snapshot (rank, name, rating, "
+            "previous day's rank), optionally searched by a name substring. season and "
+            "day default to the newest stored. Same shape as REST /v1/leaderboards data."
+        )
+    )
+    async def leaderboard(
+        self,
+        mode: str = "standard",
+        region: str = "EU",
+        season: int | None = None,
+        day: str | None = None,
+        query: str | None = None,
+        limit: int = 25,
+        offset: int = 0,
+    ) -> JSON | None:
+        from ..blizzard_leaderboards import get_table
+
+        _leaderboard_selector(region, mode, season)
+        if not 1 <= limit <= 100 or not 0 <= offset <= 200_000:
+            raise _validation_error("limit must be 1..100 and offset 0..200000")
+        if day is not None:
+            try:
+                date.fromisoformat(day)
+            except ValueError:
+                raise _validation_error("day must be YYYY-MM-DD") from None
+        return await asyncio.to_thread(
+            get_table,
+            region=region,
+            mode=mode,
+            season_id=season,
+            day=day,
+            query=_normalize_text(query, "query", 64),
+            limit=limit,
+            offset=offset,
+        )
+
+    @strawberry.field(
+        description=(
+            "Aggregates of an official Blizzard leaderboard: rating at top 100/1000/5000, "
+            "player count and thresholds by day, Battlegrounds/Arena rating distribution. "
+            "Same shape as REST /v1/leaderboards/stats data."
+        )
+    )
+    async def leaderboard_stats(
+        self,
+        mode: str = "standard",
+        region: str = "EU",
+        season: int | None = None,
+        bucket: float | None = None,
+    ) -> JSON | None:
+        from ..blizzard_leaderboards import get_stats
+
+        _leaderboard_selector(region, mode, season)
+        if bucket is not None and not 0 < bucket <= 10_000:
+            raise _validation_error("bucket must be between 0 and 10000")
+        return await asyncio.to_thread(
+            get_stats, region=region, mode=mode, season_id=season, bucket=bucket
+        )
+
+    @strawberry.field(
+        description=(
+            "Players of the official Blizzard leaderboards whose name starts with query, "
+            "with their places on the live boards. Same shape as REST "
+            "/v1/leaderboards/players data."
+        )
+    )
+    async def leaderboard_players(
+        self, query: str, region: str | None = None, limit: int = 20
+    ) -> JSON:
+        from ..blizzard_leaderboards import REGIONS, search_players
+
+        name = _normalize_text(query, "query", 64)
+        if not name or len(name) < 2:
+            raise _validation_error("query needs at least 2 characters")
+        if region is not None and region not in REGIONS:
+            raise _validation_error(f"region must be one of {', '.join(REGIONS)}")
+        if not 1 <= limit <= 50:
+            raise _validation_error("limit must be 1..50")
+        return await asyncio.to_thread(search_players, query=name, region=region, limit=limit)
+
+    @strawberry.field(
+        description=(
+            "Every stored season of a leaderboard player (name without the BattleTag "
+            "number, per region): best and last rank and the rank by day. Same shape as "
+            "REST /v1/leaderboards/player data."
+        )
+    )
+    async def leaderboard_player(
+        self, name: str, region: str = "EU", mode: str | None = None
+    ) -> JSON | None:
+        from ..blizzard_leaderboards import get_player
+
+        _leaderboard_selector(region, mode or "standard", None)
+        player = _normalize_text(name, "name", 64)
+        if not player:
+            raise _validation_error("name is required")
+        return await asyncio.to_thread(get_player, region=region, name=player, mode=mode)
 
     @strawberry.field(
         description=(

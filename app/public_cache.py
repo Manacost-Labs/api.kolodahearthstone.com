@@ -29,6 +29,7 @@ def _no_store_path(path: str) -> bool:
             "/v1/hsreplay/card-choices/coverage",
             "/v1/hsguru/streaming-now",
             "/v1/hsguru/streamers/coverage",
+            "/v1/leaderboards/coverage",
             "/v1/system/parsing-reliability",
             "/v1/search",
             "/v1/materials/",
@@ -56,6 +57,7 @@ def _cacheable_path(path: str) -> bool:
             "/v1/hsguru/mulligan/coverage",
             "/v1/hsreplay/mulligan/coverage",
             "/v1/hsreplay/card-choices/coverage",
+            "/v1/leaderboards/coverage",
         )
     ):
         # Run rows change without a new snapshot (failed or unchanged pages).
@@ -195,6 +197,10 @@ def _db_revision(path: str) -> str | None:
             from .hsreplay_mulligan import latest_revision as hsreplay_mulligan_revision
 
             return hsreplay_mulligan_revision()
+        if path.startswith("/v1/leaderboards"):
+            from .blizzard_leaderboards import latest_revision as leaderboards_revision
+
+            return leaderboards_revision()
         if path.startswith("/v1/battlegrounds/minions") and (
             path.endswith(("/stats", "/stats/history", "/stats/slices"))
         ):

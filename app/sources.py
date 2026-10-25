@@ -599,6 +599,22 @@ SOURCES: tuple[Source, ...] = (
         kind="pipeline",
     ),
     Source(
+        id="blizzard_leaderboards",
+        url="https://hearthstone.blizzard.com/en-us/community/leaderboards",
+        site="blizzard",
+        category="leaderboards",
+        description=(
+            "Official Blizzard leaderboards (Standard, Wild, Battlegrounds solo and duos, "
+            "Arena, Underground Arena, Twist) for EU, US and AP from the keyless community "
+            "API. Live seasons are re-read in full every six hours into one SQLite snapshot "
+            "per board and UTC day; past seasons are read once by an hourly backfill. "
+            "Timers hs-data-api-docker-refresh-blizzard-leaderboards(-history); "
+            "stale_hours = 6h cadence + 6h slack."
+        ),
+        stale_hours=12,
+        kind="pipeline",
+    ),
+    Source(
         id="hsreplay_card_choices",
         url="https://hsreplay.net/cards/",
         site="hsreplay",

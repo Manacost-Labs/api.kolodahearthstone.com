@@ -517,6 +517,31 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         default="all",
         help="Restrict candidate hunt to one format (standard refresh timer uses this).",
     )
+    leaderboards = sub.add_parser(
+        "refresh-blizzard-leaderboards",
+        help=(
+            "Read the official Blizzard leaderboards: live seasons in full or the "
+            "past-season backfill within its page budget."
+        ),
+    )
+    leaderboards.add_argument(
+        "--scope",
+        choices=("live", "history", "all"),
+        default="live",
+        help="live: newest season of every mode and region; history: past seasons once.",
+    )
+    leaderboards.add_argument(
+        "--max-boards",
+        type=int,
+        default=None,
+        help="Read at most this many boards (diagnostic runs).",
+    )
+    leaderboards.add_argument(
+        "--scheduled",
+        action="store_true",
+        help="Skip this scheduled pipeline when its admin section is disabled.",
+    )
+    leaderboards.add_argument("--schedule-id")
     hsguru_mulligan = sub.add_parser(
         "refresh-hsguru-mulligan",
         help=(
@@ -814,6 +839,7 @@ def main(argv: list[str] | None = None) -> int:
                 "hsguru_esports_legacy",
             }
         ),
+        "refresh-blizzard-leaderboards": frozenset({"blizzard_leaderboards"}),
         "capture-bg-compositions-screenshot": frozenset(
             {"hsreplay_battlegrounds_compositions_screenshot"}
         ),
@@ -1498,6 +1524,42 @@ def main(argv: list[str] | None = None) -> int:
         if args.scheduled and result.get("state") == "locked":
             return int(ExitCode.DEGRADED)
         return 0 if result.get("ok") else 1
+    if args.command == "refresh-blizzard-leaderboards":
+        source_id = "blizzard_leaderboards"
+        if args.scheduled:
+            from .parser_control import is_source_scheduled_enabled
+
+            if not is_source_scheduled_enabled(source_id):
+                result = _run_pipeline_command_with_telemetry(
+                    source_id,
+                    lambda: {
+                        "ok": True,
+                        "skipped": True,
+                        "reason": "section_disabled",
+                        "source_id": source_id,
+                    },
+                    refresh_window_id=dedicated_refresh_window_id,
+                )
+                print(json.dumps(result, ensure_ascii=False, indent=2))
+                return 0
+        from .blizzard_leaderboards import refresh_blizzard_leaderboards
+
+        result = _run_pipeline_command_with_telemetry(
+            source_id,
+            lambda: asyncio.run(
+                refresh_blizzard_leaderboards(scope=args.scope, max_boards=args.max_boards)
+            ),
+            diagnostic=args.max_boards is not None,
+            refresh_window_id=dedicated_refresh_window_id,
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        if args.scheduled and result.get("state") == "locked":
+            return int(ExitCode.DEGRADED)
+        if result.get("ok") and result.get("state") == "ok":
+            return int(ExitCode.OK)
+        if result.get("published"):
+            return int(ExitCode.DEGRADED)
+        return int(ExitCode.ERROR)
     if args.command == "refresh-hsguru-mulligan":
         source_id = "hsguru_mulligan"
         if args.estimate:

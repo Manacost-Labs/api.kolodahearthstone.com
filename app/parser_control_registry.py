@@ -200,6 +200,13 @@ SECTIONS: tuple[ParserSection, ...] = (
             "hsguru_esports_legacy",
         ),
     ),
+    ParserSection(
+        id="official-leaderboards",
+        label="Официальные таблицы лидеров",
+        group="Разное",
+        description="Таблицы лидеров Blizzard по режимам, регионам и сезонам с историей по дням.",
+        source_ids=("blizzard_leaderboards",),
+    ),
 )
 
 
@@ -241,6 +248,7 @@ SOURCE_LABELS_RU: dict[str, str] = {
     "hsguru_matchups": "HSGuru · матрицы матчапов архетипов по всем срезам",
     "hsguru_archetype_analysis": "HSGuru · анализ архетипов",
     "hsguru_mulligan": "HSGuru · муллиган и матчапы по классам архетипов и колод",
+    "blizzard_leaderboards": "Blizzard · официальные таблицы лидеров",
     "hsguru_brawl": "HSGuru · Потасовка: архетипы и колоды",
     "hsguru_esports_tournaments": "HSGuru · турниры: сетки и составы",
     "hsguru_esports_points": "HSGuru · очки HSEsports по сезонам",

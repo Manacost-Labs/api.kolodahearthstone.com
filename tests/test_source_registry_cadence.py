@@ -29,6 +29,7 @@ from app.sources import SOURCE_BY_ID, SOURCES
 from app.stale_monitor import find_stale_sources
 
 PIPELINE_IDS = (
+    "blizzard_leaderboards",
     "hsguru_archetype_analysis",
     "hsguru_brawl",
     "hsguru_esports_legacy",
