@@ -56,6 +56,14 @@ RANK_WORDS = (
     (re.compile(r"Даймонд\w*", re.IGNORECASE), "Алмаз"),
     (re.compile(r"Леджен\w*", re.IGNORECASE), "Легенда"),
     (re.compile(r"Близз?ард\w*"), "Blizzard"),
+    # The model sometimes names the company after the Mage spell.
+    (
+        re.compile(
+            r"Снежн(?:ая|ой|ую) бур(?:я|и|ю)(?=\s+(?:сообщ|отмет|заяв|реш|призна|"
+            r"написа|ввел|следит|может|уже|не\s|пока|обычно|часто|чаще|исторически))"
+        ),
+        "Blizzard",
+    ),
     # The Wild format is "Вольный" in the Russian client.
     (re.compile(r"\bДиком\b"), "Вольном"),
     (re.compile(r"\bДикий\b"), "Вольный"),
@@ -375,7 +383,13 @@ class Glossary:
 
     @property
     def _all_names(self) -> dict[str, str]:
-        return {**self.extra_ru_by_en, **self.ru_by_en}
+        # Brand words stay Latin even when a card shares the name
+        # (the Mage spell Blizzard must not rename the company).
+        return {
+            english: russian
+            for english, russian in {**self.extra_ru_by_en, **self.ru_by_en}.items()
+            if english.casefold() not in ALLOWED_LATIN
+        }
 
     @property
     def _english_pattern(self) -> re.Pattern[str] | None:
