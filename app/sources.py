@@ -509,6 +509,24 @@ SOURCES: tuple[Source, ...] = (
         kind="pipeline",
     ),
     Source(
+        id="hsreplay_card_choices",
+        url="https://hsreplay.net/cards/",
+        site="hsreplay",
+        category="ranked_cards",
+        description=(
+            "HSReplay pick statistics of choice cards (single_card_choices_by_winrate_v2: "
+            "how often each Discover/Adapt/Dredge option is taken when offered and its "
+            "winrate) for the most played choice cards of Standard (50) and Wild (10) at "
+            "Legend and Bronze-Gold. Each target is re-read weekly and once a day after a "
+            "patch; a daily queue runs through hs-data-api-docker-refresh-hsreplay-card-choices.timer "
+            "(plain Scrape.do, at most 5 parallel, <= 60 credits a UTC day) into SQLite "
+            "snapshots mirrored to PostgreSQL. Full option pools (and Excavate treasures "
+            "by tier) come from the card base; stale_hours = daily cadence + 12h slack."
+        ),
+        stale_hours=36,
+        kind="pipeline",
+    ),
+    Source(
         id="hsreplay_battlegrounds_compositions_screenshot",
         url="https://hsreplay.net/battlegrounds/compositions/",
         site="hsreplay",

@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh due HSReplay card choice statistics once a day
+
+[Timer]
+OnCalendar=*-*-* 04:35:00 Europe/Warsaw
+AccuracySec=5min
+Persistent=false
+
+[Install]
+WantedBy=timers.target

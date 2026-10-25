@@ -52,6 +52,7 @@ from .routers.constructed import router as constructed_v1_router
 from .routers.hsguru_meta import router as hsguru_meta_v1_router
 from .routers.hsguru_stats import router as hsguru_stats_v1_router
 from .routers.hsreplay_mulligan import router as hsreplay_mulligan_v1_router
+from .routers.hsreplay_card_choices import router as hsreplay_card_choices_v1_router
 from .routers.material_search import router as material_search_router
 from .material_search_mcp import material_api_lifespan, mcp_app
 from .routers.system import canonical_router as canonical_system_v1_router
@@ -210,6 +211,7 @@ app.include_router(canonical_system_v1_router)
 app.include_router(hsguru_meta_v1_router)
 app.include_router(hsguru_stats_v1_router)
 app.include_router(hsreplay_mulligan_v1_router)
+app.include_router(hsreplay_card_choices_v1_router)
 app.include_router(api_tokens_router)
 app.include_router(material_search_router)
 app.mount("/v1/mcp", mcp_app)

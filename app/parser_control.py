@@ -1783,6 +1783,10 @@ async def _run_pipeline_source(source_id: str) -> dict[str, Any]:
         from .hsreplay_mulligan import refresh_hsreplay_mulligan
 
         result = await refresh_hsreplay_mulligan()
+    elif source_id == "hsreplay_card_choices":
+        from .hsreplay_card_choices import refresh_hsreplay_card_choices
+
+        result = await refresh_hsreplay_card_choices()
     elif source_id == "hsreplay_battlegrounds_compositions_screenshot":
         from .hsreplay_bg_screenshots import capture_compositions_screenshot
 
@@ -1835,6 +1839,7 @@ async def _run_pipeline_source(source_id: str) -> dict[str, Any]:
             "hsguru_archetype_analysis": ("archetypes",),
             "hsguru_mulligan": ("targets_with_data",),
             "hsreplay_mulligan": ("targets_with_data",),
+            "hsreplay_card_choices": ("targets_with_data",),
             "hsreplay_battlegrounds_minions": ("minions_ok", "minions_total"),
         }
         rows_total = next(

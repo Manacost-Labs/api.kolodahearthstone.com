@@ -74,6 +74,10 @@ PUBLIC_TABLES = (
     "hsreplay_mulligan_runs",
     "hsreplay_mulligan_snapshots",
     "hsreplay_mulligan_targets",
+    "hsreplay_card_choice_rows",
+    "hsreplay_card_choice_runs",
+    "hsreplay_card_choice_snapshots",
+    "hsreplay_card_choice_targets",
 )
 CONTAINER_ID = ""
 

@@ -156,6 +156,9 @@ GraphQL pagination возвращает `items` и `pageInfo`. Максимал�
 | GET | `/v1/hsreplay/mulligan/slices` | `deck` (required), `format` | Срезы одной колоды и их состояние |
 | GET | `/v1/hsreplay/mulligan/history` | срез, `card`, `limit` | Снимки среза и строка одной карты по времени |
 | GET | `/v1/hsreplay/mulligan/coverage` | `runs` | Покрытие, статус премиум-сессии HSReplay, запуски и расход Scrape.do |
+| GET | `/v1/hsreplay/card-choices` | `card` (required), `format`, `rank` | Что берут из Раскопки/Адаптации: «берут» и винрейт по вариантам HSReplay + полный пул карты (Добыча — сокровища по уровням) |
+| GET | `/v1/hsreplay/card-choices/cards` | `format`, `kind` | Карты с выбором (Раскопка, Адаптация, Улов, «Выберите эффект», Добыча) и собранные срезы |
+| GET | `/v1/hsreplay/card-choices/coverage` | — | Покрытие выборов HSReplay и последний запуск |
 
 ## REST v1 — System
 

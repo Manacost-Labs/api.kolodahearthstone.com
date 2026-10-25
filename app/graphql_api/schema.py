@@ -607,6 +607,44 @@ async def _hsreplay_mulligan(
         ) from None
 
 
+async def _hsreplay_card_choices(
+    info: Info[GraphQLContext, None],
+    *,
+    card: str,
+    format_name: str | None,
+    rank: str,
+) -> Any:
+    from ..card_choice_pools import load_card_base
+    from ..hsreplay_card_choices import (
+        FORMATS,
+        RANKS,
+        CardNotFound,
+        assemble,
+        default_format,
+        resolve_card,
+    )
+
+    ref = _normalize_text(card, "card", 40)
+    if not ref:
+        raise _validation_error("card must be a card id or dbf id")
+    if format_name is not None and format_name not in FORMATS:
+        raise _validation_error("format must be standard or wild")
+    if rank not in RANKS:
+        raise _validation_error(f"rank must be one of {', '.join(RANKS)}")
+    base = await asyncio.to_thread(load_card_base)
+    try:
+        found_card = resolve_card(base, ref)
+    except CardNotFound:
+        return None
+    chosen = format_name or default_format(base, found_card)
+    stored = await _call_repository(
+        _repository(info).hsreplay_card_choices(
+            card_id=str(found_card["id"]), format_name=chosen, rank=rank
+        )
+    )
+    return await asyncio.to_thread(assemble, base, found_card, chosen, rank, stored)
+
+
 async def _call_repository(operation: Any) -> Any:
     try:
         return await operation
@@ -1332,6 +1370,30 @@ class Query:
             initiative=initiative,
             period=period,
             opponent_class=opponent_class,
+        )
+
+    @strawberry.field(
+        description=(
+            "What players pick from one choice card (Discover, Adapt, Dredge) on "
+            "HSReplay plus its full option pool from the card base: per option "
+            "popularity (taken when offered), win_rate, low_sample and undervalued; "
+            "pool.resolved is false when the pool depends on the game. card is a card "
+            "id or dbf id; format standard or wild (default: Standard when legal); rank "
+            "legend or bronze_gold (diamond_4to1, diamond when enabled). Choose One and "
+            "Excavate cards return the pool (Excavate: treasures by tier) without "
+            "statistics. Null for an unknown card or a card without a choice. Same "
+            "shape as REST /v1/hsreplay/card-choices data."
+        )
+    )
+    async def hsreplay_card_choices(
+        self,
+        info: Info[GraphQLContext, None],
+        card: str,
+        format: str | None = None,
+        rank: str = "legend",
+    ) -> JSON | None:
+        return await _hsreplay_card_choices(
+            info, card=card, format_name=format, rank=rank
         )
 
     @strawberry.field(

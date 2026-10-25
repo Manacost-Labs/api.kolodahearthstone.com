@@ -20,7 +20,7 @@ from .source_tiers import LIGHT_API_IDS, MEDIUM_API_IDS
 from .sources import SOURCE_BY_ID
 
 SCHEDULE_INVENTORY_SCHEMA_VERSION = 2
-SCHEDULE_INVENTORY_VERSION = "2026-10-25.4"
+SCHEDULE_INVENTORY_VERSION = "2026-10-25.5"
 SCHEDULE_TIMEZONE = "Europe/Warsaw"
 
 _SYSTEMCTL_SEARCH_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
@@ -161,6 +161,15 @@ _SCHEDULES: tuple[_ScheduleSpec, ...] = (
         source_ids=frozenset({"hsreplay_mulligan"}),
         recurrence="daily",
         local_times=_times(*((hour, 50) for hour in range(1, 24, 3))),
+    ),
+    _ScheduleSpec(
+        id="refresh-hsreplay-card-choices",
+        label="Ежедневно в 04:35 — что берут из Открытия (HSReplay)",
+        systemd_unit="hs-data-api-docker-refresh-hsreplay-card-choices.timer",
+        on_calendar=("*-*-* 04:35:00 Europe/Warsaw",),
+        source_ids=frozenset({"hsreplay_card_choices"}),
+        recurrence="daily",
+        local_times=_times((4, 35)),
     ),
     _ScheduleSpec(
         id="recover-hsguru-archetype-analysis",
