@@ -171,10 +171,14 @@ class HsGuruDecksImprovementsTest(unittest.TestCase):
         self.assertEqual(page.backend, "flaresolverr")
         self.assertEqual(page.request_credits, 0)
         solver.assert_awaited_once_with(source, wait_ms=0)
-        self.assertEqual(primary.await_count, 1)
+        # One plain request, one rendered retry, no super proxy or reserve.
+        self.assertEqual(
+            [call.kwargs["scrape_do_profiles"] for call in primary.await_args_list],
+            [((False, False),), ((True, False),)],
+        )
         self.assertEqual(
             primary.await_args.kwargs["skip_providers"],
-            {"brightdata", "firecrawl", "scrapfly"},
+            {"brightdata", "decodo", "firecrawl", "scrapfly"},
         )
 
     def test_all_rank_fanout_prefers_fast_local_solver(self) -> None:
@@ -327,7 +331,8 @@ class HsGuruDecksImprovementsTest(unittest.TestCase):
             )
 
         self.assertEqual(page.backend, "flaresolverr")
-        self.assertEqual(page.request_credits, 25)
+        # Both Scrape.do steps (plain, then rendered) were rejected and billed.
+        self.assertEqual(page.request_credits, 50)
         self.assertEqual(
             [
                 (attempt["backend"], attempt["state"], attempt["request_credits"])
@@ -335,10 +340,11 @@ class HsGuruDecksImprovementsTest(unittest.TestCase):
             ],
             [
                 ("scrape_do_super", "rejected", 25),
+                ("scrape_do_super", "rejected", 25),
                 ("flaresolverr", "accepted", 0),
             ],
         )
-        self.assertEqual(len(page.acquisition), 2)
+        self.assertEqual(len(page.acquisition), 3)
         self.assertEqual(
             page.acquisition[0]["error_type"],
             "ScrapeDoContentError",
