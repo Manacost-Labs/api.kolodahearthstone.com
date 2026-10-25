@@ -40,7 +40,8 @@ The normalized statistics contract is documented in
 
 | Command | Purpose |
 |---|---|
-| `scripts/apply-migrations.sh` | Create/update the `hs_data` database |
+| `scripts/apply-migrations.sh [--dry-run]` | Create/update the `hs_data` database; applies each `sql/NNN_*.sql` once via `platform.schema_migrations`, so re-runs are safe |
+| `tests/migrations-idempotency.sh` | Apply all migrations to a throwaway PostgreSQL and require a no-op re-run (`make platform-migrations-check`, CI) |
 | `scripts/bootstrap-shadow.php all` | Copy MariaDB and SQLite into PostgreSQL |
 | `scripts/import-datasets.php` | Import validated parser JSON snapshots as JSONB |
 | `scripts/import-statistics.php` | Normalize meta, HSGuru, Arena, Standard/Wild cards and BG rating slices |

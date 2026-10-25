@@ -707,12 +707,12 @@ def test_postgres_migration_mirrors_sqlite_columns_and_types() -> None:
 def test_analytics_delta_contract_lists_every_table() -> None:
     stage = (ROOT / "platform/scripts/stage-analytics.py").read_text()
     merge = (ROOT / "platform/scripts/merge-analytics.sql").read_text()
-    migrations = (ROOT / "platform/scripts/apply-migrations.sh").read_text()
     for table in store.TABLES:
         assert f"'{table}'" in stage and f"'{table}'" in merge
         # Targets update in place and snapshots age out: never append-only.
         assert f"'{table}'" not in stage.split("APPEND_ONLY")[1].split(")")[0]
-    assert "017_hsguru_mulligan.sql" in migrations
+    # apply-migrations.sh applies every numbered file in platform/sql.
+    assert (ROOT / "platform/sql/017_hsguru_mulligan.sql").is_file()
 
 
 def test_systemd_timer_matches_the_schedule_inventory() -> None:
