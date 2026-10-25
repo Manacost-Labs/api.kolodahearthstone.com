@@ -263,7 +263,10 @@ LOAD DATABASE
                                  'hsguru_stat_snapshots', 'hsguru_stat_targets',
                                  'hsguru_streamer_decks', 'hsguru_streamer_live',
                                  'hsguru_streamer_runs', 'hsguru_streamer_vods',
-                                 'hsguru_streamers', 'hsreplay_archetypes'
+                                 'hsguru_streamers', 'hsreplay_archetypes',
+                                 'hsreplay_mulligan_cards', 'hsreplay_mulligan_decks',
+                                 'hsreplay_mulligan_groups', 'hsreplay_mulligan_runs',
+                                 'hsreplay_mulligan_snapshots', 'hsreplay_mulligan_targets'
  EXCLUDING TABLE NAMES LIKE 'api_tokens'
 
  ALTER TABLE NAMES MATCHING ~/./ SET SCHEMA '{$analyticsSchema}';

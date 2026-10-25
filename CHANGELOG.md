@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+- HSGuru coverage: Tavern Brawl and esports. `hsguru_brawl` reads the current
+  Brawl meta (7 ranks × 3 coin options and 11 opponent classes, from 10
+  games) and Brawl decks every three hours. `hsguru_esports_tournaments`
+  collects /esports upcoming tournaments and every official tour stop
+  (2019–2026) plus recently started community tournaments with stage
+  standings, player lineups (deck codes) and lineup archetype popularity;
+  finished tournaments are reused from the previous snapshot.
+  `hsguru_esports_points` holds HSEsports points of every season for
+  Standard and Battlegrounds; `hsguru_esports_legacy` the Masters Tour
+  archive (weekly). Plain Scrape.do pages, at most 5 at once, as `detail`
+  jobs of the shared HSGuru budget. REST `/v1/hsguru/brawl/*`,
+  `/v1/hsguru/esports/*` (OpenAPI descriptions and examples) and GraphQL
+  `hsguruBrawl*`/`hsguruEsports*`. A page that fails validation gets one
+  rendered retry (5 credits); super proxies are not used. Docs:
+  `docs/HSGURU_BRAWL_ESPORTS.md`, `docs/API.md`, `docs/GRAPHQL_API.md`,
+  `docs/SCRAPE_PROVIDERS.md`; the HSGuru coverage audit is in
+  `docs/DATA_CATALOG.md`.
+
+
+- HSGuru matchup matrices for every public slice: new pipeline
+  `hsguru_matchups` reads HSGuru `/matchups` for Standard and Wild, seven
+  ranks and every advertised period (Bans window, expansion, patch, rolling
+  windows) with HSGuru's lowest sample filters (1/1) and keeps winrate and
+  games of every cell, so any threshold is applied on request. One API with
+  slice parameters, `GET /v1/hsguru/matchups` (+ `/slices`) and GraphQL
+  `hsguruMatchups`, instead of one source per combination. Short windows are
+  re-read hourly, wide ones every 6-48 hours (plain Scrape.do, five pages in
+  parallel, ~800 credits a day). HSGuru publishes no coin split for matchups,
+  so only `any_player` exists. See docs/HSGURU_MATCHUPS.md.
 - HSGuru streamers (`hsguru_streamers`, every five minutes): every
   `/streamer-decks` row in all formats, ranks and windows (one walk from the
   top down to the last complete walk; the first run goes back 120 days), who
@@ -44,6 +73,32 @@
   builds from wider windows (Bans: the whole release, then the rolling month)
   or real deck codes from its public replays, and says where they come from
   (`decks_period`, `decks_source`, `decks_fallback`).
+
+- New pipeline `hsreplay_mulligan`: the HSReplay deck mulligan guide
+  (mulligan v2, `/api/v1/mulligan/`) for the top decks of
+  `list_decks_by_win_rate_v2` in Standard (10 most played + 2 best winrate per
+  rank) and Wild (5 + 1) at Legend, Diamond 4-1, Diamond and Bronze-Gold: every
+  deck × `all`/`first`/`coin` × `last_30_days`/`current_patch`/
+  `current_expansion` (648 slices), each answer with `ALL` and the split by the
+  eleven opponent classes from the premium session. Per card: keep %, opening
+  hand, drawn and played winrate, turns held, turn played, plus `*_impact`
+  versus the base winrate (the unit of `/v1/hsguru/mulligan`); `scope` says
+  whether HSReplay used the deck itself or fell back to the archetype or class.
+  Incremental TTL queue, snapshots only on change, plain Scrape.do with at most
+  5 parallel requests, ~145 credits a UTC day by plan (caps: 60 a run, 160 a
+  day). HTTP 202 (still computing) is deferred with backoff, 204 is an empty
+  slice, not an error. Each run probes `/api/v1/account/`: a rejected or
+  non-premium session skips premium slices, sends a Telegram alert, turns the
+  source `partial` and makes the API answer premium slices with `503` and
+  `premium_session` instead of an empty result. SQLite `hsreplay_mulligan_*`
+  is mirrored to PostgreSQL `analytics.hsreplay_mulligan_*` (migration 019,
+  view `hub.hsreplay_mulligan_latest`). REST `/v1/hsreplay/mulligan`,
+  `/mulligan/decks`, `/mulligan/slices`, `/mulligan/history`,
+  `/mulligan/coverage`, GraphQL `hsreplayMulligan`; timer
+  `hs-data-api-docker-refresh-hsreplay-mulligan` every three hours at :50.
+  Live run on 25 October: 72 decks listed, 72 slices with the opponent-class
+  split (823 groups, 13,640 card rows) for 160 credits. Not shown on the site yet. See
+  docs/HSREPLAY_MULLIGAN.md.
 
 - Balance Radar: accurate, short, Russian-only texts. Archetypes use
   HearthPulse's own labels (the rest translated once by Claude and cached);

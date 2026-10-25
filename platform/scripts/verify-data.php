@@ -194,6 +194,14 @@ function compareSqliteCounts(): array
         'hsguru_stat_runs',
         'hsguru_stat_snapshots',
         'hsguru_stat_targets',
+        // The HSReplay mulligan writer runs every three hours, re-lists its
+        // deck pool daily and prunes old snapshots: same lag argument.
+        'hsreplay_mulligan_cards',
+        'hsreplay_mulligan_decks',
+        'hsreplay_mulligan_groups',
+        'hsreplay_mulligan_runs',
+        'hsreplay_mulligan_snapshots',
+        'hsreplay_mulligan_targets',
         // The HSGuru streamers writer runs every five minutes, replaces the
         // live table and prunes old VODs and runs.
         'hsguru_streamer_decks',

@@ -559,6 +559,88 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Skip this scheduled pipeline when its admin section is disabled.",
     )
     hsguru_streamers.add_argument("--schedule-id")
+    hsreplay_mulligan = sub.add_parser(
+        "refresh-hsreplay-mulligan",
+        help=(
+            "Read the most overdue HSReplay deck mulligan (v2) slices through Scrape.do "
+            "within the run and UTC-day credit caps."
+        ),
+    )
+    hsreplay_mulligan.add_argument(
+        "--max-requests",
+        type=int,
+        default=None,
+        help="Extra credit cap for this run (on top of HS_HSREPLAY_MULLIGAN_* caps).",
+    )
+    hsreplay_mulligan.add_argument(
+        "--estimate",
+        action="store_true",
+        help="Print the stored deck pool's targets and requests per day; fetch nothing.",
+    )
+    hsreplay_mulligan.add_argument(
+        "--scheduled",
+        action="store_true",
+        help="Skip this scheduled pipeline when its admin section is disabled.",
+    )
+    hsreplay_mulligan.add_argument("--schedule-id")
+    hsguru_matchups = sub.add_parser(
+        "refresh-hsguru-matchups",
+        help=(
+            "Read the overdue HSGuru archetype matchup matrices of every slice "
+            "(plain Scrape.do, five in parallel, FlareSolverr fallback)."
+        ),
+    )
+    hsguru_matchups.add_argument(
+        "--max-pages",
+        type=int,
+        default=None,
+        help="Page budget of this run (default HS_HSGURU_MATCHUPS_MAX_PAGES or 400).",
+    )
+    hsguru_matchups.add_argument(
+        "--estimate",
+        action="store_true",
+        help="Print the planned slices and Scrape.do credits per day; fetch nothing.",
+    )
+    hsguru_matchups.add_argument(
+        "--scheduled",
+        action="store_true",
+        help="Skip this scheduled pipeline when its admin section is disabled.",
+    )
+    hsguru_matchups.add_argument("--schedule-id")
+    hsguru_brawl = sub.add_parser(
+        "refresh-hsguru-brawl",
+        help="Refresh HSGuru Tavern Brawl archetype meta and decks (plain Scrape.do).",
+    )
+    hsguru_brawl.add_argument(
+        "--scheduled",
+        action="store_true",
+        help="Skip this scheduled pipeline when its admin section is disabled.",
+    )
+    hsguru_brawl.add_argument("--schedule-id")
+    hsguru_esports = sub.add_parser(
+        "refresh-hsguru-esports",
+        help=(
+            "Refresh HSGuru tournaments (standings, lineups), HSEsports points and "
+            "the legacy Masters Tour archive."
+        ),
+    )
+    hsguru_esports.add_argument(
+        "--part",
+        action="append",
+        choices=("tournaments", "points", "legacy"),
+        help="Refresh only this dataset (repeatable; default all three).",
+    )
+    hsguru_esports.add_argument(
+        "--force-legacy",
+        action="store_true",
+        help="Read the legacy archive even when the last snapshot is under a week old.",
+    )
+    hsguru_esports.add_argument(
+        "--scheduled",
+        action="store_true",
+        help="Skip datasets whose admin section is disabled.",
+    )
+    hsguru_esports.add_argument("--schedule-id")
     hsguru_analysis = sub.add_parser(
         "refresh-hsguru-archetype-analysis",
         help="Refresh Legend class matchups and card stats for active HSGuru archetypes.",
@@ -697,6 +779,16 @@ def main(argv: list[str] | None = None) -> int:
         ),
         "refresh-hsguru-mulligan": frozenset({"hsguru_mulligan"}),
         "refresh-hsguru-streamers": frozenset({"hsguru_streamers"}),
+        "refresh-hsreplay-mulligan": frozenset({"hsreplay_mulligan"}),
+        "refresh-hsguru-matchups": frozenset({"hsguru_matchups"}),
+        "refresh-hsguru-brawl": frozenset({"hsguru_brawl"}),
+        "refresh-hsguru-esports": frozenset(
+            {
+                "hsguru_esports_tournaments",
+                "hsguru_esports_points",
+                "hsguru_esports_legacy",
+            }
+        ),
         "capture-bg-compositions-screenshot": frozenset(
             {"hsreplay_battlegrounds_compositions_screenshot"}
         ),
@@ -1455,6 +1547,176 @@ def main(argv: list[str] | None = None) -> int:
         if result.get("ok") and result.get("published"):
             return int(ExitCode.OK)
         if args.scheduled and result.get("published"):
+            return int(ExitCode.DEGRADED)
+        return int(ExitCode.ERROR)
+    if args.command == "refresh-hsreplay-mulligan":
+        source_id = "hsreplay_mulligan"
+        if args.estimate:
+            from .db import get_db_connection, init_db
+            from .hsreplay_mulligan import estimate_plan
+            from .hsreplay_mulligan_store import active_decks
+
+            init_db()
+            conn = get_db_connection()
+            try:
+                result = estimate_plan(active_decks(conn))
+            finally:
+                conn.close()
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+        if args.scheduled:
+            from .parser_control import is_source_scheduled_enabled
+
+            if not is_source_scheduled_enabled(source_id):
+                result = _run_pipeline_command_with_telemetry(
+                    source_id,
+                    lambda: {
+                        "ok": True,
+                        "skipped": True,
+                        "reason": "section_disabled",
+                        "source_id": source_id,
+                    },
+                    refresh_window_id=dedicated_refresh_window_id,
+                )
+                print(json.dumps(result, ensure_ascii=False, indent=2))
+                return 0
+        from .hsreplay_mulligan import refresh_hsreplay_mulligan
+
+        result = _run_pipeline_command_with_telemetry(
+            source_id,
+            lambda: asyncio.run(
+                refresh_hsreplay_mulligan(max_requests=args.max_requests)
+            ),
+            diagnostic=args.max_requests is not None,
+            refresh_window_id=dedicated_refresh_window_id,
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        if args.scheduled and result.get("state") == "locked":
+            return int(ExitCode.DEGRADED)
+        if result.get("ok") and result.get("published"):
+            return int(ExitCode.OK)
+        if result.get("published"):
+            # Partial: some slices failed or the premium session is rejected.
+            return int(ExitCode.DEGRADED)
+        return int(ExitCode.ERROR)
+    if args.command == "refresh-hsguru-matchups":
+        source_id = "hsguru_matchups"
+        if args.estimate:
+            from .hsguru_matchups import estimate_plan, matrix_structured, planned_periods
+
+            result = estimate_plan(planned_periods(matrix_structured()))
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+        if args.scheduled:
+            from .parser_control import is_source_scheduled_enabled
+
+            if not is_source_scheduled_enabled(source_id):
+                result = _run_pipeline_command_with_telemetry(
+                    source_id,
+                    lambda: {
+                        "ok": True,
+                        "skipped": True,
+                        "reason": "section_disabled",
+                        "source_id": source_id,
+                    },
+                    refresh_window_id=dedicated_refresh_window_id,
+                )
+                print(json.dumps(result, ensure_ascii=False, indent=2))
+                return 0
+        from .hsguru_matchups import refresh_hsguru_matchups
+
+        result = _run_pipeline_command_with_telemetry(
+            source_id,
+            lambda: asyncio.run(refresh_hsguru_matchups(max_pages=args.max_pages)),
+            diagnostic=args.max_pages is not None,
+            refresh_window_id=dedicated_refresh_window_id,
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        if args.scheduled and result.get("state") == "locked":
+            return int(ExitCode.DEGRADED)
+        if result.get("ok") and result.get("published"):
+            return int(ExitCode.OK)
+        if args.scheduled and result.get("published"):
+            return int(ExitCode.DEGRADED)
+        return int(ExitCode.ERROR)
+    if args.command == "refresh-hsguru-brawl":
+        source_id = "hsguru_brawl"
+        if args.scheduled:
+            from .parser_control import is_source_scheduled_enabled
+
+            if not is_source_scheduled_enabled(source_id):
+                result = _run_pipeline_command_with_telemetry(
+                    source_id,
+                    lambda: {
+                        "ok": True,
+                        "skipped": True,
+                        "reason": "section_disabled",
+                        "source_id": source_id,
+                    },
+                    refresh_window_id=dedicated_refresh_window_id,
+                )
+                print(json.dumps(result, ensure_ascii=False, indent=2))
+                return 0
+        from .hsguru_brawl import refresh_hsguru_brawl
+
+        result = _run_pipeline_command_with_telemetry(
+            source_id,
+            lambda: asyncio.run(refresh_hsguru_brawl()),
+            refresh_window_id=dedicated_refresh_window_id,
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        return int(ExitCode.OK) if result.get("ok") else int(ExitCode.ERROR)
+    if args.command == "refresh-hsguru-esports":
+        from .hsguru_esports import (
+            LEGACY_SOURCE_ID,
+            POINTS_SOURCE_ID,
+            REFRESHERS,
+            TOURNAMENTS_SOURCE_ID,
+        )
+
+        parts = {
+            "tournaments": TOURNAMENTS_SOURCE_ID,
+            "points": POINTS_SOURCE_ID,
+            "legacy": LEGACY_SOURCE_ID,
+        }
+        selected = [parts[name] for name in dict.fromkeys(args.part or parts)]
+        results: dict[str, object] = {}
+        for source_id in selected:
+            if args.scheduled:
+                from .parser_control import is_source_scheduled_enabled
+
+                if not is_source_scheduled_enabled(source_id):
+                    results[source_id] = _run_pipeline_command_with_telemetry(
+                        source_id,
+                        lambda source_id=source_id: {
+                            "ok": True,
+                            "skipped": True,
+                            "reason": "section_disabled",
+                            "source_id": source_id,
+                        },
+                        refresh_window_id=dedicated_refresh_window_id,
+                    )
+                    continue
+            refresh = REFRESHERS[source_id]
+            # The weekly archive answers "skipped" while its snapshot is fresh.
+            options = (
+                {"force": True}
+                if source_id == LEGACY_SOURCE_ID and args.force_legacy
+                else {}
+            )
+            results[source_id] = _run_pipeline_command_with_telemetry(
+                source_id,
+                lambda refresh=refresh, options=options: asyncio.run(refresh(**options)),
+                refresh_window_id=dedicated_refresh_window_id,
+            )
+        print(json.dumps(results, ensure_ascii=False, indent=2, default=str))
+        if all(
+            isinstance(item, dict) and item.get("ok") for item in results.values()
+        ):
+            return int(ExitCode.OK)
+        if any(
+            isinstance(item, dict) and item.get("ok") for item in results.values()
+        ):
             return int(ExitCode.DEGRADED)
         return int(ExitCode.ERROR)
     if args.command == "refresh-hsguru-archetype-analysis":

@@ -25,6 +25,7 @@ def _no_store_path(path: str) -> bool:
             "/v1/constructed/hsguru-deck",
             "/v1/hsguru/archetypes/analysis",
             "/v1/hsguru/mulligan/coverage",
+            "/v1/hsreplay/mulligan/coverage",
             "/v1/hsguru/streaming-now",
             "/v1/hsguru/streamers/coverage",
             "/v1/system/parsing-reliability",
@@ -49,7 +50,7 @@ def _cacheable_path(path: str) -> bool:
         # ETag can race their reads and return a false 304 for changed freshness
         # metadata. Keep this endpoint coherent by evaluating every request.
         return False
-    if path.startswith("/v1/hsguru/mulligan/coverage"):
+    if path.startswith(("/v1/hsguru/mulligan/coverage", "/v1/hsreplay/mulligan/coverage")):
         # Run rows change without a new snapshot (failed or unchanged pages).
         return False
     if path.startswith(("/v1/hsguru/streaming-now", "/v1/hsguru/streamers/coverage")):
@@ -167,6 +168,10 @@ def _db_revision(path: str) -> str | None:
 
             run = latest_run() or {}
             return str(run.get("completed_at") or run.get("started_at") or "") or None
+        if path.startswith("/v1/hsguru/matchups"):
+            from .hsguru_matchups import latest_revision as hsguru_matchups_revision
+
+            return hsguru_matchups_revision()
         if path.startswith(("/v1/hsguru/streamers", "/v1/hsguru/streamer-decks")):
             from .hsguru_streamers import latest_revision as hsguru_streamers_revision
 
@@ -175,6 +180,10 @@ def _db_revision(path: str) -> str | None:
             from .hsguru_mulligan import latest_revision as hsguru_stats_revision
 
             return hsguru_stats_revision()
+        if path.startswith("/v1/hsreplay/mulligan"):
+            from .hsreplay_mulligan import latest_revision as hsreplay_mulligan_revision
+
+            return hsreplay_mulligan_revision()
         if path.startswith("/v1/battlegrounds/minions") and (
             path.endswith(("/stats", "/stats/history", "/stats/slices"))
         ):
@@ -230,6 +239,17 @@ def cache_revision(path: str, query_string: bytes) -> str:
         from .hsguru_decks import hsguru_matrix_cache_revision
 
         return hsguru_matrix_cache_revision()
+    if path.startswith(("/v1/hsguru/brawl/", "/v1/hsguru/esports/")):
+        source_id = (
+            "hsguru_brawl"
+            if path.startswith("/v1/hsguru/brawl/")
+            else "hsguru_esports_points"
+            if path.startswith("/v1/hsguru/esports/points")
+            else "hsguru_esports_legacy"
+            if path.startswith("/v1/hsguru/esports/legacy/")
+            else "hsguru_esports_tournaments"
+        )
+        return _dataset_timestamp(source_id) or "not-cached"
     db_revision = _db_revision(path)
     if db_revision:
         return db_revision

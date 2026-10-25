@@ -67,6 +67,7 @@ class GraphQLRepository(Protocol):
 
     async def hsguru_statistics(self, **selector: Any) -> dict[str, Any] | None: ...
 
+    async def hsreplay_mulligan(self, **selector: Any) -> dict[str, Any]: ...
     async def hsguru_streamer_rows(
         self, query: str, params: dict[str, Any]
     ) -> list[dict[str, Any]]: ...
@@ -896,6 +897,93 @@ class PostgresGraphQLRepository:
         )
         return {"target": dict(target), "snapshot": dict(snapshot), "rows": rows}
 
+    async def hsreplay_mulligan(
+        self,
+        *,
+        deck_id: str,
+        format_name: str | None,
+        rank: str,
+        initiative: str,
+        period: str,
+        opponent_class: str,
+    ) -> dict[str, Any]:
+        """The mirrored latest HSReplay mulligan snapshot of one deck slice.
+
+        Same keys as ``app.hsreplay_mulligan._load_slice`` so one resolver
+        (``resolve_slice``) answers REST and GraphQL alike.
+        """
+
+        from ..hsreplay_mulligan import premium_session_from_run
+
+        run = await self._fetch_one(
+            """
+            SELECT * FROM analytics.hsreplay_mulligan_runs
+            WHERE finished_at IS NOT NULL ORDER BY id DESC LIMIT 1
+            """,
+            {},
+        )
+        if run:
+            run = dict(run)
+            detail = run.pop("detail_json", None)
+            run["detail"] = json.loads(detail) if isinstance(detail, str) else detail or {}
+        found: dict[str, Any] = {"premium_session": premium_session_from_run(run)}
+        target = await self._fetch_one(
+            """
+            SELECT * FROM analytics.hsreplay_mulligan_targets
+            WHERE deck_id = %(deck_id)s
+              AND (%(format)s::text IS NULL OR format = %(format)s::text)
+              AND rank = %(rank)s AND initiative = %(initiative)s AND period = %(period)s
+            ORDER BY latest_snapshot_id IS NOT NULL DESC, active DESC,
+                     last_success_at DESC NULLS LAST, id DESC
+            LIMIT 1
+            """,
+            {
+                "deck_id": deck_id,
+                "format": format_name,
+                "rank": rank,
+                "initiative": initiative,
+                "period": period,
+            },
+        )
+        if not target:
+            return found
+        found["target"] = dict(target)
+        found["deck"] = await self._fetch_one(
+            """
+            SELECT * FROM analytics.hsreplay_mulligan_decks
+            WHERE deck_id = %(deck_id)s AND format = %(format)s
+            ORDER BY active DESC, listed_at DESC, id DESC LIMIT 1
+            """,
+            {"deck_id": deck_id, "format": target["format"]},
+        )
+        snapshot = None
+        if target.get("latest_snapshot_id") is not None:
+            snapshot = await self._fetch_one(
+                "SELECT * FROM analytics.hsreplay_mulligan_snapshots WHERE id = %(id)s",
+                {"id": target["latest_snapshot_id"]},
+            )
+        found["snapshot"] = dict(snapshot) if snapshot else None
+        if snapshot:
+            group_key = "ALL" if opponent_class == "any" else opponent_class
+            found["groups"] = await self._fetch_all(
+                """
+                SELECT * FROM analytics.hsreplay_mulligan_groups
+                WHERE snapshot_id = %(id)s ORDER BY opponent_class
+                """,
+                {"id": snapshot["id"]},
+            )
+            found["cards"] = await self._fetch_all(
+                """
+                SELECT dbf_id, card_id, card_name, keep_percentage, opening_hand_winrate,
+                       winrate_when_drawn, winrate_when_played, avg_turns_in_hand,
+                       avg_turn_played_on
+                FROM analytics.hsreplay_mulligan_cards
+                WHERE snapshot_id = %(id)s AND opponent_class = %(opponent)s
+                ORDER BY position
+                """,
+                {"id": snapshot["id"], "opponent": group_key},
+            )
+        return found
     async def hsguru_streamer_rows(
         self, query: str, params: dict[str, Any]
     ) -> list[dict[str, Any]]:
