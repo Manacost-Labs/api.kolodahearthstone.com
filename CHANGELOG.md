@@ -9,9 +9,13 @@
   rest was glibc arena fragmentation from 40 Scrape.do threads: the unit runs
   the container with `MALLOC_ARENA_MAX=2` and a run calls `malloc_trim(0)`
   every 200 pages. Local benchmark with 3,000 distinct pages: peak RSS
-  1,262 → 465 MB, flat at 320–340 MB, throughput unchanged. Documents the
-  class-matchup de-duplication and per-page write isolation from #62.
-
+  1,262 → 465 MB, flat at 320–340 MB, throughput unchanged.
+- Balance Radar: the company Blizzard is never renamed after the Mage spell
+  «Снежная буря» (brand words stay out of the name pass; «Снежная буря» used
+  as the actor of a statement becomes Blizzard again) (#63).
+- HSGuru mulligan: class matchup pages that map two labels to one class keep
+  the larger sample, and a failed write of one page marks only that target
+  failed instead of ending the run (#62).
 - Balance Radar: accurate, short, Russian-only texts. Archetypes use
   HearthPulse's own labels (the rest translated once by Claude and cached);
   cards use the ruRU localization. Every reader text is cleaned
