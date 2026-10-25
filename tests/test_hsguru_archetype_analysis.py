@@ -598,15 +598,20 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
                     "slices": [
                         {
                             "key": "standard|legend|past_week|any_player",
-                            "rows": [{"archetype": "Legend Mage"}],
+                            "rows": [
+                                {"archetype": "Legend Mage", "games": 100},
+                                # Slices list archetypes down to 10 games; the
+                                # paid analysis keeps its 100-game targets.
+                                {"archetype": "Quiet Mage", "games": 99},
+                            ],
                         },
                         {
                             "key": "wild|legend|past_week|any_player",
-                            "rows": [{"archetype": "Wild Rogue"}],
+                            "rows": [{"archetype": "Wild Rogue", "games": 742}],
                         },
                         {
                             "key": "standard|all|past_week|any_player",
-                            "rows": [{"archetype": "Wrong Rank"}],
+                            "rows": [{"archetype": "Wrong Rank", "games": 742}],
                         },
                     ],
                     "current_catalog": {

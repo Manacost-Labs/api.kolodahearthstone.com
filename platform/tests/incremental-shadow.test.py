@@ -62,6 +62,11 @@ PUBLIC_TABLES = (
     "fetch_log",
     "hearthstone_patches",
     "hsguru_archetype_history",
+    "hsguru_class_matchups",
+    "hsguru_mulligan_cards",
+    "hsguru_stat_runs",
+    "hsguru_stat_snapshots",
+    "hsguru_stat_targets",
     "hsreplay_archetypes",
 )
 CONTAINER_ID = ""

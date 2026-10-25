@@ -16,6 +16,34 @@
   patterns (thresholds, change types, timing after releases), a Claude-written
   overview, and up to three similar past cases per candidate (`precedents`).
   New endpoints `/v1/constructed/balance-radar/history` and `/patterns`.
+- HSGuru coverage: matrix slices are requested with `min_games=10` instead of
+  100 (same request count; Standard Bans ALL grows from 141 to about 226
+  archetypes, Wild from 216 to about 628), add the Bronze–Platinum rank, and
+  split On Coin / Going First for every rank instead of six. A run grows from
+  423 to 603 Scrape.do pages (about 2,420 to 3,450 credits); its deadline grows
+  to 150 minutes and the unit timeout to 160 minutes. `/v1/hsguru/meta` accepts
+  `min_games` 10/25/50 and keeps its default of 100. The current archetype
+  catalog lists archetypes from 10 games, and a Bans catalog
+  (`/v1/hsguru/archetypes?period=black_empire_ban`) is built from the matrix
+  slices with builds from its own deck catalogs. Deck catalogs ask for HSGuru's
+  full 200-build page per archetype, re-read covered archetypes daily instead
+  of keeping week-old builds, skip archetypes below HSGuru's 50-game deck
+  floor, and the deck job's timeout grows to four hours. The paid archetype
+  analysis keeps its 100-game Legend/past-week target set.
+- New pipeline `hsguru_mulligan` collects the HSGuru mulligan guide
+  (mulligan, drawn, not drawn and kept impact with counts per card) and class
+  matchups for every archetype and catalog deck with enough games: six ranks ×
+  eight periods including the Bans window, the coin split, opponent class for
+  the most played archetypes, 8,289 pages on 25 October (about 1,200 a day by
+  TTL). Before, only Legend past_week, without coin or decks, was collected.
+  An incremental queue re-reads a page when its period TTL expires or a
+  cumulative window grows by 30 %; it runs every three hours (200 pages, one
+  hour) through the free local FlareSolverr. Scrape.do is a fallback capped at 300 credits per run and
+  1,000 per UTC day inside the Meta-Lab HSGuru budget. SQLite `hsguru_*` is
+  mirrored to PostgreSQL `analytics.hsguru_*` (migration 017). New REST
+  `/v1/hsguru/mulligan`, `/class-matchups`, `/mulligan/slices`,
+  `/mulligan/history`, `/mulligan/coverage` and GraphQL `hsguruMulligan`,
+  `hsguruClassMatchups`. See docs/HSGURU_MULLIGAN.md.
 
 - A HSGuru deck page whose cards all rendered but hold no usable deck (one
   "Highlander Warrior" card with a one-card code) now means "no builds" instead

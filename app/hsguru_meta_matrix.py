@@ -17,7 +17,7 @@ from bs4 import BeautifulSoup
 from .config import hsguru_current_patch_period
 from .firecrawl_backend import FirecrawlScrape, scrape_source_with_options
 from .hsguru_auth import hsguru_firecrawl_headers
-from .hsguru_decks import cached_hsguru_catalog_decks
+from .hsguru_decks import CATALOG_PERIODS, cached_hsguru_catalog_decks
 from .meta_intelligence.budget import validate_attempt
 from .job_run import (
     AtomicJobRunSnapshotWriter,
@@ -42,6 +42,7 @@ HSGURU_META_URL = "https://www.hsguru.com/meta"
 FORMATS = ("standard", "wild")
 RANKS = (
     "all",
+    "bronze_plat",
     "diamond",
     "diamond_4to1",
     "diamond_to_legend",
@@ -72,22 +73,30 @@ NAMED_PERIODS = ("black_empire", "black_empire_ban")
 # exposed as ``black_empire`` next to the newest patch link 36.6.3). Retired
 # windows (violet_hold, most_wanted) are no longer advertised and not scraped.
 CURRENT_NAMED_PERIODS = ("black_empire",)
+# ``CATALOG_PERIODS`` (the Bans window, shown by HearthPulse by default) get an
+# archetype catalog of their own next to the current one. It is built from the
+# matrix Any Player/all-rank slice, so it costs no request beyond the matrix.
 PERIODS = (*ROLLING_PERIODS, DEFAULT_PATCH_PERIOD, *NAMED_PERIODS)
 COINS = ("any_player", "on_coin", "going_first")
 # HSGuru's ``player_has_coin`` filter: second with the Coin, or first.
 _COIN_QUERY = {"on_coin": "yes", "going_first": "no"}
-# The coin split triples the request count, so it covers only the ranks the
-# HearthPulse meta table offers; the other ranks stay Any Player only.
-COIN_RANKS = ("all", "diamond", "diamond_to_legend", "legend", "top_5k", "top_legend")
-MIN_GAMES = (100, 250, 500, 1000, 2500, 5000)
-CURRENT_MIN_GAMES = 50
-# Scrape.do can legitimately need more than an hour for the full matrix. The
-# checkpoint still bounds retries and lets an interrupted run
-# resume, while this deadline avoids turning a healthy slow run into an LKG.
-DEFAULT_RUN_DEADLINE_SECONDS = 90 * 60
+# The coin split triples the request count; it covers every rank so each
+# rank view has the same Any Player / On Coin / Going First choice.
+COIN_RANKS = RANKS
+# Every slice is requested with the lowest useful HSGuru threshold and then
+# filtered locally, so one request serves every published min-games view.
+# Below ten games an archetype's winrate is noise; HSGuru accepts any value.
+SLICE_QUERY_MIN_GAMES = 10
+MIN_GAMES = (10, 25, 50, 100, 250, 500, 1000, 2500, 5000)
+CURRENT_MIN_GAMES = SLICE_QUERY_MIN_GAMES
+# Scrape.do needs about an hour per 420 pages, so the 600-page matrix takes
+# about 90 minutes. The checkpoint still bounds retries and lets an
+# interrupted run resume, while this deadline avoids turning a healthy slow run
+# into an LKG.
+DEFAULT_RUN_DEADLINE_SECONDS = 150 * 60
 CHECKPOINT_SCHEMA_VERSION = 1
 CHECKPOINT_LABEL = "refresh_checkpoint_v1"
-CHECKPOINT_TTL = timedelta(hours=2)
+CHECKPOINT_TTL = timedelta(hours=3)
 EMPTY_BASE_SLICE_ALLOWLIST = frozenset(
     {
         *(
@@ -369,7 +378,7 @@ def iter_slice_specs(periods: tuple[str, ...] = PERIODS) -> tuple[SliceSpec, ...
             "format": _FORMAT_QUERY[format_name],
             "rank": rank,
             "period": period,
-            "min_games": MIN_GAMES[0],
+            "min_games": SLICE_QUERY_MIN_GAMES,
             **({"player_has_coin": _COIN_QUERY[coin]} if coin in _COIN_QUERY else {}),
         }
         query = urlencode(params)
@@ -1024,6 +1033,19 @@ def _normalize_current_rows(
     return normalized
 
 
+def _cached_catalog(
+    cached_dataset: dict[str, Any] | None,
+    period: str | None,
+) -> dict[str, Any]:
+    """Return the published catalog for ``period`` (the current one by default)."""
+    structured = ((cached_dataset or {}).get("data") or {}).get("structured") or {}
+    if period in CATALOG_PERIODS:
+        catalog = (structured.get("period_catalogs") or {}).get(period)
+    else:
+        catalog = structured.get("current_catalog")
+    return catalog if isinstance(catalog, dict) else {}
+
+
 def enrich_current_rows_with_cached_decks(
     rows: list[dict[str, Any]],
     cached_dataset: dict[str, Any] | None = None,
@@ -1037,11 +1059,7 @@ def enrich_current_rows_with_cached_decks(
     one paid page request per archetype on every matrix refresh.
     """
     effective_sample_period = sample_period or "past_30_days"
-    previous_rows = (
-        (((cached_dataset or {}).get("data") or {}).get("structured") or {})
-        .get("current_catalog", {})
-        .get("archetypes", [])
-    )
+    previous_rows = _cached_catalog(cached_dataset, sample_period).get("archetypes", [])
     previous_decks: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for row in previous_rows if isinstance(previous_rows, list) else []:
         if not isinstance(row, dict):
@@ -1105,6 +1123,69 @@ def enrich_current_rows_with_cached_decks(
         row["has_decks"] = bool(merged)
 
 
+def _deck_catalog_join(period: str, joined_at: str) -> dict[str, Any]:
+    suffix = f"_{period}" if period in CATALOG_PERIODS else ""
+    return {
+        "joined_at": joined_at,
+        "source_ids": [
+            f"hsguru_deck_catalog_{format_name}_all{suffix}" for format_name in FORMATS
+        ],
+        "sample_rank": "all",
+        "sample_period": period,
+    }
+
+
+def build_period_catalog(
+    period: str,
+    slices: list[dict[str, Any]],
+    cached_dataset: dict[str, Any] | None,
+    *,
+    joined_at: str,
+) -> dict[str, Any]:
+    """Build an archetype catalog for ``period`` from its all-rank slices."""
+    rows: list[dict[str, Any]] = []
+    acquisition: list[dict[str, Any]] = []
+    by_key = {str(item.get("key") or ""): item for item in slices}
+    for format_name in FORMATS:
+        key = f"{format_name}|all|{period}|any_player"
+        item = by_key.get(key)
+        if item is None:
+            continue
+        rows.extend(
+            _normalize_current_rows(
+                [row for row in item.get("rows") or [] if isinstance(row, dict)],
+                format_name=format_name,
+                period=period,
+                source_url=str(item.get("source_url") or ""),
+            )
+        )
+        acquisition.append(
+            {
+                "format": format_name,
+                "source_slice": key,
+                "fetched_at": item.get("fetched_at"),
+                "serving_cached_slice": bool(
+                    (item.get("quality") or {}).get("serving_cached_slice")
+                ),
+            }
+        )
+    rows.sort(key=lambda row: (row["format"], -int(row["games"]), row["archetype"]))
+    enrich_current_rows_with_cached_decks(rows, cached_dataset, sample_period=period)
+    return {
+        "criteria": {
+            "period": period,
+            "rank": "all",
+            "minimum_games": CURRENT_MIN_GAMES,
+            "formats": list(FORMATS),
+        },
+        "coverage": _current_catalog_coverage(rows),
+        "total_archetypes": len(rows),
+        "archetypes": rows,
+        "acquisition": acquisition,
+        "deck_catalog": _deck_catalog_join(period, joined_at),
+    }
+
+
 def _current_catalog_coverage(
     rows: list[dict[str, Any]],
 ) -> dict[str, dict[str, int]]:
@@ -1146,15 +1227,24 @@ def _refresh_current_catalog_deck_join_unlocked() -> dict[str, Any]:
     )
     joined_at = datetime.now(UTC).isoformat()
     catalog["coverage"] = _current_catalog_coverage(rows)
-    catalog["deck_catalog"] = {
-        "joined_at": joined_at,
-        "source_ids": [
-            "hsguru_deck_catalog_standard_all",
-            "hsguru_deck_catalog_wild_all",
-        ],
-        "sample_rank": "all",
-        "sample_period": sample_period,
-    }
+    catalog["deck_catalog"] = _deck_catalog_join(sample_period, joined_at)
+    period_coverage: dict[str, dict[str, dict[str, int]]] = {}
+    for period, period_catalog in (structured.get("period_catalogs") or {}).items():
+        period_rows = (
+            period_catalog.get("archetypes")
+            if isinstance(period_catalog, dict)
+            else None
+        )
+        if not isinstance(period_rows, list):
+            continue
+        enrich_current_rows_with_cached_decks(
+            period_rows,
+            dataset,
+            sample_period=period,
+        )
+        period_catalog["coverage"] = _current_catalog_coverage(period_rows)
+        period_catalog["deck_catalog"] = _deck_catalog_join(period, joined_at)
+        period_coverage[period] = period_catalog["coverage"]
     structured["schema_version"] = max(int(structured.get("schema_version") or 0), 7)
     save_dataset(SOURCE_ID, dataset)
     return {
@@ -1164,6 +1254,7 @@ def _refresh_current_catalog_deck_join_unlocked() -> dict[str, Any]:
         "with_decks": sum(1 for row in rows if row.get("has_decks")),
         "decks": sum(int(row.get("deck_count") or 0) for row in rows),
         "coverage": catalog["coverage"],
+        "period_coverage": period_coverage,
     }
 
 
@@ -1636,6 +1727,16 @@ async def _refresh_hsguru_meta_matrix_unlocked(
         sample_period=current_period,
     )
     current_coverage = _current_catalog_coverage(current_rows)
+    period_catalogs = {
+        period: build_period_catalog(
+            period,
+            slices,
+            cached_dataset,
+            joined_at=fetched_at,
+        )
+        for period in CATALOG_PERIODS
+        if period in periods and period != current_period
+    }
     current_complete = current_period is not None and all(
         current_coverage[name]["archetypes"] > 0 for name in FORMATS
     )
@@ -1743,7 +1844,7 @@ async def _refresh_hsguru_meta_matrix_unlocked(
     )
     structured = {
         "type": "hsguru_meta_matrix",
-        "schema_version": 8,
+        "schema_version": 9,
         "fetched_at": fetched_at,
         "dimensions": {
             "formats": list(FORMATS),
@@ -1791,16 +1892,9 @@ async def _refresh_hsguru_meta_matrix_unlocked(
             "total_archetypes": len(current_rows),
             "archetypes": current_rows,
             "acquisition": current_acquisition,
-            "deck_catalog": {
-                "joined_at": fetched_at,
-                "source_ids": [
-                    "hsguru_deck_catalog_standard_all",
-                    "hsguru_deck_catalog_wild_all",
-                ],
-                "sample_rank": "all",
-                "sample_period": current_period,
-            },
+            "deck_catalog": _deck_catalog_join(current_period, fetched_at),
         },
+        "period_catalogs": period_catalogs,
     }
     dataset = {
         "source_id": SOURCE_ID,
@@ -1884,6 +1978,10 @@ async def _refresh_hsguru_meta_matrix_unlocked(
             "published": publishable,
             "current_catalog_archetypes": len(current_rows),
             "current_catalog_period": current_period,
+            "period_catalog_archetypes": {
+                period: catalog["total_archetypes"]
+                for period, catalog in period_catalogs.items()
+            },
         },
     )
     return {

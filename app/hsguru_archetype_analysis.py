@@ -31,6 +31,9 @@ SCHEMA_VERSION = 2
 CHECKPOINT_SCHEMA_VERSION = 3
 ANALYSIS_RANK = "legend"
 ANALYSIS_PERIOD = "past_week"
+# The matrix slices now list archetypes down to 10 games; the paid analysis
+# keeps its former 100-game target set.
+ANALYSIS_MIN_GAMES = 100
 CARD_STATS_MIN_MULL_COUNT = 25
 CARD_STATS_MIN_DRAWN_COUNT = 25
 FORMAT_IDS = {"standard": 2, "wild": 1}
@@ -331,7 +334,7 @@ def _active_archetypes() -> list[dict[str, str]]:
             if not isinstance(row, dict):
                 continue
             archetype = str(row.get("archetype") or "").strip()
-            if archetype:
+            if archetype and int(row.get("games") or 0) >= ANALYSIS_MIN_GAMES:
                 active.append({"format": format_name, "archetype": archetype})
     return active
 

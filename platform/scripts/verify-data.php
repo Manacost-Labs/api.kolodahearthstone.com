@@ -187,6 +187,13 @@ function compareSqliteCounts(): array
         'bg_minion_stat_rounds',
         'bg_minion_stat_snapshots',
         'bg_minion_stat_summaries',
+        // The HSGuru mulligan writer runs every three hours and prunes old
+        // snapshots, so the same lag argument applies to its tables.
+        'hsguru_class_matchups',
+        'hsguru_mulligan_cards',
+        'hsguru_stat_runs',
+        'hsguru_stat_snapshots',
+        'hsguru_stat_targets',
     ];
     $sourceTotal = 0;
     $targetTotal = 0;

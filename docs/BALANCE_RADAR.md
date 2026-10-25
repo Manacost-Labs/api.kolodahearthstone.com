@@ -298,7 +298,7 @@ p25, median, p75, max}`), `narrative` — обзор на русском. Пок
 
 ## Запуск и расписание
 
-- Таймер `hs-data-api-docker-balance-radar.timer` срабатывает в 02:10 и 14:10
+- Таймер `hs-data-api-docker-balance-radar.timer` срабатывает в 03:10 и 15:10
   по Варшаве, после двенадцатичасового обновления HSGuru meta matrix. Он
   запускает `docker compose run --rm api python -m app.balance_radar run`.
 - Коды выхода: `0` — всё успешно. `10` — один формат не удался или один из

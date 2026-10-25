@@ -191,8 +191,8 @@ Production refresh schedule:
   matrix at `00:00` and `12:00 Europe/Warsaw`; every rank includes rolling,
   active-patch and Violet Hold periods. A newly advertised HSGuru `patch_*`
   becomes active only after the complete matrix passes its publication gate.
-- `hs-data-api-docker-balance-radar.timer`: nerf/buff Balance Radar at `02:10`
-  and `14:10 Europe/Warsaw`, after the meta matrix. Needs
+- `hs-data-api-docker-balance-radar.timer`: nerf/buff Balance Radar at `03:10`
+  and `15:10 Europe/Warsaw`, after the meta matrix. Needs
   `HS_RADAR_ENV_FILE` (default `/home/debian/server/secrets/hs-data-api/radar.env`);
   see [docs/BALANCE_RADAR.md](docs/BALANCE_RADAR.md).
 - `hs-data-api-docker-firecrawl-streamer.timer`: HSGuru streamer decks every
