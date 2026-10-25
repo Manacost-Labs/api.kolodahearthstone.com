@@ -29,15 +29,26 @@ _CACHE_TTL_SECONDS = 6 * 60 * 60
 _EMPTY_CACHE_TTL_SECONDS = 10 * 60
 _CATALOG_MAX_AGE_SECONDS = 24 * 60 * 60
 _ALL_CATALOG_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
+# Covered archetypes are re-read once a day so their builds and statistics
+# follow the growing window instead of waiting for the seven-day expiry.
+_ALL_CATALOG_REFRESH_SECONDS = 20 * 60 * 60
 _ALL_CATALOG_BATCH_SIZE = 20
 _ALL_CATALOG_BATCH_CONCURRENCY = 2
 # Exact one-archetype retries run on the free local browser first; the cap
 # covers a whole catalog's builds-less archetypes in one night.
 _ALL_CATALOG_EXACT_RETRY_LIMIT = 200
+# HSGuru lists no build below 50 games, whatever ``min_games`` asks for, and
+# caps one page at 200 builds without pagination. An archetype below 50 games
+# therefore never has a build to fetch.
+DECK_MIN_GAMES = 50
+_PAGE_LIMIT = 200
 # A shared page that reaches its limit was crowded by prolific archetypes; each
-# of its archetypes is then asked for on its own, down to 10-game builds.
+# of its archetypes is then asked for on its own page with the full limit.
 _CROWDED_SPLIT_MIN_GAMES = 10
-_CROWDED_SPLIT_LIMIT = 30
+_CROWDED_SPLIT_LIMIT = _PAGE_LIMIT
+# Windows published as their own archetype catalog next to the current one
+# (HSGuru's Bans window). Their builds live in period-suffixed catalogs.
+CATALOG_PERIODS = ("black_empire_ban",)
 # Quiet archetypes can have aggregate stats but no single build with a sample
 # in the current window. Their builds come from these wider windows, tried in
 # order, and every row keeps the window it was sampled from.
@@ -661,8 +672,13 @@ def _validate_parsed_catalog_rows(
         raise RuntimeError("HSGuru empty deck catalog could not be verified")
 
 
-def _catalog_source_id(format_name: str, rank: str = "legend") -> str:
-    return f"hsguru_deck_catalog_{format_name}_{rank}"
+def _catalog_source_id(
+    format_name: str,
+    rank: str = "legend",
+    period: str | None = None,
+) -> str:
+    suffix = f"_{period}" if period in CATALOG_PERIODS else ""
+    return f"hsguru_deck_catalog_{format_name}_{rank}{suffix}"
 
 
 def _catalog_snapshot(
@@ -672,7 +688,7 @@ def _catalog_snapshot(
     expected_period: str | None = None,
 ) -> _CatalogSnapshot | None:
     period = expected_period or _current_deck_period()
-    path = dataset_path(_catalog_source_id(format_name, rank))
+    path = dataset_path(_catalog_source_id(format_name, rank, period))
     try:
         mtime_ns = path.stat().st_mtime_ns
     except OSError:
@@ -751,6 +767,30 @@ def _catalog_snapshot(
         return None
     _catalog_memory[cache_key] = (mtime_ns, snapshot)
     return snapshot
+
+
+def _snapshot_needs_full_refresh(snapshot: _CatalogSnapshot) -> bool:
+    try:
+        fetched_at = datetime.fromisoformat(snapshot.fetched_at.replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    if fetched_at.tzinfo is None:
+        return True
+    age_seconds = (datetime.now(UTC) - fetched_at.astimezone(UTC)).total_seconds()
+    return age_seconds >= _ALL_CATALOG_REFRESH_SECONDS
+
+
+def hsguru_catalog_periods() -> tuple[str, ...]:
+    """Secondary windows whose archetype catalogs the matrix has published."""
+    try:
+        matrix = load_resolved_public_dataset("hsguru_meta_matrix") or {}
+    except (OSError, RuntimeError, TypeError, ValueError):
+        matrix = {}
+    structured = (matrix.get("data") or {}).get("structured") or {}
+    published = structured.get("period_catalogs") or {}
+    if not isinstance(published, dict):
+        return ()
+    return tuple(period for period in CATALOG_PERIODS if period in published)
 
 
 def _catalog_rows(
@@ -832,7 +872,11 @@ def _meta_archetypes(
     except (OSError, RuntimeError, TypeError, ValueError):
         matrix = {}
     structured = (matrix.get("data") or {}).get("structured") or {}
-    current_catalog = structured.get("current_catalog") or {}
+    current_catalog = (
+        (structured.get("period_catalogs") or {}).get(target_period)
+        if target_period in CATALOG_PERIODS
+        else structured.get("current_catalog")
+    ) or {}
     criteria = current_catalog.get("criteria") or {}
     current_rows = current_catalog.get("archetypes") or []
     if (
@@ -845,6 +889,10 @@ def _meta_archetypes(
             if not isinstance(row, dict):
                 continue
             if str(row.get("format") or "").strip().lower() != format_name:
+                continue
+            # The catalog lists archetypes down to 10 games, but no build of
+            # an archetype below HSGuru's 50-game deck floor can be listed.
+            if int(row.get("games") or 0) < DECK_MIN_GAMES:
                 continue
             name = str(row.get("archetype") or "").strip()
             if name:
@@ -984,7 +1032,7 @@ async def _fetch_catalog_chunk(
         *(("player_deck_archetype[]", archetype) for archetype in archetypes),
     ]
     source = Source(
-        id=_catalog_source_id(format_name, "all"),
+        id=_catalog_source_id(format_name, "all", period),
         url=str(httpx.URL(HSGURU_DECKS_URL, params=params)),
         site="hsguru",
         category="deck_catalog",
@@ -1134,7 +1182,7 @@ def _write_catalog(
             row["updated_at"] = fetched_at
         row["sample_period"] = period
         row["sample_rank"] = rank
-    source_id = _catalog_source_id(format_name, rank)
+    source_id = _catalog_source_id(format_name, rank, period)
     provider_backends = list(dict.fromkeys(backends))
     backend = (
         provider_backends[0]
@@ -1214,6 +1262,10 @@ async def _refresh_all_rank_catalog(
         raise RuntimeError(
             f"HSGuru {format_name} current-patch archetype catalog is unavailable"
         )
+    if snapshot is not None and _snapshot_needs_full_refresh(snapshot):
+        # Re-read every archetype; rows of the stale snapshot would otherwise
+        # keep their old statistics and hide newer builds for up to a week.
+        existing_rows = []
     covered_keys = {
         _key(str(row.get("archetype") or row.get("title") or ""))
         for row in existing_rows
@@ -1292,7 +1344,7 @@ async def _refresh_all_rank_catalog(
             period=period,
             size=1,
             min_games=10,
-            limit=20,
+            limit=_PAGE_LIMIT,
         )
         credits += retry_credits
         backends.extend(retry_backends)
@@ -1397,7 +1449,7 @@ async def _fetch_fallback_decks(
                 batch_number=batch_number,
                 period=window,
                 min_games=min_games,
-                limit=20,
+                limit=_PAGE_LIMIT,
             )
         except Exception as exc:  # noqa: BLE001 - one archetype must not stop others
             attempts.append(
@@ -1527,7 +1579,7 @@ async def refresh_hsguru_fallback_deck_catalog(
         and key not in failed_keys
         and key not in unchecked_keys
     ]
-    source_id = _catalog_source_id(format_name, "fallback")
+    source_id = _catalog_source_id(format_name, "fallback", period)
     provider_backends = list(dict.fromkeys(backends))
     write_json(
         dataset_path(source_id),

@@ -4,7 +4,13 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query
 
-from ..hsguru_meta_matrix import MIN_GAMES, PERIODS, SOURCE_ID
+from ..hsguru_meta_matrix import (
+    CATALOG_PERIODS,
+    CURRENT_MIN_GAMES,
+    MIN_GAMES,
+    PERIODS,
+    SOURCE_ID,
+)
 from ..storage import load_dataset
 from .models import ApiMeta, timestamp_is_stale
 
@@ -71,6 +77,7 @@ def hsguru_meta(
     format_name: Literal["standard", "wild"] = Query("standard", alias="format"),
     rank: Literal[
         "all",
+        "bronze_plat",
         "diamond",
         "diamond_4to1",
         "diamond_to_legend",
@@ -160,8 +167,17 @@ def hsguru_meta(
 @router.get("/archetypes")
 def hsguru_current_archetypes(
     format_name: Literal["all", "standard", "wild"] = Query("all", alias="format"),
+    period: str | None = Query(
+        None,
+        min_length=1,
+        max_length=64,
+        description=(
+            "Catalog window: the current one by default, or a window listed in "
+            "meta.available_periods such as the Bans window"
+        ),
+    ),
     q: str | None = Query(None, min_length=1, max_length=120),
-    min_games: int = Query(50, ge=50),
+    min_games: int = Query(CURRENT_MIN_GAMES, ge=CURRENT_MIN_GAMES),
     has_decks: bool | None = Query(
         None,
         description="Filter to archetypes with or without cached HSGuru builds",
@@ -175,9 +191,27 @@ def hsguru_current_archetypes(
     if not dataset:
         raise HTTPException(status_code=503, detail="HSGuru meta matrix is not available yet")
     structured = ((dataset.get("data") or {}).get("structured") or {})
-    catalog = structured.get("current_catalog") or {}
+    current_catalog = structured.get("current_catalog") or {}
+    current_period = str((current_catalog.get("criteria") or {}).get("period") or "")
+    period_catalogs = {
+        name: value
+        for name, value in (structured.get("period_catalogs") or {}).items()
+        if name in CATALOG_PERIODS and isinstance(value, dict)
+    }
+    available_periods = [name for name in (current_period, *period_catalogs) if name]
+    if period is None or period == current_period:
+        catalog = current_catalog
+    elif period in period_catalogs:
+        catalog = period_catalogs[period]
+    else:
+        raise HTTPException(
+            status_code=422,
+            detail={"allowed_periods": available_periods},
+        )
     if not catalog.get("archetypes"):
-        raise HTTPException(status_code=503, detail="Current HSGuru catalog is unavailable")
+        raise HTTPException(
+            status_code=503, detail="Requested HSGuru catalog is unavailable"
+        )
     rows = [
         dict(row)
         for row in catalog.get("archetypes") or []
@@ -202,18 +236,25 @@ def hsguru_current_archetypes(
     rows.sort(key=sort_key, reverse=order == "desc")
     total = len(rows)
     fetched_at = dataset.get("fetched_at") or structured.get("fetched_at")
+    response_meta = ApiMeta(
+        source_id=SOURCE_ID,
+        fetched_at=fetched_at,
+        stale=timestamp_is_stale(fetched_at, max_age_hours=36),
+        count=total,
+        limit=limit,
+        offset=offset,
+    ).model_dump(exclude_none=True)
+    response_meta.update(
+        {
+            "available_periods": available_periods,
+            "current_period": current_period or None,
+        }
+    )
     return {
         "data": rows[offset : offset + limit],
         "criteria": catalog.get("criteria"),
         "coverage": catalog.get("coverage"),
-        "meta": ApiMeta(
-            source_id=SOURCE_ID,
-            fetched_at=fetched_at,
-            stale=timestamp_is_stale(fetched_at, max_age_hours=36),
-            count=total,
-            limit=limit,
-            offset=offset,
-        ).model_dump(exclude_none=True),
+        "meta": response_meta,
     }
 
 

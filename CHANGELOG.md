@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- HSGuru coverage: matrix slices are requested with `min_games=10` instead of
+  100 (same request count; Standard Bans ALL grows from 141 to about 226
+  archetypes, Wild from 216 to about 628), add the Bronze–Platinum rank, and
+  split On Coin / Going First for every rank instead of six. A run grows from
+  423 to 603 Scrape.do pages (about 2,420 to 3,450 credits); its deadline grows
+  to 150 minutes and the unit timeout to 160 minutes. `/v1/hsguru/meta` accepts
+  `min_games` 10/25/50 and keeps its default of 100. The current archetype
+  catalog lists archetypes from 10 games, and a Bans catalog
+  (`/v1/hsguru/archetypes?period=black_empire_ban`) is built from the matrix
+  slices with builds from its own deck catalogs. Deck catalogs ask for HSGuru's
+  full 200-build page per archetype, re-read covered archetypes daily instead
+  of keeping week-old builds, skip archetypes below HSGuru's 50-game deck
+  floor, and the deck job's timeout grows to four hours. The paid archetype
+  analysis keeps its 100-game Legend/past-week target set.
+
 - A HSGuru deck page whose cards all rendered but hold no usable deck (one
   "Highlander Warrior" card with a one-card code) now means "no builds" instead
   of failing the whole Wild all-rank catalog. Only cards without copy text count

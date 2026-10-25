@@ -399,7 +399,8 @@ def test_all_rank_retry_budget_advances_across_two_runs(
     snapshot = hsguru_decks._CatalogSnapshot(
         rows=existing,
         period="patch_36.2.0",
-        fetched_at="2026-08-11T00:00:00+00:00",
+        # Recent snapshots stay incremental; stale ones are re-read in full.
+        fetched_at=datetime.now(UTC).isoformat(),
         backend="flaresolverr",
         provider_backends=("flaresolverr",),
         missing_archetypes=tuple(first_payload["missing_archetypes"]),
@@ -434,7 +435,7 @@ def test_all_rank_retry_budget_advances_across_two_runs(
     third_snapshot = hsguru_decks._CatalogSnapshot(
         rows=existing,
         period="patch_36.2.0",
-        fetched_at="2026-08-11T01:00:00+00:00",
+        fetched_at=datetime.now(UTC).isoformat(),
         backend="flaresolverr",
         provider_backends=("flaresolverr",),
         zero_sample_archetypes=tuple(second_payload["zero_sample_archetypes"]),
@@ -466,8 +467,21 @@ def test_patch_catalog_targets_exact_current_matrix_period() -> None:
                 "current_catalog": {
                     "criteria": {"period": "patch_36.2.0"},
                     "archetypes": [
-                        {"format": "wild", "archetype": "Current Wild Mage"},
-                        {"format": "standard", "archetype": "Current Standard DK"},
+                        {
+                            "format": "wild",
+                            "archetype": "Current Wild Mage",
+                            "games": 50,
+                        },
+                        {
+                            "format": "wild",
+                            "archetype": "Below Deck Floor",
+                            "games": 49,
+                        },
+                        {
+                            "format": "standard",
+                            "archetype": "Current Standard DK",
+                            "games": 500,
+                        },
                     ],
                 }
             }
@@ -902,10 +916,10 @@ def test_crowded_shared_page_asks_for_each_archetype_on_its_own() -> None:
         )
 
     # The shared page reached its limit, so each archetype got its own page
-    # with the lower 10-game threshold.
+    # with the lower 10-game threshold and HSGuru's full 200-build page.
     assert fetch_page.await_count == 3
     split_urls = [call_args.args[0].url for call_args in fetch_page.await_args_list[1:]]
-    assert all("min_games=10" in url and "limit=30" in url for url in split_urls)
+    assert all("min_games=10" in url and "limit=200" in url for url in split_urls)
     assert {row["archetype"] for row in rows} >= {"Evenlock"}
 
 
