@@ -49,7 +49,8 @@ HSJSON_CARDS_URL = (
     "https://api.hearthstonejson.com/v1/{build}/enUS/cards.collectible.json"
 )
 HISTORY_FILE = "balance-radar-history.json"
-SCHEMA_VERSION = 1
+# 2: metaBeforeAll and calibration tables.
+SCHEMA_VERSION = 2
 MAX_AGE = timedelta(days=7)
 NUMERIC_FIELDS = ("cost", "attack", "health", "durability", "armor")
 TEXT_FIELD = "text"
@@ -339,6 +340,13 @@ class ArchetypeStats:
         ]
         self._shares: dict[int, dict[int, dict[int, float]]] = {}
 
+    def card_name(self, dbf_id: int) -> str | None:
+        row = self.conn.execute(
+            "SELECT COALESCE(card_name_en, card_name) FROM archetype_deck_cards WHERE dbf_id = ? LIMIT 1",
+            (dbf_id,),
+        ).fetchone()
+        return str(row[0]) if row and row[0] else None
+
     def _run_for(self, day: str) -> tuple[int, str] | None:
         before = [run for run in self.runs if run[1][:10] < day]
         if before:
@@ -435,7 +443,7 @@ class ArchetypeStats:
             )
         return result[:3]
 
-    def meta_before(self, day: str, limit: int = 10) -> list[dict[str, Any]]:
+    def meta_before(self, day: str, limit: int | None = 10) -> list[dict[str, Any]]:
         if not self.first_day or day < self.first_day:
             return []
         patch_day = date.fromisoformat(day)
@@ -454,7 +462,7 @@ class ArchetypeStats:
                 name, class_id = self.names.get(archetype_id, (str(archetype_id), None))
                 rows.append({"archetype": name, "class": class_id, **stats})
         rows.sort(key=lambda row: -(row["popularity"] or 0))
-        return rows[:limit]
+        return rows[:limit] if limit else rows
 
 
 # -- model labels -------------------------------------------------------------
@@ -773,6 +781,239 @@ def compute_patterns(
             "buff": effect(buffs),
         },
         "sparedArchetypes": spared[-15:],
+        "calibration": calibration_tables(patches),
+        "timing": {
+            "balancePatchIntervals": intervals,
+            "firstBalancePatchDaysAfterExpansion": [
+                r["days"] for r in first_after_drop if r["kind"] == "expansion"
+            ],
+            "firstBalancePatchDaysAfterMiniSet": [
+                r["days"] for r in first_after_drop if r["kind"] != "expansion"
+            ],
+            "lastBalancePatch": balance_days[-1] if balance_days else None,
+        },
+    }
+
+
+# -- calibration ----------------------------------------------------------------
+
+NERF_WINRATE_BANDS = (
+    (None, 50.0),
+    (50.0, 52.0),
+    (52.0, 54.0),
+    (54.0, 56.0),
+    (56.0, None),
+)
+NERF_POPULARITY_BANDS = ((None, 3.0), (3.0, 8.0), (8.0, None))
+BUFF_WINRATE_BANDS = (
+    (None, 40.0),
+    (40.0, 45.0),
+    (45.0, 48.0),
+    (48.0, 51.0),
+    (51.0, None),
+)
+BUFF_POPULARITY_BANDS = ((None, 1.0), (1.0, 3.0), (3.0, None))
+MIN_CELL_SAMPLES = 4
+
+
+def _band(value: float, bands: Sequence[tuple[float | None, float | None]]) -> str:
+    for low, high in bands:
+        if (low is None or value >= low) and (high is None or value < high):
+            left = "" if low is None else f"{low:g}"
+            right = "" if high is None else f"{high:g}"
+            return f"{left}-{right}"
+    return "?"
+
+
+def calibration_samples(patches: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Archetype-weeks before balance patches, marked with what the patch did to them."""
+    samples = []
+    for patch in patches:
+        if not patch.get("metaBeforeAll"):
+            continue
+        if not any(c["direction"] in {"nerf", "buff"} for c in patch["changes"]):
+            continue
+        hits = {
+            direction: {
+                a["archetype"]
+                for c in patch["changes"]
+                if c["direction"] == direction
+                for a in c.get("archetypes") or []
+            }
+            for direction in ("nerf", "buff")
+        }
+        for name, class_id, winrate, popularity in patch["metaBeforeAll"]:
+            samples.append(
+                {
+                    "patch": patch["version"],
+                    "archetype": name,
+                    "class": class_id,
+                    "winrate": winrate,
+                    "popularity": popularity,
+                    "nerfed": name in hits["nerf"],
+                    "buffed": name in hits["buff"],
+                }
+            )
+    return samples
+
+
+def calibration_tables(patches: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """How often an archetype in a winrate/popularity band was hit by the next balance patch."""
+    samples = calibration_samples(patches)
+
+    def table(flag: str, wr_bands: Any, pop_bands: Any) -> dict[str, Any]:
+        grid: dict[str, dict[str, Any]] = {}
+        by_wr: dict[str, dict[str, Any]] = {}
+        by_pop: dict[str, dict[str, Any]] = {}
+        for sample in samples:
+            for key, store, label in (
+                (
+                    f"{_band(sample['winrate'], wr_bands)}|{_band(sample['popularity'], pop_bands)}",
+                    grid,
+                    "grid",
+                ),
+                (_band(sample["winrate"], wr_bands), by_wr, "wr"),
+                (_band(sample["popularity"], pop_bands), by_pop, "pop"),
+            ):
+                cell = store.setdefault(key, {"samples": 0, "hits": 0, "examples": []})
+                cell["samples"] += 1
+                if sample[flag]:
+                    cell["hits"] += 1
+                    if label == "grid" and len(cell["examples"]) < 3:
+                        cell["examples"].append(
+                            f"{sample['archetype']} ({sample['patch']})"
+                        )
+        for store in (grid, by_wr, by_pop):
+            for cell in store.values():
+                cell["rate"] = (
+                    round(cell["hits"] / cell["samples"], 3)
+                    if cell["samples"]
+                    else None
+                )
+        total = sum(1 for s in samples if s[flag])
+        return {
+            "grid": grid,
+            "byWinrate": by_wr,
+            "byPopularity": by_pop,
+            "overall": round(total / len(samples), 3) if samples else None,
+        }
+
+    return {
+        "basis": (
+            "HSReplay Legend archetypes seen the week before each balance patch with "
+            "statistics; hit = a changed card is in at least half of the archetype's decks"
+        ),
+        "samples": len(samples),
+        "patches": len({s["patch"] for s in samples}),
+        "nerf": table("nerfed", NERF_WINRATE_BANDS, NERF_POPULARITY_BANDS),
+        "buff": table("buffed", BUFF_WINRATE_BANDS, BUFF_POPULARITY_BANDS),
+    }
+
+
+def calibrate(
+    calibration: Mapping[str, Any] | None,
+    side: str,
+    winrate: float | None,
+    popularity: float | None,
+) -> dict[str, Any] | None:
+    """Historical hit rate for this winrate/popularity, falling back to coarser tables."""
+    if not calibration or winrate is None or popularity is None:
+        return None
+    direction = "nerf" if side in {"nerf", "nerfs"} else "buff"
+    tables = calibration.get(direction) or {}
+    wr_bands = NERF_WINRATE_BANDS if direction == "nerf" else BUFF_WINRATE_BANDS
+    pop_bands = NERF_POPULARITY_BANDS if direction == "nerf" else BUFF_POPULARITY_BANDS
+    wr_band, pop_band = _band(winrate, wr_bands), _band(popularity, pop_bands)
+    for level, key, store in (
+        ("winrate×popularity", f"{wr_band}|{pop_band}", tables.get("grid") or {}),
+        ("winrate", wr_band, tables.get("byWinrate") or {}),
+        ("popularity", pop_band, tables.get("byPopularity") or {}),
+    ):
+        cell = store.get(key)
+        if cell and cell["samples"] >= MIN_CELL_SAMPLES:
+            return {
+                "level": level,
+                "band": key,
+                "historicalRate": cell["rate"],
+                "samples": cell["samples"],
+                "hits": cell["hits"],
+                "examples": cell.get("examples") or [],
+            }
+    overall = tables.get("overall")
+    return {
+        "level": "overall",
+        "band": None,
+        "historicalRate": overall,
+        "samples": calibration.get("samples"),
+        "hits": None,
+        "examples": [],
+    }
+
+
+def patch_probability(
+    intervals: Sequence[int], days_since: int | None, horizon: int
+) -> float | None:
+    """P(next balance patch within ``horizon`` days | ``days_since`` days without one)."""
+    if days_since is None:
+        return None
+    longer = [gap for gap in intervals if gap > days_since]
+    if len(longer) < 3:
+        return None
+    # Laplace smoothing: eight past expansions are not certainty.
+    hits = sum(1 for gap in longer if gap <= days_since + horizon)
+    return round((hits + 1) / (len(longer) + 2), 3)
+
+
+def timing_outlook(
+    history: Mapping[str, Any] | None, today: date
+) -> dict[str, Any] | None:
+    if not history:
+        return None
+    patterns = history.get("patterns") or {}
+    timing = patterns.get("timing") or {}
+    drops = history.get("contentDrops") or []
+    expansion = next((d for d in drops if d.get("kind") == "expansion"), None)
+    latest_drop = drops[0] if drops else None
+    last_patch = timing.get("lastBalancePatch")
+    since_patch = (today - date.fromisoformat(last_patch)).days if last_patch else None
+    since_expansion = (
+        (today - date.fromisoformat(expansion["date"])).days if expansion else None
+    )
+    balance_since_expansion = bool(
+        expansion and last_patch and last_patch > expansion["date"]
+    )
+    after_release = timing.get("firstBalancePatchDaysAfterExpansion") or []
+    intervals = timing.get("balancePatchIntervals") or []
+    if expansion and not balance_since_expansion:
+        p7, p14 = (
+            patch_probability(after_release, since_expansion, h) for h in (7, 14)
+        )
+        basis = (
+            "days since the expansion launch, first balance patch after past expansions"
+        )
+    else:
+        p7, p14 = (patch_probability(intervals, since_patch, h) for h in (7, 14))
+        basis = (
+            "days since the last balance patch, intervals between past balance patches"
+        )
+    return {
+        "today": today.isoformat(),
+        "lastExpansion": expansion["version"] if expansion else None,
+        "lastExpansionDate": expansion["date"] if expansion else None,
+        "daysSinceExpansion": since_expansion,
+        "lastContentDrop": latest_drop["version"] if latest_drop else None,
+        "lastBalancePatchDate": last_patch,
+        "daysSinceLastBalancePatch": since_patch,
+        "balancePatchSinceExpansion": balance_since_expansion,
+        "medianDaysToFirstPatchAfterExpansion": statistics.median(after_release)
+        if after_release
+        else None,
+        "medianDaysBetweenBalancePatches": statistics.median(intervals)
+        if intervals
+        else None,
+        "nextPatchWithin7Days": p7,
+        "nextPatchWithin14Days": p14,
+        "basis": basis,
     }
 
 
@@ -916,6 +1157,17 @@ def build_history(
                     if drop
                     else None,
                     "metaBefore": stats.meta_before(entry["date"]),
+                    # Every archetype seen the week before: the calibration sample.
+                    "metaBeforeAll": [
+                        [
+                            row["archetype"],
+                            row["class"],
+                            row["winrate"],
+                            row["popularity"],
+                        ]
+                        for row in stats.meta_before(entry["date"], limit=None)
+                        if (row["popularity"] or 0) >= 0.1
+                    ],
                     "summary": None,
                     "targetedArchetypes": [],
                 }
@@ -1219,6 +1471,8 @@ def ensure_history(
     except Exception as exc:  # noqa: BLE001 - keep serving the previous history
         logger.warning("patch catalog unavailable for history: %s", type(exc).__name__)
         return current
+    if current and current.get("schemaVersion", 1) < SCHEMA_VERSION:
+        force = True
     if current and not force:
         generated = datetime.fromisoformat(current["generatedAt"])
         known = max((p["build"] for p in current.get("patches") or []), default=0)
@@ -1233,6 +1487,13 @@ def ensure_history(
         logger.warning("balance history rebuild failed: %s", exc)
         return current
     save_history(dataset)
+    try:
+        # The statistical backtest is free; keep it in step with the history.
+        from .backtest import load_backtest, run_backtest, save_backtest
+
+        save_backtest(run_backtest(dataset, previous=load_backtest(), now=now))
+    except Exception as exc:  # noqa: BLE001 - the backtest only reports
+        logger.warning("balance radar backtest skipped: %s", exc)
     return dataset
 
 

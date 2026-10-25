@@ -5,6 +5,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Path, Query
 
 from ..balance_radar import store
+from ..balance_radar.backtest import load_backtest
 from ..balance_radar.history import load_history
 from .models import ApiMeta, timestamp_is_stale
 
@@ -189,4 +190,52 @@ def balance_patterns() -> dict[str, Any]:
             count=int((history.get("patterns") or {}).get("balancePatches") or 0),
             max_age_hours=HISTORY_MAX_AGE_HOURS,
         ),
+    }
+
+
+@router.get("/backtest")
+def balance_backtest() -> dict[str, Any]:
+    """How the radar would have scored on past balance patches (precision/recall)."""
+    result = load_backtest()
+    if not result:
+        raise HTTPException(
+            status_code=503, detail="Balance Radar backtest has not been run yet"
+        )
+    statistical = result.get("statistical") or {}
+    return {
+        "data": result,
+        "meta": _meta(
+            fetched_at=result.get("generatedAt"),
+            count=int(statistical.get("patches") or 0),
+            max_age_hours=HISTORY_MAX_AGE_HOURS,
+        ),
+    }
+
+
+@router.get("/confidence-history")
+def balance_confidence_history(
+    format_name: Literal["standard", "wild"] = Query("standard", alias="format"),
+    ref: str | None = Query(None, min_length=3, max_length=160),
+    side: Literal["nerfs", "buffs"] | None = Query(None),
+    runs: int = Query(30, ge=2, le=120),
+) -> dict[str, Any]:
+    """Confidence of each candidate across successful runs, oldest first, for charts."""
+    series = store.confidence_series(format_name, runs=runs)
+    data = [
+        {"side": key_side, "ref": key_ref, "points": points}
+        for (key_side, key_ref), points in sorted(series.items())
+        if (ref is None or key_ref == ref) and (side is None or key_side == side)
+    ]
+    latest = max(
+        (
+            p["generatedAt"]
+            for item in data
+            for p in item["points"]
+            if p.get("generatedAt")
+        ),
+        default=None,
+    )
+    return {
+        "data": {"format": format_name, "series": data},
+        "meta": _meta(fetched_at=latest, count=len(data)),
     }

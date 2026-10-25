@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import uuid
+from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -20,15 +21,20 @@ from .analysis import (
     analysis_model,
     analyze,
     build_model_input,
+    developer_posts,
     select_posts,
 )
+from .backtest import backtest_summary, load_backtest
 from .clients import GetXApiClient, RedditApisClient
 from .history import (
+    ArchetypeStats,
     all_changes,
+    calibrate,
     ensure_history,
     find_precedents,
     model_context,
     precedent_view,
+    timing_outlook,
 )
 from .http import SocialApiError
 from .schema import SCHEMA_VERSION, ModelCandidate, RadarResult
@@ -39,6 +45,10 @@ logger = logging.getLogger(__name__)
 
 FORMATS = ("standard", "wild")
 TOP_POSTS = 5
+# Precedents in the prompt: the strongest-scored candidates only, two each
+# (the response still gets up to three per candidate).
+PRECEDENT_REFS = 80
+PRECEDENTS_PER_REF = 2
 
 
 @dataclass
@@ -121,6 +131,7 @@ def _post_view(post: SocialPost, cited: set[str]) -> dict[str, Any]:
         "community": post.community,
         "createdAt": post.created_at or None,
         "official": post.official,
+        "authorRole": post.author_role,
         "citedByModel": post.id in cited,
     }
 
@@ -137,6 +148,8 @@ def assemble_candidate(
     social_window: Mapping[str, Any],
     generated_at: str,
     changes: Sequence[Mapping[str, Any]] = (),
+    series: Mapping[tuple[str, str], Sequence[Mapping[str, Any]]] | None = None,
+    run_id: str | None = None,
 ) -> dict[str, Any]:
     cited_posts = [
         posts_by_id[pid] for pid in item.evidence_post_ids if pid in posts_by_id
@@ -185,7 +198,166 @@ def assemble_candidate(
             "socialWindowTo": social_window.get("to"),
         },
         "precedents": candidate_precedents(item, entity, side, changes),
+        "keyNumbers": list(item.key_numbers),
+        "predictedChanges": [change.model_dump() for change in item.predicted_changes],
+        "metaImpact": item.meta_impact or None,
+        "quotes": [
+            _quote_view(quote.text, posts_by_id[quote.post_id])
+            for quote in item.quotes
+            if quote.post_id in posts_by_id
+        ],
+        "developerSignal": item.developer_signal or None,
+        "calibration": _side_calibration(entity, side),
+        "trend": _trend(item.confidence, previous.get("previousConfidence")),
+        "confidenceHistory": [
+            *((series or {}).get((side, item.ref)) or []),
+            {
+                "runId": run_id,
+                "generatedAt": generated_at,
+                "confidence": item.confidence,
+            },
+        ][-30:],
     }
+
+
+def _quote_view(text: str, post: SocialPost) -> dict[str, Any]:
+    return {
+        "text": text,
+        "postId": post.id,
+        "platform": post.platform,
+        "kind": post.kind,
+        "url": post.url,
+        "author": post.author,
+        "score": post.score,
+        "createdAt": post.created_at or None,
+        "official": post.official,
+        "authorRole": post.author_role,
+    }
+
+
+def _side_calibration(entity: Mapping[str, Any], side: str) -> dict[str, Any] | None:
+    calibration = entity.get("calibration") or {}
+    item = calibration.get("nerf" if side == "nerfs" else "buff")
+    if not item:
+        return None
+    return {**item, "features": calibration.get("features")}
+
+
+def _trend(confidence: int, previous: Any) -> dict[str, Any]:
+    if not isinstance(previous, int):
+        return {"status": "new", "previousConfidence": None, "delta": None}
+    delta = confidence - previous
+    status = "up" if delta >= 5 else "down" if delta <= -5 else "stable"
+    return {"status": status, "previousConfidence": previous, "delta": delta}
+
+
+def attach_calibration(
+    stats: StatsBundle, calibration: Mapping[str, Any] | None, p14: float | None
+) -> None:
+    """Historical hit rates for each entity, from features comparable to the history."""
+    if not calibration:
+        return
+    for entity in stats.entities.values():
+        values = entity.get("stats") or {}
+        if entity["kind"] == "card" and values.get("core"):
+            core = values["core"][0]
+            features = {
+                "winrate": core.get("winrate"),
+                "popularity": core.get("popularity"),
+                "source": f"HSReplay Legend core archetype {core['archetype']}",
+            }
+        elif entity["kind"] == "archetype" and values.get("legendWinrate") is not None:
+            features = {
+                "winrate": values.get("legendWinrate"),
+                "popularity": values.get("legendPopularity"),
+                "source": "HSGuru Legend",
+            }
+        else:
+            features = {
+                "winrate": values.get("winrate"),
+                "popularity": values.get("popularity"),
+                "source": f"{values.get('source')} {values.get('rank')} (approximate)",
+            }
+        result: dict[str, Any] = {"features": features}
+        for side in ("nerf", "buff"):
+            cell = calibrate(
+                calibration, side, features["winrate"], features["popularity"]
+            )
+            if cell:
+                if p14 is not None and cell.get("historicalRate") is not None:
+                    cell["withPatchIn14Days"] = round(cell["historicalRate"] * p14, 3)
+                result[side] = cell
+        entity["calibration"] = result
+
+
+def changes_since_previous(
+    payload: Mapping[str, Any], previous: Mapping[str, Any] | None
+) -> dict[str, Any] | None:
+    """New and dropped candidates and the biggest confidence moves since the last good run."""
+    old = (previous or {}).get("payload") or {}
+    if not old:
+        return None
+
+    def index(source: Mapping[str, Any]) -> dict[tuple[str, str], Mapping[str, Any]]:
+        return {
+            (side, c["ref"]): c
+            for side in ("nerfs", "buffs")
+            for c in source.get(side) or []
+        }
+
+    before, after = index(old), index(payload)
+
+    def view(side: str, candidate: Mapping[str, Any], **extra: Any) -> dict[str, Any]:
+        return {
+            "side": side,
+            "ref": candidate["ref"],
+            "kind": candidate.get("kind"),
+            "name": candidate.get("name"),
+            "confidence": candidate.get("confidence"),
+            **extra,
+        }
+
+    moved = []
+    for key, candidate in after.items():
+        if key in before:
+            delta = candidate["confidence"] - before[key]["confidence"]
+            if delta:
+                moved.append(
+                    view(
+                        key[0],
+                        candidate,
+                        previousConfidence=before[key]["confidence"],
+                        delta=delta,
+                    )
+                )
+    moved.sort(key=lambda item: item["delta"])
+    return {
+        "previousRunId": old.get("runId"),
+        "previousGeneratedAt": old.get("generatedAt"),
+        "added": [
+            view(side, c)
+            for (side, ref), c in after.items()
+            if (side, ref) not in before
+        ],
+        "removed": [
+            view(side, c)
+            for (side, ref), c in before.items()
+            if (side, ref) not in after
+        ],
+        "risen": [item for item in reversed(moved) if item["delta"] > 0][:10],
+        "fallen": [item for item in moved if item["delta"] < 0][:10],
+    }
+
+
+def candidate_counts(payload: Mapping[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for side in ("nerfs", "buffs"):
+        kinds = Counter(c.get("kind") for c in payload.get(side) or [])
+        out[side] = {
+            "total": sum(kinds.values()),
+            **{kind: kinds.get(kind, 0) for kind in ("card", "archetype", "class")},
+        }
+    return out
 
 
 def _precedent_side(entity: Mapping[str, Any]) -> str:
@@ -200,8 +372,15 @@ def precedent_digest(
 ) -> dict[str, list[dict[str, Any]]]:
     """Up to three past changes per candidate, compact for the prompt."""
     digest: dict[str, list[dict[str, Any]]] = {}
-    for ref, entity in entities.items():
-        found = find_precedents(entity, _precedent_side(entity), changes, limit=3)
+    ranked = sorted(
+        entities.items(),
+        key=lambda item: max((item[1].get("scores") or {}).values() or [0]),
+        reverse=True,
+    )[:PRECEDENT_REFS]
+    for ref, entity in ranked:
+        found = find_precedents(
+            entity, _precedent_side(entity), changes, limit=PRECEDENTS_PER_REF
+        )
         if not found:
             continue
         digest[ref] = [
@@ -216,7 +395,6 @@ def precedent_digest(
                     [f["field"], f["before"], f["after"]]
                     for f in change.get("fields") or []
                 ],
-                "textAfter": (change.get("textAfter") or "")[:160] or None,
                 "summary": change.get("summary"),
                 "setAgeDays": change.get("setAgeDays"),
                 "core": [
@@ -263,7 +441,9 @@ def candidate_precedents(
     return views[:3]
 
 
-def history_block(history: Mapping[str, Any] | None) -> dict[str, Any] | None:
+def history_block(
+    history: Mapping[str, Any] | None, backtest: Mapping[str, Any] | None = None
+) -> dict[str, Any] | None:
     if not history:
         return None
     narrative = history.get("narrative") or {}
@@ -276,6 +456,17 @@ def history_block(history: Mapping[str, Any] | None) -> dict[str, Any] | None:
         "patterns": narrative.get("patterns") or [],
         "historyUrl": "/v1/constructed/balance-radar/history",
         "patternsUrl": "/v1/constructed/balance-radar/patterns",
+        "calibration": {
+            "samples": (patterns.get("calibration") or {}).get("samples"),
+            "patches": (patterns.get("calibration") or {}).get("patches"),
+            "nerfOverall": ((patterns.get("calibration") or {}).get("nerf") or {}).get(
+                "overall"
+            ),
+            "buffOverall": ((patterns.get("calibration") or {}).get("buff") or {}).get(
+                "overall"
+            ),
+        },
+        "backtest": backtest_summary(backtest),
     }
 
 
@@ -325,6 +516,10 @@ def assemble_result(
     generated_at: str,
     requested_model: str,
     balance_history: Mapping[str, Any] | None = None,
+    timing: Mapping[str, Any] | None = None,
+    previous: Mapping[str, Any] | None = None,
+    series: Mapping[tuple[str, str], Sequence[Mapping[str, Any]]] | None = None,
+    backtest: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     posts_by_id = {post.id: post for post in posts}
     changes = all_changes(balance_history)
@@ -357,8 +552,10 @@ def assemble_result(
                 social_window=window,
                 generated_at=generated_at,
                 changes=changes,
+                series=series,
+                run_id=run_id,
             )
-            for item in items
+            for item in sorted(items, key=lambda candidate: -candidate.confidence)
         ]
 
     social_total = sum(
@@ -399,8 +596,27 @@ def assemble_result(
             "totalCostUsd": round(social_total + float(analysis_cost or 0), 4),
             "droppedModelItems": analysis.dropped,
         },
-        "history": history_block(balance_history),
+        "history": history_block(balance_history, backtest),
+        "timing": {**dict(timing), "outlook": analysis.output.timing_outlook or None}
+        if timing
+        else None,
     }
+
+
+def _local_stats() -> tuple[Any, Any]:
+    """The parser database (mulligan tables) and HSReplay archetype tables, if present."""
+    try:
+        from ..db import get_db_connection
+
+        conn = get_db_connection()
+    except Exception as exc:  # noqa: BLE001 - optional context
+        logger.warning("local statistics database unavailable: %s", type(exc).__name__)
+        return None, None
+    try:
+        return conn, ArchetypeStats(conn)
+    except Exception as exc:  # noqa: BLE001 - HSReplay archetype tables are optional
+        logger.info("HSReplay archetype tables unavailable: %s", type(exc).__name__)
+        return conn, None
 
 
 def _clients() -> tuple[RedditApisClient | None, GetXApiClient | None]:
@@ -446,12 +662,25 @@ def run_balance_radar(
     dry_run_dir: Any = None,
     balance_history: Mapping[str, Any] | None = None,
     refresh_history: bool = True,
+    db: Any = None,
+    archetype_stats: Any = None,
+    use_local_db: bool = True,
 ) -> RunSummary:
     now = now or datetime.now(UTC)
     started_at = now.astimezone(UTC).isoformat(timespec="seconds")
     summary = RunSummary(started_at=started_at)
+    if db is None and use_local_db:
+        db, archetype_stats = _local_stats()
     bundles = {
-        name: build_stats(name, loader=loader, cards_en=cards_en) for name in formats
+        name: build_stats(
+            name,
+            loader=loader,
+            cards_en=cards_en,
+            db=db,
+            archetype_stats=archetype_stats,
+            today=now.date().isoformat(),
+        )
+        for name in formats
     }
     standard = bundles.get("standard") or next(iter(bundles.values()), None)
     entity_terms: list[str] = []
@@ -476,6 +705,9 @@ def run_balance_radar(
             logger.warning("balance history unavailable: %s", exc)
     history_context = model_context(balance_history)
     changes = all_changes(balance_history)
+    timing = timing_outlook(balance_history, now.date())
+    calibration = ((balance_history or {}).get("patterns") or {}).get("calibration")
+    backtest = load_backtest()
     requested = analysis_model()
     for name, stats in bundles.items():
         run_id = f"{now.strftime('%Y%m%dT%H%M%SZ')}-{name}-{uuid.uuid4().hex[:6]}"
@@ -491,10 +723,15 @@ def run_balance_radar(
                 FormatOutcome(name, "failed", run_id, error="no statistics")
             )
             continue
+        attach_calibration(
+            stats, calibration, (timing or {}).get("nextPatchWithin14Days")
+        )
         posts = social.for_format(name)
         mentions = match_mentions(posts, stats.aliases)
         mentioned = {post.id for matches in mentions.values() for post in matches}
         shown = select_posts(posts, mentioned)
+        developer = developer_posts(posts)
+        visible = {post.id: post for post in (*shown, *developer)}
         previous = store.latest_ok(name)
         model_input = build_model_input(
             stats=stats,
@@ -506,6 +743,8 @@ def run_balance_radar(
             generated_at=started_at,
             history=history_context,
             precedents=precedent_digest(stats.entities, changes) if changes else None,
+            timing=timing,
+            developer=developer,
         )
         digest = input_hash(model_input)
         if dry_run:
@@ -536,7 +775,8 @@ def run_balance_radar(
             analysis = analyze(
                 model_input,
                 allowed_refs=set(stats.entities),
-                allowed_posts={post.id for post in shown},
+                allowed_posts=set(visible),
+                post_texts={pid: post.body for pid, post in visible.items()},
                 allowed_precedents={f"precedent:{change['id']}" for change in changes},
                 model=requested,
                 client=claude,
@@ -547,13 +787,19 @@ def run_balance_radar(
                 analysis=analysis,
                 social=social,
                 mentions=mentions,
-                posts=shown,
+                posts=list(visible.values()),
                 patch=patch,
                 history=store.flag_history(name),
                 generated_at=datetime.now(UTC).isoformat(timespec="seconds"),
                 requested_model=requested,
                 balance_history=balance_history,
+                timing=timing,
+                previous=previous,
+                series=store.confidence_series(name),
+                backtest=backtest,
             )
+            payload["changesSincePrevious"] = changes_since_previous(payload, previous)
+            payload["counts"] = candidate_counts(payload)
             RadarResult.model_validate(payload)
         except (AnalysisError, ValueError) as exc:
             logger.error("balance radar %s analysis failed: %s", name, exc)

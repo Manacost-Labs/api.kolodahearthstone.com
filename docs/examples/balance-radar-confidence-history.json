@@ -1,0 +1,73 @@
+{
+  "data": {
+    "format": "standard",
+    "series": [
+      {
+        "side": "nerfs",
+        "ref": "archetype:standard:C'Thun DH",
+        "points": [
+          {
+            "runId": "20261025T104922Z-standard-ec658b",
+            "generatedAt": "2026-10-25T10:51:02+00:00",
+            "confidence": 33
+          },
+          {
+            "runId": "20261025T123813Z-standard-7f9458",
+            "generatedAt": "2026-10-25T12:41:05+00:00",
+            "confidence": 42
+          }
+        ]
+      },
+      {
+        "side": "nerfs",
+        "ref": "archetype:standard:C'Thun Warlock",
+        "points": [
+          {
+            "runId": "20261025T123813Z-standard-7f9458",
+            "generatedAt": "2026-10-25T12:41:05+00:00",
+            "confidence": 36
+          }
+        ]
+      },
+      {
+        "side": "nerfs",
+        "ref": "archetype:standard:Egg Priest",
+        "points": [
+          {
+            "runId": "20261025T123813Z-standard-7f9458",
+            "generatedAt": "2026-10-25T12:41:05+00:00",
+            "confidence": 18
+          }
+        ]
+      },
+      {
+        "side": "nerfs",
+        "ref": "archetype:standard:Handbuff DK",
+        "points": [
+          {
+            "runId": "20261025T123813Z-standard-7f9458",
+            "generatedAt": "2026-10-25T12:41:05+00:00",
+            "confidence": 14
+          }
+        ]
+      },
+      {
+        "side": "nerfs",
+        "ref": "archetype:standard:N'Zoth Handbuff DK",
+        "points": [
+          {
+            "runId": "20261025T123813Z-standard-7f9458",
+            "generatedAt": "2026-10-25T12:41:05+00:00",
+            "confidence": 22
+          }
+        ]
+      }
+    ]
+  },
+  "meta": {
+    "source_id": "balance_radar",
+    "fetched_at": "2026-10-25T12:41:05+00:00",
+    "stale": false,
+    "count": 17
+  }
+}

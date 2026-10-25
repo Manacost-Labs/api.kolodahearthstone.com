@@ -219,3 +219,31 @@ def flag_history(
         for key in active:
             history[key]["firstFlaggedAt"] = row["generated_at"]
     return history
+
+
+def confidence_series(
+    format_name: str, *, runs: int = 30
+) -> dict[tuple[str, str], list[dict[str, Any]]]:
+    """Confidence of every candidate across the latest successful runs, oldest first."""
+    if not db_path().exists():
+        return {}
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT id, generated_at, payload FROM runs WHERE format = ? AND status = 'ok' "
+            "ORDER BY generated_at DESC, rowid DESC LIMIT ?",
+            (format_name, runs),
+        ).fetchall()
+    series: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for row in reversed(rows):
+        payload = json.loads(row["payload"] or "{}")
+        for side in ("nerfs", "buffs"):
+            for item in payload.get(side) or []:
+                if isinstance(item, dict) and item.get("ref"):
+                    series.setdefault((side, item["ref"]), []).append(
+                        {
+                            "runId": row["id"],
+                            "generatedAt": row["generated_at"],
+                            "confidence": item.get("confidence"),
+                        }
+                    )
+    return series

@@ -115,6 +115,8 @@ GraphQL pagination возвращает `items` и `pageInfo`. Максимал�
 | GET | `/v1/constructed/balance-radar/runs/{run_id}` | — | Один прогон радара нерфов и баффов |
 | GET | `/v1/constructed/balance-radar/history` | `card`, `direction`, `class`, `since`, `limit`, `offset` | История балансных патчей Blizzard с точными изменениями карт |
 | GET | `/v1/constructed/balance-radar/patterns` | — | Закономерности Blizzard: пороги, типы правок, сроки патчей |
+| GET | `/v1/constructed/balance-radar/backtest` | — | Бэктест радара на прошлых балансных патчах: precision/recall |
+| GET | `/v1/constructed/balance-radar/confidence-history` | `format`, `ref`, `side`, `runs` | История уверенности кандидатов по прогонам для графика |
 | GET | `/v1/constructed/archetypes` | `class_name`, `q`, `rank_range`, `game_type`, `limit`, `offset` | HSReplay archetypes |
 | GET | `/v1/battlegrounds/heroes` | `mode`, `q`, `limit`, `offset` | BG‑герои Solo/Duos |
 | GET | `/v1/battlegrounds/minions` | `q`, `tavern_tier`, `limit`, `offset` | BG‑существа |

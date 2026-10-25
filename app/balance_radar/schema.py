@@ -12,12 +12,45 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-SCHEMA_VERSION = 1
+# 2: predictedChanges, metaImpact, quotes, keyNumbers, calibration, trend,
+#    confidenceHistory, timing, changesSincePrevious, counts (all additive).
+SCHEMA_VERSION = 2
 Sentiment = Literal["negative", "mixed", "neutral", "positive", "no_data"]
 Stance = Literal["wants_nerf", "wants_buff", "divided", "indifferent", "no_data"]
 CandidateKind = Literal["card", "archetype", "class"]
 
 # -- model output (structured outputs) ---------------------------------------
+
+ChangeField = Literal[
+    "cost", "attack", "health", "durability", "armor", "text", "other"
+]
+
+
+class PredictedChange(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    change: str = Field(description="Изменение по-русски, например «Стоимость 2 → 3»")
+    field: ChangeField
+    before: int | None = Field(
+        description="Значение до (для числовых полей), иначе null"
+    )
+    after: int | None = Field(
+        description="Значение после (для числовых полей), иначе null"
+    )
+    probability: int = Field(
+        ge=0, le=100, description="Вероятность этого варианта, если правка будет"
+    )
+
+
+class Quote(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    post_id: str = Field(
+        description="id поста или комментария из social.posts/developerStatements"
+    )
+    text: str = Field(
+        description="Дословная цитата из этого поста, до 200 символов, на языке оригинала"
+    )
 
 
 class ModelCandidate(BaseModel):
@@ -46,6 +79,21 @@ class ModelCandidate(BaseModel):
     precedent_ids: list[str] = Field(
         description="id прошлых случаев из history.precedents, на которые опирается вывод (0-3)"
     )
+    key_numbers: list[str] = Field(
+        description="2-5 цифр из входа, на которых основан вывод, со сравнением с порогом/калибровкой"
+    )
+    predicted_changes: list[PredictedChange] = Field(
+        description="1-3 варианта конкретной правки с вероятностями (сумма не больше 100)"
+    )
+    meta_impact: str = Field(
+        description="Ожидаемый эффект правки на мету, 1-2 предложения по-русски"
+    )
+    quotes: list[Quote] = Field(
+        description="0-3 дословные цитаты из сообщества об этой сущности"
+    )
+    developer_signal: str = Field(
+        description="Что говорили разработчики/официальный аккаунт об этой сущности; пусто, если ничего"
+    )
 
 
 class ModelOutput(BaseModel):
@@ -57,6 +105,9 @@ class ModelOutput(BaseModel):
     )
     buffs: list[ModelCandidate] = Field(
         description="Кандидаты на бафф, от самого вероятного"
+    )
+    timing_outlook: str = Field(
+        description="Когда вероятен следующий балансный патч и почему (по timing), 1-2 предложения по-русски"
     )
 
 
@@ -162,6 +213,14 @@ class RadarCandidate(_Open):
     social: RadarSocial
     dates: RadarDates
     precedents: list[RadarPrecedent] = Field(default_factory=list)
+    keyNumbers: list[str] = Field(default_factory=list)
+    predictedChanges: list[dict[str, Any]] = Field(default_factory=list)
+    metaImpact: str | None = None
+    quotes: list[dict[str, Any]] = Field(default_factory=list)
+    developerSignal: str | None = None
+    calibration: dict[str, Any] | None = None
+    trend: dict[str, Any] | None = None
+    confidenceHistory: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class RadarSource(_Open):
@@ -190,3 +249,6 @@ class RadarResult(_Open):
     socialWindow: dict[str, Any]
     usage: dict[str, Any]
     history: dict[str, Any] | None = None
+    timing: dict[str, Any] | None = None
+    changesSincePrevious: dict[str, Any] | None = None
+    counts: dict[str, Any] | None = None

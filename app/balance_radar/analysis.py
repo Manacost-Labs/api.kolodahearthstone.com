@@ -7,7 +7,7 @@ import logging
 import os
 import re
 import time
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -21,8 +21,9 @@ from .stats import StatsBundle
 logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "claude-sonnet-5-5"
-MAX_TOKENS = 64_000
-MAX_CANDIDATES = 10
+MAX_TOKENS = 128_000
+MAX_CANDIDATES = 25
+MAX_QUOTES = 3
 MAX_POSTS = 80
 MAX_COMMENTS = 40
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
@@ -37,56 +38,81 @@ PRICES_PER_MTOK: dict[str, tuple[float, float, float, float]] = {
 }
 
 SYSTEM_PROMPT = """Ты — аналитик баланса Hearthstone для русскоязычного сайта HearthPulse.
-Твоя задача: по статистике и обсуждениям в соцсетях определить, какие карты,
-архетипы и классы вероятнее всего понерфят или забаффают в ближайшем балансном
-патче, и объяснить почему.
+Твоя задача: по статистике, обсуждениям в соцсетях и прошлым решениям Blizzard
+определить, какие карты, архетипы и классы вероятнее всего понерфят или
+забаффают в ближайшем балансном патче, и объяснить почему цифрами.
 
 Как читать данные:
-- Архетипы и классы — HSGuru, ранг all (и Legend отдельно). winrate и
-  popularity в процентах; popularity — доля игр архетипа. Период statsPeriods.primary
-  обычно HSGuru-окно «Bans» (*_ban): игры после последнего балансного/бан-обновления,
-  это самое свежее состояние баланса. trend.winrateDelta/popularityDelta —
-  past_day минус past_week; banWinrateDelta — окно банов минус всё дополнение.
-- Карты — HSReplay. winrate — винрейт колод с картой, popularity — доля колод с
-  картой. playedWinrate («винрейт при розыгрыше») систематически завышен у дорогих
-  карт, используй его только как вспомогательный сигнал.
-- scores.nerf/scores.buff — грубая эвристика ранжирования пула, не истина.
-- social.posts — посты Reddit и X за окно socialWindow; mentions — сколько постов
-  упоминают сущность. Сарказм и мемы — слабый сигнал; официальные аккаунты
-  (official=true) и подробные разборы — сильный.
-- previousRun — прошлый прогон радара: учитывай устойчивость сигналов.
-- history.patterns — как Blizzard меняла баланс раньше: пороги винрейта и
-  популярности перед нерфами и баффами, типичные правки, частота и сроки
-  балансных патчей после выхода набора, эффект правок.
-- history.precedents[ref] — похожие прошлые правки для каждого кандидата
-  (та же карта, тот же класс или архетип, похожие винрейт и популярность).
+- Архетипы и классы — HSGuru. Заголовочный срез — ранг all в периоде
+  statsPeriods.primary (обычно окно «Bans» *_ban: игры после последнего
+  балансного/бан-обновления, самое свежее состояние). ranks — тот же период на
+  рангах all, legend, top_legend (топ Легенды) и diamond_4to1. winrate и
+  popularity — в процентах; popularity — доля игр. trend.winrateDelta/
+  popularityDelta — past_day минус past_week; banWinrateDelta — окно банов минус
+  всё дополнение.
+- mulligan (HSGuru) — влияние карты на винрейт колоды в п.п.: mulliganImpact —
+  оставили в стартовой руке, drawnImpact — взяли за игру, keptImpact — оставили
+  при муллигане. Высокий плюс означает, что сила колоды держится на этой карте.
+- Карты — HSReplay (Legend, 7 дней; Diamond и Diamond 4-1 в periods). winrate —
+  винрейт колод с картой, popularity — доля колод с картой. playedWinrate и
+  drawnWinrate завышены у дорогих карт — только вспомогательный сигнал.
+  core — архетипы HSReplay Legend, в которых карта стоит в ≥50% колод, с их
+  винрейтом и популярностью за неделю (те же признаки, что в калибровке).
+- calibration (у кандидатов) — {nerf: [доля, наблюдений], buff: [...]}: как часто
+  Blizzard реально меняла архетип с такими винрейтом и популярностью (HSReplay
+  Legend; у карт — их core-архетип) в следующем балансном патче. Это якорь для
+  confidence.
+- Компактные массивы: ranks — {ранг: [winrate, popularity, games]}; periods
+  архетипов — [ранг, период, winrate, popularity, games]; periods карт —
+  [ранг, период, winrate колод, popularity, розыгрышей]; core —
+  [архетип, доля колод с картой, winrate, popularity]; mulligan у карты —
+  [архетип, mulliganImpact, drawnImpact, keptImpact, взяли раз], у архетипа
+  keyCards — [карта, mulliganImpact, drawnImpact, keptImpact].
+- timing — сколько дней прошло с выхода дополнения и прошлого балансного
+  патча и историческая вероятность патча в ближайшие 7 и 14 дней.
+- social.posts — посты Reddit и X за окно; mentions — сколько постов упоминают
+  сущность. developerStatements — посты разработчиков и официальных аккаунтов:
+  это самый сильный социальный сигнал (заявления о планах, «следим за…»).
+  Мемы и сарказм — слабый сигнал.
+- previousRun — прошлый прогон: учитывай устойчивость сигналов.
+- history.patterns — пороги, типичные правки, сроки патчей, эффект правок;
+  history.precedents[ref] — похожие прошлые правки для кандидата.
 
 Правила ответа:
-- Выбирай кандидатов только из переданных ref (archetypes, classes, cards.*).
-  Не придумывай ref, числа, посты или ссылки.
-- До 8 кандидатов на нерф и до 8 на бафф, от самого вероятного. Лучше меньше,
-  но обоснованно. Если сила архетипа держится на конкретной карте, предпочти
-  карту (kind=card) и назови архетип в вердикте; архетип отдельно — только
-  если нерф нужен всей колоде.
-- Blizzard обычно нерфит то, что одновременно сильное и популярное (винрейт
-  заметно выше 53–55% при большой доле игр, особенно на Легенде), и баффает
-  классы/архетипы далеко ниже 47–48% с малой популярностью и новые карты,
-  которые никто не играет.
-- confidence 0–100: 80+ только при сильной статистике и согласии сообщества;
-  40–60 — заметный, но спорный сигнал; ниже 30 не включай.
-- verdict — 3–6 предложений по-русски с конкретными цифрами из данных и
-  периодами. reasons — 2–5 коротких пунктов. suggested_change — одно
-  правдоподобное изменение (например, «стоимость 2 → 3»).
-- sentiment и community_stance — по постам об этой сущности; если упоминаний
-  нет, ставь no_data и пустой social_summary.
-- evidence_post_ids — только id из social.posts, 0–5 штук, самые показательные.
-- Опирайся на прошлые решения Blizzard: сверяй цифры кандидата с порогами из
-  history.patterns и учитывай сроки (сколько дней прошло с выхода набора, как
-  давно был балансный патч). Если есть похожий прошлый случай, назови его в
-  вердикте (карта, патч, что поменяли и с какими цифрами) и укажи его id в
-  precedent_ids (0–3, только из history.precedents этого кандидата).
+- Выбирай кандидатов только из переданных ref. Не придумывай ref, числа, посты,
+  цитаты или ссылки.
+- 15–25 кандидатов на нерф и 15–25 на бафф, если данные это позволяют, от
+  самого вероятного. В каждом списке — и карты (kind=card), и архетипы
+  (kind=archetype), по возможности не меньше 6 тех и других; классы — только
+  когда менять нужно класс целиком. Если сила архетипа держится на конкретной
+  карте, назови и карту, и архетип: это разные кандидаты.
+- confidence 0–100 — вероятность, что эту сущность изменят в ближайшем
+  балансном патче. Отталкивайся от calibration.historicalRate (и вероятности
+  патча из timing), затем поправляй на сильную статистику на высоких рангах,
+  муллиган, единодушие сообщества и заявления разработчиков. Отходи от якоря
+  больше чем на 30 пунктов только с явной причиной и назови её в key_numbers.
+  Кандидаты с confidence ниже 10 не включай.
+- key_numbers — 2–5 строк: конкретные цифры из входа, на которых основан вывод,
+  со сравнением (например «Легенда: 58,8% при 11,1% популярности — выше медианы
+  нерфов 52,8% / 11%», «калибровка: 5 из 11 таких колод понерфили»).
+- verdict — 2–4 предложения по-русски с цифрами и периодами; reasons — 2–4
+  коротких пункта.
+- predicted_changes — 1–3 конкретных варианта правки с вероятностями (сумма
+  не больше 100), с field (cost, attack, health, durability, armor, text,
+  other) и before/after для чисел, опираясь на типичные правки истории
+  (+1 мана, −1 атака/здоровье, текст). suggested_change — самый вероятный из них.
+- meta_impact — что изменится в мете, если правка выйдет (какие колоды
+  поднимутся или упадут), 1–2 предложения.
+- quotes — 0–3 дословные цитаты (до 200 символов, на языке оригинала) из
+  social.posts или developerStatements об этой сущности, с post_id.
+- developer_signal — что говорили разработчики об этой сущности, иначе пусто.
+- sentiment и community_stance — по постам об этой сущности; если упоминаний нет,
+  no_data и пустой social_summary. evidence_post_ids — 0–5 id из social.posts.
+- precedent_ids — 0–3 id из history.precedents этого кандидата; назови похожий
+  случай в вердикте (карта, патч, что поменяли, при каких цифрах).
+- timing_outlook — когда вероятен следующий балансный патч и почему.
 - Названия карт пиши по-русски, как в name; английское можно в скобках.
-- summary — общий вывод по формату: 2–4 абзаца по-русски, без маркдаун-заголовков.
+- summary — общий вывод по формату: 2–4 абзаца по-русски, без заголовков.
 """
 
 
@@ -110,6 +136,60 @@ def analysis_model() -> str:
 _TAGS = re.compile(r"<[^>]+>|\[x\]")
 
 
+def _calibration_view(record: Mapping[str, Any]) -> dict[str, Any] | None:
+    """{side: [historical rate, samples]} — see the prompt for the meaning."""
+    calibration = record.get("calibration") or {}
+    view = {
+        side: [item.get("historicalRate"), item.get("samples")]
+        for side, item in calibration.items()
+        if isinstance(item, dict) and side in {"nerf", "buff"}
+    }
+    return view or None
+
+
+def _trend_view(trend: Any) -> Any:
+    if not isinstance(trend, dict):
+        return None
+    return {
+        key: value
+        for key, value in trend.items()
+        if key != "basis" and value is not None
+    } or None
+
+
+def _mulligan_view(mulligan: Any) -> Any:
+    if isinstance(mulligan, list):  # a card: its impact in the decks running it
+        return [
+            [
+                m["archetype"],
+                m.get("mulliganImpact"),
+                m.get("drawnImpact"),
+                m.get("keptImpact"),
+                m.get("drawnCount"),
+            ]
+            for m in mulligan
+        ]
+    if isinstance(mulligan, dict):  # an archetype: its key and weak cards
+        return {
+            "period": mulligan.get("period"),
+            "rank": mulligan.get("rank"),
+            "keyCards": [
+                [
+                    c["name"],
+                    c.get("mulliganImpact"),
+                    c.get("drawnImpact"),
+                    c.get("keptImpact"),
+                ]
+                for c in (mulligan.get("keyCards") or [])[:4]
+            ],
+            "weakCards": [
+                [c["name"], c.get("drawnImpact")]
+                for c in (mulligan.get("weakCards") or [])[:2]
+            ],
+        }
+    return None
+
+
 def _compact_card(record: Mapping[str, Any]) -> dict[str, Any]:
     stats = record["stats"]
     return {
@@ -121,15 +201,15 @@ def _compact_card(record: Mapping[str, Any]) -> dict[str, Any]:
         "rarity": record.get("rarity"),
         "set": record.get("set"),
         "newSet": record.get("newSet"),
-        "text": _TAGS.sub("", str(record.get("text") or "")).replace("\n", " ")[:240]
+        "text": _TAGS.sub("", str(record.get("text") or "")).replace("\n", " ")[:160]
         or None,
         "winrate": stats.get("winrate"),
         "popularity": stats.get("popularity"),
         "playedWinrate": stats.get("playedWinrate"),
         "timesPlayed": stats.get("timesPlayed"),
-        "rank": stats.get("rank"),
-        "period": stats.get("period"),
-        "trend": stats.get("trend"),
+        "trend": _trend_view(stats.get("trend")),
+        # rank, period, deck winrate, deck popularity, plays: every Legend
+        # period, the seven-day window elsewhere.
         "periods": [
             [
                 p["rank"],
@@ -139,8 +219,16 @@ def _compact_card(record: Mapping[str, Any]) -> dict[str, Any]:
                 p.get("timesPlayed"),
             ]
             for p in stats.get("periods") or []
+            if (p["rank"] == "legend" and p["period"] in {"1d", "7d", "14d"})
+            or (p["rank"] != "legend" and p["period"] == "7d")
         ],
-        "scores": record.get("scores"),
+        "mulligan": _mulligan_view(stats.get("mulligan")),
+        "core": [
+            [c["archetype"], c.get("cardShare"), c.get("winrate"), c.get("popularity")]
+            for c in stats.get("core") or []
+        ]
+        or None,
+        "calibration": _calibration_view(record),
     }
 
 
@@ -153,9 +241,12 @@ def _compact_archetype(record: Mapping[str, Any]) -> dict[str, Any]:
         "winrate": stats.get("winrate"),
         "popularity": stats.get("popularity"),
         "games": stats.get("games"),
-        "legendWinrate": stats.get("legendWinrate"),
-        "legendPopularity": stats.get("legendPopularity"),
-        "trend": stats.get("trend"),
+        # rank: [winrate, popularity, games] in the primary period
+        "ranks": {
+            rank: [v.get("winrate"), v.get("popularity"), v.get("games")]
+            for rank, v in (stats.get("ranks") or {}).items()
+        },
+        "trend": _trend_view(stats.get("trend")),
         "periods": [
             [
                 p["rank"],
@@ -166,7 +257,8 @@ def _compact_archetype(record: Mapping[str, Any]) -> dict[str, Any]:
             ]
             for p in stats.get("periods") or []
         ],
-        "scores": record.get("scores"),
+        "mulligan": _mulligan_view(stats.get("mulligan")),
+        "calibration": _calibration_view(record),
     }
 
 
@@ -179,7 +271,7 @@ def _compact_class(record: Mapping[str, Any]) -> dict[str, Any]:
         "popularity": stats.get("popularity"),
         "games": stats.get("games"),
         "topArchetypes": stats.get("topArchetypes"),
-        "scores": record.get("scores"),
+        "calibration": _calibration_view(record),
     }
 
 
@@ -197,6 +289,26 @@ def select_posts(posts: Iterable[SocialPost], mentioned: set[str]) -> list[Socia
     return top_level + comments
 
 
+MAX_DEVELOPER_POSTS = 15
+
+
+def developer_posts(posts: Iterable[SocialPost]) -> list[SocialPost]:
+    """Posts by the game's official account or Blizzard-flaired staff, newest first."""
+    found = [
+        post
+        for post in posts
+        if post.author_role
+        # Support replies from the official account ("known issue") are noise.
+        and not (
+            post.platform == "x"
+            and post.text.startswith("@")
+            and not post.is_balance_related()
+        )
+    ]
+    found.sort(key=lambda post: post.created_at or "", reverse=True)
+    return found[:MAX_DEVELOPER_POSTS]
+
+
 def build_model_input(
     *,
     stats: StatsBundle,
@@ -208,8 +320,10 @@ def build_model_input(
     generated_at: str,
     history: Mapping[str, Any] | None = None,
     precedents: Mapping[str, list[dict[str, Any]]] | None = None,
+    timing: Mapping[str, Any] | None = None,
+    developer: Sequence[SocialPost] = (),
 ) -> dict[str, Any]:
-    shown = {post.id for post in posts}
+    shown = {post.id for post in (*posts, *developer)}
     return {
         "format": stats.format,
         "generatedAt": generated_at,
@@ -250,6 +364,20 @@ def build_model_input(
                 for post in posts
             ],
         },
+        "developerStatements": [
+            {
+                "id": post.id,
+                "platform": post.platform,
+                "role": post.author_role,
+                "author": post.author,
+                "createdAt": post.created_at,
+                "score": post.score,
+                "title": post.title,
+                "text": post.text[:600],
+            }
+            for post in developer
+        ],
+        "timing": dict(timing) if timing else None,
         "previousRun": previous,
         "history": {"patterns": history, "precedents": dict(precedents or {})}
         if history
@@ -274,16 +402,29 @@ def _cost(model: str, usage: Mapping[str, int]) -> float | None:
     )
 
 
+_NORMAL_SPACE = re.compile(r"\s+")
+
+
+def _normal(text: str) -> str:
+    return (
+        _NORMAL_SPACE.sub(" ", text.replace("\u2019", "'").replace("\u2018", "'"))
+        .strip()
+        .casefold()
+    )
+
+
 def validate_output(
     output: ModelOutput,
     allowed_refs: set[str],
     allowed_posts: set[str],
     allowed_precedents: set[str] | None = None,
+    post_texts: Mapping[str, str] | None = None,
 ) -> tuple[ModelOutput, list[str]]:
     """Drop unknown refs, post and precedent ids, duplicates and anything past the cap."""
     dropped: list[str] = []
     seen: set[str] = set()
     precedents = allowed_precedents or set()
+    bodies = {pid: _normal(text) for pid, text in (post_texts or {}).items()}
 
     def clean(items: list[Any], side: str) -> list[Any]:
         kept = []
@@ -308,9 +449,31 @@ def validate_output(
                 for pid in item.precedent_ids
                 if pid not in precedents
             )
+            quotes = []
+            for quote in item.quotes:
+                text = quote.text.strip().strip('"«»“”')
+                if (
+                    quote.post_id in bodies
+                    and text
+                    and _normal(text) in bodies[quote.post_id]
+                ):
+                    quotes.append(quote.model_copy(update={"text": text[:200]}))
+                else:
+                    dropped.append(f"{side}:{item.ref}:quote:{quote.post_id}")
+            changes = list(item.predicted_changes)[:3]
+            total = sum(change.probability for change in changes)
+            if total > 100:
+                changes = [
+                    change.model_copy(
+                        update={"probability": round(change.probability * 100 / total)}
+                    )
+                    for change in changes
+                ]
             kept.append(
                 item.model_copy(
                     update={
+                        "quotes": quotes[:MAX_QUOTES],
+                        "predicted_changes": changes,
                         "evidence_post_ids": [
                             pid
                             for pid in item.evidence_post_ids
@@ -377,7 +540,7 @@ def call_structured(
     requested = model or analysis_model()
     if client is None:
         try:
-            client = anthropic.Anthropic(max_retries=3, timeout=900.0)
+            client = anthropic.Anthropic(max_retries=3, timeout=1800.0)
         except anthropic.AnthropicError:
             raise AnalysisError("ANTHROPIC_API_KEY is not configured") from None
     started = time.monotonic()
@@ -466,6 +629,7 @@ def analyze(
     allowed_refs: set[str],
     allowed_posts: set[str],
     allowed_precedents: set[str] | None = None,
+    post_texts: Mapping[str, str] | None = None,
     model: str | None = None,
     client: Any = None,
 ) -> AnalysisResult:
@@ -477,7 +641,7 @@ def analyze(
         client=client,
     )
     output, dropped = validate_output(
-        output, allowed_refs, allowed_posts, allowed_precedents
+        output, allowed_refs, allowed_posts, allowed_precedents, post_texts
     )
     if dropped:
         logger.warning(
