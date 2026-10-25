@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- Balance Radar v2 (schemaVersion 2, additive): 15–25 nerf and 15–25 buff
+  candidates per format (cards, archetypes, classes) from wider pools (HSGuru
+  all/legend/top_legend/diamond_4to1 in the Bans window, HSReplay Legend,
+  Diamond 4-1 and Diamond). Confidence is anchored on a calibration of past
+  patches (how often an archetype with this winrate/popularity was changed:
+  389 archetype-weeks over 9 patches) and the odds of a patch within 7/14
+  days. New inputs: HSGuru mulligan impacts, HSReplay core archetypes of each
+  card, developer statements (Blizzard flair, official accounts). New fields:
+  predicted changes with probabilities, meta impact, verified community
+  quotes, key numbers, calibration, trend, confidence history, timing,
+  changes since the previous run, counts. New `/backtest` (statistical
+  nerf precision@5 0.28 / recall@10 0.59; Claude 0.33 / 0.77) and
+  `/confidence-history` endpoints. About $1.14 per run for both formats.
+
 - Balance Radar (`/v1/constructed/balance-radar`): nerf and buff candidates for
   Standard and Wild. A timer twice a day joins HSGuru archetypes by period
   (including the Bans window) and HSReplay card periods with Reddit

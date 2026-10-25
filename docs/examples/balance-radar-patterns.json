@@ -1,6 +1,6 @@
 {
   "data": {
-    "generatedAt": "2026-10-25T10:48:18+00:00",
+    "generatedAt": "2026-10-25T12:29:41+00:00",
     "coverage": {
       "fromBuild": 190920,
       "toBuild": 255130,
@@ -440,7 +440,416 @@
           "winrate": 54.86,
           "popularity": 4.76
         }
-      ]
+      ],
+      "calibration": {
+        "basis": "HSReplay Legend archetypes seen the week before each balance patch with statistics; hit = a changed card is in at least half of the archetype's decks",
+        "samples": 389,
+        "patches": 9,
+        "nerf": {
+          "grid": {
+            "52-54|8-": {
+              "samples": 11,
+              "hits": 5,
+              "examples": [
+                "Dragon Warrior (36.6.3.253932)",
+                "Zee Shaman (36.2.2.249896)",
+                "Face Hunter (36.2.2.249896)"
+              ],
+              "rate": 0.455
+            },
+            "-50|8-": {
+              "samples": 16,
+              "hits": 2,
+              "examples": [
+                "Troublemaker Rogue (36.2.2.249896)",
+                "Troublemaker Rogue (36.0.3.247416)"
+              ],
+              "rate": 0.125
+            },
+            "-50|3-8": {
+              "samples": 36,
+              "hits": 0,
+              "examples": [],
+              "rate": 0.0
+            },
+            "52-54|3-8": {
+              "samples": 7,
+              "hits": 1,
+              "examples": [
+                "Dragon Warrior (35.4.2.242566)"
+              ],
+              "rate": 0.143
+            },
+            "-50|-3": {
+              "samples": 269,
+              "hits": 7,
+              "examples": [
+                "Herald Warrior (36.6.3.253932)",
+                "Quest Mage (36.4.2.251332)",
+                "Corpse Death Knight (36.2.2.249896)"
+              ],
+              "rate": 0.026
+            },
+            "50-52|-3": {
+              "samples": 20,
+              "hits": 3,
+              "examples": [
+                "Attack Druid (36.6.3.253932)",
+                "Attack Druid (36.4.2.251332)",
+                "Egg Warrior (36.0.3.247416)"
+              ],
+              "rate": 0.15
+            },
+            "52-54|-3": {
+              "samples": 9,
+              "hits": 0,
+              "examples": [],
+              "rate": 0.0
+            },
+            "50-52|3-8": {
+              "samples": 9,
+              "hits": 2,
+              "examples": [
+                "Tripwire Hunter (36.2.2.249896)",
+                "Tripwire Hunter (36.0.3.247416)"
+              ],
+              "rate": 0.222
+            },
+            "50-52|8-": {
+              "samples": 2,
+              "hits": 0,
+              "examples": [],
+              "rate": 0.0
+            },
+            "54-56|-3": {
+              "samples": 3,
+              "hits": 0,
+              "examples": [],
+              "rate": 0.0
+            },
+            "54-56|8-": {
+              "samples": 4,
+              "hits": 1,
+              "examples": [
+                "Mug Shaman (36.0.3.247416)"
+              ],
+              "rate": 0.25
+            },
+            "54-56|3-8": {
+              "samples": 2,
+              "hits": 0,
+              "examples": [],
+              "rate": 0.0
+            },
+            "56-|8-": {
+              "samples": 1,
+              "hits": 1,
+              "examples": [
+                "Dragon Warrior (35.2.2.241135)"
+              ],
+              "rate": 1.0
+            }
+          },
+          "byWinrate": {
+            "52-54": {
+              "samples": 27,
+              "hits": 6,
+              "examples": [],
+              "rate": 0.222
+            },
+            "-50": {
+              "samples": 321,
+              "hits": 9,
+              "examples": [],
+              "rate": 0.028
+            },
+            "50-52": {
+              "samples": 31,
+              "hits": 5,
+              "examples": [],
+              "rate": 0.161
+            },
+            "54-56": {
+              "samples": 9,
+              "hits": 1,
+              "examples": [],
+              "rate": 0.111
+            },
+            "56-": {
+              "samples": 1,
+              "hits": 1,
+              "examples": [],
+              "rate": 1.0
+            }
+          },
+          "byPopularity": {
+            "8-": {
+              "samples": 34,
+              "hits": 9,
+              "examples": [],
+              "rate": 0.265
+            },
+            "3-8": {
+              "samples": 54,
+              "hits": 3,
+              "examples": [],
+              "rate": 0.056
+            },
+            "-3": {
+              "samples": 301,
+              "hits": 10,
+              "examples": [],
+              "rate": 0.033
+            }
+          },
+          "overall": 0.057
+        },
+        "buff": {
+          "grid": {
+            "51-|3-": {
+              "samples": 31,
+              "hits": 1,
+              "examples": [
+                "Mug Shaman (36.2.2.249896)"
+              ],
+              "rate": 0.032
+            },
+            "48-51|3-": {
+              "samples": 28,
+              "hits": 0,
+              "examples": [],
+              "rate": 0.0
+            },
+            "45-48|3-": {
+              "samples": 19,
+              "hits": 1,
+              "examples": [
+                "Leyline Mage (37.0.0.254477)"
+              ],
+              "rate": 0.053
+            },
+            "48-51|1-3": {
+              "samples": 26,
+              "hits": 0,
+              "examples": [],
+              "rate": 0.0
+            },
+            "51-|1-3": {
+              "samples": 11,
+              "hits": 1,
+              "examples": [
+                "Contraband Mage (37.0.0.254477)"
+              ],
+              "rate": 0.091
+            },
+            "40-45|1-3": {
+              "samples": 18,
+              "hits": 1,
+              "examples": [
+                "Manastorm Mage (37.0.0.254477)"
+              ],
+              "rate": 0.056
+            },
+            "45-48|1-3": {
+              "samples": 27,
+              "hits": 0,
+              "examples": [],
+              "rate": 0.0
+            },
+            "-40|-1": {
+              "samples": 99,
+              "hits": 5,
+              "examples": [
+                "Broxigar Demon Hunter (36.2.2.249896)",
+                "Coin Rogue (36.2.2.249896)",
+                "Void Demon Hunter (36.0.3.247416)"
+              ],
+              "rate": 0.051
+            },
+            "48-51|-1": {
+              "samples": 19,
+              "hits": 0,
+              "examples": [],
+              "rate": 0.0
+            },
+            "45-48|-1": {
+              "samples": 32,
+              "hits": 1,
+              "examples": [
+                "Burn Mage (36.2.2.249896)"
+              ],
+              "rate": 0.031
+            },
+            "51-|-1": {
+              "samples": 8,
+              "hits": 0,
+              "examples": [],
+              "rate": 0.0
+            },
+            "40-45|-1": {
+              "samples": 57,
+              "hits": 1,
+              "examples": [
+                "Attack Druid (36.2.2.249896)"
+              ],
+              "rate": 0.018
+            },
+            "40-45|3-": {
+              "samples": 10,
+              "hits": 0,
+              "examples": [],
+              "rate": 0.0
+            },
+            "-40|1-3": {
+              "samples": 4,
+              "hits": 0,
+              "examples": [],
+              "rate": 0.0
+            }
+          },
+          "byWinrate": {
+            "51-": {
+              "samples": 50,
+              "hits": 2,
+              "examples": [],
+              "rate": 0.04
+            },
+            "48-51": {
+              "samples": 73,
+              "hits": 0,
+              "examples": [],
+              "rate": 0.0
+            },
+            "45-48": {
+              "samples": 78,
+              "hits": 2,
+              "examples": [],
+              "rate": 0.026
+            },
+            "40-45": {
+              "samples": 85,
+              "hits": 2,
+              "examples": [],
+              "rate": 0.024
+            },
+            "-40": {
+              "samples": 103,
+              "hits": 5,
+              "examples": [],
+              "rate": 0.049
+            }
+          },
+          "byPopularity": {
+            "3-": {
+              "samples": 88,
+              "hits": 2,
+              "examples": [],
+              "rate": 0.023
+            },
+            "1-3": {
+              "samples": 86,
+              "hits": 2,
+              "examples": [],
+              "rate": 0.023
+            },
+            "-1": {
+              "samples": 215,
+              "hits": 7,
+              "examples": [],
+              "rate": 0.033
+            }
+          },
+          "overall": 0.028
+        }
+      },
+      "timing": {
+        "balancePatchIntervals": [
+          30,
+          11,
+          16,
+          8,
+          18,
+          17,
+          19,
+          9,
+          19,
+          9,
+          35,
+          19,
+          23,
+          12,
+          10,
+          27,
+          21,
+          12,
+          23,
+          26,
+          35,
+          14,
+          15,
+          27,
+          17,
+          48,
+          12,
+          9,
+          19,
+          17,
+          18,
+          14,
+          29,
+          41,
+          16,
+          19,
+          57,
+          13,
+          15,
+          13,
+          23,
+          12,
+          15,
+          20,
+          23,
+          40,
+          13,
+          15,
+          17,
+          27,
+          11
+        ],
+        "firstBalancePatchDaysAfterExpansion": [
+          21,
+          23,
+          16,
+          17,
+          17,
+          23,
+          23,
+          17
+        ],
+        "firstBalancePatchDaysAfterMiniSet": [
+          15,
+          11,
+          15,
+          8,
+          14,
+          15,
+          15,
+          15,
+          28,
+          15,
+          9,
+          23,
+          27,
+          14,
+          7,
+          16,
+          10,
+          9,
+          8,
+          11
+        ],
+        "lastBalancePatch": "2026-10-12"
+      }
     },
     "narrative": {
       "summary": "За период с 2023-12-08 по 2026-10-12 вышло 52 балансных патча: 1 в 2023, 20 в 2024, 16 в 2025 и 15 в 2026 году. Медиана между патчами 17 дней (от 8 до 57, p25 13, p75 23), то есть ритм примерно раз в две-три недели. Правок в сумме 340 баффов против 229 нерфов, плюс 93 рефорка: Blizzard больше усиливает, чем ослабляет.\n\nПервый патч после контента выходит быстро: после дополнений медиана 19 дней (16–23), после мини-наборов и карт медиана 14,5 дня (7–28). Часто первый патч после мини-набора идёт уже через 1–2 недели, например 30.6.2 через 7 дней и 28.6.2 через 8.\n\nНерфы бьют по сильным и популярным колодам: по 15 патчам со статистикой медианный винрейт целевого ядра 52,76% и популярность 10,99%, а баффы идут по колодам с медианой винрейта 32,67% и популярностью 0,49%. Нерфы чаще всего простые: подорожание на +1 (80 случаев из 229) либо правка текста (91). Баффы — снижение стоимости на −1 (135 из 340) и правки текста.\n\nBlizzard открыто признаёт ошибки и откатывает: Vicious Voidscale (36.0.3 бафф, 36.2.0 откат), Mister Clocksworth (34.0.0 → 34.2.0), Hellraiser (36.2.2 → 37.0.0), Isiset и К'Тун в 36.6.3 → 37.0.0. Патчи перед дополнением и после ротации часто работают как массовые баффы: 35.0.0 (44 баффа), 32.0.0 (71), 29.0.0 (48).",
@@ -491,7 +900,7 @@
   },
   "meta": {
     "source_id": "balance_radar",
-    "fetched_at": "2026-10-25T10:48:18+00:00",
+    "fetched_at": "2026-10-25T12:29:41+00:00",
     "stale": false,
     "count": 52
   }

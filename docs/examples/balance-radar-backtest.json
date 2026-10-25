@@ -1,0 +1,1397 @@
+{
+  "data": {
+    "generatedAt": "2026-10-25T12:38:19+00:00",
+    "historyGeneratedAt": "2026-10-25T12:29:41+00:00",
+    "window": "7 days before each patch",
+    "statistical": {
+      "predictor": "statistical",
+      "basis": "leave-one-patch-out calibrated hit rate of HSReplay Legend archetypes (week before the patch)",
+      "patches": 8,
+      "nerf": {
+        "@3": {
+          "precision": 0.292,
+          "recall": 0.318,
+          "hits": 7,
+          "predicted": 24,
+          "actual": 22
+        },
+        "@5": {
+          "precision": 0.275,
+          "recall": 0.5,
+          "hits": 11,
+          "predicted": 40,
+          "actual": 22
+        },
+        "@10": {
+          "precision": 0.163,
+          "recall": 0.591,
+          "hits": 13,
+          "predicted": 80,
+          "actual": 22
+        }
+      },
+      "buff": {
+        "@3": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "hits": 0,
+          "predicted": 24,
+          "actual": 11
+        },
+        "@5": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "hits": 0,
+          "predicted": 40,
+          "actual": 11
+        },
+        "@10": {
+          "precision": 0.025,
+          "recall": 0.182,
+          "hits": 2,
+          "predicted": 80,
+          "actual": 11
+        }
+      },
+      "perPatch": [
+        {
+          "patch": "35.2.2.241135",
+          "date": "2026-04-29",
+          "nerf": {
+            "3": [
+              1,
+              3,
+              1
+            ],
+            "5": [
+              1,
+              5,
+              1
+            ],
+            "10": [
+              1,
+              10,
+              1
+            ]
+          },
+          "nerfTop": [
+            "Herald Warrior",
+            "Face Hunter",
+            "Dragon Warrior",
+            "Spell Demon Hunter",
+            "Herald Shaman"
+          ],
+          "nerfTruth": [
+            "Dragon Warrior"
+          ],
+          "buff": {
+            "3": [
+              0,
+              3,
+              0
+            ],
+            "5": [
+              0,
+              5,
+              0
+            ],
+            "10": [
+              0,
+              10,
+              0
+            ]
+          },
+          "buffTop": [
+            "Aggro Druid",
+            "Aggro Paladin",
+            "Quest Mage",
+            "Quest Priest",
+            "Herald Death Knight"
+          ],
+          "buffTruth": []
+        },
+        {
+          "patch": "35.4.2.242566",
+          "date": "2026-05-19",
+          "nerf": {
+            "3": [
+              0,
+              3,
+              1
+            ],
+            "5": [
+              0,
+              5,
+              1
+            ],
+            "10": [
+              0,
+              10,
+              1
+            ]
+          },
+          "nerfTop": [
+            "Broxigar Demon Hunter",
+            "Companion Hunter",
+            "Aggro Druid",
+            "Egg Warlock",
+            "Egg Warrior"
+          ],
+          "nerfTruth": [
+            "Dragon Warrior"
+          ],
+          "buff": {
+            "3": [
+              0,
+              3,
+              0
+            ],
+            "5": [
+              0,
+              5,
+              0
+            ],
+            "10": [
+              0,
+              10,
+              0
+            ]
+          },
+          "buffTop": [
+            "Aura Paladin",
+            "Quest Mage",
+            "Imbue Rogue",
+            "Companion Hunter",
+            "Control Priest"
+          ],
+          "buffTruth": []
+        },
+        {
+          "patch": "36.0.3.247416",
+          "date": "2026-07-21",
+          "nerf": {
+            "3": [
+              2,
+              3,
+              9
+            ],
+            "5": [
+              4,
+              5,
+              9
+            ],
+            "10": [
+              5,
+              10,
+              9
+            ]
+          },
+          "nerfTop": [
+            "Dragon Warrior",
+            "Face Hunter",
+            "Tripwire Hunter",
+            "Egg Warrior",
+            "Troublemaker Rogue"
+          ],
+          "nerfTruth": [
+            "Attack Druid",
+            "Companion Hunter",
+            "Control Warrior",
+            "Egg Warrior",
+            "Face Hunter",
+            "Herald Rogue",
+            "Mug Shaman",
+            "Tripwire Hunter",
+            "Troublemaker Rogue"
+          ],
+          "buff": {
+            "3": [
+              0,
+              3,
+              3
+            ],
+            "5": [
+              0,
+              5,
+              3
+            ],
+            "10": [
+              1,
+              10,
+              3
+            ]
+          },
+          "buffTop": [
+            "Face Hunter",
+            "Dragon Warrior",
+            "Mug Shaman",
+            "Aggro Paladin",
+            "Mask Warlock"
+          ],
+          "buffTruth": [
+            "Azalina Priest",
+            "Demon Warlock",
+            "Void Demon Hunter"
+          ]
+        },
+        {
+          "patch": "36.2.0.248348",
+          "date": "2026-08-03",
+          "nerf": {
+            "3": [
+              1,
+              3,
+              1
+            ],
+            "5": [
+              1,
+              5,
+              1
+            ],
+            "10": [
+              1,
+              10,
+              1
+            ]
+          },
+          "nerfTop": [
+            "Void Demon Hunter",
+            "Tripwire Hunter",
+            "Face Hunter",
+            "Mug Shaman",
+            "Quest Hunter"
+          ],
+          "nerfTruth": [
+            "Void Demon Hunter"
+          ],
+          "buff": {
+            "3": [
+              0,
+              3,
+              0
+            ],
+            "5": [
+              0,
+              5,
+              0
+            ],
+            "10": [
+              0,
+              10,
+              0
+            ]
+          },
+          "buffTop": [
+            "Aggro Paladin",
+            "Quest Mage",
+            "Manastorm Mage",
+            "Chef Druid",
+            "Egg Death Knight"
+          ],
+          "buffTruth": []
+        },
+        {
+          "patch": "36.2.2.249896",
+          "date": "2026-08-18",
+          "nerf": {
+            "3": [
+              2,
+              3,
+              5
+            ],
+            "5": [
+              4,
+              5,
+              5
+            ],
+            "10": [
+              4,
+              10,
+              5
+            ]
+          },
+          "nerfTop": [
+            "Zee Shaman",
+            "Face Hunter",
+            "Mug Shaman",
+            "Tripwire Hunter",
+            "Troublemaker Rogue"
+          ],
+          "nerfTruth": [
+            "Corpse Death Knight",
+            "Face Hunter",
+            "Tripwire Hunter",
+            "Troublemaker Rogue",
+            "Zee Shaman"
+          ],
+          "buff": {
+            "3": [
+              0,
+              3,
+              5
+            ],
+            "5": [
+              0,
+              5,
+              5
+            ],
+            "10": [
+              1,
+              10,
+              5
+            ]
+          },
+          "buffTop": [
+            "Herald Death Knight",
+            "Void Demon Hunter",
+            "Rafaam Warlock",
+            "Quest Mage",
+            "Azalina Priest"
+          ],
+          "buffTruth": [
+            "Attack Druid",
+            "Broxigar Demon Hunter",
+            "Burn Mage",
+            "Coin Rogue",
+            "Mug Shaman"
+          ]
+        },
+        {
+          "patch": "36.4.2.251332",
+          "date": "2026-09-04",
+          "nerf": {
+            "3": [
+              0,
+              3,
+              2
+            ],
+            "5": [
+              0,
+              5,
+              2
+            ],
+            "10": [
+              1,
+              10,
+              2
+            ]
+          },
+          "nerfTop": [
+            "Ramp Druid",
+            "Dragon Warrior",
+            "Quest Priest",
+            "Cannon Warrior",
+            "Hand Warlock"
+          ],
+          "nerfTruth": [
+            "Attack Druid",
+            "Quest Mage"
+          ],
+          "buff": {
+            "3": [
+              0,
+              3,
+              0
+            ],
+            "5": [
+              0,
+              5,
+              0
+            ],
+            "10": [
+              0,
+              10,
+              0
+            ]
+          },
+          "buffTop": [
+            "Herald Rogue",
+            "Rafaam Warlock",
+            "Azalina Priest",
+            "Quest Priest",
+            "Broxigar Demon Hunter"
+          ],
+          "buffTruth": []
+        },
+        {
+          "patch": "36.6.3.253932",
+          "date": "2026-10-01",
+          "nerf": {
+            "3": [
+              1,
+              3,
+              3
+            ],
+            "5": [
+              1,
+              5,
+              3
+            ],
+            "10": [
+              1,
+              10,
+              3
+            ]
+          },
+          "nerfTop": [
+            "Dragon Warrior",
+            "Ramp Druid",
+            "Mug Shaman",
+            "Quest Priest",
+            "Hand Warlock"
+          ],
+          "nerfTruth": [
+            "Attack Druid",
+            "Dragon Warrior",
+            "Herald Warrior"
+          ],
+          "buff": {
+            "3": [
+              0,
+              3,
+              0
+            ],
+            "5": [
+              0,
+              5,
+              0
+            ],
+            "10": [
+              0,
+              10,
+              0
+            ]
+          },
+          "buffTop": [
+            "Attack Druid",
+            "Corpse Death Knight",
+            "Unholy Death Knight",
+            "Herald Death Knight",
+            "BBB Control Death Knight"
+          ],
+          "buffTruth": []
+        },
+        {
+          "patch": "37.0.0.254477",
+          "date": "2026-10-12",
+          "nerf": {
+            "3": [
+              0,
+              3,
+              0
+            ],
+            "5": [
+              0,
+              5,
+              0
+            ],
+            "10": [
+              0,
+              10,
+              0
+            ]
+          },
+          "nerfTop": [
+            "Dragon Warrior",
+            "Mug Shaman",
+            "Cannon Warrior",
+            "Contraband Mage",
+            "Unholy Death Knight"
+          ],
+          "nerfTruth": [],
+          "buff": {
+            "3": [
+              0,
+              3,
+              3
+            ],
+            "5": [
+              0,
+              5,
+              3
+            ],
+            "10": [
+              0,
+              10,
+              3
+            ]
+          },
+          "buffTop": [
+            "Ysera Rogue",
+            "Tripwire Hunter",
+            "Quest Warrior",
+            "Egg Paladin",
+            "Companion Hunter"
+          ],
+          "buffTruth": [
+            "Contraband Mage",
+            "Leyline Mage",
+            "Manastorm Mage"
+          ]
+        }
+      ]
+    },
+    "model": {
+      "predictor": "model",
+      "basis": "Claude on data dated before each patch; may have seen these patch notes in training (upper bound)",
+      "patches": 8,
+      "nerf": {
+        "@3": {
+          "precision": 0.292,
+          "recall": 0.318,
+          "hits": 7,
+          "predicted": 24,
+          "actual": 22
+        },
+        "@5": {
+          "precision": 0.325,
+          "recall": 0.591,
+          "hits": 13,
+          "predicted": 40,
+          "actual": 22
+        },
+        "@10": {
+          "precision": 0.27,
+          "recall": 0.773,
+          "hits": 17,
+          "predicted": 63,
+          "actual": 22
+        }
+      },
+      "buff": {
+        "@3": {
+          "precision": 0.083,
+          "recall": 0.182,
+          "hits": 2,
+          "predicted": 24,
+          "actual": 11
+        },
+        "@5": {
+          "precision": 0.05,
+          "recall": 0.182,
+          "hits": 2,
+          "predicted": 40,
+          "actual": 11
+        },
+        "@10": {
+          "precision": 0.067,
+          "recall": 0.455,
+          "hits": 5,
+          "predicted": 75,
+          "actual": 11
+        }
+      },
+      "nerfCards": {
+        "@3": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "hits": 0,
+          "predicted": 19,
+          "actual": 9
+        },
+        "@5": {
+          "precision": 0.097,
+          "recall": 0.333,
+          "hits": 3,
+          "predicted": 31,
+          "actual": 9
+        },
+        "@10": {
+          "precision": 0.105,
+          "recall": 0.444,
+          "hits": 4,
+          "predicted": 38,
+          "actual": 9
+        }
+      },
+      "buffCards": {
+        "@3": {
+          "precision": null,
+          "recall": 0.0,
+          "hits": 0,
+          "predicted": 0,
+          "actual": 8
+        },
+        "@5": {
+          "precision": null,
+          "recall": 0.0,
+          "hits": 0,
+          "predicted": 0,
+          "actual": 8
+        },
+        "@10": {
+          "precision": null,
+          "recall": 0.0,
+          "hits": 0,
+          "predicted": 0,
+          "actual": 8
+        }
+      },
+      "costUsd": 0.2746,
+      "errors": [],
+      "perPatch": [
+        {
+          "patch": "35.2.2.241135",
+          "date": "2026-04-29",
+          "model": "claude-sonnet-5-5",
+          "nerf": {
+            "3": [
+              1,
+              3,
+              1
+            ],
+            "5": [
+              1,
+              5,
+              1
+            ],
+            "10": [
+              1,
+              6,
+              1
+            ]
+          },
+          "nerfCards": {
+            "3": [
+              0,
+              3,
+              0
+            ],
+            "5": [
+              0,
+              5,
+              0
+            ],
+            "10": [
+              0,
+              5,
+              0
+            ]
+          },
+          "nerfTop": [
+            "Dragon Warrior",
+            "Bubble Paladin",
+            "Spell Demon Hunter",
+            "Aggro Paladin",
+            "Herald Shaman"
+          ],
+          "nerfTruth": [
+            "Dragon Warrior"
+          ],
+          "buff": {
+            "3": [
+              0,
+              3,
+              0
+            ],
+            "5": [
+              0,
+              5,
+              0
+            ],
+            "10": [
+              0,
+              10,
+              0
+            ]
+          },
+          "buffCards": {
+            "3": [
+              0,
+              0,
+              0
+            ],
+            "5": [
+              0,
+              0,
+              0
+            ],
+            "10": [
+              0,
+              0,
+              0
+            ]
+          },
+          "buffTop": [
+            "Quest Priest",
+            "Herald Death Knight",
+            "Quest Mage",
+            "Imbue Rogue",
+            "Control Priest"
+          ],
+          "buffTruth": []
+        },
+        {
+          "patch": "35.4.2.242566",
+          "date": "2026-05-19",
+          "model": "claude-sonnet-5-5",
+          "nerf": {
+            "3": [
+              0,
+              3,
+              1
+            ],
+            "5": [
+              1,
+              5,
+              1
+            ],
+            "10": [
+              1,
+              7,
+              1
+            ]
+          },
+          "nerfCards": {
+            "3": [
+              0,
+              0,
+              1
+            ],
+            "5": [
+              0,
+              0,
+              1
+            ],
+            "10": [
+              0,
+              0,
+              1
+            ]
+          },
+          "nerfTop": [
+            "Aggro Druid",
+            "Broxigar Demon Hunter",
+            "Herald Shaman",
+            "Aura Paladin",
+            "Dragon Warrior"
+          ],
+          "nerfTruth": [
+            "Dragon Warrior"
+          ],
+          "buff": {
+            "3": [
+              0,
+              3,
+              0
+            ],
+            "5": [
+              0,
+              5,
+              0
+            ],
+            "10": [
+              0,
+              10,
+              0
+            ]
+          },
+          "buffCards": {
+            "3": [
+              0,
+              0,
+              0
+            ],
+            "5": [
+              0,
+              0,
+              0
+            ],
+            "10": [
+              0,
+              0,
+              0
+            ]
+          },
+          "buffTop": [
+            "Companion Hunter",
+            "Quest Priest",
+            "Imbue Rogue",
+            "Herald Death Knight",
+            "Quest Mage"
+          ],
+          "buffTruth": []
+        },
+        {
+          "patch": "36.0.3.247416",
+          "date": "2026-07-21",
+          "model": "claude-sonnet-5-5",
+          "nerf": {
+            "3": [
+              1,
+              3,
+              9
+            ],
+            "5": [
+              3,
+              5,
+              9
+            ],
+            "10": [
+              6,
+              8,
+              9
+            ]
+          },
+          "nerfCards": {
+            "3": [
+              0,
+              3,
+              1
+            ],
+            "5": [
+              0,
+              5,
+              1
+            ],
+            "10": [
+              0,
+              9,
+              1
+            ]
+          },
+          "nerfTop": [
+            "Mug Shaman",
+            "Dragon Warrior",
+            "Zee Shaman",
+            "Face Hunter",
+            "Troublemaker Rogue"
+          ],
+          "nerfTruth": [
+            "Attack Druid",
+            "Companion Hunter",
+            "Control Warrior",
+            "Egg Warrior",
+            "Face Hunter",
+            "Herald Rogue",
+            "Mug Shaman",
+            "Tripwire Hunter",
+            "Troublemaker Rogue"
+          ],
+          "buff": {
+            "3": [
+              0,
+              3,
+              3
+            ],
+            "5": [
+              0,
+              5,
+              3
+            ],
+            "10": [
+              1,
+              8,
+              3
+            ]
+          },
+          "buffCards": {
+            "3": [
+              0,
+              0,
+              4
+            ],
+            "5": [
+              0,
+              0,
+              4
+            ],
+            "10": [
+              0,
+              0,
+              4
+            ]
+          },
+          "buffTop": [
+            "Quest Priest",
+            "Rafaam Warlock",
+            "Chef Druid",
+            "Quest Mage",
+            "Aura Paladin"
+          ],
+          "buffTruth": [
+            "Azalina Priest",
+            "Demon Warlock",
+            "Void Demon Hunter"
+          ]
+        },
+        {
+          "patch": "36.2.0.248348",
+          "date": "2026-08-03",
+          "model": "claude-sonnet-5-5",
+          "nerf": {
+            "3": [
+              1,
+              3,
+              1
+            ],
+            "5": [
+              1,
+              5,
+              1
+            ],
+            "10": [
+              1,
+              7,
+              1
+            ]
+          },
+          "nerfCards": {
+            "3": [
+              0,
+              3,
+              1
+            ],
+            "5": [
+              1,
+              5,
+              1
+            ],
+            "10": [
+              1,
+              5,
+              1
+            ]
+          },
+          "nerfTop": [
+            "Zee Shaman",
+            "Void Demon Hunter",
+            "Aggro Paladin",
+            "Mug Shaman",
+            "Face Hunter"
+          ],
+          "nerfTruth": [
+            "Void Demon Hunter"
+          ],
+          "buff": {
+            "3": [
+              0,
+              3,
+              0
+            ],
+            "5": [
+              0,
+              5,
+              0
+            ],
+            "10": [
+              0,
+              10,
+              0
+            ]
+          },
+          "buffCards": {
+            "3": [
+              0,
+              0,
+              0
+            ],
+            "5": [
+              0,
+              0,
+              0
+            ],
+            "10": [
+              0,
+              0,
+              0
+            ]
+          },
+          "buffTop": [
+            "Beatrix Paladin",
+            "Control Warrior",
+            "Egg Paladin",
+            "Herald Shaman",
+            "Attack Druid"
+          ],
+          "buffTruth": []
+        },
+        {
+          "patch": "36.2.2.249896",
+          "date": "2026-08-18",
+          "model": "claude-sonnet-5-5",
+          "nerf": {
+            "3": [
+              2,
+              3,
+              5
+            ],
+            "5": [
+              4,
+              5,
+              5
+            ],
+            "10": [
+              4,
+              5,
+              5
+            ]
+          },
+          "nerfCards": {
+            "3": [
+              0,
+              3,
+              3
+            ],
+            "5": [
+              1,
+              5,
+              3
+            ],
+            "10": [
+              2,
+              7,
+              3
+            ]
+          },
+          "nerfTop": [
+            "Mug Shaman",
+            "Zee Shaman",
+            "Face Hunter",
+            "Troublemaker Rogue",
+            "Tripwire Hunter"
+          ],
+          "nerfTruth": [
+            "Corpse Death Knight",
+            "Face Hunter",
+            "Tripwire Hunter",
+            "Troublemaker Rogue",
+            "Zee Shaman"
+          ],
+          "buff": {
+            "3": [
+              2,
+              3,
+              5
+            ],
+            "5": [
+              2,
+              5,
+              5
+            ],
+            "10": [
+              2,
+              7,
+              5
+            ]
+          },
+          "buffCards": {
+            "3": [
+              0,
+              0,
+              3
+            ],
+            "5": [
+              0,
+              0,
+              3
+            ],
+            "10": [
+              0,
+              0,
+              3
+            ]
+          },
+          "buffTop": [
+            "Herald Shaman",
+            "Broxigar Demon Hunter",
+            "Coin Rogue",
+            "Herald Warrior",
+            "Manastorm Mage"
+          ],
+          "buffTruth": [
+            "Attack Druid",
+            "Broxigar Demon Hunter",
+            "Burn Mage",
+            "Coin Rogue",
+            "Mug Shaman"
+          ]
+        },
+        {
+          "patch": "36.4.2.251332",
+          "date": "2026-09-04",
+          "model": "claude-sonnet-5-5",
+          "nerf": {
+            "3": [
+              0,
+              3,
+              2
+            ],
+            "5": [
+              1,
+              5,
+              2
+            ],
+            "10": [
+              1,
+              10,
+              2
+            ]
+          },
+          "nerfCards": {
+            "3": [
+              0,
+              1,
+              1
+            ],
+            "5": [
+              0,
+              1,
+              1
+            ],
+            "10": [
+              0,
+              1,
+              1
+            ]
+          },
+          "nerfTop": [
+            "Ramp Druid",
+            "Dragon Warrior",
+            "Quest Priest",
+            "Unholy Death Knight",
+            "Attack Druid"
+          ],
+          "nerfTruth": [
+            "Attack Druid",
+            "Quest Mage"
+          ],
+          "buff": {
+            "3": [
+              0,
+              3,
+              0
+            ],
+            "5": [
+              0,
+              5,
+              0
+            ],
+            "10": [
+              0,
+              10,
+              0
+            ]
+          },
+          "buffCards": {
+            "3": [
+              0,
+              0,
+              0
+            ],
+            "5": [
+              0,
+              0,
+              0
+            ],
+            "10": [
+              0,
+              0,
+              0
+            ]
+          },
+          "buffTop": [
+            "Broxigar Demon Hunter",
+            "Herald Death Knight",
+            "Leyline Mage",
+            "Void Demon Hunter",
+            "Quest Mage"
+          ],
+          "buffTruth": []
+        },
+        {
+          "patch": "36.6.3.253932",
+          "date": "2026-10-01",
+          "model": "claude-sonnet-5-5",
+          "nerf": {
+            "3": [
+              2,
+              3,
+              3
+            ],
+            "5": [
+              2,
+              5,
+              3
+            ],
+            "10": [
+              3,
+              10,
+              3
+            ]
+          },
+          "nerfCards": {
+            "3": [
+              0,
+              3,
+              2
+            ],
+            "5": [
+              1,
+              5,
+              2
+            ],
+            "10": [
+              1,
+              6,
+              2
+            ]
+          },
+          "nerfTop": [
+            "Dragon Warrior",
+            "Herald Warrior",
+            "Dragon Hunter",
+            "Ramp Druid",
+            "Egg Warrior"
+          ],
+          "nerfTruth": [
+            "Attack Druid",
+            "Dragon Warrior",
+            "Herald Warrior"
+          ],
+          "buff": {
+            "3": [
+              0,
+              3,
+              0
+            ],
+            "5": [
+              0,
+              5,
+              0
+            ],
+            "10": [
+              0,
+              10,
+              0
+            ]
+          },
+          "buffCards": {
+            "3": [
+              0,
+              0,
+              0
+            ],
+            "5": [
+              0,
+              0,
+              0
+            ],
+            "10": [
+              0,
+              0,
+              0
+            ]
+          },
+          "buffTop": [
+            "Quest Priest",
+            "Azalina Priest",
+            "Broxigar Demon Hunter",
+            "Coin Rogue",
+            "Herald Death Knight"
+          ],
+          "buffTruth": []
+        },
+        {
+          "patch": "37.0.0.254477",
+          "date": "2026-10-12",
+          "model": "claude-sonnet-5-5",
+          "nerf": {
+            "3": [
+              0,
+              3,
+              0
+            ],
+            "5": [
+              0,
+              5,
+              0
+            ],
+            "10": [
+              0,
+              10,
+              0
+            ]
+          },
+          "nerfCards": {
+            "3": [
+              0,
+              3,
+              0
+            ],
+            "5": [
+              0,
+              5,
+              0
+            ],
+            "10": [
+              0,
+              5,
+              0
+            ]
+          },
+          "nerfTop": [
+            "Dragon Warrior",
+            "Egg Warrior",
+            "Herald Warrior",
+            "Cannon Warrior",
+            "Mug Shaman"
+          ],
+          "nerfTruth": [],
+          "buff": {
+            "3": [
+              0,
+              3,
+              3
+            ],
+            "5": [
+              0,
+              5,
+              3
+            ],
+            "10": [
+              2,
+              10,
+              3
+            ]
+          },
+          "buffCards": {
+            "3": [
+              0,
+              0,
+              1
+            ],
+            "5": [
+              0,
+              0,
+              1
+            ],
+            "10": [
+              0,
+              0,
+              1
+            ]
+          },
+          "buffTop": [
+            "Broxigar Demon Hunter",
+            "Coin Rogue",
+            "Companion Hunter",
+            "Herald Warrior",
+            "Herald Death Knight"
+          ],
+          "buffTruth": [
+            "Contraband Mage",
+            "Leyline Mage",
+            "Manastorm Mage"
+          ]
+        }
+      ]
+    }
+  },
+  "meta": {
+    "source_id": "balance_radar",
+    "fetched_at": "2026-10-25T12:38:19+00:00",
+    "stale": false,
+    "count": 8
+  }
+}

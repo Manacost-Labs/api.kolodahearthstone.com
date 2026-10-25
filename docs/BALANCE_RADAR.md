@@ -31,6 +31,10 @@ Balance Radar отвечает на вопрос: какие карты, арх�
 | GET | `/v1/constructed/balance-radar` | `format=standard\|wild` (по умолчанию `standard`) | `{data: RadarResult, meta}`. Если успешного прогона ещё нет, вернётся `503`. |
 | GET | `/v1/constructed/balance-radar/runs` | `format`, `status=ok\|failed\|skipped`, `limit` (1–200, по умолчанию 30), `offset` | История прогонов, новые первыми, без payload. |
 | GET | `/v1/constructed/balance-radar/runs/{run_id}` | — | `{data: RadarResult \| null, run, meta}`. У `failed` и `skipped` поле `data` равно `null`. |
+| GET | `/v1/constructed/balance-radar/history` | см. ниже | Прошлые балансные патчи с точными правками карт. |
+| GET | `/v1/constructed/balance-radar/patterns` | — | Закономерности Blizzard и калибровка. |
+| GET | `/v1/constructed/balance-radar/backtest` | — | Бэктест на прошлых патчах: precision/recall. |
+| GET | `/v1/constructed/balance-radar/confidence-history` | `format`, `ref`, `side=nerfs\|buffs`, `runs` (2–120, по умолчанию 30) | `{data: {format, series: [{side, ref, points: [{runId, generatedAt, confidence}]}]}, meta}` для графика уверенности. |
 
 Поле `meta` устроено как в остальных `/v1/*`: `source_id = "balance_radar"`,
 `fetched_at = generatedAt`, `count` (число кандидатов или прогонов) и `stale`.
@@ -40,8 +44,125 @@ Balance Radar отвечает на вопрос: какие карты, арх�
 HSGuru/радаров в проекте публикуются только через REST.
 
 Полные примеры реальных ответов (прогон от 2026-10-25):
-[Стандарт](examples/balance-radar-standard.json) и
-[Вольный](examples/balance-radar-wild.json).
+[Стандарт](examples/balance-radar-standard.json),
+[Вольный](examples/balance-radar-wild.json),
+[история](examples/balance-radar-history.json),
+[закономерности](examples/balance-radar-patterns.json),
+[бэктест](examples/balance-radar-backtest.json),
+[история уверенности](examples/balance-radar-confidence-history.json).
+
+## Что добавлено в schemaVersion 2
+
+Все изменения добавочные: поля v1 сохранены, у старых прогонов новых полей нет
+(или они пустые).
+
+**Больше кандидатов.** Модель отдаёт 15–25 кандидатов на нерф и 15–25 на бафф
+(не меньше 10 confidence). Списки отсортированы по `confidence` и содержат
+карты, архетипы и классы. Пулы для отбора стали шире:
+
+- архетипы HSGuru: ранги all, legend, top_legend и diamond_4to1 в окне банов
+  (`stats.ranks`); в пул попадают архетипы с ≥1000 игр на all или ≥500 на
+  Легенде — до 60 по числу игр плюс по 25 с наибольшим перекосом;
+- карты HSReplay: Legend, Diamond 4-1 и Diamond; 60 кандидатов на нерф и 50 на
+  бафф, не больше 12 на класс; в баффы попадают и непопулярные эпики и
+  легендарки нового набора.
+
+**Новые поля `RadarCandidate`:**
+
+| Поле | Тип | Описание |
+| --- | --- | --- |
+| `keyNumbers` | string[] | 2–5 цифр, на которых основан вывод, со сравнением с порогом или калибровкой. |
+| `predictedChanges` | `{change, field, before, after, probability}[]` | 1–3 варианта конкретной правки. `field` — `cost \| attack \| health \| durability \| armor \| text \| other`; `before`/`after` — числа или `null`; `probability` 0–100, сумма не больше 100. `suggestedChange` — самый вероятный вариант. |
+| `metaImpact` | string \| null | Ожидаемый эффект на мету. |
+| `quotes` | `{text, postId, platform, kind, url, author, score, createdAt, official, authorRole}[]` | До 3 дословных цитат из сообщества. Код проверяет, что текст действительно есть в посте; придуманные цитаты отбрасываются. |
+| `developerSignal` | string \| null | Что говорили разработчики или официальный аккаунт. |
+| `calibration` | object \| null | `{level, band, historicalRate, samples, hits, examples[], withPatchIn14Days, features: {winrate, popularity, source}}` — как часто Blizzard меняла сущность с такими цифрами (см. ниже). |
+| `trend` | `{status: new\|up\|down\|stable, previousConfidence, delta}` | Изменение уверенности с прошлого прогона (±5 и больше — `up`/`down`). |
+| `confidenceHistory` | `{runId, generatedAt, confidence}[]` | Уверенность в последних 30 прогонах, от старых к новым, включая текущий. |
+
+У `stats` появились поля:
+
+- `ranks` (архетипы) — `{rank: {winrate, popularity, games}}`;
+- `mulligan`. У архетипа это `{period, rank, games, fetchedAt, keyCards[],
+  weakCards[]}`, у карты — `[{archetype, mulliganImpact, drawnImpact,
+  keptImpact, drawnCount}]`. Значения — сдвиг винрейта колоды в п.п. по данным
+  HSGuru `/v1/hsguru/mulligan`;
+- `core` (карты Стандарта) — архетипы HSReplay Legend, где карта стоит в ≥50%
+  колод: `[{archetype, cardShare, winrate, popularity}]`.
+
+Верхний уровень `RadarResult` — новые поля:
+
+- `timing` — `{today, lastExpansion, lastExpansionDate, daysSinceExpansion,
+  lastContentDrop, lastBalancePatchDate, daysSinceLastBalancePatch,
+  balancePatchSinceExpansion, medianDaysToFirstPatchAfterExpansion,
+  medianDaysBetweenBalancePatches, nextPatchWithin7Days, nextPatchWithin14Days,
+  basis, outlook}`. Вероятности — эмпирические, со сглаживанием Лапласа;
+  `outlook` пишет модель;
+- `changesSincePrevious` — `{previousRunId, previousGeneratedAt, added[],
+  removed[], risen[], fallen[]}`; у элементов `{side, ref, kind, name,
+  confidence, previousConfidence?, delta?}`; `risen` и `fallen` — до 10 самых
+  больших сдвигов;
+- `counts` — `{nerfs: {total, card, archetype, class}, buffs: {...}}`;
+- `history.calibration` — `{samples, patches, nerfOverall, buffOverall}`;
+- `history.backtest` — сводка бэктеста.
+
+**Заявления разработчиков.** Помечаются посты с флером Blizzard на Reddit
+(флер поста или автора: Blizzard, Game Designer, Developer, Community
+Manager), посты @PlayHearthstone и аккаунтов из `RADAR_X_DEV_ACCOUNTS`.
+Отдельный поиск `flair:Blizzard` по r/hearthstone добавляет один запрос за
+прогон. Такие посты передаются модели отдельным блоком
+`developerStatements` с повышенным весом; ответы саппорта («known issue»)
+отфильтровываются. У постов в `topPosts` и `quotes` есть `authorRole`:
+`official`, `developer` или `null`.
+
+### Калибровка уверенности
+
+По каждому балансному патчу со статистикой берутся все архетипы HSReplay
+Legend за неделю до патча и помечается, задел ли их патч (изменённая карта
+стоит в ≥50% колод архетипа). Так получилась таблица «винрейт × популярность →
+доля нерфов/баффов» (`patterns.calibration`). На 2026-10-25 в ней 389
+наблюдений по 9 патчам. Примеры:
+
+| Винрейт и популярность | Нерф в следующем патче |
+| --- | --- |
+| <50%, любая популярность | 2,8% (9 из 321) |
+| 50–52% | 16% (5 из 31) |
+| 52–54% | 22% (6 из 27) |
+| 52–54% при популярности ≥8% | 45% (5 из 11) |
+| любая, популярность ≥8% | 26% (9 из 34) |
+
+Кандидату достаётся ячейка таблицы по его признакам: для архетипа — HSGuru
+Legend, для карты — её core-архетип HSReplay. Если в ячейке меньше 4
+наблюдений, берётся строка только по винрейту, затем только по популярности,
+затем общая частота. Модель получает эту долю как якорь и отходит от неё
+больше чем на 30 пунктов только с названной причиной. Вероятность патча в
+ближайшие 7 и 14 дней считается по срокам прошлых патчей; `withPatchIn14Days`
+— доля из таблицы, умноженная на вероятность патча за 14 дней.
+
+### Бэктест
+
+`python -m app.balance_radar backtest [--llm]` берёт каждый прошлый балансный
+патч, для которого есть локальная статистика (сейчас 8, от 35.2.2 до 37.0.0),
+собирает входы только из данных, датированных до патча, и сравнивает прогноз
+с реальными правками. «Попадание» — архетип, ключевая карта которого
+изменилась; на уровне карт — сама изменённая карта.
+
+| Предсказатель | Нерфы: precision@5 / recall@5 | Нерфы: precision@10 / recall@10 | Баффы: recall@10 | Карты (нерф): recall@10 |
+| --- | --- | --- | --- | --- |
+| Статистика (калибровка, leave-one-patch-out) | 0,275 / 0,50 | 0,163 / 0,59 | 0,18 | — |
+| Claude (данные до патча, история до патча) | 0,325 / 0,59 | 0,27 / 0,77 | 0,455 | 0,44 |
+
+Базовая частота нерфа архетипа — 5,7%, так что precision@5 около 0,3 — это
+примерно в пять раз лучше случайного выбора. Баффы по статистике архетипов
+почти не угадываются: Blizzard баффает отдельные непопулярные карты. Claude мог
+видеть часть этих патч-ноутов при обучении, поэтому его строка — оценка
+сверху. У статистического предсказателя такой утечки нет. Статистический
+бэктест пересчитывается бесплатно при каждой пересборке истории.
+LLM-бэктест стоил $0,27 за 8 патчей и запускается вручную. Ответ
+`/backtest`: `{data: {generatedAt, historyGeneratedAt, window, statistical,
+model}, meta}`. У каждого предсказателя есть `{patches, nerf, buff,
+nerfCards?, buffCards?, perPatch[]}`, метрики — по `@3`, `@5`, `@10`
+(`precision`, `recall`, `hits`, `predicted`, `actual`).
 
 ## Контракт `RadarResult` (schemaVersion 1)
 
@@ -332,6 +453,7 @@ p25, median, p75, max}`), `narrative` — обзор на русском. Пок
 | `RADAR_X_ACCOUNTS` | Необязательно: список аккаунтов X через запятую вместо встроенного (PlayHearthstone, bmkibler, ThijsHS, TrumpSC, Kripparrian, HSReplayNet, ViciousSyndicat, ZalaeHS, RduHS). |
 | `RADAR_SOCIAL_WINDOW_DAYS` | Окно постов, по умолчанию 7 дней (1–30). |
 | `RADAR_SOCIAL_CACHE_TTL_SECONDS` | TTL дискового кэша соцсетей, по умолчанию 10800. |
+| `RADAR_X_DEV_ACCOUNTS` | Необязательно: аккаунты разработчиков в X через запятую; их посты идут в `developerStatements`. |
 
 Запрос к Claude идёт с adaptive thinking, `effort=high`, кэшированием
 системного промпта и server-side fallback (`fallbacks: "default"`, beta
@@ -357,11 +479,13 @@ p25, median, p75, max}`), `narrative` — обзор на русском. Пок
 | --- | --- | --- |
 | RedditAPIs | ~22 чтения ($0.0015) | ~$0.033 |
 | GetXAPI | ~7 страниц поиска ($0.001) | ~$0.007 |
-| Claude Стандарт (с историей и прецедентами) | ~155K вход + ~13K выход | ~$0.45 |
-| Claude Вольный (системный промпт из кэша) | ~112K вход + ~15K выход | ~$0.37 |
-| **Итого за прогон** | | **~$0.86** |
+| Claude Стандарт (v2: 190 сущностей в пуле, 32 кандидата) | ~165K вход + ~26K выход | ~$0.61 |
+| Claude Вольный (v2: 145 сущностей, 32 кандидата) | ~125K вход + ~24K выход | ~$0.49 |
+| **Итого за прогон** | | **~$1.14** |
 
-Два прогона в день стоят около $1.7 в день и около $52 в месяц. История
+Два прогона в день стоят около $2.3 в день и около $69 в месяц. В v1 было
+$0.86 за прогон; рост — это больше кандидатов и полей в ответе и больше
+статистики во входе. Анализ одного формата занимает около 2,5–3 минут. История
 патчей собирается отдельно. Первая полная сборка стоит около $0.68: 4 пакета
 разметки (~96K вход + ~31K выход, $0.51) и обзор (~50K вход + ~7K выход,
 $0.18). Потом при каждом новом патче размечаются только новые правки и
