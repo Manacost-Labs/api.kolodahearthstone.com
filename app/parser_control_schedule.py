@@ -20,7 +20,7 @@ from .source_tiers import LIGHT_API_IDS, MEDIUM_API_IDS
 from .sources import SOURCE_BY_ID
 
 SCHEDULE_INVENTORY_SCHEMA_VERSION = 2
-SCHEDULE_INVENTORY_VERSION = "2026-10-21.1"
+SCHEDULE_INVENTORY_VERSION = "2026-10-25.1"
 SCHEDULE_TIMEZONE = "Europe/Warsaw"
 
 _SYSTEMCTL_SEARCH_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
@@ -140,6 +140,15 @@ _SCHEDULES: tuple[_ScheduleSpec, ...] = (
         source_ids=frozenset({"hsguru_archetype_analysis"}),
         recurrence="odd-month-days",
         local_times=_times((3, 20)),
+    ),
+    _ScheduleSpec(
+        id="refresh-hsguru-mulligan",
+        label="Каждые 3 часа в :25 — муллиган и матчапы HSGuru",
+        systemd_unit="hs-data-api-docker-refresh-hsguru-mulligan.timer",
+        on_calendar=("*-*-* 00/3:25:00 Europe/Warsaw",),
+        source_ids=frozenset({"hsguru_mulligan"}),
+        recurrence="daily",
+        local_times=_times(*((hour, 25) for hour in range(0, 24, 3))),
     ),
     _ScheduleSpec(
         id="recover-hsguru-archetype-analysis",

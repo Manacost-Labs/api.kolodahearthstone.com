@@ -65,6 +65,8 @@ class GraphQLRepository(Protocol):
         self, *, dbf_id: int, mmr_percentile: str, time_range: str, composition_id: int
     ) -> dict[str, Any] | None: ...
 
+    async def hsguru_statistics(self, **selector: Any) -> dict[str, Any] | None: ...
+
     async def sources(self, **filters: Any) -> PageResult: ...
 
     async def search(self, **filters: Any) -> PageResult: ...
@@ -832,6 +834,63 @@ class PostgresGraphQLRepository:
         )
         out["position_compositions"] = [int(row["composition_id"]) for row in compositions]
         return out
+
+    async def hsguru_statistics(
+        self,
+        *,
+        kind: str,
+        subject_type: str,
+        format_name: str | None,
+        archetype: str | None,
+        deck_id: int | None,
+        rank: str,
+        period: str,
+        coin: str,
+        opponent_class: str,
+    ) -> dict[str, Any] | None:
+        """The mirrored latest HSGuru mulligan or class-matchup page of one slice."""
+
+        target = await self._fetch_one(
+            """
+            SELECT * FROM analytics.hsguru_stat_targets
+            WHERE kind = %(kind)s AND subject_type = %(subject_type)s
+              AND (%(format)s::text IS NULL OR format = %(format)s::text)
+              AND CASE WHEN %(subject_type)s = 'deck' THEN deck_id = %(deck_id)s::bigint
+                       ELSE lower(archetype) = lower(%(archetype)s::text) END
+              AND rank = %(rank)s AND period = %(period)s AND coin = %(coin)s
+              AND opponent_class = %(opponent_class)s AND latest_snapshot_id IS NOT NULL
+            ORDER BY active DESC, id DESC LIMIT 1
+            """,
+            {
+                "kind": kind,
+                "subject_type": subject_type,
+                "format": format_name,
+                "archetype": archetype,
+                "deck_id": deck_id,
+                "rank": rank,
+                "period": period,
+                "coin": coin,
+                "opponent_class": opponent_class,
+            },
+        )
+        if not target:
+            return None
+        snapshot = await self._fetch_one(
+            "SELECT * FROM analytics.hsguru_stat_snapshots WHERE id = %(id)s",
+            {"id": target["latest_snapshot_id"]},
+        )
+        if not snapshot:
+            return None
+        table, order = (
+            ("hsguru_mulligan_cards", "position")
+            if kind == "cards"
+            else ("hsguru_class_matchups", "opponent_class")
+        )
+        rows = await self._fetch_all(
+            f"SELECT * FROM analytics.{table} WHERE snapshot_id = %(id)s ORDER BY {order}",
+            {"id": snapshot["id"]},
+        )
+        return {"target": dict(target), "snapshot": dict(snapshot), "rows": rows}
 
     async def sources(
         self,

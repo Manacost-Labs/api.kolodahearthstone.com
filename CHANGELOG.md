@@ -16,6 +16,20 @@
   of keeping week-old builds, skip archetypes below HSGuru's 50-game deck
   floor, and the deck job's timeout grows to four hours. The paid archetype
   analysis keeps its 100-game Legend/past-week target set.
+- New pipeline `hsguru_mulligan` collects the HSGuru mulligan guide
+  (mulligan, drawn, not drawn and kept impact with counts per card) and class
+  matchups for every archetype and catalog deck with enough games: six ranks ×
+  eight periods including the Bans window, the coin split, opponent class for
+  the most played archetypes, 8,289 pages on 25 October (about 1,200 a day by
+  TTL). Before, only Legend past_week, without coin or decks, was collected.
+  An incremental queue re-reads a page when its period TTL expires or a
+  cumulative window grows by 30 %; it runs every three hours (200 pages, one
+  hour) through the free local FlareSolverr. Scrape.do is a fallback capped at 300 credits per run and
+  1,000 per UTC day inside the Meta-Lab HSGuru budget. SQLite `hsguru_*` is
+  mirrored to PostgreSQL `analytics.hsguru_*` (migration 017). New REST
+  `/v1/hsguru/mulligan`, `/class-matchups`, `/mulligan/slices`,
+  `/mulligan/history`, `/mulligan/coverage` and GraphQL `hsguruMulligan`,
+  `hsguruClassMatchups`. See docs/HSGURU_MULLIGAN.md.
 
 - A HSGuru deck page whose cards all rendered but hold no usable deck (one
   "Highlander Warrior" card with a one-card code) now means "no builds" instead
