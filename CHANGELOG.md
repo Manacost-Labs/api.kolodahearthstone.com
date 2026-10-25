@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- HSGuru deck catalogs: the `/replays` render now waits for
+  `#replays_table` instead of the LiveView root, which is already in the dead
+  render; about 15% of replay renders came back without the table, were
+  billed 5 credits and rejected. A catalog page spends at most two billed
+  Scrape.do responses (one paid retry); unbilled 502s keep the 30 and 120 s
+  retries. The 25.10 run that used super proxies (16:01–18:35 UTC) started
+  before #66 was deployed and ran the old ladder; the current code sends no
+  super proxy for deck catalogs. See docs/SCRAPE_PROVIDERS.md.
+
 - New pipeline `hsreplay_card_choices`: what players pick from Discover,
   Adapt and Dredge cards. HSReplay's `single_card_choices_by_winrate_v2`
   gives, per offered option, how often it is taken when offered

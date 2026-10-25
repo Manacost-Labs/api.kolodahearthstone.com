@@ -132,6 +132,37 @@ def test_hsguru_render_waits_for_liveview_and_keeps_only_site_session() -> None:
     assert "disable_retries" not in kwargs
 
 
+def test_hsguru_replay_render_waits_for_the_mounted_table() -> None:
+    # The LiveView root is already in the dead render; the replay table is
+    # mounted only after the socket connects.
+    source = Source(
+        id="hsguru_replays_tuning_test",
+        url="https://www.hsguru.com/replays?format=2&period=black_empire",
+        site="hsguru",
+        category="deck_replays",
+    )
+    page = ScrapeDoScrape(
+        html=PAGE.replace("<table>", '<table id="replays_table">'),
+        status_code=200,
+        final_url=source.url,
+        request_cost=5,
+        credits_remaining=None,
+        super_proxy=False,
+    )
+    with (
+        patch("app.firecrawl_backend.scrape_do_token", return_value="configured"),
+        patch("app.firecrawl_backend.scrape_url_sync", return_value=page) as scrape,
+    ):
+        _scrape_sync(
+            source,
+            formats=["html"],
+            skip_providers={"brightdata", "decodo", "firecrawl", "scrapfly"},
+            scrape_do_profiles=((True, False),),
+        )
+
+    assert scrape.call_args.kwargs["wait_selector"] == "#replays_table"
+
+
 def test_hsguru_residential_profile_is_anonymous_and_keeps_provider_retries() -> None:
     from app.scrape_do_backend import ScrapeDoTransientError
 

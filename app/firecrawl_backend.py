@@ -77,6 +77,10 @@ _HSGURU_SCRAPE_DO_PROFILES = (
 # a legitimately empty window) carries a LiveView root, the Cloudflare
 # interstitial never does. Waiting for it replaces a fixed customWait.
 _HSGURU_WAIT_SELECTOR = "[data-phx-session]"
+# Replay pages mount their table only after the LiveView connects; the root
+# is already in the dead render, so waiting for it returned a page without the
+# table (billed, then rejected) for ~15% of renders on 2026-10-25.
+_HSGURU_WAIT_SELECTORS = {"deck_replays": "#replays_table"}
 # Cloudflare cookies are bound to the browser/IP that obtained them. Forwarded
 # through a proxy they trigger BLOCKED_BY_WAF, so only the site session goes.
 _CLOUDFLARE_COOKIE_PREFIXES = ("__cf", "_cf", "cf_")
@@ -487,6 +491,7 @@ def _hsguru_scrape_do_options(
     render: bool,
     super_proxy: bool,
     wait_ms: int | None,
+    wait_selector: str = _HSGURU_WAIT_SELECTOR,
 ) -> dict[str, Any]:
     """Per-profile HSGuru request shape backed by the 2026-10-21 benchmark."""
     forwarded: dict[str, str] = {}
@@ -507,7 +512,7 @@ def _hsguru_scrape_do_options(
     if render:
         options.update(
             wait_ms=None,
-            wait_selector=_HSGURU_WAIT_SELECTOR,
+            wait_selector=wait_selector,
             block_resources=True,
         )
     else:
@@ -559,6 +564,9 @@ def _scrape_via_scrape_do(
                         render=render,
                         super_proxy=super_proxy,
                         wait_ms=wait_ms,
+                        wait_selector=_HSGURU_WAIT_SELECTORS.get(
+                            source.category, _HSGURU_WAIT_SELECTOR
+                        ),
                     )
                     if adaptive
                     else {"headers": headers, "wait_ms": wait_ms}

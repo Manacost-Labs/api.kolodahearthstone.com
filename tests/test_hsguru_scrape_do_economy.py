@@ -133,3 +133,98 @@ def test_page_failing_after_every_pause_raises() -> None:
     assert [call.args[0] for call in sleep.await_args_list] == list(
         hsguru_decks._PAGE_RETRY_DELAYS_SECONDS
     )
+
+
+def _rejected(url: str, credits: int) -> SimpleNamespace:
+    return _result(url, "<html>dead render without the table</html>", credits)
+
+
+def _observing_scrape(results: list[SimpleNamespace]) -> AsyncMock:
+    """Scrape.do that reports each billed response as rejected, then fails."""
+    pending = list(results)
+
+    async def scrape(_source, *, attempt_observer, accept_result, **_kwargs):
+        result = pending.pop(0)
+        attempt_observer(result, accept_result(result))
+        raise RuntimeError("Scrape.do response failed content validation")
+
+    return AsyncMock(side_effect=scrape)
+
+
+def test_billed_rejections_stop_the_page_after_one_paid_retry(monkeypatch) -> None:
+    monkeypatch.setattr(hsguru_decks, "fetch_via_flaresolverr", AsyncMock(
+        side_effect=RuntimeError("no local solver")
+    ))
+    hsguru_decks.reset_hsguru_catalog_provider_state()
+    scrape = _observing_scrape([_rejected(DECKS_URL, 1), _rejected(DECKS_URL, 5)])
+    sleep = AsyncMock()
+    with (
+        patch.object(hsguru_decks, "scrape_source_with_options", scrape),
+        patch.object(hsguru_decks.asyncio, "sleep", sleep),
+        pytest.raises(RuntimeError),
+    ):
+        asyncio.run(
+            hsguru_decks._fetch_catalog_page_with_backoff(
+                _source(DECKS_URL), max_age_ms=0, wait_ms=0, timeout_ms=90_000
+            )
+        )
+
+    # Plain (1 credit) and its rendered retry (5): no further paid round.
+    assert scrape.await_count == 2
+    sleep.assert_not_awaited()
+
+
+def test_replay_page_gets_one_paid_retry_after_a_pause(monkeypatch) -> None:
+    monkeypatch.setattr(hsguru_decks, "fetch_via_flaresolverr", AsyncMock(
+        side_effect=RuntimeError("no local solver")
+    ))
+    hsguru_decks.reset_hsguru_catalog_provider_state()
+    scrape = _observing_scrape(
+        [_rejected(REPLAYS_URL, 5), _rejected(REPLAYS_URL, 5)]
+    )
+    sleep = AsyncMock()
+    with (
+        patch.object(hsguru_decks, "scrape_source_with_options", scrape),
+        patch.object(hsguru_decks.asyncio, "sleep", sleep),
+        pytest.raises(RuntimeError),
+    ):
+        asyncio.run(
+            hsguru_decks._fetch_catalog_page_with_backoff(
+                _source(REPLAYS_URL),
+                max_age_ms=0,
+                wait_ms=0,
+                timeout_ms=90_000,
+                marker=hsguru_decks._REPLAYS_PAGE_MARKER,
+                scrape_do_steps=hsguru_decks._REPLAYS_SCRAPE_DO_STEPS,
+            )
+        )
+
+    assert scrape.await_count == 2
+    assert sleep.await_count == 1
+
+
+def test_unbilled_failures_keep_every_pause(monkeypatch) -> None:
+    monkeypatch.setattr(hsguru_decks, "fetch_via_flaresolverr", AsyncMock(
+        side_effect=RuntimeError("no local solver")
+    ))
+    hsguru_decks.reset_hsguru_catalog_provider_state()
+    scrape = AsyncMock(side_effect=RuntimeError("Scrape.do HTTP 502"))
+    sleep = AsyncMock()
+    with (
+        patch.object(hsguru_decks, "scrape_source_with_options", scrape),
+        patch.object(hsguru_decks.asyncio, "sleep", sleep),
+        patch.object(hsguru_decks, "_scrape_do_circuit_open", return_value=False),
+        pytest.raises(RuntimeError),
+    ):
+        asyncio.run(
+            hsguru_decks._fetch_catalog_page_with_backoff(
+                _source(REPLAYS_URL),
+                max_age_ms=0,
+                wait_ms=0,
+                timeout_ms=90_000,
+                marker=hsguru_decks._REPLAYS_PAGE_MARKER,
+                scrape_do_steps=hsguru_decks._REPLAYS_SCRAPE_DO_STEPS,
+            )
+        )
+
+    assert scrape.await_count == len(hsguru_decks._PAGE_RETRY_DELAYS_SECONDS) + 1
