@@ -920,20 +920,18 @@ def test_dead_render_class_matchups_parse_completely() -> None:
 
 
 def test_dead_render_card_stats_have_cards_and_sample_but_need_show_counts() -> None:
-    from bs4 import BeautifulSoup
-
-    from app.hsguru_archetype_analysis import _card_identity, parse_card_stats_games
+    from lxml import html as lxml_html
 
     # Fetched without show_counts=yes: impacts only, so the plain profile
     # result is rejected and the ladder escalates instead of storing it.
     html = (NORENDER / "norender_card_stats_without_counts.html").read_text()
-    assert parse_card_stats_games(html) == 180162
-    cells = [
-        row.find_all("td")[0] for row in BeautifulSoup(html, "lxml").select("tbody tr")
-    ]
-    names = [mulligan._card_name(cell, _card_identity(cell)[2]) for cell in cells]
+    assert mulligan._games(html) == 180162
+    rows = lxml_html.fromstring(html).xpath("//tbody/tr")
+    cells = [row.findall("td")[0] for row in rows]
+    identities = [mulligan.card_identity(cell) for cell in cells]
+    names = [name for _, _, name in identities]
     assert len(names) == 32 and names[:2] == ["Ritual of Summoning", "Ritual of C'Thun"]
-    assert all(_card_identity(cell)[1] for cell in cells)
+    assert all(dbf_id for _, dbf_id, _ in identities)
     with pytest.raises(mulligan.PageRejected, match="content_validation"):
         mulligan.parse_mulligan_html(html)
     # Every mulligan URL asks for the count columns.
@@ -949,3 +947,24 @@ def test_dead_render_card_stats_have_cards_and_sample_but_need_show_counts() -> 
         expected_games=1,
     )
     assert "show_counts=yes" in mulligan.target_url(target)
+
+
+def test_a_page_is_parsed_once_for_validation_and_storage(monkeypatch) -> None:
+    calls: list[int] = []
+    document = mulligan._document
+
+    def counting_document(html: str):
+        calls.append(len(html))
+        return document(html)
+
+    monkeypatch.setattr(mulligan, "_document", counting_document)
+    mulligan._parse_cached.cache_clear()
+    html = card_stats_html([FORGE, DUCK], games=777)
+    # The cascade validates twice, then the run stores the parsed page.
+    assert mulligan.page_is_valid("cards", html) and mulligan.page_is_valid(
+        "cards", html
+    )
+    first = mulligan.parse_page("cards", html)
+    first["rows"].clear()
+    assert len(mulligan.parse_page("cards", html)["rows"]) == 2
+    assert len(calls) == 1
