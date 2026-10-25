@@ -114,7 +114,7 @@ def test_fallback_fills_only_empty_archetypes_from_wider_window(datasets) -> Non
 
     # Only the archetype no window could fill is looked up in its replays.
     assert [call.args[1] for call in replays.await_args_list] == ["Silent Warrior"]
-    assert replays.await_args.kwargs["windows"] == ("black_empire", "past_30_days")
+    assert replays.await_args.kwargs["windows"] == ("black_empire",)
     assert all(archetype != "Popular Mage" for archetype, _, _ in calls)
     # HSGuru lists no build below 50 games, so one 50-game window is asked.
     assert {(period, min_games) for _, period, min_games in calls} == {
@@ -365,3 +365,67 @@ def test_catalog_job_reports_fallback_failures_and_still_joins() -> None:
         "1 archetypes could not be fetched"
     )
     assert result["errors"]["wild_fallback"].startswith("RuntimeError")
+
+
+def test_replay_lookups_are_repeated_only_every_three_days(datasets) -> None:
+    write, read = datasets
+    write(
+        "hsguru_deck_catalog_standard_all",
+        _catalog("hsguru_deck_catalog_standard_all", "black_empire", []),
+    )
+    recent = (datetime.now(UTC) - timedelta(days=1)).isoformat()
+    stale = (datetime.now(UTC) - timedelta(days=4)).isoformat()
+    replay_row = {
+        **_row("Found Rogue", "FOUND"),
+        "games": None,
+        "sample_source": "replays",
+        "sample_period": "black_empire",
+        "sample_fallback_for": "black_empire",
+        "updated_at": recent,
+    }
+    write(
+        "hsguru_deck_catalog_standard_fallback",
+        {
+            **_catalog(
+                "hsguru_deck_catalog_standard_fallback", "black_empire", [replay_row]
+            ),
+            "replay_checks": {"Empty Mage": recent, "Old Druid": stale},
+        },
+    )
+    replays = AsyncMock(return_value=([], 0, [], [], None))
+    with (
+        patch.object(
+            hsguru_decks,
+            "_meta_archetypes",
+            return_value=["Found Rogue", "Empty Mage", "Old Druid"],
+        ),
+        patch.object(
+            hsguru_decks, "_fetch_catalog_chunk", AsyncMock(return_value=_page([]))
+        ),
+        patch.object(hsguru_decks, "_fetch_replay_decks", replays),
+    ):
+        summary = asyncio.run(
+            hsguru_decks.refresh_hsguru_fallback_deck_catalog(
+                "standard", period="black_empire"
+            )
+        )
+
+    # The day-old replay build is kept, the day-old empty lookup is not
+    # repeated, and only the four-day-old empty lookup is asked again.
+    assert [call.args[1] for call in replays.await_args_list] == ["Old Druid"]
+    assert summary["zero_sample_archetypes"] == ["Empty Mage", "Old Druid"]
+    payload = read("hsguru_deck_catalog_standard_fallback")
+    assert [row["archetype"] for row in payload["data"]] == ["Found Rogue"]
+    assert payload["replay_checks"]["Empty Mage"] == recent
+    assert payload["replay_checks"]["Old Druid"] != stale
+
+
+def test_bans_replays_fall_back_to_the_release_window() -> None:
+    with patch.object(
+        hsguru_decks, "_current_deck_period", return_value="black_empire"
+    ):
+        assert hsguru_decks._replay_windows("black_empire_ban") == (
+            "black_empire_ban",
+            "black_empire",
+        )
+        assert hsguru_decks._replay_windows("black_empire") == ("black_empire",)

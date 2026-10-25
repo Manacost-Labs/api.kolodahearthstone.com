@@ -65,6 +65,9 @@ _FALLBACK_DECK_WINDOWS: tuple[tuple[str, int], ...] = (
 # HSGuru's public replays of that archetype (no sample statistics).
 _REPLAY_PAGE_ROWS = 20
 _FALLBACK_REUSE_SECONDS = 20 * 60 * 60
+# A replay is a past game, so its build stays valid; replay lookups, found or
+# empty, are repeated every three days instead of every night.
+_REPLAY_REUSE_SECONDS = 3 * 24 * 60 * 60
 _ALLOWED_HSGURU_HOSTS = frozenset({"hsguru.com", "www.hsguru.com"})
 _HSGURU_SEMANTIC_QUERY_KEYS = frozenset(
     {
@@ -1393,6 +1396,22 @@ def _fallback_windows(period: str) -> tuple[tuple[str, int], ...]:
     )
 
 
+def _replay_windows(period: str) -> tuple[str, ...]:
+    """Replay windows for ``period``: itself, then the release for Bans."""
+    release = _current_deck_period() if period in CATALOG_PERIODS else ""
+    return tuple(dict.fromkeys(window for window in (period, release) if window))
+
+
+def _seconds_since(value: object) -> float | None:
+    try:
+        moment = datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if moment.tzinfo is None:
+        return None
+    return (datetime.now(UTC) - moment.astimezone(UTC)).total_seconds()
+
+
 def parse_hsguru_replays_html(
     page_html: str,
     *,
@@ -1629,8 +1648,29 @@ async def refresh_hsguru_fallback_deck_catalog(
         if _key(str(row.get("archetype") or "")) in target_keys
         and str(row.get("sample_fallback_for") or "") == period
         and (age := _row_age_seconds(row)) is not None
-        and 0 <= age <= _FALLBACK_REUSE_SECONDS
+        and 0
+        <= age
+        <= (
+            _REPLAY_REUSE_SECONDS
+            if row.get("sample_source") == "replays"
+            else _FALLBACK_REUSE_SECONDS
+        )
     ]
+    previous_payload = (
+        read_json(dataset_path(_catalog_source_id(format_name, "fallback", period)))
+        if previous is not None
+        and previous.collection_version == _CATALOG_COLLECTION_VERSION
+        else None
+    ) or {}
+    previous_checks = previous_payload.get("replay_checks")
+    recent_replay_checks = {
+        _key(str(name)): str(checked_at)
+        for name, checked_at in (
+            previous_checks.items() if isinstance(previous_checks, dict) else []
+        )
+        if (age := _seconds_since(checked_at)) is not None
+        and 0 <= age <= _REPLAY_REUSE_SECONDS
+    }
     reused_keys = {_key(str(row.get("archetype") or "")) for row in reused_rows}
     pending = (
         [name for name in targets if _key(name) not in reused_keys] if windows else []
@@ -1673,9 +1713,11 @@ async def refresh_hsguru_fallback_deck_catalog(
     replay_pending = [
         name
         for name in replay_targets
-        if (key := _key(name)) not in covered and key not in failed_keys
+        if (key := _key(name)) not in covered
+        and key not in failed_keys
+        and key not in recent_replay_checks
     ]
-    replay_windows = (period, *(window for window, _min_games in windows))
+    replay_windows = _replay_windows(period)
     collect(
         replay_pending,
         await asyncio.gather(
@@ -1699,6 +1741,13 @@ async def refresh_hsguru_fallback_deck_catalog(
         for name in replay_targets
         if (key := _key(name)) not in covered_keys and key not in failed_keys
     ]
+    checked_at = datetime.now(UTC).isoformat()
+    asked_keys = {_key(name) for name in replay_pending}
+    replay_checks = {
+        name: recent_replay_checks.get(_key(name), checked_at)
+        for name in zero_sample
+        if _key(name) in recent_replay_checks or _key(name) in asked_keys
+    }
     source_id = _catalog_source_id(format_name, "fallback", period)
     provider_backends = list(dict.fromkeys(backends))
     write_json(
@@ -1740,6 +1789,9 @@ async def refresh_hsguru_fallback_deck_catalog(
             },
             "missing_archetypes": failed,
             "zero_sample_archetypes": zero_sample,
+            # Archetypes whose replays listed no build, and when they were
+            # last asked; they are asked again after _REPLAY_REUSE_SECONDS.
+            "replay_checks": replay_checks,
             "data": merged,
         },
     )
