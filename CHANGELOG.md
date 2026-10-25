@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Balance Radar: the company Blizzard is never renamed after the Mage spell
+  «Снежная буря» (brand words stay out of the name pass; «Снежная буря» used
+  as the actor of a statement becomes Blizzard again) (#63).
+- HSGuru mulligan: class matchup pages that map two labels to one class keep
+  the larger sample, and a failed write of one page marks only that target
+  failed instead of ending the run (#62).
 - Balance Radar: accurate, short, Russian-only texts. Archetypes use
   HearthPulse's own labels (the rest translated once by Claude and cached);
   cards use the ruRU localization. Every reader text is cleaned
