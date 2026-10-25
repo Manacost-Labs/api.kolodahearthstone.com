@@ -134,12 +134,12 @@ _SCHEDULES: tuple[_ScheduleSpec, ...] = (
     ),
     _ScheduleSpec(
         id="refresh-blizzard-leaderboards-history",
-        label="Каждый час в :40 — прошлые сезоны таблиц лидеров (один раз)",
+        label="Каждый час в :40, кроме часов живого обхода — прошлые сезоны таблиц лидеров (один раз)",
         systemd_unit="hs-data-api-docker-refresh-blizzard-leaderboards-history.timer",
-        on_calendar=("*-*-* *:40:00 Europe/Warsaw",),
+        on_calendar=("*-*-* 01..05,07..11,13..17,19..23:40:00 Europe/Warsaw",),
         source_ids=frozenset({"blizzard_leaderboards"}),
         recurrence="daily",
-        local_times=_times(*((hour, 40) for hour in range(24))),
+        local_times=_times(*((hour, 40) for hour in range(24) if hour % 6)),
     ),
     _ScheduleSpec(
         id="refresh-hsguru-meta-matrix",

@@ -8,17 +8,20 @@ are *history*.
 
 Two scopes share one lock so Blizzard never sees two runs at once:
 
-* ``live`` re-reads every live board in full (about 4,300 pages, 18 minutes at
-  four requests a second) and replaces that UTC day's snapshot;
+* ``live`` re-reads every live board in full (about 4,300 pages, 36 minutes at
+  two requests a second) and replaces that UTC day's snapshot;
 * ``history`` reads past seasons once, newest first, within a page budget per
   run. A season that stopped being live gets its final read before the
   backfill continues.
 
 Requests are paced globally (``requests_per_second``) with a small concurrency
-cap, retried with backoff on 429/5xx/timeouts, and a 429 halves the pace for
-the rest of the run. Responses are requested gzip-compressed (17 KB instead of
-300 KB a page). A board is written only when every page of it was read, so a
-snapshot is never a partial table. Boards larger than ``max_pages`` (old
+cap and retried with backoff on 5xx, timeouts and broken JSON. Blizzard meets a
+burst (about 1,200 requests in five minutes on 2026-10-25) with a short 403,
+sometimes 429: every request then pauses (30 s, doubling to 5 minutes, or
+Retry-After) and the pace halves for the rest of the run, within a pause budget
+per run. Responses are requested gzip-compressed (17 KB instead of 300 KB a
+page). A board is written only when every page of it was read, so a snapshot is
+never a partial table. Boards larger than ``max_pages`` (old
 Battlegrounds seasons list up to 1.5 million players) keep their top
 ``max_pages`` pages and are marked ``truncated``.
 """
@@ -67,7 +70,12 @@ SCOPES = ("live", "history", "all")
 PAGE_SIZE = 25
 STALE_HOURS = 12
 USER_AGENT = "HearthPulse-leaderboards/1.0 (+https://hearthpulse.net)"
-_RETRY_STATUS = frozenset({429, 500, 502, 503, 504})
+_RETRY_STATUS = frozenset({500, 502, 503, 504})
+# Blizzard answers a burst with a short 403 (no Retry-After), sometimes 429.
+_THROTTLE_STATUS = frozenset({403, 429})
+MAX_THROTTLE_PAUSE = 300.0
+MAX_THROTTLES_PER_PAGE = 8
+MAX_REQUEST_INTERVAL = 2.0
 
 
 class LeaderboardError(RuntimeError):
@@ -102,15 +110,17 @@ def _env_list(name: str, allowed: Sequence[str]) -> tuple[str, ...]:
 class Settings:
     regions: tuple[str, ...] = REGIONS
     modes: tuple[str, ...] = MODES
-    concurrency: int = 3
-    requests_per_second: float = 4.0
+    concurrency: int = 2
+    requests_per_second: float = 2.0
     max_pages: int = 2000
-    history_pages: int = 3000
-    live_seconds: int = 50 * 60
-    history_seconds: int = 20 * 60
+    history_pages: int = 2000
+    live_seconds: int = 60 * 60
+    history_seconds: int = 25 * 60
     timeout_seconds: float = 30.0
     attempts: int = 4
     backoff_seconds: float = 2.0
+    throttle_pause_seconds: float = 30.0
+    throttle_budget_seconds: float = 15 * 60
     stop_after_failures: int = 12
 
     @classmethod
@@ -118,21 +128,21 @@ class Settings:
         return cls(
             regions=_env_list("HS_LEADERBOARDS_REGIONS", REGIONS),
             modes=_env_list("HS_LEADERBOARDS_MODES", MODES),
-            concurrency=_env_int("HS_LEADERBOARDS_CONCURRENCY", 3, 1, 8),
-            requests_per_second=_env_float("HS_LEADERBOARDS_RPS", 4.0, 0.2, 10.0),
+            concurrency=_env_int("HS_LEADERBOARDS_CONCURRENCY", 2, 1, 8),
+            requests_per_second=_env_float("HS_LEADERBOARDS_RPS", 2.0, 0.2, 10.0),
             max_pages=_env_int("HS_LEADERBOARDS_MAX_PAGES", 2000, 1, 100_000),
-            history_pages=_env_int("HS_LEADERBOARDS_HISTORY_PAGES", 3000, 0, 1_000_000),
+            history_pages=_env_int("HS_LEADERBOARDS_HISTORY_PAGES", 2000, 0, 1_000_000),
             live_seconds=_env_int(
-                "HS_LEADERBOARDS_LIVE_SECONDS", 50 * 60, 60, 6 * 3600
+                "HS_LEADERBOARDS_LIVE_SECONDS", 60 * 60, 60, 6 * 3600
             ),
             history_seconds=_env_int(
-                "HS_LEADERBOARDS_HISTORY_SECONDS", 20 * 60, 60, 6 * 3600
+                "HS_LEADERBOARDS_HISTORY_SECONDS", 25 * 60, 60, 6 * 3600
             ),
         )
 
 
 class Pacer:
-    """Space request starts globally; a 429 doubles the spacing for the run."""
+    """Space request starts globally; throttling pauses everyone and halves the pace."""
 
     def __init__(self, requests_per_second: float) -> None:
         self.interval = 1.0 / requests_per_second
@@ -147,8 +157,17 @@ class Pacer:
         if delay > 0:
             await asyncio.sleep(delay)
 
+    def pause(self, seconds: float) -> bool:
+        """Hold every request for ``seconds``; False when a longer pause already runs."""
+
+        until = time.monotonic() + seconds
+        if until <= self._next:
+            return False
+        self._next = until
+        return True
+
     def slow_down(self) -> None:
-        self.interval = min(self.interval * 2, 4.0)
+        self.interval = min(self.interval * 2, MAX_REQUEST_INTERVAL)
 
 
 @dataclass
@@ -160,7 +179,33 @@ class Client:
     requests: int = 0
     retries: int = 0
     throttled: int = 0
+    throttle_seconds: float = 0.0
     consecutive_failures: int = 0
+    _throttle_streak: int = 0
+
+    def _throttle(self, response: httpx.Response) -> bool:
+        """Pause all requests after a 403/429; False once the run's pause budget is spent."""
+
+        self.throttled += 1
+        if self.throttle_seconds >= self.settings.throttle_budget_seconds:
+            return False
+        retry_after = response.headers.get("retry-after", "")
+        cooldown = (
+            float(min(int(retry_after), MAX_THROTTLE_PAUSE))
+            if retry_after.isdigit()
+            else min(
+                self.settings.throttle_pause_seconds
+                * 2 ** min(self._throttle_streak, 4),
+                MAX_THROTTLE_PAUSE,
+            )
+        )
+        # Requests already in flight answer 403 too: one throttling episode
+        # pauses and slows down once, not once per parallel request.
+        if self.pacer.pause(cooldown):
+            self._throttle_streak += 1
+            self.throttle_seconds += cooldown
+            self.pacer.slow_down()
+        return True
 
     async def page(
         self, region: str, mode: str, season_id: int | None, page: int
@@ -169,40 +214,43 @@ class Client:
         if season_id is not None:
             params["seasonId"] = season_id
         error: Exception | None = None
-        for attempt in range(self.settings.attempts):
-            if attempt:
-                self.retries += 1
-                await asyncio.sleep(self.settings.backoff_seconds * 2 ** (attempt - 1))
+        attempt = throttles = 0
+        while attempt < self.settings.attempts:
             async with self.semaphore:
                 await self.pacer.wait()
                 self.requests += 1
                 try:
                     response = await self.http.get(API_URL, params=params)
                 except httpx.HTTPError as exc:
+                    response = None
                     error = exc
-                    continue
-            if response.status_code in _RETRY_STATUS:
+            if response is not None and response.status_code in _THROTTLE_STATUS:
                 error = LeaderboardError(f"HTTP {response.status_code}")
-                if response.status_code == 429:
-                    self.throttled += 1
-                    self.pacer.slow_down()
-                    retry_after = response.headers.get("retry-after", "")
-                    if retry_after.isdigit():
-                        await asyncio.sleep(min(int(retry_after), 60))
-                continue
-            if response.status_code != 200:
+                throttles += 1
+                if throttles <= MAX_THROTTLES_PER_PAGE and self._throttle(response):
+                    continue
+                break
+            if response is not None and response.status_code == 200:
+                try:
+                    payload = response.json()
+                except ValueError as exc:
+                    payload = None
+                    error = LeaderboardError(f"invalid JSON: {exc}")
+                if isinstance(payload, dict):
+                    self.consecutive_failures = 0
+                    self._throttle_streak = 0
+                    return payload
+                if payload is not None:
+                    error = LeaderboardError("response is not an object")
+            elif response is not None and response.status_code not in _RETRY_STATUS:
                 self.consecutive_failures += 1
                 raise LeaderboardError(f"HTTP {response.status_code}")
-            try:
-                payload = response.json()
-            except ValueError as exc:
-                error = LeaderboardError(f"invalid JSON: {exc}")
-                continue
-            if not isinstance(payload, dict):
-                error = LeaderboardError("response is not an object")
-                continue
-            self.consecutive_failures = 0
-            return payload
+            elif response is not None:
+                error = LeaderboardError(f"HTTP {response.status_code}")
+            attempt += 1
+            if attempt < self.settings.attempts:
+                self.retries += 1
+                await asyncio.sleep(self.settings.backoff_seconds * 2 ** (attempt - 1))
         self.consecutive_failures += 1
         raise LeaderboardError(f"{region}/{mode}/{season_id} page {page}: {error}")
 
@@ -502,6 +550,7 @@ async def _refresh_unlocked(
         "requests": client.requests,
         "retries": client.retries,
         "throttled": client.throttled,
+        "throttle_seconds": round(client.throttle_seconds, 1),
         "stop_reason": stop_reason,
         "failures": failures[:20],
         "seconds": round(time.monotonic() - started, 1),

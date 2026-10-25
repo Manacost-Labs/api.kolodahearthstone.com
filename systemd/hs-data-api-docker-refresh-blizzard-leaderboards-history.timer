@@ -1,8 +1,8 @@
 [Unit]
-Description=Backfill past seasons of the official Blizzard leaderboards every hour until done
+Description=Backfill past seasons of the official Blizzard leaderboards hourly outside the live sweeps
 
 [Timer]
-OnCalendar=*-*-* *:40:00 Europe/Warsaw
+OnCalendar=*-*-* 01..05,07..11,13..17,19..23:40:00 Europe/Warsaw
 AccuracySec=5min
 Persistent=false
 

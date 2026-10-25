@@ -918,8 +918,8 @@ curl -s "https://api.kolodahearthstone.com/v1/hsreplay/mulligan?deck=5Tf8XCaMoKK
 Источник `blizzard_leaderboards` (pipeline). Таймер
 `hs-data-api-docker-refresh-blizzard-leaderboards.timer` каждые 6 часов
 полностью перечитывает текущие сезоны всех режимов и регионов;
-`hs-data-api-docker-refresh-blizzard-leaderboards-history.timer` каждый час
-дочитывает прошлые сезоны (каждый — один раз).
+`hs-data-api-docker-refresh-blizzard-leaderboards-history.timer` каждый час,
+кроме часов живого обхода, дочитывает прошлые сезоны (каждый — один раз).
 
 | Endpoint | Что возвращает |
 | --- | --- |

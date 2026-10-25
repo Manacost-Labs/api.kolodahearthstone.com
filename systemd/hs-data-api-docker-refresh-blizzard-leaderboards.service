@@ -8,5 +8,5 @@ Type=oneshot
 SuccessExitStatus=10
 WorkingDirectory=/srv/hs-data-api
 ExecStart=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm api python -m app.cli refresh-blizzard-leaderboards --scope live --scheduled --schedule-id refresh-blizzard-leaderboards
-TimeoutStartSec=75min
+TimeoutStartSec=90min
 TimeoutStopSec=1min

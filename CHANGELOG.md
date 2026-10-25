@@ -8,8 +8,9 @@
   live season in full every six hours and every past season the API still
   serves (490 boards) once through an hourly backfill. One snapshot per board
   and UTC day keeps the rank and rating of every player by day in a separate
-  SQLite file. Requests are paced to four a second with three in flight,
-  gzip-compressed, retried with backoff; a 429 halves the pace. New REST
+  SQLite file. Requests are paced to two a second with two in flight,
+  gzip-compressed, retried with backoff; Blizzard's burst 403/429 pauses
+  every request (30 s doubling to 5 min) and halves the pace. New REST
   `/v1/leaderboards`, `/stats`, `/players`, `/player`, `/seasons`,
   `/coverage` and GraphQL `leaderboard`, `leaderboardStats`,
   `leaderboardPlayers`, `leaderboardPlayer`, `leaderboardSeasons`. See

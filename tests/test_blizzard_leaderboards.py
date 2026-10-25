@@ -20,6 +20,7 @@ FAST = lb.Settings(
     concurrency=4,
     requests_per_second=10_000,
     backoff_seconds=0,
+    throttle_pause_seconds=0,
     max_pages=2000,
 )
 
@@ -324,7 +325,7 @@ def test_failed_page_keeps_previous_snapshot_and_reports_partial() -> None:
     assert board["failures"] == 1 and "HTTP 503" in board["last_error"]
 
 
-def test_throttling_is_retried_and_slows_the_pace() -> None:
+def test_throttling_pauses_and_retries_the_same_page() -> None:
     fake = _fake()
     seen: set[str] = set()
 
@@ -332,14 +333,38 @@ def test_throttling_is_retried_and_slows_the_pace() -> None:
         key = f"{params.get('seasonId')}:{params['page']}"
         if params.get("seasonId") == "19" and key not in seen:
             seen.add(key)
-            return httpx.Response(429, headers={"Retry-After": "0"})
+            # Blizzard answers a burst with a bare 403; 429 may carry Retry-After.
+            status = 403 if params["page"] == "1" else 429
+            return httpx.Response(status, headers={"Retry-After": "0"})
         return None
 
     fake.fail = throttle_once
     result = _run(fake, "live")
-    assert (
-        result["state"] == "ok" and result["throttled"] == 2 and result["retries"] == 2
+    assert result["state"] == "ok" and result["live_ok"] == 2
+    assert (result["throttled"], result["retries"], result["failed"]) == (2, 0, 0)
+
+
+def test_persistent_throttling_fails_the_board_not_the_run() -> None:
+    fake = _fake()
+    fake.fail = lambda params: (
+        httpx.Response(403) if params.get("seasonId") == "19" else None
     )
+    result = _run(fake, "live")
+    assert result["state"] == "partial" and result["live_ok"] == 1
+    assert result["errors"] == [
+        "EU/battlegrounds/19: EU/battlegrounds/19 page 1: HTTP 403"
+    ]
+    assert result["throttled"] == lb.MAX_THROTTLES_PER_PAGE
+
+
+def test_pacer_pause_holds_requests_once_per_episode() -> None:
+    pacer = lb.Pacer(requests_per_second=2)
+    assert pacer.pause(30) is True
+    assert pacer.pause(5) is False
+    pacer.slow_down()
+    pacer.slow_down()
+    pacer.slow_down()
+    assert pacer.interval == lb.MAX_REQUEST_INTERVAL
 
 
 def test_metadata_failure_publishes_nothing() -> None:
