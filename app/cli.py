@@ -521,14 +521,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "refresh-hsguru-mulligan",
         help=(
             "Read the most overdue HSGuru mulligan and class-matchup pages of archetypes "
-            "and decks (FlareSolverr first, capped Scrape.do fallback)."
+            "and decks (Scrape.do in parallel, FlareSolverr fallback)."
         ),
     )
     hsguru_mulligan.add_argument(
         "--max-pages",
         type=int,
         default=None,
-        help="Page budget of this run (default HS_HSGURU_MULLIGAN_MAX_PAGES or 450).",
+        help="Page budget of this run (default HS_HSGURU_MULLIGAN_MAX_PAGES or 10000).",
     )
     hsguru_mulligan.add_argument(
         "--estimate",

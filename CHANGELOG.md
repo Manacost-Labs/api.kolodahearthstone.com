@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- HSGuru mulligan reads pages through Scrape.do first, 25 in parallel
+  (`HS_HSGURU_MULLIGAN_CONCURRENCY`, up to 50), so the shared server's
+  FlareSolverr is only the fallback (`HS_HSGURU_MULLIGAN_TRANSPORT=scrape_do_only`
+  turns it off, `flaresolverr` restores the old order). Blocking provider calls
+  run in a dedicated thread pool instead of the default executor the API
+  shares. Credit caps are off by default and stay available as safety limits.
+  One run reads up to 10,000 pages in 150 minutes, so the whole plan
+  (8,720 pages, about 51,000 credits) loads in about two hours instead of five
+  days; keeping it fresh costs about 7,600 credits a day. Cumulative windows
+  are re-read on 50 % growth at most every two days (was 30 % and one day) to
+  keep re-reads of young windows affordable on the paid route.
+
 - Balance Radar (`/v1/constructed/balance-radar`): nerf and buff candidates for
   Standard and Wild. A timer twice a day joins HSGuru archetypes by period
   (including the Bans window) and HSReplay card periods with Reddit
