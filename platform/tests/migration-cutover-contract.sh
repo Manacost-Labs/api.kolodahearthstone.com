@@ -23,6 +23,21 @@ assert_not_contains() {
   fi
 }
 
+# The runner applies every platform/sql/NNN_*.sql in order, so a migration is
+# deployed once its file exists there under the canonical name.
+assert_migration() {
+  local version="$1"
+  local message="$2"
+  if [[ ! -f "${project_root}/sql/${version}.sql" ]]; then
+    echo "FAIL: ${message}" >&2
+    exit 1
+  fi
+}
+
+assert_contains scripts/apply-migrations.sh \
+  "/sql\" -maxdepth 1 -name '\\[0-9\\]\\[0-9\\]\\[0-9\\]_\\*\\.sql'" \
+  'the migration runner must discover every numbered migration'
+
 assert_contains scripts/bootstrap-shadow.php \
   "INCLUDING ONLY TABLE NAMES LIKE 'archetype_deck_cards'" \
   'SQLite analytics migration must use a public-table allowlist'
@@ -108,8 +123,7 @@ assert_contains scripts/index-media-assets.php \
 assert_not_contains scripts/verify-platform.sh \
   '/var/www/koloda/data/www/db\.kolodahs\.ru' \
   'health checks must not depend on the retired domain runtime'
-assert_contains scripts/apply-migrations.sh \
-  '006_card_catalog_pagination\.sql' \
+assert_migration 006_card_catalog_pagination \
   'the canonical GraphQL cards cursor indexes must be deployed'
 assert_contains sql/006_card_catalog_pagination.sql \
   'battlegrounds_cards_catalog_cursor_idx' \
@@ -117,8 +131,7 @@ assert_contains sql/006_card_catalog_pagination.sql \
 assert_contains sql/006_card_catalog_pagination.sql \
   'constructed_cards_catalog_cursor_idx' \
   'constructed cards must have a keyset pagination index'
-assert_contains scripts/apply-migrations.sh \
-  '007_large_collection_pagination\.sql' \
+assert_migration 007_large_collection_pagination \
   'all large GraphQL collections must deploy cursor indexes'
 assert_contains sql/007_large_collection_pagination.sql \
   'game_stat_snapshots_cursor_idx' \
@@ -126,8 +139,7 @@ assert_contains sql/007_large_collection_pagination.sql \
 assert_contains sql/007_large_collection_pagination.sql \
   'bg_minion_snapshots_cursor_idx' \
   'Battlegrounds minion history must have a keyset pagination index'
-assert_contains scripts/apply-migrations.sh \
-  '008_unified_search_and_history\.sql' \
+assert_migration 008_unified_search_and_history \
   'unified search and patch history indexes must be deployed'
 assert_contains sql/008_unified_search_and_history.sql \
   'CREATE OR REPLACE VIEW hub\.unified_search' \
@@ -135,14 +147,12 @@ assert_contains sql/008_unified_search_and_history.sql \
 assert_contains sql/008_unified_search_and_history.sql \
   'game_stat_rows_entity_history_idx' \
   'per-entity patch history must have a lookup index'
-assert_contains scripts/apply-migrations.sh \
-  '009_horizontal_art\.sql' \
+assert_migration 009_horizontal_art \
   'horizontal artwork must be exposed by the canonical GraphQL catalogue'
 assert_contains sql/009_horizontal_art.sql \
   'horizontal_image_url' \
   'the horizontal artwork migration must publish a dedicated URL'
-assert_contains scripts/apply-migrations.sh \
-  '010_battlegrounds_card_overrides\.sql' \
+assert_migration 010_battlegrounds_card_overrides \
   'the shadow catalogue must know the manual card corrections table'
 assert_contains sql/010_battlegrounds_card_overrides.sql \
   'PRIMARY KEY \(card_id, field_name\)' \
@@ -152,21 +162,21 @@ echo 'OK: migration cutover contract'
 
 assert_contains sql/011_card_versions.sql 'catalog.catalog_card_versions' 'card history needs a mirror table before source activation'
 assert_contains sql/011_card_versions.sql 'snapshot_json jsonb NOT NULL' 'card snapshot JSON must match the shadow loader JSONB conversion'
-assert_contains scripts/apply-migrations.sh '011_card_versions\.sql' 'the migration runner must install card history'
+assert_migration 011_card_versions 'the migration runner must install card history'
 assert_contains scripts/sync-shadow.php "'catalog.catalog_card_versions'" 'card history must use append-only shadow merge'
 
 assert_contains sql/012_bartender_catalog.sql 'catalog.battlegrounds_bartender_skins' 'bartender catalog must be mirrored before activation'
 assert_contains sql/012_bartender_catalog.sql 'source_payload_json jsonb' 'bartender JSON must match the shadow loader JSONB conversion'
-assert_contains scripts/apply-migrations.sh '012_bartender_catalog\.sql' 'the migration runner must install bartender catalog'
+assert_migration 012_bartender_catalog 'the migration runner must install bartender catalog'
 
 assert_contains sql/015_full_card_catalog.sql 'catalog.hearthstone_card_catalog' 'the full card catalogue must be mirrored before shadow merge'
 assert_contains sql/015_full_card_catalog.sql 'dbf bigint NOT NULL UNIQUE' 'catalogue dbf must match the loader type and stay unique'
-assert_contains scripts/apply-migrations.sh '015_full_card_catalog\.sql' 'the migration runner must install the full card catalogue'
+assert_migration 015_full_card_catalog 'the migration runner must install the full card catalogue'
 assert_contains sql/016_bg_minion_stats.sql 'analytics.bg_minion_stat_positions' 'minion statistics detail tables must exist before the analytics delta stages them'
-assert_contains scripts/apply-migrations.sh '016_bg_minion_stats\.sql' 'the migration runner must install the minion statistics tables'
+assert_migration 016_bg_minion_stats 'the migration runner must install the minion statistics tables'
 assert_contains scripts/stage-analytics.py "'bg_minion_stat_snapshots'" 'minion statistics snapshots must be mirrored by the analytics delta'
 assert_contains sql/017_hsguru_mulligan.sql 'analytics.hsguru_mulligan_cards' 'HSGuru mulligan tables must exist before the analytics delta stages them'
-assert_contains scripts/apply-migrations.sh '017_hsguru_mulligan\.sql' 'the migration runner must install the HSGuru mulligan tables'
+assert_migration 017_hsguru_mulligan 'the migration runner must install the HSGuru mulligan tables'
 assert_contains scripts/stage-analytics.py "'hsguru_stat_targets'" 'HSGuru mulligan targets must be mirrored by the analytics delta'
 
 assert_contains systemd/kolodahs-card-history-media.service 'flock -E 75 -w 900' 'a busy sync lock must end the card history turn with a distinct code'

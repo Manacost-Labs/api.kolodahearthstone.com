@@ -446,6 +446,27 @@ def flaresolverr_hsguru_wait_ms() -> int:
     return max(0, int(os.environ.get("HS_FLARESOLVERR_HSGURU_WAIT_MS", "30000")))
 
 
+def hsguru_deck_catalog_concurrency() -> int:
+    """Concurrent scheduled HSGuru deck-catalog pages (Scrape.do account share)."""
+    value = int(os.environ.get("HS_HSGURU_DECK_CATALOG_CONCURRENCY", "15"))
+    return min(50, max(1, value))
+
+
+def hsguru_deck_catalog_local_concurrency() -> int:
+    """Concurrent deck-catalog pages the single local FlareSolverr may render."""
+    value = int(os.environ.get("HS_HSGURU_DECK_CATALOG_LOCAL_CONCURRENCY", "2"))
+    return min(10, max(1, value))
+
+
+def hsguru_deck_catalog_local_first() -> bool:
+    """Ask the free local solver before Scrape.do for scheduled deck catalogs."""
+    return os.environ.get("HS_HSGURU_DECK_CATALOG_LOCAL_FIRST", "0").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
+
 def flaresolverr_hsguru_decks_wait_ms() -> int:
     """Deck pages are server-rendered; avoid the long meta-table hydration wait."""
     return max(

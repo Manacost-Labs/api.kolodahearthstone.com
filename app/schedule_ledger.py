@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+import sys
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
@@ -13,7 +14,6 @@ from .config import source_operationally_enabled
 from .parser_control_schedule import (
     _SCHEDULES,
     SCHEDULE_INVENTORY_VERSION,
-    SCHEDULE_TIMEZONE,
     _ScheduleSpec,
 )
 from .sources import SOURCE_BY_ID
@@ -122,7 +122,7 @@ def enumerate_nominal_occurrences(
             if lower <= (moment := value.astimezone(UTC)) < upper
         )
 
-    timezone = ZoneInfo(SCHEDULE_TIMEZONE)
+    timezone = ZoneInfo(spec.timezone)
     local_day = lower.astimezone(timezone).date()
     last_day = upper.astimezone(timezone).date()
     occurrences: list[datetime] = []
@@ -563,3 +563,35 @@ def claim_occurrence(
         return occurrence_id
     finally:
         connection.close()
+
+
+def claim_occurrence_or_unscheduled(
+    schedule_id: str,
+    requested_source_ids: Collection[str],
+    *,
+    now: datetime | None = None,
+    path: Path | None = None,
+) -> str | None:
+    """Claim the due occurrence, or return None for a run outside the schedule.
+
+    A manual ``systemctl start`` of a timer's service has no materialized
+    occurrence. It runs as an ordinary unscheduled refresh that does not count
+    toward the schedule; the missed slot itself stays visible in the ledger.
+    An untracked schedule or a source scope mismatch is a configuration error
+    and still raises.
+    """
+
+    options: dict[str, object] = {}
+    if now is not None:
+        options["now"] = now
+    if path is not None:
+        options["path"] = path
+    try:
+        return claim_occurrence(schedule_id, requested_source_ids, **options)
+    except OccurrenceNotFoundError:
+        print(
+            f"No due schedule occurrence for {schedule_id}; "
+            "running as an unscheduled refresh that does not count toward it",
+            file=sys.stderr,
+        )
+        return None

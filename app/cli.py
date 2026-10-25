@@ -215,10 +215,10 @@ async def _refresh_scheduled_api_tiers(
 ) -> tuple[list[dict[str, object]], int]:
     refresh_window_id: str | None = None
     if schedule_id is not None:
-        from .schedule_ledger import claim_occurrence
+        from .schedule_ledger import claim_occurrence_or_unscheduled
         from .source_tiers import LIGHT_API_IDS, MEDIUM_API_IDS
 
-        refresh_window_id = claim_occurrence(
+        refresh_window_id = claim_occurrence_or_unscheduled(
             schedule_id,
             sorted(LIGHT_API_IDS | MEDIUM_API_IDS),
         )
@@ -521,14 +521,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "refresh-hsguru-mulligan",
         help=(
             "Read the most overdue HSGuru mulligan and class-matchup pages of archetypes "
-            "and decks (FlareSolverr first, capped Scrape.do fallback)."
+            "and decks (Scrape.do in parallel, FlareSolverr fallback)."
         ),
     )
     hsguru_mulligan.add_argument(
         "--max-pages",
         type=int,
         default=None,
-        help="Page budget of this run (default HS_HSGURU_MULLIGAN_MAX_PAGES or 450).",
+        help="Page budget of this run (default HS_HSGURU_MULLIGAN_MAX_PAGES or 10000).",
     )
     hsguru_mulligan.add_argument(
         "--estimate",
@@ -694,9 +694,9 @@ def main(argv: list[str] | None = None) -> int:
             print("--schedule-id requires --scheduled", file=sys.stderr)
             return 2
         try:
-            from .schedule_ledger import claim_occurrence
+            from .schedule_ledger import claim_occurrence_or_unscheduled
 
-            dedicated_refresh_window_id = claim_occurrence(
+            dedicated_refresh_window_id = claim_occurrence_or_unscheduled(
                 schedule_id,
                 sorted(dedicated_schedule_sources[args.command]),
             )
@@ -1775,7 +1775,7 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         refresh_window_id: str | None = None
         if args.schedule_id:
-            from .schedule_ledger import claim_occurrence
+            from .schedule_ledger import claim_occurrence_or_unscheduled
 
             declared_source_ids = {
                 source_id
@@ -1792,7 +1792,7 @@ def main(argv: list[str] | None = None) -> int:
                     if tier_for(source_id) == selected_tier
                 }
             try:
-                refresh_window_id = claim_occurrence(
+                refresh_window_id = claim_occurrence_or_unscheduled(
                     args.schedule_id,
                     sorted(declared_source_ids),
                 )

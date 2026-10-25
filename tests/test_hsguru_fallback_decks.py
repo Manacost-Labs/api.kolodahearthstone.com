@@ -45,6 +45,7 @@ def datasets(tmp_path):
 def _catalog(source_id: str, period: str, rows: list[dict[str, object]]) -> dict:
     return {
         "source_id": source_id,
+        "collection_version": hsguru_decks._CATALOG_COLLECTION_VERSION,
         "state": "ok",
         "fetched_at": datetime.now(UTC).isoformat(),
         "period": period,
@@ -80,10 +81,10 @@ def test_fallback_fills_only_empty_archetypes_from_wider_window(datasets) -> Non
         calls.append((archetype, period, min_games))
         if archetype == "Broken Rogue":
             raise RuntimeError("HSGuru deck catalog fetch failed")
-        if archetype == "Quest Mage" and min_games == 10:
+        if archetype == "Quest Mage":
             return _page([_row("Quest Mage", QUEST_MAGE_CODE, 236)])
-        if archetype == "Rare Druid" and min_games == 1:
-            return _page([_row("Rare Druid", "RARE", 4)])
+        if archetype == "Rare Druid":
+            return _page([_row("Rare Druid", "RARE", 52)])
         return _page([])
 
     with (
@@ -107,9 +108,11 @@ def test_fallback_fills_only_empty_archetypes_from_wider_window(datasets) -> Non
         )
 
     assert all(archetype != "Popular Mage" for archetype, _, _ in calls)
-    assert ("Quest Mage", "past_30_days", 10) in calls
-    assert ("Quest Mage", "past_30_days", 1) not in calls
-    assert ("Rare Druid", "past_30_days", 1) in calls
+    # HSGuru lists no build below 50 games, so one 50-game window is asked.
+    assert {(period, min_games) for _, period, min_games in calls} == {
+        ("past_30_days", 50)
+    }
+    assert len(calls) == 4
     assert summary["state"] == "partial"
     assert summary["with_decks"] == 2
     assert summary["zero_sample_archetypes"] == ["Silent Warrior"]
@@ -120,9 +123,8 @@ def test_fallback_fills_only_empty_archetypes_from_wider_window(datasets) -> Non
     by_archetype = {row["archetype"]: row for row in payload["data"]}
     assert set(by_archetype) == {"Quest Mage", "Rare Druid"}
     assert by_archetype["Quest Mage"]["sample_period"] == "past_30_days"
-    assert by_archetype["Quest Mage"]["sample_min_games"] == 10
+    assert by_archetype["Quest Mage"]["sample_min_games"] == 50
     assert by_archetype["Quest Mage"]["sample_fallback_for"] == "black_empire"
-    assert by_archetype["Rare Druid"]["sample_min_games"] == 1
 
 
 def test_fallback_reuses_fresh_builds_and_refetches_stale_ones(datasets) -> None:

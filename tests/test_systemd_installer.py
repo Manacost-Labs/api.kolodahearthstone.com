@@ -311,3 +311,48 @@ def test_scrape_do_map_and_daily_audit_schedules_are_canonical() -> None:
     ).read_text(encoding="utf-8")
     assert "OnCalendar=*-*-* 10:20:00 Europe/Warsaw" in patch_timer
     assert "OnCalendar=*-*-* 11:15:00 Europe/Warsaw" in audit_timer
+
+
+def test_docker_systemd_installer_keeps_deliberately_disabled_timers(
+    tmp_path: Path,
+) -> None:
+    staged_systemd = tmp_path / "systemd"
+    staged_systemd.mkdir()
+    disabled = "hs-data-api-docker-refresh-patches.timer"
+    (staged_systemd / disabled).write_text("[Timer]\n", encoding="utf-8")
+    calls_file = tmp_path / "systemctl-calls"
+    fake_systemctl = tmp_path / "systemctl"
+    fake_systemctl.write_text(
+        "#!/usr/bin/env bash\n"
+        'printf \'%s\\n\' "$*" >> "$SYSTEMCTL_CALLS_FILE"\n'
+        f'if [[ "$1" == is-enabled && "$2" == {disabled} ]]; then\n'
+        "  echo disabled; exit 1\n"
+        "fi\n",
+        encoding="utf-8",
+    )
+    fake_systemctl.chmod(0o755)
+    env = {
+        **os.environ,
+        "SYSTEMD_DIR": str(staged_systemd),
+        "SYSTEMCTL_BIN": str(fake_systemctl),
+        "SYSTEMCTL_CALLS_FILE": str(calls_file),
+    }
+
+    result = subprocess.run(
+        ["bash", str(ROOT / "scripts/install-docker-systemd.sh")],
+        check=True,
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    calls = calls_file.read_text(encoding="utf-8").splitlines()
+    assert f"enable --now {disabled}" not in calls
+    assert f"Keeping {disabled} disabled" in result.stdout
+    # The unit file itself is still refreshed, and new timers are enabled.
+    assert (staged_systemd / disabled).read_text(encoding="utf-8") == (
+        ROOT / "systemd" / disabled
+    ).read_text(encoding="utf-8")
+    assert "enable --now hs-data-api-docker-freshness-check.timer" in calls
+    assert oct((staged_systemd / disabled).stat().st_mode & 0o777) == "0o644"

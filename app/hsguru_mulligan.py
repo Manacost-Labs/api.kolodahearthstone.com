@@ -17,21 +17,25 @@ is a *target* with incremental state (see :mod:`app.hsguru_mulligan_store`):
 * each run reads due targets in priority order up to a page budget and a
   deadline, and the rest stay due for the next run.
 
-Pages are read through the free local FlareSolverr first (HSGuru is direct in
-the FlareSolverr proxy policy). Scrape.do is a bounded fallback with per-run
-and per-UTC-day credit caps, inside the shared HSGuru Meta-Lab budget.
+Pages are read through Scrape.do first, with many pages in parallel, so the
+shared server is not loaded; the local FlareSolverr (direct for HSGuru in the
+proxy policy) is the fallback. Optional per-run and per-UTC-day credit caps
+and the shared HSGuru Meta-Lab budget bound the spending.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextvars
+import functools
 import hashlib
 import json
 import logging
 import os
 import re
 from collections.abc import Awaitable, Callable, Iterable, Mapping
-from dataclasses import dataclass, field
+from concurrent.futures import Executor, ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import quote, urlencode
@@ -81,9 +85,9 @@ OPPONENT_CLASSES = (
 )
 # 3/6-hour windows rarely reach a usable per-card sample and churn constantly.
 SKIPPED_PERIODS = frozenset({"past_3_hours", "past_6_hours"})
-# FlareSolverr reads about 175-200 HSGuru pages an hour on this server
-# (measured 2026-10-25), so eight 200-page runs a day are the capacity. The
-# default plan needs about 1,200 pages a day by TTL (see ``estimate_plan``).
+# The default plan needs about 1,200 pages a day by TTL (see
+# ``estimate_plan``): about 1,300 Scrape.do credits when the plain 1-credit
+# profile serves the page. Shorter TTLs cost credits proportionally.
 ROLLING_TTL_HOURS = {
     "past_day": 24,
     "past_3_days": 72,
@@ -96,8 +100,10 @@ ROLLING_TTL_HOURS = {
 CORE_ROLLING_PERIODS = frozenset({"past_week"})
 # Patch, expansion and Bans windows only grow: re-read on growth or after TTL.
 CUMULATIVE_TTL_HOURS = 168
-CUMULATIVE_GROWTH = 0.3
-CUMULATIVE_MIN_AGE_HOURS = 24
+# A young window grows fast: at 50 % and two days a page of a 5-day-old
+# window is re-read every ~2.5 days instead of daily.
+CUMULATIVE_GROWTH = 0.5
+CUMULATIVE_MIN_AGE_HOURS = 48
 
 
 # Read order inside a tier: the expansion window, the Bans window, then the
@@ -132,10 +138,18 @@ PAYWALL_MARKER = "you do not have access to these filters"
 DECK_CATALOG_SUFFIXES = ("legend", "all", "fallback")
 DECK_URL_RE = re.compile(r"/deck/(\d+)")
 FREE_CIRCUIT_THRESHOLD = 4
+# Consecutive Scrape.do failures (after its own retries and profile ladder).
+PAID_CIRCUIT_THRESHOLD = 10
 RUN_CIRCUIT_THRESHOLD = 8
+MAX_CONCURRENCY = 50
 SCRAPE_DO_RESERVE_CREDITS = 25
 FLARESOLVERR_WAIT_MS = 0
 SCRAPE_DO_TIMEOUT_MS = 60_000
+# HSGuru serves these pages as LiveView dead renders, so a plain request has
+# the full tables (2026-10-25: 8 s and 1 credit vs 54 s and 5 credits with
+# render, same 32 cards). A rejected page climbs to the browser profiles,
+# which also carry the session cookie for premium filters.
+SCRAPE_DO_PROFILES = ((False, False), (True, False), (False, True), (True, True))
 
 
 def _env_int(
@@ -155,23 +169,33 @@ class Settings:
     opponent_min_games: int = 10000
     deck_min_games: int = 100
     deck_coin_min_games: int = 600
-    max_pages: int = 200
-    deadline_seconds: int = 60 * 60
-    concurrency: int = 2
-    scrape_do_run_credits: int = 300
-    scrape_do_daily_credits: int = 1000
+    # One run can load the whole plan: ~15,000 plain Scrape.do pages an hour.
+    max_pages: int = 10_000
+    deadline_seconds: int = 150 * 60
+    # Scrape.do allows 50 concurrent requests per account; the meta matrix (5)
+    # and the deck catalogs share them.
+    concurrency: int = 40
+    # 0 means no cap. Positive values are hard safety limits.
+    scrape_do_run_credits: int = 0
+    scrape_do_daily_credits: int = 0
     snapshot_days: int = 30
+    transport: str = "scrape_do"
 
     @classmethod
     def from_env(cls) -> Settings:
         base = cls()
-        values = {
+        values: dict[str, Any] = {
             name: _env_int(f"HS_HSGURU_MULLIGAN_{name.upper()}", getattr(base, name))
             for name in cls.__dataclass_fields__
+            if name != "transport"
         }
-        values["concurrency"] = max(1, min(values["concurrency"], 4))
+        values["concurrency"] = max(1, min(values["concurrency"], MAX_CONCURRENCY))
         values["max_pages"] = max(1, values["max_pages"])
         values["snapshot_days"] = max(1, values["snapshot_days"])
+        transport = os.environ.get("HS_HSGURU_MULLIGAN_TRANSPORT", base.transport)
+        values["transport"] = (
+            transport.strip() if transport.strip() in TRANSPORTS else base.transport
+        )
         return cls(**values)
 
 
@@ -636,19 +660,35 @@ def _retry_after(failures: int, now: datetime) -> datetime:
 PageFetcher = Callable[[str, str], Awaitable[tuple[str, dict[str, Any]]]]
 
 
+TRANSPORTS = {
+    # Scrape.do first so the shared server is not loaded; the local solver
+    # only picks up what Scrape.do could not deliver.
+    "scrape_do": ("paid", "free"),
+    "scrape_do_only": ("paid",),
+    "flaresolverr": ("free", "paid"),
+}
+
+
 @dataclass
 class Acquirer:
-    """Free FlareSolverr first; Scrape.do only inside the credit caps."""
+    """Reads one page through the configured route order with per-route circuits.
 
-    scrape_do_credit_cap: int
+    ``scrape_do_credit_cap`` of ``None`` means no credit cap; otherwise a paid
+    call is made only while the spent credits plus the worst-case price of one
+    page stay inside the cap.
+    """
+
+    scrape_do_credit_cap: int | None
+    routes: tuple[str, ...] = TRANSPORTS["scrape_do"]
     pages_free: int = 0
     pages_scrape_do: int = 0
     scrape_do_credits: int = 0
     free_failures_in_row: int = 0
+    paid_failures_in_row: int = 0
     stop_reason: str | None = None
-    errors: list[str] = field(default_factory=list)
     fetch_free: Callable[[Source], Awaitable[Any]] | None = None
     fetch_paid: Callable[..., Awaitable[Any]] | None = None
+    executor: Executor | None = None
 
     def _source(self, url: str) -> Source:
         return Source(
@@ -678,22 +718,33 @@ class Acquirer:
             raise RuntimeError("content_validation")
         return html, {"backend": "flaresolverr", "request_credits": 0}
 
+    async def _call_paid(self, source: Source, **options: Any) -> Any:
+        if self.fetch_paid is not None:
+            return await self.fetch_paid(source, **options)
+        from .firecrawl_backend import _scrape_sync
+
+        # The provider cascade is blocking. A dedicated pool keeps dozens of
+        # parallel pages off the default executor that API handlers share;
+        # the copied context carries the Meta-Lab acquisition scope.
+        call = functools.partial(
+            contextvars.copy_context().run, _scrape_sync, source, **options
+        )
+        if self.executor is None:
+            return await asyncio.to_thread(call)
+        return await asyncio.get_running_loop().run_in_executor(self.executor, call)
+
     async def _paid(self, url: str, kind: str) -> tuple[str, dict[str, Any]]:
         from .meta_intelligence.budget import acquisition_scope
 
+        headers = None
         if self.fetch_paid is None:
-            from .firecrawl_backend import scrape_source_with_options
             from .hsguru_auth import hsguru_firecrawl_headers
 
-            fetch_paid = scrape_source_with_options
             headers = hsguru_firecrawl_headers()
-        else:
-            fetch_paid = self.fetch_paid
-            headers = None
         # "detail" jobs stop at the Meta-Lab throttle threshold of the shared
         # monthly HSGuru budget, before critical meta refreshes are affected.
         with acquisition_scope(SOURCE_ID, job_class="detail"):
-            result = await fetch_paid(
+            result = await self._call_paid(
                 self._source(url),
                 formats=["html"],
                 only_main_content=True,
@@ -702,6 +753,7 @@ class Acquirer:
                 timeout_ms=SCRAPE_DO_TIMEOUT_MS,
                 skip_providers={"decodo", "firecrawl", "brightdata", "scrapfly"},
                 accept_result=lambda scraped: page_is_valid(kind, scraped.html),
+                scrape_do_profiles=SCRAPE_DO_PROFILES,
             )
         credits = int(getattr(result, "request_credits", 0) or 0)
         self.scrape_do_credits += credits
@@ -712,41 +764,60 @@ class Acquirer:
         }
 
     def paid_allowed(self) -> bool:
-        return (
+        return self.scrape_do_credit_cap is None or (
             self.scrape_do_credits + SCRAPE_DO_RESERVE_CREDITS
             <= self.scrape_do_credit_cap
         )
 
+    def _route_open(self, route: str) -> bool:
+        if route == "free":
+            return self.free_failures_in_row < FREE_CIRCUIT_THRESHOLD
+        return (
+            self.paid_failures_in_row < PAID_CIRCUIT_THRESHOLD and self.paid_allowed()
+        )
+
+    def _note_dead_end(self) -> None:
+        if self.stop_reason is not None or any(
+            self._route_open(route) for route in self.routes
+        ):
+            return
+        self.stop_reason = (
+            "scrape_do_budget_exhausted"
+            if "paid" in self.routes and not self.paid_allowed()
+            else "provider_circuit_open"
+        )
+
     async def fetch(self, url: str, kind: str) -> tuple[str, dict[str, Any]]:
-        free_error: Exception | None = None
-        if self.free_failures_in_row < FREE_CIRCUIT_THRESHOLD:
+        errors: list[str] = []
+        for route in self.routes:
+            if not self._route_open(route):
+                reason = (
+                    "budget"
+                    if route == "paid" and not self.paid_allowed()
+                    else "circuit_open"
+                )
+                errors.append(f"{route}={reason}")
+                continue
             try:
-                html, meta = await self._free(url, kind)
-                self.free_failures_in_row = 0
-                self.pages_free += 1
+                if route == "free":
+                    html, meta = await self._free(url, kind)
+                    self.free_failures_in_row = 0
+                    self.pages_free += 1
+                else:
+                    html, meta = await self._paid(url, kind)
+                    self.paid_failures_in_row = 0
                 return html, meta
             except PageRejected as exc:
-                # A premium filter: only the logged-in browser profile can read it.
-                free_error = exc
+                # A premium filter: only the logged-in browser profile reads it.
+                errors.append(f"{route}={exc.reason}")
             except Exception as exc:  # noqa: BLE001 - provider boundary
-                free_error = exc
-                self.free_failures_in_row += 1
-        if not self.paid_allowed():
-            if (
-                self.stop_reason is None
-                and self.free_failures_in_row >= FREE_CIRCUIT_THRESHOLD
-            ):
-                self.stop_reason = "scrape_do_budget_exhausted"
-            raise RuntimeError(
-                f"free={type(free_error).__name__ if free_error else 'skipped'}; paid=budget"
-            )
-        try:
-            return await self._paid(url, kind)
-        except Exception as paid_exc:
-            raise RuntimeError(
-                f"free={str(free_error)[:80] if free_error else 'circuit_open'}; "
-                f"paid={type(paid_exc).__name__}"
-            ) from paid_exc
+                errors.append(f"{route}={str(exc)[:80] or type(exc).__name__}")
+                if route == "free":
+                    self.free_failures_in_row += 1
+                else:
+                    self.paid_failures_in_row += 1
+        self._note_dead_end()
+        raise RuntimeError("; ".join(errors))
 
 
 # --- refresh --------------------------------------------------------------------
@@ -804,15 +875,27 @@ async def _refresh_unlocked(
         due = due_targets(targets, started)
         budget_pages = max(1, max_pages or settings.max_pages)
         spent_today = store.scrape_do_credits_since(conn, _utc_day_start(started))
-        credit_cap = max(
-            0,
-            min(
-                settings.scrape_do_run_credits,
-                settings.scrape_do_daily_credits - spent_today,
-            ),
+        caps = [
+            cap
+            for cap in (
+                settings.scrape_do_run_credits or None,
+                settings.scrape_do_daily_credits - spent_today
+                if settings.scrape_do_daily_credits
+                else None,
+            )
+            if cap is not None
+        ]
+        credit_cap = max(0, min(caps)) if caps else None
+        executor = ThreadPoolExecutor(
+            max_workers=settings.concurrency, thread_name_prefix="hsguru-mulligan"
         )
-        acquirer = Acquirer(scrape_do_credit_cap=credit_cap)
+        acquirer = Acquirer(
+            scrape_do_credit_cap=credit_cap,
+            routes=TRANSPORTS[settings.transport],
+            executor=executor,
+        )
         fetch = fetch_page or acquirer.fetch
+        run_circuit = max(RUN_CIRCUIT_THRESHOLD, 2 * settings.concurrency)
         queue = list(due[:budget_pages])
         counts = {
             "attempted": 0,
@@ -863,10 +946,7 @@ async def _refresh_unlocked(
                     )
                     async with lock:
                         failures_in_row += 1
-                        if (
-                            failures_in_row >= RUN_CIRCUIT_THRESHOLD
-                            and stop_reason is None
-                        ):
+                        if failures_in_row >= run_circuit and stop_reason is None:
                             stop_reason = "provider_circuit_open"
                     continue
                 async with lock:
@@ -892,7 +972,10 @@ async def _refresh_unlocked(
                 kind_key = f"{target['subject_type']}_{target['kind']}"
                 by_kind[kind_key] = by_kind.get(kind_key, 0) + 1
 
-        await asyncio.gather(*(worker() for _ in range(settings.concurrency)))
+        try:
+            await asyncio.gather(*(worker() for _ in range(settings.concurrency)))
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
         if stop_reason is None and len(due) > budget_pages:
             stop_reason = "page_budget"
         pruned = store.prune(conn, now=started, snapshot_days=settings.snapshot_days)
@@ -963,12 +1046,16 @@ async def _refresh_unlocked(
         if published
         else previous.get("fetched_at") or finished_at,
         "http_status": 200 if succeeded else None,
-        "backend": "flaresolverr+scrape_do",
+        "backend": "+".join(
+            {"paid": "scrape_do", "free": "flaresolverr"}[route]
+            for route in TRANSPORTS[settings.transport]
+        ),
         "rows_total": with_data,
         "detail": (
             f"HSGuru mulligan: {succeeded}/{counts['attempted']} pages ok, "
             f"{remaining_due} still due, stop={stop_reason or 'done'}, "
-            f"scrape.do credits {acquirer.scrape_do_credits}/{credit_cap}"
+            f"scrape.do credits {acquirer.scrape_do_credits}/"
+            f"{'unlimited' if credit_cap is None else credit_cap}"
         ),
         "serving_cached_dataset": not published and bool(previous),
         "last_refresh_state": str(state),

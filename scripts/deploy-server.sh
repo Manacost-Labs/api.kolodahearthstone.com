@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
-# Деплой hs-data-api из git: pull -> сборка образа -> перезапуск -> проверка.
+# Деплой hs-data-api из git — единственный путь обновления прода:
+#   1. pull чистого origin/<branch>;
+#   2. платформа: deploy-platform.sh + apply-migrations.sh (до рестарта API);
+#   3. сборка образа -> перезапуск -> /v1/health (при сбое — откат образа);
+#   4. systemd-юниты Docker-задач (install-docker-systemd.sh) и проверка
+#      host-side exporter расписаний.
+# --dry-run показывает план каждого шага и ничего не меняет.
+# --skip-platform / --skip-units пропускают шаг 2 / 4 (аварийный обход).
 # Образ собирается только из чистого дерева, совпадающего с origin/<branch>,
 # и получает label org.opencontainers.image.revision=<полный SHA>.
 #
@@ -21,16 +28,24 @@ HOST_SERVICE_USER="${HOST_SERVICE_USER:-debian}"
 HOST_TIMER_EXPORT_UNIT="${HOST_TIMER_EXPORT_UNIT:-hs-data-api-docker-export-timer-state.service}"
 HOST_TIMER_SNAPSHOT="$INSTALL_DIR/data/parser-control-systemd.json"
 STAMP_FILE="$INSTALL_DIR/.deployed-commit"
+PLATFORM_TARGET="${HS_DATA_PLATFORM_TARGET_ROOT:-/srv/hs-data-platform}"
+PLATFORM_DB_CONTAINER="${PLATFORM_DB_CONTAINER:-hs-data-postgres-1}"
+SYSTEMD_DIR="${SYSTEMD_DIR:-/etc/systemd/system}"
+LOCK_FILE="${DEPLOY_LOCK_FILE:-/run/lock/hs-data-api-deploy.lock}"
 
 DRY_RUN=0
+SKIP_PLATFORM=0
+SKIP_UNITS=0
 for arg in "$@"; do
   case "$arg" in
     --allow-dirty)
       echo "ОШИБКА: --allow-dirty больше не поддерживается: образ собирается только из чистого origin/$BRANCH" >&2
       exit 2 ;;
     --dry-run) DRY_RUN=1 ;;
+    --skip-platform) SKIP_PLATFORM=1 ;;
+    --skip-units) SKIP_UNITS=1 ;;
     -h|--help)
-      sed -n '2,14p' "$0"; exit 0 ;;
+      sed -n '2,21p' "$0"; exit 0 ;;
     *) echo "Неизвестный аргумент: $arg" >&2; exit 2 ;;
   esac
 done
@@ -72,10 +87,50 @@ verify_host_timer_export() {
     || { echo "Exporter не создал $HOST_TIMER_SNAPSHOT" >&2; return 1; }
 }
 
+# План миграций считается раннером из origin/$BRANCH: новые файлы sql ещё не
+# лежат на диске. Старый раннер не знал --dry-run и применил бы всё, поэтому
+# без поддержки флага план не строится.
+plan_migrations() {
+  local tmp
+  tmp="$(mktemp -d)"
+  git archive "origin/$BRANCH" platform/scripts/apply-migrations.sh platform/sql | tar -x -C "$tmp"
+  if grep -q -- '--dry-run)' "$tmp/platform/scripts/apply-migrations.sh"; then
+    PLATFORM_DOCKER=docker PLATFORM_PSQL_CONTAINER="$PLATFORM_DB_CONTAINER" \
+      "$tmp/platform/scripts/apply-migrations.sh" --dry-run | sed 's/^/    /' \
+      || echo "    не удалось получить план миграций (контейнер $PLATFORM_DB_CONTAINER?)"
+  else
+    echo "    раннер в origin/$BRANCH не поддерживает --dry-run; план не построен"
+  fi
+  rm -rf "$tmp"
+}
+
+# unit_plan <каталог юнитов в репо> <glob> <render 0|1>: какие юниты из
+# origin/$BRANCH появятся или изменятся в $SYSTEMD_DIR. render=1 повторяет
+# подстановку INSTALL_DIR из install-docker-systemd.sh.
+unit_plan() {
+  local dir="$1" pattern="$2" render="$3" path name rendered changes=0
+  while IFS= read -r path; do
+    name="${path##*/}"
+    # shellcheck disable=SC2254 # pattern is an intentional glob
+    case "$name" in $pattern) ;; *) continue ;; esac
+    rendered="$(git show "origin/$BRANCH:$path")"
+    [[ "$render" -eq 1 ]] && rendered="${rendered//\/srv\/hs-data-api/$INSTALL_DIR}"
+    if [[ ! -f "$SYSTEMD_DIR/$name" ]]; then
+      echo "    новый: $name"; changes=$((changes + 1))
+    elif [[ "$rendered" != "$(cat "$SYSTEMD_DIR/$name")" ]]; then
+      echo "    изменится: $name"; changes=$((changes + 1))
+    fi
+  done < <(git ls-tree --name-only "origin/$BRANCH" "$dir/")
+  [[ "$changes" -gt 0 ]] || echo "    без изменений"
+}
+
 [[ "$(id -u)" -eq 0 ]] || die "запускать через sudo"
 [[ -d "$INSTALL_DIR/.git" ]] || die "$INSTALL_DIR не git-репозиторий"
 
 cd "$INSTALL_DIR"
+
+exec 9>"$LOCK_FILE"
+flock -n 9 || die "другой деплой уже идёт ($LOCK_FILE)"
 
 # Ручные правки прямо на сервере — это то, от чего мы уходим. Молча затирать
 # их нельзя, а собирать из них образ — значит снова получить prod, которого нет
@@ -104,6 +159,23 @@ else
 fi
 
 if [[ "$DRY_RUN" -eq 1 ]]; then
+  if [[ "$SKIP_PLATFORM" -eq 1 ]]; then
+    say "платформа: пропущу (--skip-platform)"
+  else
+    say "платформа: синхронизирую в $PLATFORM_TARGET; изменения в platform/:"
+    git --no-pager diff --stat "HEAD..origin/$BRANCH" -- platform | sed 's/^/    /'
+    say "платформа: миграции"
+    plan_migrations
+    say "платформа: systemd-юниты"
+    unit_plan platform/systemd '*' 0
+  fi
+  say "API: соберу образ из origin/$BRANCH, перезапущу, проверю $HEALTH_URL"
+  if [[ "$SKIP_UNITS" -eq 1 ]]; then
+    say "юниты Docker-задач: пропущу (--skip-units)"
+  else
+    say "юниты Docker-задач"
+    unit_plan systemd 'hs-data-api-docker*' 1
+  fi
   say "--dry-run: изменения не применяю"
   exit 0
 fi
@@ -117,6 +189,19 @@ REVISION="$(git rev-parse HEAD)"
   || die "HEAD $COMMIT не совпадает с origin/$BRANCH; сборка отменена"
 require_clean_tree
 ensure_host_services_can_read_source
+
+# Миграции идут до рестарта: новый код API может ждать новые таблицы. При
+# сбое прежний контейнер продолжает работать, код на диске уже новый.
+if [[ "$SKIP_PLATFORM" -eq 1 ]]; then
+  say "платформа пропущена (--skip-platform)"
+else
+  say "платформа: синхронизирую $PLATFORM_TARGET"
+  HS_DATA_PLATFORM_TARGET_ROOT="$PLATFORM_TARGET" scripts/deploy-platform.sh \
+    || die "deploy-platform.sh завершился ошибкой; API не перезапущен"
+  say "платформа: миграции"
+  "$PLATFORM_TARGET/scripts/apply-migrations.sh" \
+    || die "миграции не применились; API не перезапущен (старый контейнер работает)"
+fi
 
 # Тег на прежний образ, чтобы откат не зависел от повторной сборки.
 if docker image inspect hs-data-api:local >/dev/null 2>&1; then
@@ -156,6 +241,18 @@ if [[ "$API_HEALTHY" -ne 1 ]]; then
   echo "ОШИБКА: сервис не ответил за $((HEALTH_RETRIES * HEALTH_DELAY)) с, откатываюсь" >&2
   rollback_api
   exit 1
+fi
+
+# Юниты ставятся после здорового API: новые задачи вызывают команды нового
+# образа. Exporter ниже проверяется уже с новыми юнитами.
+if [[ "$SKIP_UNITS" -eq 1 ]]; then
+  say "юниты Docker-задач пропущены (--skip-units)"
+else
+  say "устанавливаю юниты Docker-задач"
+  if ! INSTALL_DIR="$INSTALL_DIR" SYSTEMD_DIR="$SYSTEMD_DIR" scripts/install-docker-systemd.sh; then
+    echo "ОШИБКА: install-docker-systemd.sh не прошёл; API уже обновлён до $COMMIT, отметка не записана" >&2
+    exit 1
+  fi
 fi
 
 say "проверяю host-side exporter расписаний"
