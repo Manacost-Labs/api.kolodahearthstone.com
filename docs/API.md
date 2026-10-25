@@ -469,6 +469,61 @@ curl -s "https://api.kolodahearthstone.com/v1/hsguru/archetypes?period=black_emp
 (минимум игр архетипа, от 1), `limit` (N самых популярных архетипов, до 200).
 Несобранный срез — `404`.
 
+```bash
+curl -s "https://api.kolodahearthstone.com/v1/hsguru/matchups?format=standard&rank=legend&period=black_empire_ban&min_games=100&limit=2"
+```
+
+```json
+{
+  "data": {
+    "format": "standard",
+    "rank": "legend",
+    "period": "black_empire_ban",
+    "coin": "any_player",
+    "min_games": 100,
+    "min_archetype_games": 1,
+    "total_games": 936588,
+    "checked_at": "2026-10-25T16:31:28.884000+00:00",
+    "changed_at": "2026-10-25T16:31:28.884000+00:00",
+    "stale": false,
+    "source_url": "https://www.hsguru.com/matchups?format=2&rank=legend&period=black_empire_ban&min_archetype_sample=1&min_matchup_sample=1",
+    "archetypes": [
+      {"archetype": "Aggro Warlock", "class": "WARLOCK", "games": 182401, "winrate": 56.5, "popularity_pct": 19.48},
+      {"archetype": "C'Thun DH", "class": "DEMONHUNTER", "games": 121862, "winrate": 51.0, "popularity_pct": 13.01}
+    ],
+    "matchups": [
+      {"archetype": "Aggro Warlock", "opponent": "Aggro Warlock", "winrate": 50.0, "games": 41382},
+      {"archetype": "Aggro Warlock", "opponent": "C'Thun DH", "winrate": 54.3, "games": 26669},
+      {"archetype": "C'Thun DH", "opponent": "Aggro Warlock", "winrate": 45.7, "games": 26669},
+      {"archetype": "C'Thun DH", "opponent": "C'Thun DH", "winrate": 50.0, "games": 18124}
+    ]
+  },
+  "meta": {
+    "source_id": "hsguru_matchups",
+    "fetched_at": "2026-10-25T16:31:28.884000+00:00",
+    "stale": false,
+    "count": 4,
+    "available": {
+      "formats": ["standard", "wild"],
+      "ranks": ["all", "top_legend", "top_5k", "legend", "diamond_to_legend", "diamond_4to1", "bronze_plat"],
+      "periods": ["past_3_hours", "past_6_hours", "past_day", "past_3_days", "past_week", "past_2_weeks", "past_30_days", "patch_36.6.3", "black_empire", "black_empire_ban"],
+      "coins": ["any_player"],
+      "min_games": [1, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000],
+      "min_archetype_games": [1, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 25000, 50000],
+      "current_period": "black_empire",
+      "default_period": "black_empire_ban"
+    }
+  }
+}
+```
+
+`/v1/hsguru/matchups/slices` отдаёт в `data[]` по строке на срез: `key`,
+`format`, `rank`, `period`, `coin`, `active`, `state` (`ok`, `no_data`,
+`failed`, `unavailable`, `pending`), `checked_at`, `changed_at`,
+`total_games`, `archetypes`, `cells`, `stale`, `last_error`; в `meta` —
+`available`, `last_run` (страницы, кредиты, `stop_reason`) и `estimate`
+(кредиты в сутки по TTL).
+
 ## HSGuru Mulligan And Class Matchups
 
 Подробное описание (что отдаёт HSGuru, срезы, очередь обновления, бюджет
