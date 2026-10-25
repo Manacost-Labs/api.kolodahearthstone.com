@@ -49,6 +49,7 @@ from .routers.balance_radar import router as balance_radar_v1_router
 from .routers.bg import canonical_router as canonical_bg_v1_router
 from .routers.bg import router as bg_v1_router
 from .routers.constructed import router as constructed_v1_router
+from .routers.hsguru_matchups import router as hsguru_matchups_v1_router
 from .routers.hsguru_meta import router as hsguru_meta_v1_router
 from .routers.hsguru_stats import router as hsguru_stats_v1_router
 from .routers.hsreplay_mulligan import router as hsreplay_mulligan_v1_router
@@ -208,6 +209,7 @@ app.include_router(arena_v1_router)
 app.include_router(system_v1_router)
 app.include_router(canonical_system_v1_router)
 app.include_router(hsguru_meta_v1_router)
+app.include_router(hsguru_matchups_v1_router)
 app.include_router(hsguru_stats_v1_router)
 app.include_router(hsreplay_mulligan_v1_router)
 app.include_router(api_tokens_router)

@@ -1,0 +1,13 @@
+[Unit]
+Description=Refresh the overdue HSGuru matchup matrices every hour
+
+[Timer]
+# HSGuru recomputes Standard matchups hourly at :51 UTC and Wild every three
+# hours at :23; :10 reads the fresh hour. Each run reads only slices whose TTL
+# expired: 3/6-hour windows hourly, wide and cumulative windows every 6-48 h.
+OnCalendar=*-*-* *:10:00 Europe/Warsaw
+AccuracySec=2min
+Persistent=false
+
+[Install]
+WantedBy=timers.target

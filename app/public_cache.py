@@ -162,6 +162,10 @@ def _db_revision(path: str) -> str | None:
 
             run = latest_run() or {}
             return str(run.get("completed_at") or run.get("started_at") or "") or None
+        if path.startswith("/v1/hsguru/matchups"):
+            from .hsguru_matchups import latest_revision as hsguru_matchups_revision
+
+            return hsguru_matchups_revision()
         if path.startswith(("/v1/hsguru/mulligan", "/v1/hsguru/class-matchups")):
             from .hsguru_mulligan import latest_revision as hsguru_stats_revision
 

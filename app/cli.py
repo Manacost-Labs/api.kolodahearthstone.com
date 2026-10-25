@@ -565,6 +565,30 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Skip this scheduled pipeline when its admin section is disabled.",
     )
     hsreplay_mulligan.add_argument("--schedule-id")
+    hsguru_matchups = sub.add_parser(
+        "refresh-hsguru-matchups",
+        help=(
+            "Read the overdue HSGuru archetype matchup matrices of every slice "
+            "(plain Scrape.do, five in parallel, FlareSolverr fallback)."
+        ),
+    )
+    hsguru_matchups.add_argument(
+        "--max-pages",
+        type=int,
+        default=None,
+        help="Page budget of this run (default HS_HSGURU_MATCHUPS_MAX_PAGES or 400).",
+    )
+    hsguru_matchups.add_argument(
+        "--estimate",
+        action="store_true",
+        help="Print the planned slices and Scrape.do credits per day; fetch nothing.",
+    )
+    hsguru_matchups.add_argument(
+        "--scheduled",
+        action="store_true",
+        help="Skip this scheduled pipeline when its admin section is disabled.",
+    )
+    hsguru_matchups.add_argument("--schedule-id")
     hsguru_analysis = sub.add_parser(
         "refresh-hsguru-archetype-analysis",
         help="Refresh Legend class matchups and card stats for active HSGuru archetypes.",
@@ -703,6 +727,7 @@ def main(argv: list[str] | None = None) -> int:
         ),
         "refresh-hsguru-mulligan": frozenset({"hsguru_mulligan"}),
         "refresh-hsreplay-mulligan": frozenset({"hsreplay_mulligan"}),
+        "refresh-hsguru-matchups": frozenset({"hsguru_matchups"}),
         "capture-bg-compositions-screenshot": frozenset(
             {"hsreplay_battlegrounds_compositions_screenshot"}
         ),
@@ -1478,6 +1503,46 @@ def main(argv: list[str] | None = None) -> int:
             return int(ExitCode.OK)
         if result.get("published"):
             # Partial: some slices failed or the premium session is rejected.
+            return int(ExitCode.DEGRADED)
+        return int(ExitCode.ERROR)
+    if args.command == "refresh-hsguru-matchups":
+        source_id = "hsguru_matchups"
+        if args.estimate:
+            from .hsguru_matchups import estimate_plan, matrix_structured, planned_periods
+
+            result = estimate_plan(planned_periods(matrix_structured()))
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+        if args.scheduled:
+            from .parser_control import is_source_scheduled_enabled
+
+            if not is_source_scheduled_enabled(source_id):
+                result = _run_pipeline_command_with_telemetry(
+                    source_id,
+                    lambda: {
+                        "ok": True,
+                        "skipped": True,
+                        "reason": "section_disabled",
+                        "source_id": source_id,
+                    },
+                    refresh_window_id=dedicated_refresh_window_id,
+                )
+                print(json.dumps(result, ensure_ascii=False, indent=2))
+                return 0
+        from .hsguru_matchups import refresh_hsguru_matchups
+
+        result = _run_pipeline_command_with_telemetry(
+            source_id,
+            lambda: asyncio.run(refresh_hsguru_matchups(max_pages=args.max_pages)),
+            diagnostic=args.max_pages is not None,
+            refresh_window_id=dedicated_refresh_window_id,
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        if args.scheduled and result.get("state") == "locked":
+            return int(ExitCode.DEGRADED)
+        if result.get("ok") and result.get("published"):
+            return int(ExitCode.OK)
+        if args.scheduled and result.get("published"):
             return int(ExitCode.DEGRADED)
         return int(ExitCode.ERROR)
     if args.command == "refresh-hsguru-archetype-analysis":

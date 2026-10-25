@@ -447,6 +447,28 @@ curl -s "https://api.kolodahearthstone.com/v1/hsguru/archetypes?period=black_emp
   | jq '.data[] | {archetype, games, deck_count, decks_period, decks_source, decks_fallback}'
 ```
 
+## HSGuru Matchup Matrices
+
+Подробно (что отдаёт HSGuru, срезы, TTL, расход Scrape.do): [HSGURU_MATCHUPS.md](HSGURU_MATCHUPS.md).
+
+Источник `hsguru_matchups` (pipeline). Таймер
+`hs-data-api-docker-refresh-hsguru-matchups.timer` каждый час в :10 читает
+просроченные срезы `/matchups` через Scrape.do без браузера (1 кредит,
+5 параллельно), FlareSolverr — запасной маршрут.
+
+| Endpoint | Что возвращает |
+| --- | --- |
+| `GET /v1/hsguru/matchups` | Матрица одного среза: `archetypes[]` (`archetype`, `class`, `games`, `winrate`, `popularity_pct`) по убыванию игр и `matchups[]` (`archetype`, `opponent`, `winrate`, `games`); `total_games`, `checked_at`, `changed_at`, `stale`, `source_url`. `meta.available` — форматы, ранги, периоды, монетка, пресеты порогов, `default_period`, `current_period` |
+| `GET /v1/hsguru/matchups/slices` | Все срезы с состоянием, временем чтения, числом архетипов и ячеек; `meta.last_run` и `meta.estimate` (кредиты в сутки) |
+
+Параметры: `format` (`standard`, `wild`), `rank` (`all`, `top_legend`,
+`top_5k`, `legend`, `diamond_to_legend`, `diamond_4to1`, `bronze_plat`),
+`period` (из `meta.available.periods`; по умолчанию окно банов), `coin`
+(только `any_player`: HSGuru не публикует матчапы по монетке, другие значения
+— `422`), `min_games` (минимум игр ячейки, от 1), `min_archetype_games`
+(минимум игр архетипа, от 1), `limit` (N самых популярных архетипов, до 200).
+Несобранный срез — `404`.
+
 ## HSGuru Mulligan And Class Matchups
 
 Подробное описание (что отдаёт HSGuru, срезы, очередь обновления, бюджет
@@ -1096,6 +1118,7 @@ Query parameters:
 - `hsguru_matchups_legend`
 - `hsguru_matchups_wild_legend`
 - `hsguru_matchups_diamond_4to1`
+- `hsguru_matchups`
 - `hsguru_archetype_analysis`
 - `hsguru_mulligan`
 

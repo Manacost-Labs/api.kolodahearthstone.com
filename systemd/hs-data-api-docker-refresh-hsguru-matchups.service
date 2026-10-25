@@ -1,0 +1,19 @@
+[Unit]
+Description=Refresh HSGuru archetype matchup matrices of every slice in Docker
+Requires=hs-data-api-docker.service
+After=hs-data-api-docker.service network-online.target
+
+[Service]
+Type=oneshot
+SuccessExitStatus=10
+WorkingDirectory=/srv/hs-data-api
+# `docker compose run` outlives a stopped or timed-out unit; the container is
+# named after the unit so stale ones are removed before start and after stop.
+ExecStartPre=-/usr/bin/docker rm -f %N
+ExecStart=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm --name %N api python -m app.cli refresh-hsguru-matchups --scheduled --schedule-id refresh-hsguru-matchups
+ExecStopPost=-/usr/bin/docker stop --time 20 %N
+ExecStopPost=-/usr/bin/docker rm -f %N
+# The run stops taking pages after HS_HSGURU_MATCHUPS_DEADLINE_SECONDS
+# (30 min); in-flight Scrape.do pages finish within their own timeouts.
+TimeoutStartSec=45min
+TimeoutStopSec=1min

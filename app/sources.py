@@ -509,6 +509,23 @@ SOURCES: tuple[Source, ...] = (
         kind="pipeline",
     ),
     Source(
+        id="hsguru_matchups",
+        url="https://www.hsguru.com/matchups",
+        site="hsguru",
+        category="matchups",
+        description=(
+            "HSGuru archetype-versus-archetype matchup matrices for every public slice: "
+            "Standard and Wild, seven ranks and every advertised period including the "
+            "Bans window, read with the lowest sample filters and filtered on request. "
+            "Short windows are re-read hourly, wide ones every 6-48 hours, through "
+            "hs-data-api-docker-refresh-hsguru-matchups.timer (plain Scrape.do, five "
+            "pages in parallel, FlareSolverr fallback) into SQLite; stale_hours = 1h "
+            "cadence + 30 min run + slack."
+        ),
+        stale_hours=6,
+        kind="pipeline",
+    ),
+    Source(
         id="hsreplay_battlegrounds_compositions_screenshot",
         url="https://hsreplay.net/battlegrounds/compositions/",
         site="hsreplay",

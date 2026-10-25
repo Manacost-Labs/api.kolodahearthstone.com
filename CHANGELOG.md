@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- HSGuru matchup matrices for every public slice: new pipeline
+  `hsguru_matchups` reads HSGuru `/matchups` for Standard and Wild, seven
+  ranks and every advertised period (Bans window, expansion, patch, rolling
+  windows) with HSGuru's lowest sample filters (1/1) and keeps winrate and
+  games of every cell, so any threshold is applied on request. One API with
+  slice parameters, `GET /v1/hsguru/matchups` (+ `/slices`) and GraphQL
+  `hsguruMatchups`, instead of one source per combination. Short windows are
+  re-read hourly, wide ones every 6-48 hours (plain Scrape.do, five pages in
+  parallel, ~800 credits a day). HSGuru publishes no coin split for matchups,
+  so only `any_player` exists. See docs/HSGURU_MATCHUPS.md.
 - HSGuru mulligan no longer grows to gigabytes during a run (5.2 GiB RSS in
   production). The parse cache keyed by page HTML kept about 130 pages
   (~230 MB) alive; the parsed result now travels with the page from
