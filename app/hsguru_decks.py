@@ -64,7 +64,10 @@ _REPLAYS_SCRAPE_DO_STEPS: tuple[tuple[tuple[bool, bool], int | None], ...] = (
     ((True, False), None),
 )
 # A page that every provider failed is asked again only after these pauses.
+# Unbilled failures (Scrape.do 502) are retried freely; billed responses that
+# fail validation stop the page after one paid retry.
 _PAGE_RETRY_DELAYS_SECONDS = (30.0, 120.0)
+_MAX_PAID_ATTEMPTS_PER_PAGE = 2
 # Bumped whenever the collection rules change, so catalogs written under the
 # old rules are re-read in full instead of being extended incrementally.
 _CATALOG_COLLECTION_VERSION = 2
@@ -445,6 +448,16 @@ def _slots(name: str, size: int) -> asyncio.Semaphore:
     return current[1]
 
 
+class _CatalogPageError(RuntimeError):
+    def __init__(self, message: str, *, paid_attempts: int) -> None:
+        super().__init__(message)
+        self.paid_attempts = paid_attempts
+
+
+def _paid_attempts(attempts: list[dict[str, Any]]) -> int:
+    return sum(1 for attempt in attempts if attempt.get("request_credits"))
+
+
 def reset_hsguru_catalog_provider_state() -> None:
     """Close the short-lived provider circuit at the start of a scheduled run."""
     global _scrape_do_failures, _scrape_do_open_until
@@ -481,8 +494,13 @@ async def _fetch_catalog_page(
     scrape_do_steps: tuple[
         tuple[tuple[bool, bool], int | None], ...
     ] = _DECKS_SCRAPE_DO_STEPS,
+    paid_attempts: int = 0,
 ) -> _CatalogPage:
-    """Scrape.do ``scrape_do_steps`` in order, with the local solver as fallback."""
+    """Scrape.do ``scrape_do_steps`` in order, with the local solver as fallback.
+
+    ``paid_attempts`` billed requests were already spent on this page; no step
+    starts once ``_MAX_PAID_ATTEMPTS_PER_PAGE`` is reached.
+    """
     errors: list[str] = []
     attempts: list[dict[str, Any]] = []
 
@@ -535,6 +553,9 @@ async def _fetch_catalog_page(
             _merge_failure_attempt(primary_attempts, event)
 
         for profile, step_timeout_ms in scrape_do_steps:
+            if paid_attempts >= _MAX_PAID_ATTEMPTS_PER_PAGE:
+                errors.append("scrape_do:paid_attempts_exhausted")
+                break
             primary_attempts.clear()
             try:
                 primary = await scrape_source_with_options(
@@ -557,9 +578,9 @@ async def _fetch_catalog_page(
                     attempts,
                 )
             except Exception as exc:  # noqa: BLE001 - isolated provider boundary
-                attempts.extend(
-                    list(primary_attempts) or [_failed_attempt("scrape_do", exc)]
-                )
+                failed = list(primary_attempts) or [_failed_attempt("scrape_do", exc)]
+                attempts.extend(failed)
+                paid_attempts += _paid_attempts(failed)
                 errors.append(
                     f"scrape_do{'+render' if profile[0] else ''}:{type(exc).__name__}"
                 )
@@ -569,7 +590,10 @@ async def _fetch_catalog_page(
         local_page = await fetch_from_local_solver()
         if local_page is not None:
             return local_page
-    raise RuntimeError("HSGuru deck catalog fetch failed: " + ", ".join(errors))
+    raise _CatalogPageError(
+        "HSGuru deck catalog fetch failed: " + ", ".join(errors),
+        paid_attempts=paid_attempts,
+    )
 
 
 async def _fetch_catalog_page_with_backoff(
@@ -578,12 +602,21 @@ async def _fetch_catalog_page_with_backoff(
 ) -> _CatalogPage:
     """Fetch within the shared page slots; a failed page waits, then retries.
 
-    The slot is released during the pause, so other pages keep going.
+    The slot is released during the pause, so other pages keep going. A page
+    that already spent ``_MAX_PAID_ATTEMPTS_PER_PAGE`` billed requests is not
+    asked again.
     """
+    paid_attempts = 0
     for delay in (*_PAGE_RETRY_DELAYS_SECONDS, None):
         try:
             async with _slots("catalog", hsguru_deck_catalog_concurrency()):
-                return await _fetch_catalog_page(source, **options)
+                return await _fetch_catalog_page(
+                    source, paid_attempts=paid_attempts, **options
+                )
+        except _CatalogPageError as exc:
+            paid_attempts = exc.paid_attempts
+            if delay is None or paid_attempts >= _MAX_PAID_ATTEMPTS_PER_PAGE:
+                raise
         except Exception:
             if delay is None:
                 raise
