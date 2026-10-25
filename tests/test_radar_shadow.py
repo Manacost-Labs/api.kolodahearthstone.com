@@ -105,7 +105,5 @@ def test_atomic_sync_integration():
         < sync.index("$mergeOutput =")
         < sync.index("$verifyOutput =")
     )
-    assert (
-        "013_hsguru_deck_radar.sql"
-        in (ROOT / "platform/scripts/apply-migrations.sh").read_text()
-    )
+    # apply-migrations.sh applies every numbered file in platform/sql.
+    assert (ROOT / "platform/sql/013_hsguru_deck_radar.sql").is_file()

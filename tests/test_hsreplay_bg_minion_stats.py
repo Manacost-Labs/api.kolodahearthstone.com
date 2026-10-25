@@ -420,12 +420,12 @@ def test_postgres_migration_mirrors_sqlite_columns_and_types() -> None:
 def test_analytics_delta_contract_lists_every_table() -> None:
     stage = (ROOT / "platform/scripts/stage-analytics.py").read_text()
     merge = (ROOT / "platform/scripts/merge-analytics.sql").read_text()
-    migrations = (ROOT / "platform/scripts/apply-migrations.sh").read_text()
     for table in store.TABLES:
         assert f"'{table}'" in stage and f"'{table}'" in merge
         # Retention deletes detail rows, so the delta must propagate deletions.
         assert f"'{table}'" not in stage.split("APPEND_ONLY")[1].split(")")[0]
-    assert "016_bg_minion_stats.sql" in migrations
+    # apply-migrations.sh applies every numbered file in platform/sql.
+    assert (ROOT / "platform/sql/016_bg_minion_stats.sql").is_file()
 
 
 def test_missing_as_of_never_freezes_a_slice(isolated) -> None:

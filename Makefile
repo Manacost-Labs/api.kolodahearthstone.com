@@ -1,7 +1,7 @@
 PYTHON := .venv/bin/python
 AI_QUALITY_BIN := /home/debian/server/tools/ai-quality/bin
 
-.PHONY: setup check test panel-check panel-next-check platform-check provider-check docs-check sdk-check lint-report security benchmark-smoke
+.PHONY: setup check test panel-check panel-next-check platform-check platform-migrations-check provider-check docs-check sdk-check lint-report security benchmark-smoke
 
 API_BENCHMARK_BASE_URL ?= http://127.0.0.1:8000
 
@@ -46,6 +46,10 @@ platform-check:
 	python3 platform/tests/api-uploads-offload.test.py
 	@find platform/scripts -type f -name '*.php' -print0 | xargs -0 -n1 php -l >/dev/null
 	@find platform/scripts -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n
+
+# Needs docker: applies every migration to a throwaway PostgreSQL twice.
+platform-migrations-check:
+	platform/tests/migrations-idempotency.sh
 
 provider-check:
 	@test -x $(PYTHON) || { printf 'Run make setup first.\n' >&2; exit 1; }
