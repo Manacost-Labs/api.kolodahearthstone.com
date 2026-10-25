@@ -28,6 +28,9 @@ from .sources import Source
 from .storage import dataset_path, read_json, write_json
 
 HSGURU_DECKS_URL = "https://www.hsguru.com/decks"
+HSGURU_REPLAYS_URL = "https://www.hsguru.com/replays"
+_DECKS_PAGE_MARKER = "deck_stats_viewport"
+_REPLAYS_PAGE_MARKER = 'id="replays_table"'
 _CACHE_TTL_SECONDS = 6 * 60 * 60
 _EMPTY_CACHE_TTL_SECONDS = 10 * 60
 _CATALOG_MAX_AGE_SECONDS = 24 * 60 * 60
@@ -58,6 +61,9 @@ CATALOG_PERIODS = ("black_empire_ban",)
 _FALLBACK_DECK_WINDOWS: tuple[tuple[str, int], ...] = (
     ("past_30_days", DECK_MIN_GAMES),
 )
+# Archetypes still without a build after every window get real deck codes from
+# HSGuru's public replays of that archetype (no sample statistics).
+_REPLAY_PAGE_ROWS = 20
 _FALLBACK_REUSE_SECONDS = 20 * 60 * 60
 _ALLOWED_HSGURU_HOSTS = frozenset({"hsguru.com", "www.hsguru.com"})
 _HSGURU_SEMANTIC_QUERY_KEYS = frozenset(
@@ -225,6 +231,7 @@ def _catalog_page(
     result: Any,
     *,
     expected_url: str | None = None,
+    marker: str = _DECKS_PAGE_MARKER,
 ) -> _CatalogPage:
     html_text = str(getattr(result, "html", "") or "")
     final_url = str(getattr(result, "final_url", "") or "")
@@ -270,11 +277,7 @@ def _catalog_page(
             == parsed_expected_url.path.rstrip("/")
             and actual_query == required_query
         )
-    if (
-        not 200 <= status <= 299
-        or not final_url_ok
-        or "deck_stats_viewport" not in html_text
-    ):
+    if not 200 <= status <= 299 or not final_url_ok or marker not in html_text:
         raise RuntimeError("HSGuru deck catalog page is incomplete")
     return _CatalogPage(
         html=html_text,
@@ -287,9 +290,10 @@ def _catalog_result_is_valid(
     result: Any,
     *,
     expected_url: str | None = None,
+    marker: str = _DECKS_PAGE_MARKER,
 ) -> bool:
     try:
-        _catalog_page(result, expected_url=expected_url)
+        _catalog_page(result, expected_url=expected_url, marker=marker)
     except (RuntimeError, TypeError, ValueError):
         return False
     return True
@@ -454,13 +458,14 @@ async def _fetch_catalog_page(
     wait_ms: int,
     timeout_ms: int,
     prefer_local_solver: bool = False,
+    marker: str = _DECKS_PAGE_MARKER,
 ) -> _CatalogPage:
     """Prefer subscribed Scrape.do, then local solver, then remote fallbacks."""
     errors: list[str] = []
     attempts: list[dict[str, Any]] = []
 
     def catalog_result_is_valid(result: Any) -> bool:
-        return _catalog_result_is_valid(result, expected_url=source.url)
+        return _catalog_result_is_valid(result, expected_url=source.url, marker=marker)
 
     async def fetch_from_local_solver() -> _CatalogPage | None:
         solver_result: Any | None = None
@@ -470,7 +475,7 @@ async def _fetch_catalog_page(
                     source,
                     wait_ms=flaresolverr_hsguru_decks_wait_ms(),
                 )
-            page = _catalog_page(solver_result, expected_url=source.url)
+            page = _catalog_page(solver_result, expected_url=source.url, marker=marker)
             attempts.append(_provider_attempt(solver_result, "accepted"))
             return _page_with_acquisition(page, attempts)
         except Exception as exc:  # noqa: BLE001 - isolated provider boundary
@@ -523,7 +528,7 @@ async def _fetch_catalog_page(
             attempts.extend(primary_attempts)
             _record_scrape_do_success()
             return _page_with_acquisition(
-                _catalog_page(primary, expected_url=source.url),
+                _catalog_page(primary, expected_url=source.url, marker=marker),
                 attempts,
             )
         except Exception as exc:  # noqa: BLE001 - isolated provider boundary
@@ -561,7 +566,7 @@ async def _fetch_catalog_page(
         )
         attempts.extend(remote_attempts)
         return _page_with_acquisition(
-            _catalog_page(fallback, expected_url=source.url),
+            _catalog_page(fallback, expected_url=source.url, marker=marker),
             attempts,
         )
     except Exception as exc:  # noqa: BLE001 - isolated provider boundary
@@ -885,6 +890,7 @@ def _meta_archetypes(
     format_name: str,
     *,
     period: str | None = None,
+    min_games: int = DECK_MIN_GAMES,
 ) -> list[str]:
     target_period = period or _current_deck_period()
     try:
@@ -912,7 +918,7 @@ def _meta_archetypes(
                 continue
             # The catalog lists archetypes down to 10 games, but no build of
             # an archetype below HSGuru's 50-game deck floor can be listed.
-            if int(row.get("games") or 0) < DECK_MIN_GAMES:
+            if int(row.get("games") or 0) < min_games:
                 continue
             name = str(row.get("archetype") or "").strip()
             if name:
@@ -949,6 +955,7 @@ def _all_rank_catalog_archetypes(
     *,
     period: str | None = None,
     zero_sample_archetypes: tuple[str, ...] | list[str] = (),
+    min_games: int = DECK_MIN_GAMES,
 ) -> list[str]:
     rows = (
         catalog_rows if catalog_rows is not None else _catalog_rows(format_name, "all")
@@ -961,7 +968,7 @@ def _all_rank_catalog_archetypes(
     catalog_keys.update(_key(name) for name in zero_sample_archetypes)
     return [
         name
-        for name in _meta_archetypes(format_name, period=period)
+        for name in _meta_archetypes(format_name, period=period, min_games=min_games)
         if _key(name) not in catalog_keys
     ]
 
@@ -1103,6 +1110,7 @@ async def _fetch_catalog_chunk(
             # fallback (or goes first with HS_HSGURU_DECK_CATALOG_LOCAL_FIRST).
             prefer_local_solver=hsguru_deck_catalog_local_first(),
         )
+
     def parse(candidate: _CatalogPage) -> list[dict[str, Any]]:
         return parse_hsguru_decks_html(
             candidate.html,
@@ -1349,9 +1357,7 @@ async def _refresh_all_rank_catalog(
         for row in merged
         if isinstance(row, dict)
     }
-    zero_sample_archetypes = [
-        name for name in targets if _key(name) not in merged_keys
-    ]
+    zero_sample_archetypes = [name for name in targets if _key(name) not in merged_keys]
     _write_catalog(
         format_name,
         "all",
@@ -1371,6 +1377,135 @@ async def _refresh_all_rank_catalog(
         acquired_rows=len(batch_rows),
     )
     return merged
+
+
+def _fallback_windows(period: str) -> tuple[tuple[str, int], ...]:
+    """Wider windows, narrowest first, whose builds stand in for ``period``.
+
+    A secondary window (Bans) first borrows from the whole current release,
+    then from the rolling month; the current window only from the month.
+    """
+    release = _current_deck_period() if period in CATALOG_PERIODS else ""
+    windows = [(release, DECK_MIN_GAMES)] if release else []
+    windows.extend(_FALLBACK_DECK_WINDOWS)
+    return tuple(
+        dict.fromkeys(window for window in windows if window[0] and window[0] != period)
+    )
+
+
+def parse_hsguru_replays_html(
+    page_html: str,
+    *,
+    archetype: str,
+    format_name: str,
+) -> list[dict[str, Any]]:
+    """Distinct deck codes of an archetype's public replays, newest first."""
+    soup = BeautifulSoup(page_html, "lxml")
+    table = soup.find(id="replays_table") or soup.find("table")
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for tr in table.select("tbody tr") if table else []:
+        cell = tr.find("td")
+        button = cell.find(attrs={"data-clipboard-text": True}) if cell else None
+        text = str(button.get("data-clipboard-text") or "") if button else ""
+        deck_code = first_deck_code_from_text(text)
+        if not deck_code or deck_code in seen:
+            continue
+        seen.add(deck_code)
+        info = cell.find(class_="decklist-info")
+        class_token = next(
+            (
+                token
+                for token in (info.get("class") or [] if info else [])
+                if token in _CLASS_NAMES
+            ),
+            "",
+        )
+        url_match = re.search(r"https://www\.hsguru\.com/deck/\d+", text)
+        cells = tr.find_all("td")
+        rows.append(
+            {
+                "source_id": "hsguru_replays",
+                "title": archetype,
+                "archetype": archetype,
+                "class": _CLASS_NAMES.get(class_token, "Neutral"),
+                "format": format_name.capitalize(),
+                "deck_code": deck_code,
+                "win_rate": None,
+                "score": None,
+                "games": None,
+                "url": url_match.group(0) if url_match else "",
+                "played": cells[-1].get_text(" ", strip=True) if cells else "",
+                "sample_source": "replays",
+            }
+        )
+    return rows
+
+
+async def _fetch_replay_decks(
+    format_name: str,
+    archetype: str,
+    *,
+    period: str,
+    windows: tuple[str, ...],
+) -> tuple[list[dict[str, Any]], int, list[str], list[dict[str, Any]], str | None]:
+    """Deck codes from the first window whose replays list the archetype."""
+    credits = 0
+    backends: list[str] = []
+    attempts: list[dict[str, Any]] = []
+    for window in windows:
+        params: list[tuple[str, object]] = [
+            ("format", 2 if format_name == "standard" else 1),
+            ("period", window),
+            ("player_deck_archetype[]", archetype),
+        ]
+        source = Source(
+            id=_catalog_source_id(format_name, "fallback", period),
+            url=str(httpx.URL(HSGURU_REPLAYS_URL, params=params)),
+            site="hsguru",
+            category="deck_replays",
+        )
+        try:
+            async with _slots("catalog", hsguru_deck_catalog_concurrency()):
+                page = await _fetch_catalog_page(
+                    source,
+                    max_age_ms=_CACHE_TTL_SECONDS * 1_000,
+                    wait_ms=3_000,
+                    timeout_ms=_CATALOG_PAGE_TIMEOUT_MS,
+                    prefer_local_solver=hsguru_deck_catalog_local_first(),
+                    marker=_REPLAYS_PAGE_MARKER,
+                )
+        except Exception as exc:  # noqa: BLE001 - one archetype must not stop others
+            attempts.append({**_failed_attempt("hsguru", exc), "window": window})
+            return [], credits, backends, attempts, type(exc).__name__
+        credits += page.request_credits
+        backends.append(page.backend)
+        attempts.extend(
+            {**attempt, "window": window, "page": "replays"}
+            for attempt in page.acquisition
+        )
+        rows = parse_hsguru_replays_html(
+            page.html, archetype=archetype, format_name=format_name
+        )[:_REPLAY_PAGE_ROWS]
+        if rows:
+            fetched_at = datetime.now(UTC).isoformat()
+            return (
+                [
+                    {
+                        **row,
+                        "updated_at": fetched_at,
+                        "sample_period": window,
+                        "sample_rank": "all",
+                        "sample_fallback_for": period,
+                    }
+                    for row in rows
+                ],
+                credits,
+                backends,
+                attempts,
+                None,
+            )
+    return [], credits, backends, attempts, None
 
 
 def _row_age_seconds(row: dict[str, Any]) -> float | None:
@@ -1446,21 +1581,24 @@ async def refresh_hsguru_fallback_deck_catalog(
     *,
     period: str | None = None,
 ) -> dict[str, Any]:
-    """Give archetypes without a current-window build one from a wider window.
+    """Give every archetype without a ``period`` build one from elsewhere.
 
     Runs after the all-rank refresh and only for archetypes it left without
-    rows: one exact page per archetype and window, local solver first. Builds
-    fetched within ``_FALLBACK_REUSE_SECONDS`` are reused instead of paid for
-    again. Once the current window gains a build, the all-rank catalog wins.
+    rows. Archetypes with a 50-game sample get one exact page per wider window
+    (``_fallback_windows``); every archetype still without a build, down to the
+    catalog's 10-game floor, then gets deck codes from its public replays in
+    ``period`` and those windows. Rows keep the window and source they came
+    from. Builds fetched within ``_FALLBACK_REUSE_SECONDS`` are reused instead
+    of paid for again. Once ``period`` gains a build, the all-rank catalog wins.
     """
     if format_name not in {"standard", "wild"}:
         raise ValueError("Unsupported HSGuru catalog format")
     period = period or _current_deck_period()
-    windows = tuple(window for window in _FALLBACK_DECK_WINDOWS if window[0] != period)
-    targets = _all_rank_catalog_archetypes(
-        format_name,
-        _catalog_rows(format_name, "all", expected_period=period),
-        period=period,
+    windows = _fallback_windows(period)
+    all_rows = _catalog_rows(format_name, "all", expected_period=period)
+    targets = _all_rank_catalog_archetypes(format_name, all_rows, period=period)
+    replay_targets = _all_rank_catalog_archetypes(
+        format_name, all_rows, period=period, min_games=1
     )
     summary: dict[str, Any] = {
         "state": "ok",
@@ -1474,10 +1612,10 @@ async def refresh_hsguru_fallback_deck_catalog(
         "failed_archetypes": [],
         "credits_used": 0,
     }
-    if not targets or not windows:
+    if not replay_targets:
         return summary
 
-    target_keys = {_key(name) for name in targets}
+    target_keys = {_key(name) for name in replay_targets}
     previous = _catalog_snapshot(format_name, "fallback", expected_period=period)
     reusable = (
         previous.rows
@@ -1494,48 +1632,72 @@ async def refresh_hsguru_fallback_deck_catalog(
         and 0 <= age <= _FALLBACK_REUSE_SECONDS
     ]
     reused_keys = {_key(str(row.get("archetype") or "")) for row in reused_rows}
-    pending = [name for name in targets if _key(name) not in reused_keys]
+    pending = (
+        [name for name in targets if _key(name) not in reused_keys] if windows else []
+    )
 
     rows: list[dict[str, Any]] = []
     credits = 0
     backends: list[str] = []
     attempts: list[dict[str, Any]] = []
     failed: list[str] = []
-    results = await asyncio.gather(
-        *(
-            _fetch_fallback_decks(
-                format_name,
-                archetype,
-                batch_number=index + 1,
-                period=period,
-                windows=windows,
+
+    def collect(names: list[str], results: list[Any]) -> None:
+        nonlocal credits
+        for archetype, result in zip(names, results, strict=True):
+            item_rows, item_credits, item_backends, item_attempts, error = result
+            rows.extend(item_rows)
+            credits += item_credits
+            backends.extend(item_backends)
+            attempts.extend(item_attempts)
+            if error is not None:
+                failed.append(archetype)
+
+    collect(
+        pending,
+        await asyncio.gather(
+            *(
+                _fetch_fallback_decks(
+                    format_name,
+                    archetype,
+                    batch_number=index + 1,
+                    period=period,
+                    windows=windows,
+                )
+                for index, archetype in enumerate(pending)
             )
-            for index, archetype in enumerate(pending)
-        )
+        ),
     )
-    for archetype, result in zip(pending, results, strict=True):
-        item_rows, item_credits, item_backends, item_attempts, error = result
-        rows.extend(item_rows)
-        credits += item_credits
-        backends.extend(item_backends)
-        attempts.extend(item_attempts)
-        if error is not None:
-            failed.append(archetype)
+    covered = reused_keys | {_key(str(row.get("archetype") or "")) for row in rows}
+    failed_keys = {_key(name) for name in failed}
+    replay_pending = [
+        name
+        for name in replay_targets
+        if (key := _key(name)) not in covered and key not in failed_keys
+    ]
+    replay_windows = (period, *(window for window, _min_games in windows))
+    collect(
+        replay_pending,
+        await asyncio.gather(
+            *(
+                _fetch_replay_decks(
+                    format_name,
+                    archetype,
+                    period=period,
+                    windows=replay_windows,
+                )
+                for archetype in replay_pending
+            )
+        ),
+    )
 
     merged = _merge_catalog_rows(reused_rows, rows)
     covered_keys = {_key(str(row.get("archetype") or "")) for row in merged}
     failed_keys = {_key(name) for name in failed}
-    unchecked_keys = (
-        {_key(name) for name in targets}
-        - covered_keys
-        - {_key(name) for name in pending}
-    )
     zero_sample = [
         name
-        for name in targets
-        if (key := _key(name)) not in covered_keys
-        and key not in failed_keys
-        and key not in unchecked_keys
+        for name in replay_targets
+        if (key := _key(name)) not in covered_keys and key not in failed_keys
     ]
     source_id = _catalog_source_id(format_name, "fallback", period)
     provider_backends = list(dict.fromkeys(backends))
@@ -1565,6 +1727,7 @@ async def refresh_hsguru_fallback_deck_catalog(
                     {"period": window, "min_games": min_games}
                     for window, min_games in windows
                 ],
+                "replay_windows": list(replay_windows),
             },
             "acquisition": {
                 "period": period,
@@ -1583,8 +1746,11 @@ async def refresh_hsguru_fallback_deck_catalog(
     _catalog_memory.clear()
     summary.update(
         state="ok" if not failed else "partial",
+        targets=len(replay_targets),
         reused=len(reused_keys),
-        fetched=len(pending),
+        fetched=len(pending) + len(replay_pending),
+        replay_fetched=len(replay_pending),
+        replay_decks=sum(1 for row in merged if row.get("sample_source") == "replays"),
         with_decks=len(covered_keys),
         decks=len(merged),
         zero_sample_archetypes=zero_sample,

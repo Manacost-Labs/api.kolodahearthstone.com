@@ -132,9 +132,10 @@ async def _refresh_all_deck_catalogs_unlocked(
     advance without rerunning already successful format/rank combinations.
     Other failures are reported without preventing independent combinations
     from becoming fresh. Archetypes that the all-rank catalog leaves without
-    a build then get one from a wider HSGuru window before the join. Secondary
-    windows (the Bans catalog) get all-rank builds of their own afterwards;
-    they get no wider-window fallback, whose builds may predate the bans.
+    a build then get one from a wider HSGuru window or from their replays
+    before the join. Secondary windows (the Bans catalog) get all-rank builds
+    of their own afterwards and the same fallback, starting with the whole
+    current release; every borrowed build is labelled with its window.
     """
     reset_hsguru_catalog_provider_state()
     run_period = current_hsguru_deck_period()
@@ -232,8 +233,20 @@ async def _refresh_all_deck_catalogs_unlocked(
         for format_name in ("standard", "wild"):
             key = f"{format_name}_all_{period}"
             rows = await refresh_one(key, format_name, "all", period)
-            if rows is not None:
-                datasets[key] = {"decks": len(rows), "state": "ok"}
+            if rows is None:
+                continue
+            datasets[key] = {"decks": len(rows), "state": "ok"}
+            fallback_key = f"{format_name}_fallback_{period}"
+            try:
+                fallbacks[fallback_key] = await refresh_fallback(
+                    format_name, period=period
+                )
+            except Exception as exc:  # noqa: BLE001 - other catalogs still join
+                errors[fallback_key] = _error_summary(exc)
+                continue
+            failed = fallbacks[fallback_key].get("failed_archetypes") or []
+            if failed:
+                errors[fallback_key] = f"{len(failed)} archetypes could not be fetched"
 
     archetype_join: dict[str, Any] | None = None
     current_period = current_hsguru_deck_period()
