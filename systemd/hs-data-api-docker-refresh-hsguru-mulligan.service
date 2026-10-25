@@ -8,5 +8,7 @@ Type=oneshot
 SuccessExitStatus=10
 WorkingDirectory=/srv/hs-data-api
 ExecStart=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm api python -m app.cli refresh-hsguru-mulligan --scheduled --schedule-id refresh-hsguru-mulligan
-TimeoutStartSec=75min
+# The run stops taking pages after HS_HSGURU_MULLIGAN_DEADLINE_SECONDS
+# (150 min); in-flight Scrape.do pages finish within their own timeouts.
+TimeoutStartSec=175min
 TimeoutStopSec=1min

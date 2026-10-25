@@ -281,14 +281,14 @@ def test_due_rules_ttl_growth_and_retry_backoff() -> None:
     cumulative = {
         "tier": 1,
         "period": "black_empire",
-        "last_success_at": (NOW - timedelta(hours=25)).isoformat(),
+        "last_success_at": (NOW - timedelta(hours=49)).isoformat(),
         "success_expected_games": 1000,
-        "expected_games": 1299,
+        "expected_games": 1499,
     }
     assert mulligan.due_score(cumulative, NOW) is None
-    assert mulligan.due_score({**cumulative, "expected_games": 1300}, NOW) == 1.0
-    # Growth alone never re-reads a page more than once a day.
-    young = {**cumulative, "last_success_at": (NOW - timedelta(hours=23)).isoformat()}
+    assert mulligan.due_score({**cumulative, "expected_games": 1500}, NOW) == 1.0
+    # Growth alone never re-reads a page more often than every two days.
+    young = {**cumulative, "last_success_at": (NOW - timedelta(hours=47)).isoformat()}
     assert mulligan.due_score({**young, "expected_games": 5000}, NOW) is None
     retry = {**base, "next_attempt_after": (NOW + timedelta(minutes=5)).isoformat()}
     assert mulligan.due_score(retry, NOW) is None
@@ -325,8 +325,9 @@ def test_default_plan_estimate_fits_the_daily_page_capacity() -> None:
     )
     estimate = mulligan.estimate_plan(matrix, [], mulligan.Settings())
     assert estimate["targets"] == 6 * 3 * 10 + 6 * 2 * 10
-    # Eight three-hourly runs of 200 pages are the scheduled capacity.
-    assert estimate["pages_per_day_by_ttl"] < 8 * mulligan.Settings().max_pages
+    # One default run can read the whole plan, let alone a day of TTL re-reads.
+    assert estimate["targets"] <= mulligan.Settings().max_pages
+    assert estimate["pages_per_day_by_ttl"] < estimate["targets"]
 
 
 # --- acquisition -----------------------------------------------------------------
@@ -336,63 +337,170 @@ def _page(html: str, status: int = 200) -> SimpleNamespace:
     return SimpleNamespace(html=html, http_status=status)
 
 
-def test_acquirer_prefers_the_free_route_and_caps_scrape_do(monkeypatch) -> None:
-    good = card_stats_html([FORGE], games=10)
-    paid_calls: list[str] = []
+GOOD = card_stats_html([FORGE], games=10)
 
+
+def _routes(free_html: str | Exception, paid_html: str | Exception, calls: list[str]):
     async def free(source):
-        return _page("<html>Just a moment...</html>")
+        calls.append("free")
+        if isinstance(free_html, Exception):
+            raise free_html
+        return _page(free_html)
 
     async def paid(source, **options):
-        paid_calls.append(source.url)
+        calls.append("paid")
         assert options["skip_providers"] == {
             "decodo",
             "firecrawl",
             "brightdata",
             "scrapfly",
         }
-        return SimpleNamespace(html=good, request_credits=5, backend="scrape_do")
+        if isinstance(paid_html, Exception):
+            raise paid_html
+        return SimpleNamespace(html=paid_html, request_credits=5, backend="scrape_do")
 
+    return free, paid
+
+
+def _fetch(acquirer: mulligan.Acquirer, index: int = 1):
+    url = f"https://www.hsguru.com/card-stats?a={index}"
+    return asyncio.run(acquirer.fetch(url, "cards"))
+
+
+def test_scrape_do_is_the_default_route_and_flaresolverr_the_fallback() -> None:
+    calls: list[str] = []
+    free, paid = _routes(GOOD, GOOD, calls)
     acquirer = mulligan.Acquirer(
-        scrape_do_credit_cap=29, fetch_free=free, fetch_paid=paid
+        scrape_do_credit_cap=None, fetch_free=free, fetch_paid=paid
     )
-    html, meta = asyncio.run(
-        acquirer.fetch("https://www.hsguru.com/card-stats?a=1", "cards")
+    html, meta = _fetch(acquirer)
+    assert html == GOOD and meta == {"backend": "scrape_do", "request_credits": 5}
+    assert calls == ["paid"] and acquirer.pages_free == 0
+
+    calls.clear()
+    free, paid = _routes(GOOD, RuntimeError("scrape.do 502"), calls)
+    fallback = mulligan.Acquirer(
+        scrape_do_credit_cap=None, fetch_free=free, fetch_paid=paid
     )
-    assert html == good and meta == {"backend": "scrape_do", "request_credits": 5}
+    _, meta = _fetch(fallback)
+    assert calls == ["paid", "free"] and meta["backend"] == "flaresolverr"
+    assert fallback.paid_failures_in_row == 1 and fallback.pages_free == 1
+
+
+def test_credit_cap_reserves_the_worst_page_price() -> None:
+    calls: list[str] = []
+    free, paid = _routes("<html>Just a moment...</html>", GOOD, calls)
+    acquirer = mulligan.Acquirer(
+        scrape_do_credit_cap=29,
+        routes=mulligan.TRANSPORTS["scrape_do_only"],
+        fetch_free=free,
+        fetch_paid=paid,
+    )
+    _fetch(acquirer)
     # 0 + 25 reserved fitted the cap of 29; 5 spent + 25 reserved does not.
     assert acquirer.paid_allowed() is False
     with pytest.raises(RuntimeError, match="paid=budget"):
-        asyncio.run(acquirer.fetch("https://www.hsguru.com/card-stats?a=2", "cards"))
-    assert paid_calls == ["https://www.hsguru.com/card-stats?a=1"]
+        _fetch(acquirer, 2)
+    assert calls == ["paid"] and acquirer.stop_reason == "scrape_do_budget_exhausted"
+    assert mulligan.Acquirer(scrape_do_credit_cap=None).paid_allowed() is True
 
-    async def free_ok(source):
-        return _page(good)
 
-    free_route = mulligan.Acquirer(
-        scrape_do_credit_cap=0, fetch_free=free_ok, fetch_paid=paid
+def test_circuits_open_per_route_and_stop_the_run_when_both_are_open() -> None:
+    calls: list[str] = []
+    free, paid = _routes(
+        RuntimeError("solver down"), RuntimeError("scrape.do down"), calls
     )
-    _, meta = asyncio.run(
-        free_route.fetch("https://www.hsguru.com/card-stats?a=3", "cards")
+    acquirer = mulligan.Acquirer(
+        scrape_do_credit_cap=None, fetch_free=free, fetch_paid=paid
     )
-    assert meta["backend"] == "flaresolverr" and free_route.pages_free == 1
-
-
-def test_free_circuit_opens_and_budget_exhaustion_stops_the_run() -> None:
-    calls = {"free": 0}
-
-    async def free(source):
-        calls["free"] += 1
-        raise RuntimeError("solver down")
-
-    acquirer = mulligan.Acquirer(scrape_do_credit_cap=0, fetch_free=free)
-    for index in range(mulligan.FREE_CIRCUIT_THRESHOLD + 2):
+    for index in range(mulligan.PAID_CIRCUIT_THRESHOLD + 2):
         with pytest.raises(RuntimeError):
-            asyncio.run(
-                acquirer.fetch(f"https://www.hsguru.com/card-stats?a={index}", "cards")
-            )
-    assert calls["free"] == mulligan.FREE_CIRCUIT_THRESHOLD
-    assert acquirer.stop_reason == "scrape_do_budget_exhausted"
+            _fetch(acquirer, index)
+    assert calls.count("paid") == mulligan.PAID_CIRCUIT_THRESHOLD
+    assert calls.count("free") == mulligan.FREE_CIRCUIT_THRESHOLD
+    assert acquirer.stop_reason == "provider_circuit_open"
+
+
+def test_flaresolverr_transport_keeps_the_local_route_first() -> None:
+    calls: list[str] = []
+    free, paid = _routes(GOOD, GOOD, calls)
+    acquirer = mulligan.Acquirer(
+        scrape_do_credit_cap=0,
+        routes=mulligan.TRANSPORTS["flaresolverr"],
+        fetch_free=free,
+        fetch_paid=paid,
+    )
+    _, meta = _fetch(acquirer)
+    assert calls == ["free"] and meta["backend"] == "flaresolverr"
+
+
+def test_premium_filter_page_goes_to_the_logged_in_paid_profile() -> None:
+    paywall = card_stats_html([], games=0) + "You do not have access to these filters"
+    calls: list[str] = []
+    free, paid = _routes(paywall, GOOD, calls)
+    acquirer = mulligan.Acquirer(
+        scrape_do_credit_cap=100,
+        routes=mulligan.TRANSPORTS["flaresolverr"],
+        fetch_free=free,
+        fetch_paid=paid,
+    )
+    html, meta = _fetch(acquirer)
+    assert "Forge of Origination" in html and meta["request_credits"] == 5
+    # A premium filter is not a solver failure: the free circuit stays closed.
+    assert acquirer.free_failures_in_row == 0 and acquirer.pages_scrape_do == 1
+
+
+def test_scrape_do_runs_in_a_dedicated_pool_with_the_budget_scope(monkeypatch) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    from app import firecrawl_backend
+    from app.meta_intelligence import budget
+
+    seen: dict[str, Any] = {}
+
+    def fake_scrape_sync(source, **options):
+        import threading
+
+        seen["thread"] = threading.current_thread().name
+        seen["scope"] = budget._scope.get()
+        seen["source"] = source.id
+        return SimpleNamespace(html=GOOD, request_credits=5, backend="scrape_do")
+
+    monkeypatch.setattr(firecrawl_backend, "_scrape_sync", fake_scrape_sync)
+    monkeypatch.setattr("app.hsguru_auth.hsguru_firecrawl_headers", lambda: None)
+    executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="hsguru-mulligan")
+    try:
+        acquirer = mulligan.Acquirer(
+            scrape_do_credit_cap=None,
+            routes=mulligan.TRANSPORTS["scrape_do_only"],
+            executor=executor,
+        )
+        _fetch(acquirer)
+    finally:
+        executor.shutdown()
+    assert seen["thread"].startswith("hsguru-mulligan")
+    assert (
+        seen["scope"]["job_class"] == "detail"
+        and seen["source"] == "hsguru_mulligan:page"
+    )
+
+
+def test_settings_from_env_clamps_concurrency_and_validates_transport(
+    monkeypatch,
+) -> None:
+    defaults = mulligan.Settings.from_env()
+    assert (defaults.transport, defaults.concurrency) == ("scrape_do", 25)
+    assert (defaults.scrape_do_run_credits, defaults.scrape_do_daily_credits) == (0, 0)
+    monkeypatch.setenv("HS_HSGURU_MULLIGAN_CONCURRENCY", "500")
+    monkeypatch.setenv("HS_HSGURU_MULLIGAN_TRANSPORT", "bogus")
+    monkeypatch.setenv("HS_HSGURU_MULLIGAN_SCRAPE_DO_DAILY_CREDITS", "20000")
+    settings = mulligan.Settings.from_env()
+    assert settings.concurrency == mulligan.MAX_CONCURRENCY == 50
+    assert (
+        settings.transport == "scrape_do" and settings.scrape_do_daily_credits == 20000
+    )
+    monkeypatch.setenv("HS_HSGURU_MULLIGAN_TRANSPORT", "flaresolverr")
+    assert mulligan.Settings.from_env().transport == "flaresolverr"
 
 
 # --- refresh and storage ---------------------------------------------------------
@@ -730,23 +838,21 @@ def test_systemd_timer_matches_the_schedule_inventory() -> None:
     )
 
 
-def test_premium_filter_page_goes_to_the_logged_in_paid_profile() -> None:
-    paywall = card_stats_html([], games=0) + "You do not have access to these filters"
-
-    async def free(source):
-        return _page(paywall)
-
-    async def paid(source, **options):
-        return SimpleNamespace(
-            html=card_stats_html([FORGE], games=10), request_credits=5
+def test_credit_caps_are_unlimited_by_default_and_daily_cap_counts_earlier_runs(
+    isolated,
+) -> None:
+    assert _refresh()["scrape_do_credit_cap"] is None
+    conn = sqlite3.connect(isolated / "hs_parses.db")
+    with conn:
+        conn.execute(
+            f"UPDATE {store.RUNS} SET scrape_do_credits = 40 WHERE started_at = ?",
+            (NOW.isoformat(),),
         )
-
-    acquirer = mulligan.Acquirer(
-        scrape_do_credit_cap=100, fetch_free=free, fetch_paid=paid
+    conn.close()
+    capped = _refresh(
+        now=NOW + timedelta(hours=1),
+        settings=mulligan.Settings(
+            scrape_do_daily_credits=50, scrape_do_run_credits=300
+        ),
     )
-    html, meta = asyncio.run(
-        acquirer.fetch("https://www.hsguru.com/card-stats?a=1", "cards")
-    )
-    assert "Forge of Origination" in html and meta["request_credits"] == 5
-    # A premium filter is not a solver failure: the free circuit stays closed.
-    assert acquirer.free_failures_in_row == 0 and acquirer.pages_scrape_do == 1
+    assert capped["scrape_do_credit_cap"] == 10
