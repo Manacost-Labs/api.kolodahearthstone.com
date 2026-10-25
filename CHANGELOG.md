@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Balance Radar (`/v1/constructed/balance-radar`): nerf and buff candidates for
+  Standard and Wild. A timer twice a day joins HSGuru archetypes by period
+  (including the Bans window) and HSReplay card periods with Reddit
+  (RedditAPIs) and X (GetXAPI) posts, and asks `claude-sonnet-5-5` for a
+  structured verdict in Russian. Numbers and post links come from the data,
+  never from the model. Runs and their cost are stored; the API keeps serving
+  the last good run. About $0.56 per run for both formats.
+
 - A HSGuru deck page whose cards all rendered but hold no usable deck (one
   "Highlander Warrior" card with a one-card code) now means "no builds" instead
   of failing the whole Wild all-rank catalog. Only cards without copy text count

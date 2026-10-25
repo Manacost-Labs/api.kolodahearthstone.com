@@ -1,0 +1,1793 @@
+{
+  "data": {
+    "schemaVersion": 1,
+    "runId": "20261025T101238Z-wild-4c92a2",
+    "format": "wild",
+    "generatedAt": "2026-10-25T10:14:00+00:00",
+    "summary": "Главный риск для Wild после запрета Reincarnate (21 октября) — Разбойник на «Н'Зоте» (N'Zoth Rogue). За окно банов у него 64,1% винрейта при 5,3% популярности, а за последние сутки 66,6% при 11,1%. На Легенде 57,3% (7,0% популярности), за сутки 58,1% при 12,9%. Сам Н'Зот, Гибель Сна (N'Zoth, Dream's End) на Легенде за сутки играют в 21,5% колод, а за неделю в 11,3%, поэтому он главный кандидат на нерф.\n\nЯдро Йогг-Шамана снесено горячим баном Reincarnate, и популярность связанных карт обвалилась с ~7% до ~0,3% за сутки. Но бан объявлен временным, а сообщество просит нерфить именно Манипулятора Йогг-Сарона (Mastermind Yogg-Saron). Поэтому Йогг и Возрождение (Reincarnate) остаются кандидатами на постоянное изменение, хотя уверенность умеренная. Шаманские карты вроде Грязнеформера и Зова предков я не включаю: их метрики искажены баном.\n\nПиратский Воин держит 66,1% в ранге all (3,8% игр) и 58,5% на Легенде (2,0% игр). Популярность невелика, поэтому нерф вероятен лишь точечный, через Инженера-подрывника (Blastpowder Engineer). Boar Rogue (58,4% all, 13,7% игр) на Легенде всего 51,8%, и сильным его не назвать.\n\nБаффы маловероятны: Blizzard редко усиливает карты в Wild. Единственные заметные кандидаты — новые легендарки из «Власти Темной Империи» с очень низким винрейтом и почти нулевой игрой, например Диски Норганнона (Discs of Norgannon) и Клинок Темной Империи (Blade of The Black Empire). Данных от сообщества по ним практически нет.",
+    "nerfs": [
+      {
+        "ref": "card:BE_017",
+        "kind": "card",
+        "id": "BE_017",
+        "dbfId": 128389,
+        "name": "Н'Зот, Гибель Сна",
+        "nameEn": "N'Zoth, Dream's End",
+        "class": "NEUTRAL",
+        "className": "Нейтральная",
+        "imageUrl": "https://art.hearthstonejson.com/v1/256x/BE_017.png",
+        "cost": 15,
+        "rarity": "LEGENDARY",
+        "set": "BE",
+        "confidence": 70,
+        "headline": "Н'Зот, Гибель Сна двигает самую сильную и быстрорастущую колоду формата",
+        "verdict": "N'Zoth Rogue сейчас самый опасный архетип: 64,1% винрейта при 5,3% доли игр в окне банов, а за последние сутки 66,6% при 11,1%. На Легенде у него 57,3% при 7,0% популярности, за сутки 58,1% при 12,9%. Сама карта на Легенде за сутки в 21,5% колод при 54,8% винрейта (за неделю 11,3% при 52,7%), на Даймонде 57,8% при 26,8% популярности. Популярность архетипа выросла примерно в три раза за сутки, при этом винрейт тоже растёт — это классический признак нерфа. Игроки уже ждут бана или нерфа для Н'Зота.",
+        "reasons": [
+          "Архетип 64,1% в окне банов, на Легенде 57,3%",
+          "Рост популярности: past_day 11,1% против 2,8% за past_week",
+          "Карта на Легенде за сутки в 21,5% колод при 54,8% винрейта",
+          "Сообщество в обсуждениях ждёт бана/нерфа Н'Зота и жалуется на «1HKO»-эксплойт"
+        ],
+        "suggestedChange": "Скидка за существ с «Предсмертным хрипом» считается только для сыгранных из руки, либо минимальная стоимость 5",
+        "stats": {
+          "source": "hsreplay",
+          "rank": "legend",
+          "period": "7d",
+          "winrate": 52.74,
+          "popularity": 11.33,
+          "playedWinrate": 60.25,
+          "drawnWinrate": 55.9,
+          "timesPlayed": 2735,
+          "keepPercentage": 69.13,
+          "trend": {
+            "popularityDelta": 10.12,
+            "playedWinrateDelta": -1.11,
+            "basis": "popularity 1d − 7d, played winrate 3d − 14d, rank legend"
+          },
+          "periods": [
+            {
+              "rank": "legend",
+              "period": "1d",
+              "deckWinrate": 54.78,
+              "deckPopularity": 21.45,
+              "playedWinrate": 61.31,
+              "drawnWinrate": 57.58,
+              "timesPlayed": 1458,
+              "keepPercentage": 69.62
+            },
+            {
+              "rank": "legend",
+              "period": "3d",
+              "deckWinrate": 52.9,
+              "deckPopularity": 18.22,
+              "playedWinrate": 60.05,
+              "drawnWinrate": 56.0,
+              "timesPlayed": 2641,
+              "keepPercentage": 69.07
+            },
+            {
+              "rank": "legend",
+              "period": "7d",
+              "deckWinrate": 52.74,
+              "deckPopularity": 11.33,
+              "playedWinrate": 60.25,
+              "drawnWinrate": 55.9,
+              "timesPlayed": 2735,
+              "keepPercentage": 69.13
+            },
+            {
+              "rank": "legend",
+              "period": "14d",
+              "deckWinrate": 52.57,
+              "deckPopularity": 6.86,
+              "playedWinrate": 61.16,
+              "drawnWinrate": 55.81,
+              "timesPlayed": 2449,
+              "keepPercentage": 69.25
+            },
+            {
+              "rank": "legend",
+              "period": "patch",
+              "deckWinrate": 52.77,
+              "deckPopularity": 18.33,
+              "playedWinrate": 59.81,
+              "drawnWinrate": 55.96,
+              "timesPlayed": 2862,
+              "keepPercentage": 68.57
+            },
+            {
+              "rank": "diamond_4_1",
+              "period": "1d",
+              "deckWinrate": 57.81,
+              "deckPopularity": 26.77,
+              "playedWinrate": 62.09,
+              "drawnWinrate": 60.29,
+              "timesPlayed": 1356,
+              "keepPercentage": 77.47
+            },
+            {
+              "rank": "diamond_4_1",
+              "period": "3d",
+              "deckWinrate": 57.61,
+              "deckPopularity": 21.04,
+              "playedWinrate": 64.14,
+              "drawnWinrate": 60.36,
+              "timesPlayed": 2471,
+              "keepPercentage": 74.17
+            },
+            {
+              "rank": "diamond_4_1",
+              "period": "7d",
+              "deckWinrate": 57.54,
+              "deckPopularity": 12.03,
+              "playedWinrate": 63.87,
+              "drawnWinrate": 60.33,
+              "timesPlayed": 2486,
+              "keepPercentage": 74.03
+            },
+            {
+              "rank": "diamond_4_1",
+              "period": "14d",
+              "deckWinrate": 57.54,
+              "deckPopularity": 6.93,
+              "playedWinrate": 63.87,
+              "drawnWinrate": 60.33,
+              "timesPlayed": 2486,
+              "keepPercentage": 74.03
+            },
+            {
+              "rank": "diamond_4_1",
+              "period": "patch",
+              "deckWinrate": 57.86,
+              "deckPopularity": 21.02,
+              "playedWinrate": 63.82,
+              "drawnWinrate": 60.63,
+              "timesPlayed": 2546,
+              "keepPercentage": 74.48
+            }
+          ]
+        },
+        "social": {
+          "mentions": {
+            "total": 0,
+            "reddit": 0,
+            "x": 0
+          },
+          "sentiment": "mixed",
+          "stance": "wants_nerf",
+          "summary": "Сообщество спорит: часть игроков крафтит колоду и хвалит её, но есть жалобы на «1HKO»-эксплойт со старым Богом, и комментаторы ждут нерфа или бана Йогга и Н'Зота. Прямых запросов нерфа от официальных аккаунтов нет.",
+          "topPosts": [
+            {
+              "platform": "reddit",
+              "kind": "post",
+              "id": "reddit:1xdu4p7",
+              "url": "https://reddit.com/r/wildhearthstone/comments/1xdu4p7/so_theres_a_new_wild_old_god_1hko_exploit_nzoth/",
+              "author": "Skater_x7",
+              "score": 0,
+              "comments": 9,
+              "title": "So... There's a new Wild Old God 1HKO exploit (N'zoth Rogue)",
+              "excerpt": "sned help",
+              "community": "r/wildhearthstone",
+              "createdAt": "2026-10-24T00:03:39.000Z",
+              "official": false,
+              "citedByModel": true
+            },
+            {
+              "platform": "reddit",
+              "kind": "comment",
+              "id": "reddit-comment:pi0liz2",
+              "url": "https://www.reddit.com/r/hearthstone/comments/1xbi2nm/wild_is_broken_big_shaman_with_new_old_gods_out/pi0liz2/",
+              "author": "ms-fanto",
+              "score": 10,
+              "comments": null,
+              "title": null,
+              "excerpt": "Rogue the same with n zoth   Only way is dirty rat with devolution or something like that",
+              "community": "r/hearthstone",
+              "createdAt": "2026-10-21T15:16:39+00:00",
+              "official": false,
+              "citedByModel": true
+            },
+            {
+              "platform": "reddit",
+              "kind": "comment",
+              "id": "reddit-comment:19rgajtscbqx1",
+              "url": "https://www.reddit.com/r/hearthstone/comments/1xbi2nm/wild_is_broken_big_shaman_with_new_old_gods_out/19rgajtscbqx1/",
+              "author": "NoStudy2213",
+              "score": 1,
+              "comments": null,
+              "title": null,
+              "excerpt": "\\-> Gets beaten by a combo deck one turn before hitting face for lethal.   \\-> \"huur, guys this new deck out AGROOED me!\"   Jokes aside, it's getting a nerfed 100% and yogg and n'zoth are both probably catching a ban from wild.",
+              "community": "r/hearthstone",
+              "createdAt": "2026-10-21T21:18:52+00:00",
+              "official": false,
+              "citedByModel": true
+            },
+            {
+              "platform": "reddit",
+              "kind": "post",
+              "id": "reddit:1xcvimq",
+              "url": "https://reddit.com/r/wildhearthstone/comments/1xcvimq/now_that_yogg_shaman_is_gone_what_are_the_best/",
+              "author": "gorFit0",
+              "score": 2,
+              "comments": 38,
+              "title": "Now that Yogg Shaman is gone, what are the best decks in the format?",
+              "excerpt": "I'm asking because the game's beginning to grow stale on me as a mostly f2p player who can't really afford a big variety of good decks, and who mostly enjoys the game when I'm not always playing the same deck over and over again. For example, I want to craft Nzoth Rogue (the non-…",
+              "community": "r/wildhearthstone",
+              "createdAt": "2026-10-22T21:34:00.000Z",
+              "official": false,
+              "citedByModel": true
+            },
+            {
+              "platform": "reddit",
+              "kind": "post",
+              "id": "reddit:1xcfs3y",
+              "url": "https://reddit.com/r/wildhearthstone/comments/1xcfs3y/is_the_nzoth_rogue_safe_to_craft/",
+              "author": "Coolkid-4869",
+              "score": 0,
+              "comments": 25,
+              "title": "Is the N'zoth Rogue safe to craft?",
+              "excerpt": "Its seems fun, I can see the potential of an easy mil deck. But ladder is spamming it rn, is it worth it spend the dust? Also how is it fairing against disruption based decks?",
+              "community": "r/wildhearthstone",
+              "createdAt": "2026-10-22T11:17:34.000Z",
+              "official": false,
+              "citedByModel": true
+            }
+          ]
+        },
+        "dates": {
+          "firstFlaggedAt": "2026-10-25T10:14:00+00:00",
+          "previousConfidence": null,
+          "statsFetchedAt": "2026-10-25T06:02:27.356189+00:00",
+          "socialWindowFrom": "2026-10-18T00:00:00+00:00",
+          "socialWindowTo": "2026-10-25T10:12:38+00:00"
+        }
+      },
+      {
+        "ref": "card:BE_009",
+        "kind": "card",
+        "id": "BE_009",
+        "dbfId": 132547,
+        "name": "Манипулятор Йогг-Сарон",
+        "nameEn": "Mastermind Yogg-Saron",
+        "class": "NEUTRAL",
+        "className": "Нейтральная",
+        "imageUrl": "https://art.hearthstonejson.com/v1/256x/BE_009.png",
+        "cost": 9,
+        "rarity": "LEGENDARY",
+        "set": "BE",
+        "confidence": 42,
+        "headline": "Манипулятор Йогг-Сарон — «временный» бан Reincarnate, постоянное решение ещё впереди",
+        "verdict": "Блокировка Reincarnate лишь временная, поэтому Blizzard, скорее всего, внесёт постоянные правки. До бана Йогг Шаман играл на Легенде в 11,2% колод за патч, винрейт карты 53,4%, на Даймонде 58,5% при 17,4%. После бана популярность Йогга за сутки упала до 5,7% на Легенде, а винрейт до 47,8%. Сообщество прямо просит нерфа Йогга, а в обсуждениях звучит идея ограничить повторное воскрешение. Уверенность ограничена: главный источник силы связки уже заблокирован.",
+        "reasons": [
+          "Официальный твит: Reincarnate забанен временно, значит, нужно постоянное решение",
+          "До бана карта в 11,2% колод на Легенде и 17,4% на Даймонде",
+          "Сообщество просит нерф (посты про Yogg nerf и ограничение повторных Йоггов)",
+          "После бана винрейт упал до 47,8% за сутки — риск перебора уже снят"
+        ],
+        "suggestedChange": "Ограничить эффект Йогга одним срабатыванием за ход, даже при воскрешении или копировании",
+        "stats": {
+          "source": "hsreplay",
+          "rank": "legend",
+          "period": "7d",
+          "winrate": 53.66,
+          "popularity": 7.73,
+          "playedWinrate": 77.38,
+          "drawnWinrate": 51.79,
+          "timesPlayed": 2472,
+          "keepPercentage": 38.83,
+          "trend": {
+            "popularityDelta": -2.0,
+            "playedWinrateDelta": -0.01,
+            "basis": "popularity 1d − 7d, played winrate 3d − 14d, rank legend"
+          },
+          "periods": [
+            {
+              "rank": "legend",
+              "period": "1d",
+              "deckWinrate": 47.83,
+              "deckPopularity": 5.73,
+              "playedWinrate": 72.48,
+              "drawnWinrate": 52.49,
+              "timesPlayed": 607,
+              "keepPercentage": 60.0
+            },
+            {
+              "rank": "legend",
+              "period": "3d",
+              "deckWinrate": 53.46,
+              "deckPopularity": 11.6,
+              "playedWinrate": 77.84,
+              "drawnWinrate": 51.98,
+              "timesPlayed": 2221,
+              "keepPercentage": 37.7
+            },
+            {
+              "rank": "legend",
+              "period": "7d",
+              "deckWinrate": 53.66,
+              "deckPopularity": 7.73,
+              "playedWinrate": 77.38,
+              "drawnWinrate": 51.79,
+              "timesPlayed": 2472,
+              "keepPercentage": 38.83
+            },
+            {
+              "rank": "legend",
+              "period": "14d",
+              "deckWinrate": 53.71,
+              "deckPopularity": 5.01,
+              "playedWinrate": 77.85,
+              "drawnWinrate": 51.62,
+              "timesPlayed": 2393,
+              "keepPercentage": 38.18
+            },
+            {
+              "rank": "legend",
+              "period": "patch",
+              "deckWinrate": 53.41,
+              "deckPopularity": 11.16,
+              "playedWinrate": 77.75,
+              "drawnWinrate": 51.97,
+              "timesPlayed": 2225,
+              "keepPercentage": 37.7
+            },
+            {
+              "rank": "diamond_4_1",
+              "period": "1d",
+              "deckWinrate": 50.79,
+              "deckPopularity": 3.58,
+              "playedWinrate": 76.6,
+              "drawnWinrate": 55.27,
+              "timesPlayed": 312,
+              "keepPercentage": 72.34
+            },
+            {
+              "rank": "diamond_4_1",
+              "period": "3d",
+              "deckWinrate": 58.55,
+              "deckPopularity": 17.85,
+              "playedWinrate": 79.96,
+              "drawnWinrate": 52.81,
+              "timesPlayed": 3215,
+              "keepPercentage": 29.98
+            },
+            {
+              "rank": "diamond_4_1",
+              "period": "7d",
+              "deckWinrate": 58.69,
+              "deckPopularity": 10.91,
+              "playedWinrate": 79.94,
+              "drawnWinrate": 53.01,
+              "timesPlayed": 3476,
+              "keepPercentage": 29.54
+            },
+            {
+              "rank": "diamond_4_1",
+              "period": "14d",
+              "deckWinrate": 58.69,
+              "deckPopularity": 6.29,
+              "playedWinrate": 79.94,
+              "drawnWinrate": 53.01,
+              "timesPlayed": 3476,
+              "keepPercentage": 29.54
+            },
+            {
+              "rank": "diamond_4_1",
+              "period": "patch",
+              "deckWinrate": 58.48,
+              "deckPopularity": 17.39,
+              "playedWinrate": 79.8,
+              "drawnWinrate": 52.82,
+              "timesPlayed": 3249,
+              "keepPercentage": 30.16
+            }
+          ]
+        },
+        "social": {
+          "mentions": {
+            "total": 4,
+            "reddit": 4,
+            "x": 0
+          },
+          "sentiment": "negative",
+          "stance": "wants_nerf",
+          "summary": "Большинство постов в r/wildhearthstone призывает нерфить Йогга или Йогг Шамана («please and thank you», «inevitably and rightfully banned»), есть единичные защитники колоды. Обсуждают идею запретить повторные воскрешения Йогга за ход.",
+          "topPosts": [
+            {
+              "platform": "x",
+              "kind": "tweet",
+              "id": "x:2113046569238860272",
+              "url": "https://x.com/PlayHearthstone/status/2113046569238860272",
+              "author": "PlayHearthstone",
+              "score": 807,
+              "comments": 212,
+              "title": null,
+              "excerpt": "👁️ 👀 Our team has been keeping an eye on recent gameplay and discussion, noting that a few play patterns have proven more powerful than intended.  It turns out keeping the Old Gods in check isn't easy. To curb some of the madness, we're temporarily banning Reincarnate in Wild and…",
+              "community": "x",
+              "createdAt": "2026-10-21T23:15:35+00:00",
+              "official": true,
+              "citedByModel": true
+            },
+            {
+              "platform": "reddit",
+              "kind": "post",
+              "id": "reddit:1xdqgbl",
+              "url": "https://reddit.com/r/wildhearthstone/comments/1xdqgbl/ill_take_that_yogg_nerf_right_about_now_blizzard/",
+              "author": "DDMenace23",
+              "score": 14,
+              "comments": 6,
+              "title": "I'll take that Yogg nerf right about now Blizzard, please and thank you.",
+              "excerpt": "I'll take that Yogg nerf right about now Blizzard, please and thank you.",
+              "community": "r/wildhearthstone",
+              "createdAt": "2026-10-23T21:21:23.000Z",
+              "official": false,
+              "citedByModel": true
+            },
+            {
+              "platform": "reddit",
+              "kind": "post",
+              "id": "reddit:1xb82jf",
+              "url": "https://reddit.com/r/wildhearthstone/comments/1xb82jf/team_5_dont_kill_big_shaman/",
+              "author": "FardHast",
+              "score": 88,
+              "comments": 43,
+              "title": "Team 5, don't kill Big Shaman",
+              "excerpt": "Simple change, not allowing to resummon multiple Yoggs in a single turn.",
+              "community": "r/wildhearthstone",
+              "createdAt": "2026-10-20T23:54:42.000Z",
+              "official": false,
+              "citedByModel": true
+            },
+            {
+              "platform": "reddit",
+              "kind": "post",
+              "id": "reddit:1xbzlg1",
+              "url": "https://reddit.com/r/wildhearthstone/comments/1xbzlg1/contrary_to_popular_belief_you_can_build_yogg/",
+              "author": "yodaminnesota",
+              "score": 10,
+              "comments": 13,
+              "title": "Contrary to popular belief, you CAN build Yogg Shaman better or worse",
+              "excerpt": "Hi wild community,  Let's try to build the best Yogg Shaman list before its inevitably and rightfully banned.  I've seen a lot of people build this deck by just auto-completing their deck with locations weapons and heroes, but I think we can wring some additional percentage out o…",
+              "community": "r/wildhearthstone",
+              "createdAt": "2026-10-21T21:11:38.000Z",
+              "official": false,
+              "citedByModel": true
+            },
+            {
+              "platform": "reddit",
+              "kind": "post",
+              "id": "reddit:1xbwmoj",
+              "url": "https://reddit.com/r/wildhearthstone/comments/1xbwmoj/yogg_shaman_turn_2_otk/",
+              "author": "etorraG",
+              "score": 242,
+              "comments": 67,
+              "title": "Yogg Shaman: Turn 2 OTK",
+              "excerpt": "104 attempts, 56% winrate",
+              "community": "r/wildhearthstone",
+              "createdAt": "2026-10-21T19:19:22.000Z",
+              "official": false,
+              "citedByModel": true
+            }
+          ]
+        },
+        "dates": {
+          "firstFlaggedAt": "2026-10-25T10:14:00+00:00",
+          "previousConfidence": null,
+          "statsFetchedAt": "2026-10-25T06:02:27.356189+00:00",
+          "socialWindowFrom": "2026-10-18T00:00:00+00:00",
+          "socialWindowTo": "2026-10-25T10:12:38+00:00"
+        }
+      },
+      {
+        "ref": "card:CAP_104",
+        "kind": "card",
+        "id": "CAP_104",
+        "dbfId": 127016,
+        "name": "Инженер-подрывник",
+        "nameEn": "Blastpowder Engineer",
+        "class": "WARRIOR",
+        "className": "Воин",
+        "imageUrl": "https://art.hearthstonejson.com/v1/256x/CAP_104.png",
+        "cost": 2,
+        "rarity": "EPIC",
+        "set": "ESCAPEFROM_VIOLET_HOLD",
+        "confidence": 38,
+        "headline": "Инженер-подрывник держит Пиратского Воина на 66% винрейта",
+        "verdict": "Pirate Warrior показывает 66,1% в ранге all (3,8% игр) и 58,5% на Легенде (2,0% игр), оставаясь одним из самых сильных архетипов формата. Карта в Легенде за неделю: 57,8% винрейта при 4,8% популярности; на Даймонде 63,2% при 8,0%. Винрейт при розыгрыше 56,4% (рост +3,5 п.п. за 3д−14д). Из-за невысокой доли игр нерф вероятен лишь как точечный, а не срочный.",
+        "reasons": [
+          "Пиратский Воин 66,1% (all) и 58,5% (Legend) в окне банов",
+          "Карта на Даймонде 63,2% винрейта, популярность около 8%",
+          "Рост винрейта при розыгрыше на +3,5 п.п. за 3д−14д",
+          "Низкая доля игр (3,8%) снижает срочность нерфа"
+        ],
+        "suggestedChange": "Эффект: пираты наносят на 1 больше только если вы владеете оружием или стоимость 2 → 3",
+        "stats": {
+          "source": "hsreplay",
+          "rank": "legend",
+          "period": "7d",
+          "winrate": 57.83,
+          "popularity": 4.83,
+          "playedWinrate": 56.41,
+          "drawnWinrate": 55.18,
+          "timesPlayed": 2104,
+          "keepPercentage": 66.77,
+          "trend": {
+            "popularityDelta": 0.27,
+            "playedWinrateDelta": 3.53,
+            "basis": "popularity 1d − 7d, played winrate 3d − 14d, rank legend"
+          },
+          "periods": [
+            {
+              "rank": "legend",
+              "period": "1d",
+              "deckWinrate": 58.25,
+              "deckPopularity": 5.1,
+              "playedWinrate": 59.6,
+              "drawnWinrate": 57.48,
+              "timesPlayed": 651,
+              "keepPercentage": 70.5
+            },
+            {
+              "rank": "legend",
+              "period": "3d",
+              "deckWinrate": 57.79,
+              "deckPopularity": 4.45,
+              "playedWinrate": 57.71,
+              "drawnWinrate": 56.49,
+              "timesPlayed": 1180,
+              "keepPercentage": 68.56
+            },
+            {
+              "rank": "legend",
+              "period": "7d",
+              "deckWinrate": 57.83,
+              "deckPopularity": 4.83,
+              "playedWinrate": 56.41,
+              "drawnWinrate": 55.18,
+              "timesPlayed": 2104,
+              "keepPercentage": 66.77
+            },
+            {
+              "rank": "legend",
+              "period": "14d",
+              "deckWinrate": 56.68,
+              "deckPopularity": 5.19,
+              "playedWinrate": 54.18,
+              "drawnWinrate": 53.24,
+              "timesPlayed": 3492,
+              "keepPercentage": 67.23
+            },
+            {
+              "rank": "legend",
+              "period": "patch",
+              "deckWinrate": 57.6,
+              "deckPopularity": 4.44,
+              "playedWinrate": 57.62,
+              "drawnWinrate": 56.35,
+              "timesPlayed": 1232,
+              "keepPercentage": 68.75
+            },
+            {
+              "rank": "diamond_4_1",
+              "period": "1d",
+              "deckWinrate": 63.25,
+              "deckPopularity": 8.93,
+              "playedWinrate": 60.76,
+              "drawnWinrate": 59.41,
+              "timesPlayed": 1096,
+              "keepPercentage": 70.52
+            },
+            {
+              "rank": "diamond_4_1",
+              "period": "3d",
+              "deckWinrate": 63.62,
+              "deckPopularity": 7.37,
+              "playedWinrate": 62.23,
+              "drawnWinrate": 60.7,
+              "timesPlayed": 1978,
+              "keepPercentage": 70.42
+            },
+            {
+              "rank": "diamond_4_1",
+              "period": "7d",
+              "deckWinrate": 63.18,
+              "deckPopularity": 7.99,
+              "playedWinrate": 61.46,
+              "drawnWinrate": 60.3,
+              "timesPlayed": 3791,
+              "keepPercentage": 71.36
+            },
+            {
+              "rank": "diamond_4_1",
+              "period": "14d",
+              "deckWinrate": 62.71,
+              "deckPopularity": 8.53,
+              "playedWinrate": 60.69,
+              "drawnWinrate": 59.71,
+              "timesPlayed": 6974,
+              "keepPercentage": 70.36
+            },
+            {
+              "rank": "diamond_4_1",
+              "period": "patch",
+              "deckWinrate": 63.49,
+              "deckPopularity": 7.49,
+              "playedWinrate": 62.09,
+              "drawnWinrate": 60.49,
+              "timesPlayed": 2079,
+              "keepPercentage": 70.53
+            }
+          ]
+        },
+        "social": {
+          "mentions": {
+            "total": 1,
+            "reddit": 1,
+            "x": 0
+          },
+          "sentiment": "neutral",
+          "stance": "indifferent",
+          "summary": "Пиратский Воин встречается лишь в подборках топ-легенды (например, #170 Legend), жалоб и запросов нерфа почти нет.",
+          "topPosts": [
+            {
+              "platform": "x",
+              "kind": "tweet",
+              "id": "x:2113405790505849011",
+              "url": "https://x.com/neon31HS/status/2113405790505849011",
+              "author": "neon31HS",
+              "score": 2,
+              "comments": 0,
+              "title": null,
+              "excerpt": "[WILD] Check out this Pirate Warrior that has reached #170 Legend.  Score: 10-4  ▼ Deck Code and more: https://t.co/D6GxjOItTi  #WildHS #Hearthstone https://t.co/rngYGamgdr",
+              "community": "x",
+              "createdAt": "2026-10-22T23:03:00+00:00",
+              "official": false,
+              "citedByModel": true
+            },
+            {
+              "platform": "reddit",
+              "kind": "post",
+              "id": "reddit:1xbzlg1",
+              "url": "https://reddit.com/r/wildhearthstone/comments/1xbzlg1/contrary_to_popular_belief_you_can_build_yogg/",
+              "author": "yodaminnesota",
+              "score": 10,
+              "comments": 13,
+              "title": "Contrary to popular belief, you CAN build Yogg Shaman better or worse",
+              "excerpt": "Hi wild community,  Let's try to build the best Yogg Shaman list before its inevitably and rightfully banned.  I've seen a lot of people build this deck by just auto-completing their deck with locations weapons and heroes, but I think we can wring some additional percentage out o…",
+              "community": "r/wildhearthstone",
+              "createdAt": "2026-10-21T21:11:38.000Z",
+              "official": false,
+              "citedByModel": false
+            }
+          ]
+        },
+        "dates": {
+          "firstFlaggedAt": "2026-10-25T10:14:00+00:00",
+          "previousConfidence": null,
+          "statsFetchedAt": "2026-10-25T06:02:27.356189+00:00",
+          "socialWindowFrom": "2026-10-18T00:00:00+00:00",
+          "socialWindowTo": "2026-10-25T10:12:38+00:00"
+        }
+      },
+      {
+        "ref": "card:FP1_025",
+        "kind": "card",
+        "id": "FP1_025",
+        "dbfId": 1809,
+        "name": "Возрождение",
+        "nameEn": "Reincarnate",
+        "class": "SHAMAN",
+        "className": "Шаман",
+        "imageUrl": "https://art.hearthstonejson.com/v1/256x/FP1_025.png",
+        "cost": 1,
+        "rarity": "COMMON",
+        "set": "NAXX",
+        "confidence": 35,
+        "headline": "Возрождение (Reincarnate) временно забанено — ждёт постоянной правки",
+        "verdict": "Reincarnate забанено в Wild горячим фиксом 21 октября как ключевая часть комбо Йогг Шамана. Перед баном на Легенде за патч карта играла в 7,0% колод при 57,5% винрейта, а на Даймонде в 14,5% колод при 60,4%. Официальный аккаунт назвал бан временным, поэтому Blizzard может вернуть карту с нерфом или оставить её в бане. Вероятность изменения при этом ниже, чем у Йогга, поскольку карта классическая.",
+        "reasons": [
+          "Официальный твит о временном бане в Wild",
+          "На Легенде 57,5% при 7,0% популярности до бана",
+          "Сообщество связывает комбо именно с Reincarnate и Йоггом",
+          "Бан уже снял угрозу, поэтому срочности нет"
+        ],
+        "suggestedChange": "Стоимость 1 → 2 и возвращать существо без свежих способностей",
+        "stats": {
+          "source": "hsreplay",
+          "rank": "legend",
+          "period": "7d",
+          "winrate": 56.62,
+          "popularity": 5.41,
+          "playedWinrate": 88.48,
+          "drawnWinrate": 73.09,
+          "timesPlayed": 3152,
+          "keepPercentage": 28.03,
+          "trend": {
+            "popularityDelta": null,
+            "playedWinrateDelta": 4.51,
+            "basis": "popularity 1d − 7d, played winrate 3d − 14d, rank legend"
+          },
+          "periods": [
+            {
+              "rank": "legend",
+              "period": "3d",
+              "deckWinrate": 57.46,
+              "deckPopularity": 7.28,
+              "playedWinrate": 90.0,
+              "drawnWinrate": 74.32,
+              "timesPlayed": 2611,
+              "keepPercentage": 28.88
+            },
+            {
+              "rank": "legend",
+              "period": "7d",
+              "deckWinrate": 56.62,
+              "deckPopularity": 5.41,
+              "playedWinrate": 88.48,
+              "drawnWinrate": 73.09,
+              "timesPlayed": 3152,
+              "keepPercentage": 28.03
+            },
+            {
+              "rank": "legend",
+              "period": "14d",
+              "deckWinrate": 55.75,
+              "deckPopularity": 4.2,
+              "playedWinrate": 85.49,
+              "drawnWinrate": 71.02,
+              "timesPlayed": 3475,
+              "keepPercentage": 28.51
+            },
+            {
+              "rank": "legend",
+              "period": "patch",
+              "deckWinrate": 57.46,
+              "deckPopularity": 6.99,
+              "playedWinrate": 90.0,
+              "drawnWinrate": 74.32,
+              "timesPlayed": 2611,
+              "keepPercentage": 28.88
+            },
+            {
+              "rank": "diamond_4_1",
+              "period": "3d",
+              "deckWinrate": 60.4,
+              "deckPopularity": 14.99,
+              "playedWinrate": 92.15,
+              "drawnWinrate": 76.87,
+              "timesPlayed": 5547,
+              "keepPercentage": 26.01
+            },
+            {
+              "rank": "diamond_4_1",
+              "period": "7d",
+              "deckWinrate": 60.28,
+              "deckPopularity": 10.0,
+              "playedWinrate": 90.71,
+              "drawnWinrate": 75.96,
+              "timesPlayed": 6374,
+              "keepPercentage": 27.51
+            },
+            {
+              "rank": "diamond_4_1",
+              "period": "14d",
+              "deckWinrate": 59.7,
+              "deckPopularity": 6.57,
+              "playedWinrate": 88.19,
+              "drawnWinrate": 74.23,
+              "timesPlayed": 6973,
+              "keepPercentage": 29.47
+            },
+            {
+              "rank": "diamond_4_1",
+              "period": "patch",
+              "deckWinrate": 60.4,
+              "deckPopularity": 14.48,
+              "playedWinrate": 92.15,
+              "drawnWinrate": 76.87,
+              "timesPlayed": 5547,
+              "keepPercentage": 26.01
+            }
+          ]
+        },
+        "social": {
+          "mentions": {
+            "total": 4,
+            "reddit": 3,
+            "x": 1
+          },
+          "sentiment": "negative",
+          "stance": "wants_nerf",
+          "summary": "Игроки обсуждают, что Reincarnate удваивается Йоггом и запускает цепочку воскрешений. Сообщество встретило бан положительно, но просит постоянного решения.",
+          "topPosts": [
+            {
+              "platform": "x",
+              "kind": "tweet",
+              "id": "x:2113046569238860272",
+              "url": "https://x.com/PlayHearthstone/status/2113046569238860272",
+              "author": "PlayHearthstone",
+              "score": 807,
+              "comments": 212,
+              "title": null,
+              "excerpt": "👁️ 👀 Our team has been keeping an eye on recent gameplay and discussion, noting that a few play patterns have proven more powerful than intended.  It turns out keeping the Old Gods in check isn't easy. To curb some of the madness, we're temporarily banning Reincarnate in Wild and…",
+              "community": "x",
+              "createdAt": "2026-10-21T23:15:35+00:00",
+              "official": true,
+              "citedByModel": true
+            },
+            {
+              "platform": "reddit",
+              "kind": "post",
+              "id": "reddit:1xc2meq",
+              "url": "https://reddit.com/r/wildhearthstone/comments/1xc2meq/as_of_415pm_pdt_reincarnate_has_been_hotfixbanned/",
+              "author": "Impossible-Low-8651",
+              "score": 16,
+              "comments": 16,
+              "title": "As of 4:15PM PDT, Reincarnate has been hotfix-banned in the Wild format to stop the Yogg Shaman combo.",
+              "excerpt": "As of 4:15PM PDT, Reincarnate has been hotfix-banned in the Wild format to stop the Yogg Shaman combo.",
+              "community": "r/wildhearthstone",
+              "createdAt": "2026-10-21T23:19:16.000Z",
+              "official": false,
+              "citedByModel": true
+            },
+            {
+              "platform": "reddit",
+              "kind": "comment",
+              "id": "reddit-comment:phzt7aj",
+              "url": "https://www.reddit.com/r/hearthstone/comments/1xbi2nm/wild_is_broken_big_shaman_with_new_old_gods_out/phzt7aj/",
+              "author": "IAmAdamTaylor",
+              "score": 83,
+              "comments": null,
+              "title": null,
+              "excerpt": "Yep, they run a very specific package of minions and spells, the rest is weapons and locations. That way \\[\\[Muckmorpher\\]\\] from \\[\\[Fairy Tale Forest\\]\\] is guaranteed to pull Yogg, then they use his effect to draw spells including \\[\\[Lightning Bloom\\]\\] and \\[\\[Reincarnate\\]\\…",
+              "community": "r/hearthstone",
+              "createdAt": "2026-10-21T09:11:22+00:00",
+              "official": false,
+              "citedByModel": true
+            },
+            {
+              "platform": "reddit",
+              "kind": "post",
+              "id": "reddit:1xbzlg1",
+              "url": "https://reddit.com/r/wildhearthstone/comments/1xbzlg1/contrary_to_popular_belief_you_can_build_yogg/",
+              "author": "yodaminnesota",
+              "score": 10,
+              "comments": 13,
+              "title": "Contrary to popular belief, you CAN build Yogg Shaman better or worse",
+              "excerpt": "Hi wild community,  Let's try to build the best Yogg Shaman list before its inevitably and rightfully banned.  I've seen a lot of people build this deck by just auto-completing their deck with locations weapons and heroes, but I think we can wring some additional percentage out o…",
+              "community": "r/wildhearthstone",
+              "createdAt": "2026-10-21T21:11:38.000Z",
+              "official": false,
+              "citedByModel": false
+            }
+          ]
+        },
+        "dates": {
+          "firstFlaggedAt": "2026-10-25T10:14:00+00:00",
+          "previousConfidence": null,
+          "statsFetchedAt": "2026-10-25T06:02:27.356189+00:00",
+          "socialWindowFrom": "2026-10-18T00:00:00+00:00",
+          "socialWindowTo": "2026-10-25T10:12:38+00:00"
+        }
+      },
+      {
+        "ref": "card:LOOT_412",
+        "kind": "card",
+        "id": "LOOT_412",
+        "dbfId": 45936,
+        "name": "Кобольд-иллюзионист",
+        "nameEn": "Kobold Illusionist",
+        "class": "ROGUE",
+        "className": "Разбойник",
+        "imageUrl": "https://art.hearthstonejson.com/v1/256x/LOOT_412.png",
+        "cost": 5,
+        "rarity": "RARE",
+        "set": "LOOTAPALOOZA",
+        "confidence": 33,
+        "headline": "Кобольд-иллюзионист — ключевая карта популярного N'Zoth Rogue",
+        "verdict": "Кобольд-иллюзионист входит в 11,3% колод на Легенде за неделю при 54,1% винрейта, за сутки 22,0% при 55,8%. На Даймонде за сутки 58,1% при 27,4% популярности. В обсуждениях колоду без дорогого милла называют версией с ~60% винрейта: она строится именно на этой карте плюс Н'Зот. Если нерф Н'Зота окажется недостаточным, Иллюзионист — запасной вариант. Вероятность ниже, потому что Blizzard обычно нерфит одну карту.",
+        "reasons": [
+          "Играется в 22,0% колод на Легенде за сутки при 55,8% винрейта",
+          "Версия N'Zoth Rogue с этой картой оценивается игроками в ~60% винрейта",
+          "Винрейт при розыгрыше 75,6% подтверждает роль в комбо",
+          "Нерф Н'Зота может оказаться достаточным"
+        ],
+        "suggestedChange": "Стоимость 5 → 6",
+        "stats": {
+          "source": "hsreplay",
+          "rank": "legend",
+          "period": "7d",
+          "winrate": 54.12,
+          "popularity": 11.29,
+          "playedWinrate": 75.55,
+          "drawnWinrate": 56.15,
+          "timesPlayed": 5981,
+          "keepPercentage": 77.8,
+          "trend": {
+            "popularityDelta": 10.75,
+            "playedWinrateDelta": -0.07,
+            "basis": "popularity 1d − 7d, played winrate 3d − 14d, rank legend"
+          },
+          "periods": [
+            {
+              "rank": "legend",
+              "period": "1d",
+              "deckWinrate": 55.77,
+              "deckPopularity": 22.04,
+              "playedWinrate": 75.59,
+              "drawnWinrate": 57.57,
+              "timesPlayed": 3425,
+              "keepPercentage": 80.09
+            },
+            {
+              "rank": "legend",
+              "period": "3d",
+              "deckWinrate": 54.23,
+              "deckPopularity": 18.22,
+              "playedWinrate": 75.59,
+              "drawnWinrate": 56.25,
+              "timesPlayed": 5867,
+              "keepPercentage": 78.69
+            },
+            {
+              "rank": "legend",
+              "period": "7d",
+              "deckWinrate": 54.12,
+              "deckPopularity": 11.29,
+              "playedWinrate": 75.55,
+              "drawnWinrate": 56.15,
+              "timesPlayed": 5981,
+              "keepPercentage": 77.8
+            },
+            {
+              "rank": "legend",
+              "period": "14d",
+              "deckWinrate": 53.74,
+              "deckPopularity": 6.85,
+              "playedWinrate": 75.66,
+              "drawnWinrate": 55.88,
+              "timesPlayed": 5403,
+              "keepPercentage": 77.48
+            },
+            {
+              "rank": "legend",
+              "period": "patch",
+              "deckWinrate": 54.12,
+              "deckPopularity": 18.05,
+              "playedWinrate": 75.45,
+              "drawnWinrate": 56.11,
+              "timesPlayed": 6062,
+              "keepPercentage": 78.7
+            },
+            {
+              "rank": "diamond_4_1",
+              "period": "1d",
+              "deckWinrate": 58.1,
+              "deckPopularity": 27.43,
+              "playedWinrate": 79.76,
+              "drawnWinrate": 60.03,
+              "timesPlayed": 3954,
+              "keepPercentage": 82.65
+            },
+            {
+              "rank": "diamond_4_1",
+              "period": "3d",
+              "deckWinrate": 57.81,
+              "deckPopularity": 21.37,
+              "playedWinrate": 80.95,
+              "drawnWinrate": 60.22,
+              "timesPlayed": 6873,
+              "keepPercentage": 80.25
+            },
+            {
+              "rank": "diamond_4_1",
+              "period": "7d",
+              "deckWinrate": 57.78,
+              "deckPopularity": 12.21,
+              "playedWinrate": 80.9,
+              "drawnWinrate": 60.18,
+              "timesPlayed": 6902,
+              "keepPercentage": 80.22
+            },
+            {
+              "rank": "diamond_4_1",
+              "period": "14d",
+              "deckWinrate": 57.78,
+              "deckPopularity": 7.04,
+              "playedWinrate": 80.89,
+              "drawnWinrate": 60.18,
+              "timesPlayed": 6903,
+              "keepPercentage": 80.22
+            },
+            {
+              "rank": "diamond_4_1",
+              "period": "patch",
+              "deckWinrate": 58.03,
+              "deckPopularity": 21.39,
+              "playedWinrate": 80.81,
+              "drawnWinrate": 60.39,
+              "timesPlayed": 7167,
+              "keepPercentage": 80.48
+            }
+          ]
+        },
+        "social": {
+          "mentions": {
+            "total": 1,
+            "reddit": 1,
+            "x": 0
+          },
+          "sentiment": "positive",
+          "stance": "indifferent",
+          "summary": "Карту упоминают тепло («my beloved»), игроки обсуждают версию N'Zoth Rogue с ней как самую сильную, но нерфа для неё отдельно не просят.",
+          "topPosts": [
+            {
+              "platform": "reddit",
+              "kind": "comment",
+              "id": "reddit-comment:19rkcqt0yyhk1",
+              "url": "https://www.reddit.com/r/wildhearthstone/comments/1xdcp4d/the_seven_deadly_sins_of_hearthstone/19rkcqt0yyhk1/",
+              "author": "RaccoonsWithBangs",
+              "score": 1,
+              "comments": null,
+              "title": null,
+              "excerpt": "Kobold Illusionist my beloved",
+              "community": "r/wildhearthstone",
+              "createdAt": "2026-10-24T03:56:34+00:00",
+              "official": false,
+              "citedByModel": true
+            },
+            {
+              "platform": "reddit",
+              "kind": "post",
+              "id": "reddit:1xc5ej2",
+              "url": "https://reddit.com/r/wildhearthstone/comments/1xc5ej2/nzoth_rogue/",
+              "author": "zezolik",
+              "score": 6,
+              "comments": 10,
+              "title": "N'zoth Rogue",
+              "excerpt": "What exactly is the game plan for the higher wr nzoth rogue? The version that runs the 1 mana mill opponent epic has a low win rate, and the one that just has nzoth and the 5 mana summon a 1/1 has the \\~60% wr. What's the gameplay with just the nzoth and the 5 mana minion? How do…",
+              "community": "r/wildhearthstone",
+              "createdAt": "2026-10-22T01:30:12.000Z",
+              "official": false,
+              "citedByModel": true
+            }
+          ]
+        },
+        "dates": {
+          "firstFlaggedAt": "2026-10-25T10:14:00+00:00",
+          "previousConfidence": null,
+          "statsFetchedAt": "2026-10-25T06:02:27.356189+00:00",
+          "socialWindowFrom": "2026-10-18T00:00:00+00:00",
+          "socialWindowTo": "2026-10-25T10:12:38+00:00"
+        }
+      }
+    ],
+    "buffs": [
+      {
+        "ref": "card:BE_250",
+        "kind": "card",
+        "id": "BE_250",
+        "dbfId": 129112,
+        "name": "Диски Норганнона",
+        "nameEn": "Discs of Norgannon",
+        "class": "MAGE",
+        "className": "Маг",
+        "imageUrl": "https://art.hearthstonejson.com/v1/256x/BE_250.png",
+        "cost": 2,
+        "rarity": "LEGENDARY",
+        "set": "BE",
+        "confidence": 33,
+        "headline": "Диски Норганнона почти не играют и проигрывают 60% игр",
+        "verdict": "Диски Норганнона на Легенде показывают всего 39,9% винрейта при 0,76% популярности (281 розыгрыш за неделю). На Даймонде 51,4%, но доля колод всего 0,23%. Это новая легендарка 2 маны, которую никто не играет, а карта проигрывает намного больше половины игр. Blizzard иногда подкручивает такие карты, но в Wild баффы редки, поэтому уверенность невысока.",
+        "reasons": [
+          "Винрейт на Легенде 39,9% за неделю и за патч",
+          "Популярность 0,76% — карту почти не играют",
+          "Новая карта расширения без поддержки в архетипах"
+        ],
+        "suggestedChange": "Стоимость 2 → 1",
+        "stats": {
+          "source": "hsreplay",
+          "rank": "legend",
+          "period": "7d",
+          "winrate": 39.9,
+          "popularity": 0.76,
+          "playedWinrate": 44.83,
+          "drawnWinrate": 43.62,
+          "timesPlayed": 281,
+          "keepPercentage": 97.36,
+          "trend": {
+            "popularityDelta": 0.36,
+            "playedWinrateDelta": 0.32,
+            "basis": "popularity 1d − 7d, played winrate 3d − 14d, rank legend"
+          },
+          "periods": [
+            {
+              "rank": "legend",
+              "period": "1d",
+              "deckWinrate": 36.36,
+              "deckPopularity": 1.12,
+              "playedWinrate": 40.18,
+              "drawnWinrate": 37.87,
+              "timesPlayed": 107,
+              "keepPercentage": 92.3
+            },
+            {
+              "rank": "legend",
+              "period": "3d",
+              "deckWinrate": 39.93,
+              "deckPopularity": 1.15,
+              "playedWinrate": 44.04,
+              "drawnWinrate": 42.99,
+              "timesPlayed": 252,
+              "keepPercentage": 97.29
+            },
+            {
+              "rank": "legend",
+              "period": "7d",
+              "deckWinrate": 39.9,
+              "deckPopularity": 0.76,
+              "playedWinrate": 44.83,
+              "drawnWinrate": 43.62,
+              "timesPlayed": 281,
+              "keepPercentage": 97.36
+            },
+            {
+              "rank": "legend",
+              "period": "14d",
+              "deckWinrate": 39.6,
+              "deckPopularity": 0.48,
+              "playedWinrate": 43.72,
+              "drawnWinrate": 42.72,
+              "timesPlayed": 263,
+              "keepPercentage": 97.22
+            },
+            {
+              "rank": "legend",
+              "period": "patch",
+              "deckWinrate": 40.03,
+              "deckPopularity": 1.14,
+              "playedWinrate": 44.18,
+              "drawnWinrate": 43.13,
+              "timesPlayed": 258,
+              "keepPercentage": 97.29
+            },
+            {
+              "rank": "diamond_4_1",
+              "period": "1d",
+              "deckWinrate": 46.93,
+              "deckPopularity": 0.21,
+              "playedWinrate": 52.38,
+              "drawnWinrate": 42.3,
+              "timesPlayed": 21,
+              "keepPercentage": 100.0
+            },
+            {
+              "rank": "diamond_4_1",
+              "period": "3d",
+              "deckWinrate": 49.17,
+              "deckPopularity": 0.35,
+              "playedWinrate": 53.01,
+              "drawnWinrate": 49.47,
+              "timesPlayed": 83,
+              "keepPercentage": 86.66
+            },
+            {
+              "rank": "diamond_4_1",
+              "period": "7d",
+              "deckWinrate": 51.41,
+              "deckPopularity": 0.23,
+              "playedWinrate": 57.42,
+              "drawnWinrate": 53.71,
+              "timesPlayed": 101,
+              "keepPercentage": 87.5
+            },
+            {
+              "rank": "diamond_4_1",
+              "period": "14d",
+              "deckWinrate": 51.41,
+              "deckPopularity": 0.13,
+              "playedWinrate": 57.42,
+              "drawnWinrate": 53.71,
+              "timesPlayed": 101,
+              "keepPercentage": 87.5
+            },
+            {
+              "rank": "diamond_4_1",
+              "period": "patch",
+              "deckWinrate": 48.9,
+              "deckPopularity": 0.34,
+              "playedWinrate": 53.01,
+              "drawnWinrate": 49.47,
+              "timesPlayed": 83,
+              "keepPercentage": 86.66
+            }
+          ]
+        },
+        "social": {
+          "mentions": {
+            "total": 2,
+            "reddit": 2,
+            "x": 0
+          },
+          "sentiment": "neutral",
+          "stance": "indifferent",
+          "summary": "Упоминается лишь в гайдах по достижениям; запросов на усиление нет.",
+          "topPosts": [
+            {
+              "platform": "reddit",
+              "kind": "post",
+              "id": "reddit:1xbuluy",
+              "url": "https://reddit.com/r/wildhearthstone/comments/1xbuluy/black_empire_gameplay_journal_day_1_100_completion/",
+              "author": "Any_Mammoth_4516",
+              "score": 15,
+              "comments": 0,
+              "title": "Black Empire Gameplay Journal Day 1 100% Completion",
+              "excerpt": "**FOR WILD ONLY. Many people like doing it in different format. This is for the fastest completion, not intended for climbing/winning. Many of these decks contain Ysera, M.O.T.H.E.R, which are nice to have for mana reduction, but not required except for Paladin one.**  https://pr…",
+              "community": "r/wildhearthstone",
+              "createdAt": "2026-10-21T18:05:52.000Z",
+              "official": false,
+              "citedByModel": true
+            },
+            {
+              "platform": "reddit",
+              "kind": "post",
+              "id": "reddit:1xbukb1",
+              "url": "https://reddit.com/r/hearthstone/comments/1xbukb1/black_empire_gameplay_journal_day_1_100/",
+              "author": "Any_Mammoth_4516",
+              "score": 13,
+              "comments": 8,
+              "title": "Black Empire Gameplay Journal Day 1 100% Completeion",
+              "excerpt": "https://preview.redd.it/ohy9ewsuouwh1.png?width=1683&format=png&auto=webp&s=1b0ce77700aede3c22affaca495db94862d4fb7a  **FOR WILD ONLY. Many people like doing it in different format. This is for the fastest completion, not intended for climbing/winning. Many of these decks contain…",
+              "community": "r/hearthstone",
+              "createdAt": "2026-10-21T18:04:21.000Z",
+              "official": false,
+              "citedByModel": true
+            }
+          ]
+        },
+        "dates": {
+          "firstFlaggedAt": "2026-10-25T10:14:00+00:00",
+          "previousConfidence": null,
+          "statsFetchedAt": "2026-10-25T06:02:27.356189+00:00",
+          "socialWindowFrom": "2026-10-18T00:00:00+00:00",
+          "socialWindowTo": "2026-10-25T10:12:38+00:00"
+        }
+      },
+      {
+        "ref": "card:BE_227",
+        "kind": "card",
+        "id": "BE_227",
+        "dbfId": 130402,
+        "name": "Клинок Темной Империи",
+        "nameEn": "Blade of The Black Empire",
+        "class": "PRIEST",
+        "className": "Жрец",
+        "imageUrl": "https://art.hearthstonejson.com/v1/256x/BE_227.png",
+        "cost": 3,
+        "rarity": "LEGENDARY",
+        "set": "BE",
+        "confidence": 30,
+        "headline": "Клинок Темной Империи — слабая новая легендарка с 43% винрейта",
+        "verdict": "Клинок Темной Империи на Легенде имеет 43,3% винрейта за 7 дней при 0,33% популярности (134 розыгрыша). За патч 45,2% при 0,53%. Карта новая и практически не играется, а условие «Тень» делает её рискованной: при проигрыше условия усталость получает владелец. Легкое усиление условия вполне правдоподобно, но Blizzard редко баффает карты в первые недели.",
+        "reasons": [
+          "43,3% на Легенде при 0,33% популярности",
+          "Рискованный эффект: при невыполнении условия усталость получает владелец",
+          "Новая карта, не нашедшая архетипа"
+        ],
+        "suggestedChange": "Стоимость 3 → 2",
+        "stats": {
+          "source": "hsreplay",
+          "rank": "legend",
+          "period": "7d",
+          "winrate": 43.26,
+          "popularity": 0.33,
+          "playedWinrate": 51.49,
+          "drawnWinrate": 47.79,
+          "timesPlayed": 134,
+          "keepPercentage": 72.72,
+          "trend": {
+            "popularityDelta": 0.29,
+            "playedWinrateDelta": -0.46,
+            "basis": "popularity 1d − 7d, played winrate 3d − 14d, rank legend"
+          },
+          "periods": [
+            {
+              "rank": "legend",
+              "period": "1d",
+              "deckWinrate": 41.49,
+              "deckPopularity": 0.62,
+              "playedWinrate": 50.0,
+              "drawnWinrate": 47.36,
+              "timesPlayed": 66,
+              "keepPercentage": 76.47
+            },
+            {
+              "rank": "legend",
+              "period": "3d",
+              "deckWinrate": 44.15,
+              "deckPopularity": 0.52,
+              "playedWinrate": 52.38,
+              "drawnWinrate": 48.66,
+              "timesPlayed": 126,
+              "keepPercentage": 72.72
+            },
+            {
+              "rank": "legend",
+              "period": "7d",
+              "deckWinrate": 43.26,
+              "deckPopularity": 0.33,
+              "playedWinrate": 51.49,
+              "drawnWinrate": 47.79,
+              "timesPlayed": 134,
+              "keepPercentage": 72.72
+            },
+            {
+              "rank": "legend",
+              "period": "14d",
+              "deckWinrate": 44.22,
+              "deckPopularity": 0.2,
+              "playedWinrate": 52.84,
+              "drawnWinrate": 48.64,
+              "timesPlayed": 123,
+              "keepPercentage": 70.96
+            },
+            {
+              "rank": "legend",
+              "period": "patch",
+              "deckWinrate": 45.16,
+              "deckPopularity": 0.53,
+              "playedWinrate": 52.27,
+              "drawnWinrate": 49.04,
+              "timesPlayed": 132,
+              "keepPercentage": 72.72
+            },
+            {
+              "rank": "diamond_4_1",
+              "period": "1d",
+              "deckWinrate": 50.0,
+              "deckPopularity": 0.22,
+              "playedWinrate": 61.9,
+              "drawnWinrate": 55.55,
+              "timesPlayed": 21,
+              "keepPercentage": 60.0
+            },
+            {
+              "rank": "diamond_4_1",
+              "period": "3d",
+              "deckWinrate": 47.77,
+              "deckPopularity": 0.28,
+              "playedWinrate": 54.68,
+              "drawnWinrate": 50.64,
+              "timesPlayed": 64,
+              "keepPercentage": 73.33
+            },
+            {
+              "rank": "diamond_4_1",
+              "period": "7d",
+              "deckWinrate": 44.13,
+              "deckPopularity": 0.18,
+              "playedWinrate": 48.0,
+              "drawnWinrate": 46.06,
+              "timesPlayed": 75,
+              "keepPercentage": 76.47
+            },
+            {
+              "rank": "diamond_4_1",
+              "period": "14d",
+              "deckWinrate": 44.13,
+              "deckPopularity": 0.1,
+              "playedWinrate": 48.0,
+              "drawnWinrate": 46.06,
+              "timesPlayed": 75,
+              "keepPercentage": 76.47
+            },
+            {
+              "rank": "diamond_4_1",
+              "period": "patch",
+              "deckWinrate": 47.79,
+              "deckPopularity": 0.27,
+              "playedWinrate": 54.68,
+              "drawnWinrate": 50.0,
+              "timesPlayed": 64,
+              "keepPercentage": 73.33
+            }
+          ]
+        },
+        "social": {
+          "mentions": {
+            "total": 2,
+            "reddit": 2,
+            "x": 0
+          },
+          "sentiment": "neutral",
+          "stance": "indifferent",
+          "summary": "Упоминается лишь в гайдах по достижениям; запросов на усиление нет.",
+          "topPosts": [
+            {
+              "platform": "reddit",
+              "kind": "post",
+              "id": "reddit:1xbuluy",
+              "url": "https://reddit.com/r/wildhearthstone/comments/1xbuluy/black_empire_gameplay_journal_day_1_100_completion/",
+              "author": "Any_Mammoth_4516",
+              "score": 15,
+              "comments": 0,
+              "title": "Black Empire Gameplay Journal Day 1 100% Completion",
+              "excerpt": "**FOR WILD ONLY. Many people like doing it in different format. This is for the fastest completion, not intended for climbing/winning. Many of these decks contain Ysera, M.O.T.H.E.R, which are nice to have for mana reduction, but not required except for Paladin one.**  https://pr…",
+              "community": "r/wildhearthstone",
+              "createdAt": "2026-10-21T18:05:52.000Z",
+              "official": false,
+              "citedByModel": true
+            },
+            {
+              "platform": "reddit",
+              "kind": "post",
+              "id": "reddit:1xbukb1",
+              "url": "https://reddit.com/r/hearthstone/comments/1xbukb1/black_empire_gameplay_journal_day_1_100/",
+              "author": "Any_Mammoth_4516",
+              "score": 13,
+              "comments": 8,
+              "title": "Black Empire Gameplay Journal Day 1 100% Completeion",
+              "excerpt": "https://preview.redd.it/ohy9ewsuouwh1.png?width=1683&format=png&auto=webp&s=1b0ce77700aede3c22affaca495db94862d4fb7a  **FOR WILD ONLY. Many people like doing it in different format. This is for the fastest completion, not intended for climbing/winning. Many of these decks contain…",
+              "community": "r/hearthstone",
+              "createdAt": "2026-10-21T18:04:21.000Z",
+              "official": false,
+              "citedByModel": true
+            }
+          ]
+        },
+        "dates": {
+          "firstFlaggedAt": "2026-10-25T10:14:00+00:00",
+          "previousConfidence": null,
+          "statsFetchedAt": "2026-10-25T06:02:27.356189+00:00",
+          "socialWindowFrom": "2026-10-18T00:00:00+00:00",
+          "socialWindowTo": "2026-10-25T10:12:38+00:00"
+        }
+      }
+    ],
+    "patch": {
+      "version": "37.0.0.254477",
+      "title": "37.0 Patch Notes",
+      "titleRu": "Обновление 37.0: «Власть Темной Империи», предрелизная потасовка и новый сезон Арены",
+      "url": "https://playhearthstone.com/en-us/blog/24301454",
+      "publishedAt": "2026-10-12T16:55:00+00:00"
+    },
+    "statsPeriods": {
+      "available": [
+        "past_3_hours",
+        "past_6_hours",
+        "past_day",
+        "past_3_days",
+        "past_week",
+        "past_2_weeks",
+        "past_30_days",
+        "patch_36.6.3",
+        "black_empire",
+        "black_empire_ban"
+      ],
+      "current": "black_empire",
+      "patch": "patch_36.6.3",
+      "ban": "black_empire_ban",
+      "primary": "black_empire_ban",
+      "used": [
+        "past_day",
+        "past_3_days",
+        "past_week",
+        "patch_36.6.3",
+        "black_empire",
+        "black_empire_ban"
+      ]
+    },
+    "model": "claude-sonnet-5-5",
+    "requestedModel": "claude-sonnet-5-5",
+    "sources": [
+      {
+        "id": "hsguru_meta_matrix",
+        "kind": "stats",
+        "fetchedAt": "2026-10-24T22:00:03.510913+00:00",
+        "items": 32
+      },
+      {
+        "id": "hsreplay_cards_wild_legend_1d",
+        "kind": "stats",
+        "fetchedAt": "2026-10-25T06:02:01.061600+00:00",
+        "items": 3740
+      },
+      {
+        "id": "hsreplay_cards_wild_legend_3d",
+        "kind": "stats",
+        "fetchedAt": "2026-10-25T06:02:04.253900+00:00",
+        "items": 4261
+      },
+      {
+        "id": "hsreplay_cards_wild_legend_7d",
+        "kind": "stats",
+        "fetchedAt": "2026-10-25T06:02:07.167366+00:00",
+        "items": 4712
+      },
+      {
+        "id": "hsreplay_cards_wild_legend_14d",
+        "kind": "stats",
+        "fetchedAt": "2026-10-25T06:02:10.208226+00:00",
+        "items": 4979
+      },
+      {
+        "id": "hsreplay_cards_wild_legend_patch",
+        "kind": "stats",
+        "fetchedAt": "2026-10-25T06:02:12.758595+00:00",
+        "items": 4311
+      },
+      {
+        "id": "hsreplay_cards_wild_diamond_4_1_1d",
+        "kind": "stats",
+        "fetchedAt": "2026-10-25T06:02:15.328176+00:00",
+        "items": 3184
+      },
+      {
+        "id": "hsreplay_cards_wild_diamond_4_1_3d",
+        "kind": "stats",
+        "fetchedAt": "2026-10-25T06:02:17.965780+00:00",
+        "items": 3708
+      },
+      {
+        "id": "hsreplay_cards_wild_diamond_4_1_7d",
+        "kind": "stats",
+        "fetchedAt": "2026-10-25T06:02:20.722422+00:00",
+        "items": 4203
+      },
+      {
+        "id": "hsreplay_cards_wild_diamond_4_1_14d",
+        "kind": "stats",
+        "fetchedAt": "2026-10-25T06:02:24.029775+00:00",
+        "items": 4657
+      },
+      {
+        "id": "hsreplay_cards_wild_diamond_4_1_patch",
+        "kind": "stats",
+        "fetchedAt": "2026-10-25T06:02:27.356189+00:00",
+        "items": 3752
+      },
+      {
+        "kind": "social",
+        "id": "reddit:r/hearthstone:hot",
+        "platform": "reddit",
+        "state": "ok",
+        "items": 100
+      },
+      {
+        "kind": "social",
+        "id": "reddit:r/hearthstone:top:week",
+        "platform": "reddit",
+        "state": "ok",
+        "items": 100
+      },
+      {
+        "kind": "social",
+        "id": "reddit:r/hearthstone:search:balance",
+        "platform": "reddit",
+        "state": "ok",
+        "items": 100
+      },
+      {
+        "kind": "social",
+        "id": "reddit:r/CompetitiveHS:hot",
+        "platform": "reddit",
+        "state": "ok",
+        "items": 99
+      },
+      {
+        "kind": "social",
+        "id": "reddit:r/CompetitiveHS:top:week",
+        "platform": "reddit",
+        "state": "ok",
+        "items": 16
+      },
+      {
+        "kind": "social",
+        "id": "reddit:r/CompetitiveHS:search:balance",
+        "platform": "reddit",
+        "state": "ok",
+        "items": 3
+      },
+      {
+        "kind": "social",
+        "id": "reddit:r/wildhearthstone:hot",
+        "platform": "reddit",
+        "state": "ok",
+        "items": 100
+      },
+      {
+        "kind": "social",
+        "id": "reddit:r/wildhearthstone:top:week",
+        "platform": "reddit",
+        "state": "ok",
+        "items": 78
+      },
+      {
+        "kind": "social",
+        "id": "reddit:r/wildhearthstone:search:balance",
+        "platform": "reddit",
+        "state": "ok",
+        "items": 17
+      },
+      {
+        "kind": "social",
+        "id": "reddit:r/hearthstone:search:balance:new",
+        "platform": "reddit",
+        "state": "ok",
+        "items": 100
+      },
+      {
+        "kind": "social",
+        "id": "reddit:comments:1xc2n4e",
+        "platform": "reddit",
+        "state": "ok",
+        "items": 50
+      },
+      {
+        "kind": "social",
+        "id": "reddit:comments:1xdju41",
+        "platform": "reddit",
+        "state": "ok",
+        "items": 50
+      },
+      {
+        "kind": "social",
+        "id": "reddit:comments:1xchk37",
+        "platform": "reddit",
+        "state": "ok",
+        "items": 46
+      },
+      {
+        "kind": "social",
+        "id": "reddit:comments:1xdnsgb",
+        "platform": "reddit",
+        "state": "ok",
+        "items": 22
+      },
+      {
+        "kind": "social",
+        "id": "reddit:comments:1xb99wg",
+        "platform": "reddit",
+        "state": "ok",
+        "items": 50
+      },
+      {
+        "kind": "social",
+        "id": "reddit:comments:1xdcp4d",
+        "platform": "reddit",
+        "state": "ok",
+        "items": 48
+      },
+      {
+        "kind": "social",
+        "id": "reddit:comments:1xbi2nm",
+        "platform": "reddit",
+        "state": "ok",
+        "items": 44
+      },
+      {
+        "kind": "social",
+        "id": "reddit:comments:1xeplz2",
+        "platform": "reddit",
+        "state": "ok",
+        "items": 22
+      },
+      {
+        "kind": "social",
+        "id": "reddit:comments:1xd5l6d",
+        "platform": "reddit",
+        "state": "ok",
+        "items": 35
+      },
+      {
+        "kind": "social",
+        "id": "reddit:comments:1xcwe63",
+        "platform": "reddit",
+        "state": "ok",
+        "items": 32
+      },
+      {
+        "kind": "social",
+        "id": "reddit:comments:1xdv3to",
+        "platform": "reddit",
+        "state": "ok",
+        "items": 16
+      },
+      {
+        "kind": "social",
+        "id": "reddit:comments:1xa02sx",
+        "platform": "reddit",
+        "state": "ok",
+        "items": 33
+      },
+      {
+        "kind": "social",
+        "id": "x:search:balance:top",
+        "platform": "x",
+        "state": "ok",
+        "items": 15
+      },
+      {
+        "kind": "social",
+        "id": "x:search:balance:latest",
+        "platform": "x",
+        "state": "ok",
+        "items": 18
+      },
+      {
+        "kind": "social",
+        "id": "x:official:latest",
+        "platform": "x",
+        "state": "ok",
+        "items": 20
+      },
+      {
+        "kind": "social",
+        "id": "x:creators:latest",
+        "platform": "x",
+        "state": "ok",
+        "items": 7
+      },
+      {
+        "kind": "social",
+        "id": "x:search:entities:top",
+        "platform": "x",
+        "state": "ok",
+        "items": 11
+      },
+      {
+        "kind": "social",
+        "id": "x:search:wild:top",
+        "platform": "x",
+        "state": "ok",
+        "items": 2
+      }
+    ],
+    "socialWindow": {
+      "from": "2026-10-18T00:00:00+00:00",
+      "to": "2026-10-25T10:12:38+00:00",
+      "posts": 106,
+      "comments": 92,
+      "postsSentToModel": 90
+    },
+    "usage": {
+      "analysis": {
+        "inputTokens": 61960,
+        "outputTokens": 10494,
+        "cacheReadInputTokens": 4029,
+        "cacheCreationInputTokens": 0,
+        "costUsd": 0.2297,
+        "durationSeconds": 77.3,
+        "fallbackUsed": false
+      },
+      "social": {
+        "redditapis": {
+          "requests": 0,
+          "billableRequests": 0,
+          "cacheHits": 22,
+          "failedRequests": 0,
+          "costUsd": 0.0,
+          "errors": []
+        },
+        "getxapi": {
+          "requests": 1,
+          "billableRequests": 1,
+          "cacheHits": 5,
+          "failedRequests": 0,
+          "costUsd": 0.001,
+          "errors": []
+        }
+      },
+      "socialSharedAcrossFormats": true,
+      "socialCostUsd": 0.001,
+      "totalCostUsd": 0.2307,
+      "droppedModelItems": []
+    }
+  },
+  "meta": {
+    "source_id": "balance_radar",
+    "fetched_at": "2026-10-25T10:14:00+00:00",
+    "stale": false,
+    "count": 7
+  }
+}

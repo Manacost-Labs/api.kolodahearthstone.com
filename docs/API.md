@@ -77,6 +77,7 @@ Authorization: Bearer khs_v1_<token-id>_<secret>
 | --- | --- | --- |
 | `GET` | `/v1/constructed/decks` | SQL-backed колоды с фильтрами legacy endpoint. |
 | `GET` | `/v1/constructed/deck-radar` | Beta: новые точные deckstrings из HSGuru streamer snapshots, отфильтрованные против current HSGuru catalog; `status=candidate|confirmed`. |
+| `GET` | `/v1/constructed/balance-radar` | Радар нерфов и баффов (Стандарт/Вольный): статистика + Reddit/X + анализ Claude, последний успешный прогон; `format=standard|wild`. История: `/runs`, `/runs/{run_id}`. Контракт: [BALANCE_RADAR.md](BALANCE_RADAR.md). |
 | `GET` | `/v1/constructed/archetypes` | Последние успешные snapshots архетипов. |
 | `GET` | `/v1/battlegrounds/heroes` | Solo/duos герои с пагинацией. |
 | `GET` | `/v1/battlegrounds/minions` | Последний успешный snapshot существ. |

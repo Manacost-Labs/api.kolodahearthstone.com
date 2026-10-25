@@ -16,6 +16,10 @@ services:
         required: true
       - path: ${HS_OPENROUTER_ENV_FILE:-/home/debian/server/secrets/hs-data-api/openrouter.env}
         required: false
+      # Balance Radar: REDDITAPIS_API_KEY, GETXAPI_API_KEY, ANTHROPIC_API_KEY,
+      # RADAR_ANALYSIS_MODEL. Without it the radar job fails; the API still runs.
+      - path: ${HS_RADAR_ENV_FILE:-/home/debian/server/secrets/hs-data-api/radar.env}
+        required: false
       - path: ${HS_GRAPHQL_ENV_FILE:-/home/debian/server/secrets/hs-data-api/graphql.env}
         required: false
       - path: ${HS_META_LAB_ENV_FILE:-/etc/hs-data-api-meta-lab.env}

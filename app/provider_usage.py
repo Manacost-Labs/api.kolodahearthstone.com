@@ -1,4 +1,5 @@
-"""Per-call ledger of paid scrape providers (Decodo, Scrape.do, Firecrawl, Scrapfly).
+"""Per-call ledger of paid providers: scrape backends (Decodo, Scrape.do,
+Firecrawl, Scrapfly) and the Balance Radar APIs (RedditAPIs, GetXAPI, Anthropic).
 
 One row per provider HTTP call. Rows hold no URL, query string, key or body:
 only the target host and a truncated SHA-256 of the URL. Writes are
@@ -33,18 +34,31 @@ _PRUNE_INTERVAL_SECONDS = 3600.0
 _BUSY_TIMEOUT_SECONDS = 0.25
 _MAX_REASON_LENGTH = 64
 
-PROVIDERS = ("decodo", "scrape_do", "firecrawl", "scrapfly")
+PROVIDERS = (
+    "decodo",
+    "scrape_do",
+    "firecrawl",
+    "scrapfly",
+    "redditapis",
+    "getxapi",
+    "anthropic",
+)
 OUTCOMES = ("success", "failed")
 
 # Billing unit and default price per unit, overridden by
 # HS_<PROVIDER>_USD_PER_UNIT. Decodo matches the account dashboard ($1.05 for
 # 1,052 successful requests); Scrape.do is the Pro plan its /info reports
 # (1.25M credits for $99); Firecrawl and Scrapfly are entry plan list prices.
+# RedditAPIs and GetXAPI bill a flat price per read; Anthropic rows already
+# carry the dollar cost of their tokens, so its unit is one US dollar.
 PRICING: dict[str, tuple[str, float]] = {
     "decodo": ("request", 0.001),
     "scrape_do": ("credit", 99.0 / 1_250_000),
     "firecrawl": ("credit", 16.0 / 3_000),
     "scrapfly": ("credit", 30.0 / 200_000),
+    "redditapis": ("request", 0.0015),
+    "getxapi": ("request", 0.001),
+    "anthropic": ("usd", 1.0),
 }
 
 _source_id: ContextVar[str | None] = ContextVar("provider_usage_source", default=None)
