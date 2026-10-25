@@ -491,6 +491,23 @@ SOURCES: tuple[Source, ...] = (
         kind="pipeline",
     ),
     Source(
+        id="hsguru_streamers",
+        url="https://www.hsguru.com/streamer-decks",
+        site="hsguru",
+        category="decks",
+        description=(
+            "HSGuru streamers: every /streamer-decks row (all formats, ranks and windows; "
+            "streamer, deck code, archetype, class, legend peak/latest/worst, win-loss, "
+            "last played), who is live on /streaming-now, and the Twitch channel profile "
+            "(avatar, YouTube, X and other links, past broadcasts for VOD links). "
+            "hs-data-api-docker-refresh-hsguru-streamers.timer runs every five minutes "
+            "(plain Scrape.do, at most five pages in parallel); stale_hours = 5 min "
+            "cadence + backfill run + slack."
+        ),
+        stale_hours=2,
+        kind="pipeline",
+    ),
+    Source(
         id="hsreplay_mulligan",
         url="https://hsreplay.net/decks/",
         site="hsreplay",

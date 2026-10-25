@@ -166,6 +166,12 @@ GraphQL pagination возвращает `items` и `pageInfo`. Максимал�
 | GET | `/v1/hsreplay/mulligan/slices` | `deck` (required), `format` | Срезы одной колоды и их состояние |
 | GET | `/v1/hsreplay/mulligan/history` | срез, `card`, `limit` | Снимки среза и строка одной карты по времени |
 | GET | `/v1/hsreplay/mulligan/coverage` | `runs` | Покрытие, статус премиум-сессии HSReplay, запуски и расход Scrape.do |
+| GET | `/v1/hsguru/streamers` | `q`, `format`, `player_class`, `language`, `live`, `days`, `sort`, `limit`, `offset`, `decks` | Стримеры HSGuru: Twitch/YouTube/X, эфир, последние колоды |
+| GET | `/v1/hsguru/streamers/coverage` | `runs` | Покрытие сбора стримеров и последние запуски |
+| GET | `/v1/hsguru/streamers/{streamer}` | — | Стример: профиль, эфир, колоды по формату и классу, VOD |
+| GET | `/v1/hsguru/streamers/{streamer}/decks` | `format`, `player_class`, `days`, `limit`, `offset` | Колоды стримера с VOD-ссылками |
+| GET | `/v1/hsguru/streamer-decks` | `format`, `player_class`, `archetype`, `max_rank`, `days`, `limit`, `offset` | Колоды всех стримеров, новые сверху |
+| GET | `/v1/hsguru/streaming-now` | `language`, `mode`, `known`, `limit` | Кто сейчас в эфире, с какой колодой и в каком режиме |
 
 ## REST v1 — System
 

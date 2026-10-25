@@ -181,6 +181,9 @@ assert_contains scripts/stage-analytics.py "'hsguru_stat_targets'" 'HSGuru mulli
 assert_contains sql/019_hsreplay_mulligan.sql 'analytics.hsreplay_mulligan_cards' 'HSReplay mulligan tables must exist before the analytics delta stages them'
 assert_migration 019_hsreplay_mulligan 'the migration runner must install the HSReplay mulligan tables'
 assert_contains scripts/stage-analytics.py "'hsreplay_mulligan_targets'" 'HSReplay mulligan targets must be mirrored by the analytics delta'
+assert_contains sql/018_hsguru_streamers.sql 'analytics.hsguru_streamer_decks' 'HSGuru streamer tables must exist before the analytics delta stages them'
+assert_migration 018_hsguru_streamers 'the migration runner must install the HSGuru streamer tables'
+assert_contains scripts/stage-analytics.py "'hsguru_streamers'" 'HSGuru streamers must be mirrored by the analytics delta'
 
 assert_contains systemd/kolodahs-card-history-media.service 'flock -E 75 -w 900' 'a busy sync lock must end the card history turn with a distinct code'
 assert_contains systemd/kolodahs-card-history-media.service 'SuccessExitStatus=75' 'a skipped card history turn must not mark the unit failed'

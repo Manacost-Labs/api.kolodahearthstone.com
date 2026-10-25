@@ -68,6 +68,9 @@ class GraphQLRepository(Protocol):
     async def hsguru_statistics(self, **selector: Any) -> dict[str, Any] | None: ...
 
     async def hsreplay_mulligan(self, **selector: Any) -> dict[str, Any]: ...
+    async def hsguru_streamer_rows(
+        self, query: str, params: dict[str, Any]
+    ) -> list[dict[str, Any]]: ...
 
     async def sources(self, **filters: Any) -> PageResult: ...
 
@@ -981,6 +984,20 @@ class PostgresGraphQLRepository:
                 {"id": snapshot["id"], "opponent": group_key},
             )
         return found
+    async def hsguru_streamer_rows(
+        self, query: str, params: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        """Run one read of :mod:`app.hsguru_streamers` on the mirrored tables.
+
+        The reads are written with ``:name`` parameters for SQLite and only
+        address ``analytics.hsguru_streamer*`` here; values always travel as
+        bound parameters.
+        """
+
+        if "analytics.hsguru_streamer" not in query or ";" in query:
+            raise RepositoryValidationError("Unexpected streamer query")
+        converted = re.sub(r"(?<![:\w]):([a-z_][a-z0-9_]*)", r"%(\1)s", query)
+        return await self._fetch_all(converted, params)
 
     async def sources(
         self,

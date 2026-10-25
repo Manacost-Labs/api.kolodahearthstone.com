@@ -26,6 +26,8 @@ def _no_store_path(path: str) -> bool:
             "/v1/hsguru/archetypes/analysis",
             "/v1/hsguru/mulligan/coverage",
             "/v1/hsreplay/mulligan/coverage",
+            "/v1/hsguru/streaming-now",
+            "/v1/hsguru/streamers/coverage",
             "/v1/system/parsing-reliability",
             "/v1/search",
             "/v1/materials/",
@@ -50,6 +52,10 @@ def _cacheable_path(path: str) -> bool:
         return False
     if path.startswith(("/v1/hsguru/mulligan/coverage", "/v1/hsreplay/mulligan/coverage")):
         # Run rows change without a new snapshot (failed or unchanged pages).
+        return False
+    if path.startswith(("/v1/hsguru/streaming-now", "/v1/hsguru/streamers/coverage")):
+        # "stale" is measured against the request time; a run-revision ETag
+        # would keep a fresh-looking body after the timer stopped.
         return False
     if path.startswith("/v1/system/parsing-reliability"):
         # This report has moving time-window boundaries and generated_at even
@@ -166,6 +172,10 @@ def _db_revision(path: str) -> str | None:
             from .hsguru_matchups import latest_revision as hsguru_matchups_revision
 
             return hsguru_matchups_revision()
+        if path.startswith(("/v1/hsguru/streamers", "/v1/hsguru/streamer-decks")):
+            from .hsguru_streamers import latest_revision as hsguru_streamers_revision
+
+            return hsguru_streamers_revision()
         if path.startswith(("/v1/hsguru/mulligan", "/v1/hsguru/class-matchups")):
             from .hsguru_mulligan import latest_revision as hsguru_stats_revision
 

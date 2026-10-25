@@ -202,6 +202,13 @@ function compareSqliteCounts(): array
         'hsreplay_mulligan_runs',
         'hsreplay_mulligan_snapshots',
         'hsreplay_mulligan_targets',
+        // The HSGuru streamers writer runs every five minutes, replaces the
+        // live table and prunes old VODs and runs.
+        'hsguru_streamer_decks',
+        'hsguru_streamer_live',
+        'hsguru_streamer_runs',
+        'hsguru_streamer_vods',
+        'hsguru_streamers',
     ];
     $sourceTotal = 0;
     $targetTotal = 0;

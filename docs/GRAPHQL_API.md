@@ -39,6 +39,9 @@ to the new hostname first and adopt GraphQL separately.
 | `hsguruEsportsPoints` | HSEsports points of a season (`season`, `leaderboard` STD/BG_LL, `region`); same shape as REST `/v1/hsguru/esports/points` `data` |
 | `hsguruEsportsLegacy` | Archived Masters Tour table (`table`: mt-stats, qualifier-stats, mt-points; `selector`) |
 | `hsreplayMulligan` | HSReplay mulligan v2 of one deck slice: `deck` (HSReplay shortid), `format`, `rank` (`legend`, `diamond_4to1`, `diamond`, `bronze_gold`), `initiative` (`all`, `first`, `coin`), `period` (`last_30_days`, `current_patch`, `current_expansion`), `opponentClass`. JSON with the same shape as REST `/v1/hsreplay/mulligan` `data` (`source: "hsreplay"`); `null` when not collected; error `PREMIUM_SESSION_UNAVAILABLE` (with `extensions.premiumSession`) when a premium slice cannot be served because the HSReplay session is rejected |
+| `hsguruStreamers` | HSGuru streamers (`q`, `format`, `playerClass`, `language`, `live`, `days`, `sort`, `limit`, `offset`, `decks`): links, live stream, last decks; JSON with the same shape as REST `/v1/hsguru/streamers` (`items`, `total`) |
+| `hsguruStreamer` / `hsguruStreamerDecks` | One streamer (`streamer`: login, name or Twitch id) and their decks (`format`, `playerClass`, `days`, `limit`, `offset`); same shapes as REST `/v1/hsguru/streamers/{streamer}` and `/decks` |
+| `hsguruStreamingNow` | Live streams with the current deck and mode (`language`, `mode`, `known`, `limit`); the mirror trails the five-minute refresh by up to 15 minutes |
 | `sources` | Integrated sources and their last update state |
 | `search` | One search across cards, minions, heroes, archetypes and sources |
 | `datasets` | Latest imported version and payload size for each source |

@@ -541,6 +541,24 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Skip this scheduled pipeline when its admin section is disabled.",
     )
     hsguru_mulligan.add_argument("--schedule-id")
+    hsguru_streamers = sub.add_parser(
+        "refresh-hsguru-streamers",
+        help=(
+            "Read HSGuru /streaming-now, new /streamer-decks rows down to the last "
+            "complete walk, and due Twitch channel profiles."
+        ),
+    )
+    hsguru_streamers.add_argument(
+        "--no-profiles",
+        action="store_true",
+        help="Skip the Twitch channel profiles in this run.",
+    )
+    hsguru_streamers.add_argument(
+        "--scheduled",
+        action="store_true",
+        help="Skip this scheduled pipeline when its admin section is disabled.",
+    )
+    hsguru_streamers.add_argument("--schedule-id")
     hsreplay_mulligan = sub.add_parser(
         "refresh-hsreplay-mulligan",
         help=(
@@ -760,6 +778,7 @@ def main(argv: list[str] | None = None) -> int:
             {"hsguru_archetype_analysis"}
         ),
         "refresh-hsguru-mulligan": frozenset({"hsguru_mulligan"}),
+        "refresh-hsguru-streamers": frozenset({"hsguru_streamers"}),
         "refresh-hsreplay-mulligan": frozenset({"hsreplay_mulligan"}),
         "refresh-hsguru-matchups": frozenset({"hsguru_matchups"}),
         "refresh-hsguru-brawl": frozenset({"hsguru_brawl"}),
@@ -1487,6 +1506,39 @@ def main(argv: list[str] | None = None) -> int:
             source_id,
             lambda: asyncio.run(refresh_hsguru_mulligan(max_pages=args.max_pages)),
             diagnostic=args.max_pages is not None,
+            refresh_window_id=dedicated_refresh_window_id,
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        if args.scheduled and result.get("state") == "locked":
+            return int(ExitCode.DEGRADED)
+        if result.get("ok") and result.get("published"):
+            return int(ExitCode.OK)
+        if args.scheduled and result.get("published"):
+            return int(ExitCode.DEGRADED)
+        return int(ExitCode.ERROR)
+    if args.command == "refresh-hsguru-streamers":
+        source_id = "hsguru_streamers"
+        if args.scheduled:
+            from .parser_control import is_source_scheduled_enabled
+
+            if not is_source_scheduled_enabled(source_id):
+                result = _run_pipeline_command_with_telemetry(
+                    source_id,
+                    lambda: {
+                        "ok": True,
+                        "skipped": True,
+                        "reason": "section_disabled",
+                        "source_id": source_id,
+                    },
+                    refresh_window_id=dedicated_refresh_window_id,
+                )
+                print(json.dumps(result, ensure_ascii=False, indent=2))
+                return 0
+        from .hsguru_streamers import refresh_hsguru_streamers
+
+        result = _run_pipeline_command_with_telemetry(
+            source_id,
+            lambda: asyncio.run(refresh_hsguru_streamers(profiles=not args.no_profiles)),
             refresh_window_id=dedicated_refresh_window_id,
         )
         print(json.dumps(result, ensure_ascii=False, indent=2, default=str))

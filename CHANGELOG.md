@@ -31,6 +31,17 @@
   re-read hourly, wide ones every 6-48 hours (plain Scrape.do, five pages in
   parallel, ~800 credits a day). HSGuru publishes no coin split for matchups,
   so only `any_player` exists. See docs/HSGURU_MATCHUPS.md.
+- HSGuru streamers (`hsguru_streamers`, every five minutes): every
+  `/streamer-decks` row in all formats, ranks and windows (one walk from the
+  top down to the last complete walk; the first run goes back 120 days), who
+  is live on `/streaming-now` with the deck played on the current broadcast,
+  and the Twitch channel profile (avatar, YouTube, X and other links, past
+  broadcasts, so a deck links to the moment of its VOD). Plain Scrape.do, at
+  most five pages in parallel, ~3 credits a run. REST `/v1/hsguru/streamers`,
+  `/streamers/{streamer}`, `/streamers/{streamer}/decks`, `/streamer-decks`,
+  `/streaming-now`, `/streamers/coverage`; GraphQL `hsguruStreamers`,
+  `hsguruStreamer`, `hsguruStreamerDecks`, `hsguruStreamingNow` from the
+  PostgreSQL mirror (migration 018). See docs/HSGURU_STREAMERS.md.
 - HSGuru mulligan no longer grows to gigabytes during a run (5.2 GiB RSS in
   production). The parse cache keyed by page HTML kept about 130 pages
   (~230 MB) alive; the parsed result now travels with the page from

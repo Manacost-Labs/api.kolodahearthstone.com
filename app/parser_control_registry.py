@@ -90,6 +90,7 @@ SECTIONS: tuple[ParserSection, ...] = (
         description="Популярные, стримерские, фановые и высокоранговые сборки.",
         source_ids=(
             "hsguru_streamer_decks_legend_1000",
+            "hsguru_streamers",
             "hsguru_fun_decks",
             "hsreplay_decks_trending",
             "hearthstone_decks",
@@ -222,6 +223,7 @@ if _duplicates:
 
 SOURCE_LABELS_RU: dict[str, str] = {
     "hsguru_streamer_decks_legend_1000": "HSGuru · колоды стримеров, топ-1000 Легенды",
+    "hsguru_streamers": "HSGuru · стримеры: все колоды, кто в эфире, ссылки на каналы",
     "hsguru_fun_decks": "HSGuru · фановые / off-meta колоды",
     "hsguru_meta_standard_legend": "HSGuru · Standard, Легенда",
     "hsguru_meta_standard_diamond_4to1": "HSGuru · Standard, Алмаз 4–1",

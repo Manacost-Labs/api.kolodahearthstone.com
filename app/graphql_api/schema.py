@@ -540,6 +540,37 @@ async def _hsguru_statistics(
     )
 
 
+def _streamer_fetch(info: Info[GraphQLContext, None]) -> Any:
+    repository = _repository(info)
+
+    async def fetch(query: str, params: dict[str, Any]) -> list[dict[str, Any]]:
+        return await _call_repository(repository.hsguru_streamer_rows(query, params))
+
+    return fetch
+
+
+def _streamer_filters(
+    format_name: str | None,
+    player_class: str | None,
+    language: str | None = None,
+) -> None:
+    from ..hsguru_streamers import CLASSES, FORMATS
+
+    if format_name is not None and format_name not in FORMATS:
+        raise _validation_error(f"format must be one of {', '.join(FORMATS)}")
+    if player_class is not None and player_class not in CLASSES:
+        raise _validation_error("playerClass must be an upper-case class key")
+    if language is not None and not (len(language) == 2 and language.isalpha()):
+        raise _validation_error("language must be a two-letter code")
+
+
+def _streamer_page(limit: int, offset: int, maximum: int) -> None:
+    if not 1 <= limit <= maximum:
+        raise _validation_error(f"limit must be between 1 and {maximum}")
+    if not 0 <= offset <= 100_000:
+        raise _validation_error("offset must be between 0 and 100000")
+
+
 async def _hsreplay_mulligan(
     info: Info[GraphQLContext, None],
     *,
@@ -1318,6 +1349,135 @@ class Query:
             period=period,
             coin=coin,
             opponent_class="any",
+        )
+
+    @strawberry.field(
+        description=(
+            "HSGuru streamers who played a deck in the last `days` (0 = ever), live "
+            "ones first: Twitch/YouTube/X links, avatar, live stream and the last "
+            "`decks` decks. Sort: active, followers, decks or rank. Same shape as REST "
+            "/v1/hsguru/streamers (`items`, `total`). Read from the central mirror, "
+            "which trails the five-minute refresh by up to 15 minutes."
+        )
+    )
+    async def hsguru_streamers(
+        self,
+        info: Info[GraphQLContext, None],
+        q: str | None = None,
+        format: str | None = None,
+        player_class: str | None = None,
+        language: str | None = None,
+        live: bool = False,
+        days: int = 30,
+        sort: str = "active",
+        limit: int = 24,
+        offset: int = 0,
+        decks: int = 3,
+    ) -> JSON:
+        from ..hsguru_streamers import POSTGRES_TABLES, SORTS, list_streamers
+
+        _streamer_filters(format, player_class, language)
+        _streamer_page(limit, offset, 100)
+        if sort not in SORTS:
+            raise _validation_error(f"sort must be one of {', '.join(SORTS)}")
+        if not 0 <= days <= 3650 or not 0 <= decks <= 10:
+            raise _validation_error("days must be 0-3650 and decks 0-10")
+        return await list_streamers(
+            _streamer_fetch(info),
+            POSTGRES_TABLES,
+            q=_normalize_text(q, "q", 64),
+            format_name=format,
+            player_class=player_class,
+            language=language,
+            live_only=live,
+            days=days or None,
+            sort=sort,
+            limit=limit,
+            offset=offset,
+            decks_per_streamer=decks,
+        )
+
+    @strawberry.field(
+        description=(
+            "One HSGuru streamer by Twitch login, display name or Twitch user id: "
+            "profile, links, live stream, deck counts by format and class, past "
+            "broadcasts. Same shape as REST /v1/hsguru/streamers/{streamer} `data`."
+        )
+    )
+    async def hsguru_streamer(
+        self, info: Info[GraphQLContext, None], streamer: str
+    ) -> JSON | None:
+        from ..hsguru_streamers import POSTGRES_TABLES, get_streamer
+
+        key = _normalize_text(streamer, "streamer", 64)
+        if not key:
+            raise _validation_error("streamer is required")
+        return await get_streamer(_streamer_fetch(info), POSTGRES_TABLES, streamer=key)
+
+    @strawberry.field(
+        description=(
+            "Decks of one HSGuru streamer, newest game first, with VOD links where "
+            "known; optional format, playerClass and days. Same shape as REST "
+            "/v1/hsguru/streamers/{streamer}/decks (`streamer`, `items`, `total`)."
+        )
+    )
+    async def hsguru_streamer_decks(
+        self,
+        info: Info[GraphQLContext, None],
+        streamer: str,
+        format: str | None = None,
+        player_class: str | None = None,
+        days: int = 0,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> JSON | None:
+        from ..hsguru_streamers import POSTGRES_TABLES, streamer_decks
+
+        key = _normalize_text(streamer, "streamer", 64)
+        if not key:
+            raise _validation_error("streamer is required")
+        _streamer_filters(format, player_class)
+        _streamer_page(limit, offset, MAX_PAGE_SIZE)
+        if not 0 <= days <= 3650:
+            raise _validation_error("days must be between 0 and 3650")
+        return await streamer_decks(
+            _streamer_fetch(info),
+            POSTGRES_TABLES,
+            streamer=key,
+            format_name=format,
+            player_class=player_class,
+            days=days or None,
+            limit=limit,
+            offset=offset,
+        )
+
+    @strawberry.field(
+        description=(
+            "Live Hearthstone streams HSGuru lists, with the deck played on the current "
+            "broadcast and the mode (HSGuru's, or the deck's format). Same shape as REST "
+            "/v1/hsguru/streaming-now (`items`, `observed_at`, `stale`); the mirror "
+            "trails the five-minute refresh by up to 15 minutes."
+        )
+    )
+    async def hsguru_streaming_now(
+        self,
+        info: Info[GraphQLContext, None],
+        language: str | None = None,
+        mode: str | None = None,
+        known: bool = False,
+        limit: int = 100,
+    ) -> JSON:
+        from ..hsguru_streamers import POSTGRES_TABLES, streaming_now
+
+        _streamer_filters(None, None, language)
+        _streamer_page(limit, 0, 300)
+        return await streaming_now(
+            _streamer_fetch(info),
+            POSTGRES_TABLES,
+            language=language,
+            mode=_normalize_text(mode, "mode", 32),
+            known_only=known,
+            limit=limit,
         )
 
     @strawberry.field(

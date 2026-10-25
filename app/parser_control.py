@@ -1801,6 +1801,10 @@ async def _run_pipeline_source(source_id: str) -> dict[str, Any]:
         from .hsguru_matchups import refresh_hsguru_matchups
 
         result = await refresh_hsguru_matchups()
+    elif source_id == "hsguru_streamers":
+        from .hsguru_streamers import refresh_hsguru_streamers
+
+        result = await refresh_hsguru_streamers()
     elif source_id == "hsreplay_battlegrounds_compositions_screenshot":
         from .hsreplay_bg_screenshots import capture_compositions_screenshot
 
@@ -1858,6 +1862,7 @@ async def _run_pipeline_source(source_id: str) -> dict[str, Any]:
             "hsguru_esports_legacy": ("rows",),
             "hsreplay_mulligan": ("targets_with_data",),
             "hsguru_matchups": ("slices_with_data",),
+            "hsguru_streamers": ("decks",),
             "hsreplay_battlegrounds_minions": ("minions_ok", "minions_total"),
         }
         rows_total = next(

@@ -359,12 +359,14 @@ def init_db() -> None:
             from .hsguru_mulligan_store import ensure_hsguru_mulligan_schema
             from .hsreplay_mulligan_store import ensure_hsreplay_mulligan_schema
             from .hsguru_matchups import ensure_hsguru_matchups_schema
+            from .hsguru_streamers_store import ensure_hsguru_streamers_schema
 
             ensure_deck_radar_schema(conn)
             ensure_bg_minion_stats_schema(conn)
             ensure_hsguru_mulligan_schema(conn)
             ensure_hsreplay_mulligan_schema(conn)
             ensure_hsguru_matchups_schema(conn)
+            ensure_hsguru_streamers_schema(conn)
             
             logger.info("SQLite database tables initialized successfully.")
     except Exception as e:

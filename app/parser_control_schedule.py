@@ -20,7 +20,7 @@ from .source_tiers import LIGHT_API_IDS, MEDIUM_API_IDS
 from .sources import SOURCE_BY_ID
 
 SCHEDULE_INVENTORY_SCHEMA_VERSION = 2
-SCHEDULE_INVENTORY_VERSION = "2026-10-25.5"
+SCHEDULE_INVENTORY_VERSION = "2026-10-25.6"
 SCHEDULE_TIMEZONE = "Europe/Warsaw"
 
 _SYSTEMCTL_SEARCH_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
@@ -194,6 +194,17 @@ _SCHEDULES: tuple[_ScheduleSpec, ...] = (
         ),
         recurrence="daily",
         local_times=_times((5, 40)),
+    ),
+    _ScheduleSpec(
+        id="refresh-hsguru-streamers",
+        label="Каждые 5 минут — стримеры HSGuru: эфиры, колоды, профили",
+        systemd_unit="hs-data-api-docker-refresh-hsguru-streamers.timer",
+        on_calendar=("*-*-* *:00/5:00 Europe/Warsaw",),
+        source_ids=frozenset({"hsguru_streamers"}),
+        recurrence="daily",
+        local_times=_times(
+            *((hour, minute) for hour in range(24) for minute in range(0, 60, 5))
+        ),
     ),
     _ScheduleSpec(
         id="recover-hsguru-archetype-analysis",
