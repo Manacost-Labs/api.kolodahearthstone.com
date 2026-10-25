@@ -1,8 +1,11 @@
 [Unit]
-Description=Refresh the most overdue HSGuru mulligan pages every three hours
+Description=Refresh the most overdue HSGuru mulligan pages every hour
 
 [Timer]
-OnCalendar=*-*-* 00/3:25:00 Europe/Warsaw
+# A run still in progress (up to 150 min while the plan loads) makes systemd
+# skip the next trigger, so loading continues back to back; afterwards a run
+# only reads the few pages whose TTL expired.
+OnCalendar=*-*-* *:25:00 Europe/Warsaw
 AccuracySec=5min
 Persistent=false
 

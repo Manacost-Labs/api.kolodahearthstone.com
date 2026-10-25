@@ -349,6 +349,9 @@ def _routes(free_html: str | Exception, paid_html: str | Exception, calls: list[
 
     async def paid(source, **options):
         calls.append("paid")
+        # Plain request first: HSGuru tables are server-rendered LiveView.
+        assert options["scrape_do_profiles"] == mulligan.SCRAPE_DO_PROFILES
+        assert options["scrape_do_profiles"][0] == (False, False)
         assert options["skip_providers"] == {
             "decodo",
             "firecrawl",
@@ -489,7 +492,7 @@ def test_settings_from_env_clamps_concurrency_and_validates_transport(
     monkeypatch,
 ) -> None:
     defaults = mulligan.Settings.from_env()
-    assert (defaults.transport, defaults.concurrency) == ("scrape_do", 25)
+    assert (defaults.transport, defaults.concurrency) == ("scrape_do", 40)
     assert (defaults.scrape_do_run_credits, defaults.scrape_do_daily_credits) == (0, 0)
     monkeypatch.setenv("HS_HSGURU_MULLIGAN_CONCURRENCY", "500")
     monkeypatch.setenv("HS_HSGURU_MULLIGAN_TRANSPORT", "bogus")
@@ -856,3 +859,93 @@ def test_credit_caps_are_unlimited_by_default_and_daily_cap_counts_earlier_runs(
         ),
     )
     assert capped["scrape_do_credit_cap"] == 10
+
+
+@pytest.mark.parametrize(
+    ("profiles", "expected"),
+    [(mulligan.SCRAPE_DO_PROFILES, mulligan.SCRAPE_DO_PROFILES), (None, None)],
+)
+def test_cascade_uses_the_caller_profile_ladder_only_when_given(
+    monkeypatch, profiles, expected
+) -> None:
+    from app import firecrawl_backend
+    from app.sources import Source
+
+    seen: list[Any] = []
+
+    def fake_scrape_do(source, **options):
+        seen.append(options["profiles"])
+        raise RuntimeError("stop here")
+
+    monkeypatch.setattr(firecrawl_backend, "scrape_do_token", lambda: "token")
+    monkeypatch.setattr(firecrawl_backend, "decodo_api_key", lambda: None)
+    monkeypatch.setattr(firecrawl_backend, "_scrape_via_scrape_do", fake_scrape_do)
+    source = Source(
+        id="hsguru_mulligan:page",
+        url="https://www.hsguru.com/card-stats?archetype=Zoolock",
+        site="hsguru",
+        category="archetype_analysis",
+        kind="pipeline",
+    )
+    with pytest.raises(RuntimeError):
+        firecrawl_backend._scrape_sync(
+            source,
+            formats=["html"],
+            skip_providers={"decodo", "firecrawl", "brightdata", "scrapfly"},
+            scrape_do_profiles=profiles,
+        )
+    # Without the argument the cascade keeps its own measured HSGuru ladder.
+    assert seen == [expected]
+
+
+# --- Scrape.do without a browser (HSGuru LiveView dead render, 2026-10-25) --------
+
+NORENDER = ROOT / "tests/fixtures/hsguru_mulligan"
+
+
+def test_dead_render_class_matchups_parse_completely() -> None:
+    html = (NORENDER / "norender_archetype_matchups.html").read_text()
+    parsed = mulligan.parse_class_matchups_page(html)
+    assert (parsed["games"], parsed["winrate"], len(parsed["rows"])) == (
+        118816,
+        61.5,
+        11,
+    )
+    assert parsed["rows"][0] == {
+        "class_key": "deathknight",
+        "winrate": 61.7,
+        "games": 16029,
+        "share_pct": 13.5,
+    }
+
+
+def test_dead_render_card_stats_have_cards_and_sample_but_need_show_counts() -> None:
+    from bs4 import BeautifulSoup
+
+    from app.hsguru_archetype_analysis import _card_identity, parse_card_stats_games
+
+    # Fetched without show_counts=yes: impacts only, so the plain profile
+    # result is rejected and the ladder escalates instead of storing it.
+    html = (NORENDER / "norender_card_stats_without_counts.html").read_text()
+    assert parse_card_stats_games(html) == 180162
+    cells = [
+        row.find_all("td")[0] for row in BeautifulSoup(html, "lxml").select("tbody tr")
+    ]
+    names = [mulligan._card_name(cell, _card_identity(cell)[2]) for cell in cells]
+    assert len(names) == 32 and names[:2] == ["Ritual of Summoning", "Ritual of C'Thun"]
+    assert all(_card_identity(cell)[1] for cell in cells)
+    with pytest.raises(mulligan.PageRejected, match="content_validation"):
+        mulligan.parse_mulligan_html(html)
+    # Every mulligan URL asks for the count columns.
+    target = mulligan._target(
+        kind="cards",
+        subject_type="archetype",
+        format_name="standard",
+        archetype="Zoolock",
+        rank="all",
+        period="black_empire",
+        coin="on_coin",
+        tier=2,
+        expected_games=1,
+    )
+    assert "show_counts=yes" in mulligan.target_url(target)

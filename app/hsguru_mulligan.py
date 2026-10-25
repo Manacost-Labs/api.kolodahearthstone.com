@@ -86,8 +86,8 @@ OPPONENT_CLASSES = (
 # 3/6-hour windows rarely reach a usable per-card sample and churn constantly.
 SKIPPED_PERIODS = frozenset({"past_3_hours", "past_6_hours"})
 # The default plan needs about 1,200 pages a day by TTL (see
-# ``estimate_plan``): about 7,300 Scrape.do credits at the measured average of
-# 6 credits a page. Shorter TTLs cost credits proportionally.
+# ``estimate_plan``): about 1,300 Scrape.do credits when the plain 1-credit
+# profile serves the page. Shorter TTLs cost credits proportionally.
 ROLLING_TTL_HOURS = {
     "past_day": 24,
     "past_3_days": 72,
@@ -145,6 +145,11 @@ MAX_CONCURRENCY = 50
 SCRAPE_DO_RESERVE_CREDITS = 25
 FLARESOLVERR_WAIT_MS = 0
 SCRAPE_DO_TIMEOUT_MS = 60_000
+# HSGuru serves these pages as LiveView dead renders, so a plain request has
+# the full tables (2026-10-25: 8 s and 1 credit vs 54 s and 5 credits with
+# render, same 32 cards). A rejected page climbs to the browser profiles,
+# which also carry the session cookie for premium filters.
+SCRAPE_DO_PROFILES = ((False, False), (True, False), (False, True), (True, True))
 
 
 def _env_int(
@@ -164,12 +169,12 @@ class Settings:
     opponent_min_games: int = 10000
     deck_min_games: int = 100
     deck_coin_min_games: int = 600
-    # One run can load the whole plan: ~4,000 Scrape.do pages an hour at 25.
+    # One run can load the whole plan: ~15,000 plain Scrape.do pages an hour.
     max_pages: int = 10_000
     deadline_seconds: int = 150 * 60
     # Scrape.do allows 50 concurrent requests per account; the meta matrix (5)
     # and the deck catalogs share them.
-    concurrency: int = 25
+    concurrency: int = 40
     # 0 means no cap. Positive values are hard safety limits.
     scrape_do_run_credits: int = 0
     scrape_do_daily_credits: int = 0
@@ -748,6 +753,7 @@ class Acquirer:
                 timeout_ms=SCRAPE_DO_TIMEOUT_MS,
                 skip_providers={"decodo", "firecrawl", "brightdata", "scrapfly"},
                 accept_result=lambda scraped: page_is_valid(kind, scraped.html),
+                scrape_do_profiles=SCRAPE_DO_PROFILES,
             )
         credits = int(getattr(result, "request_credits", 0) or 0)
         self.scrape_do_credits += credits

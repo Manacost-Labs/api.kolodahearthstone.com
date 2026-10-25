@@ -483,9 +483,9 @@ SOURCES: tuple[Source, ...] = (
             "per card) and class matchups for every archetype and catalog deck with enough "
             "games, by format, rank, period (including the Bans window), coin and, for the "
             "most played archetypes, opponent class. An incremental queue reads the most "
-            "overdue pages every three hours through hs-data-api-docker-refresh-hsguru-mulligan.timer "
-            "(Scrape.do with 25 parallel pages, FlareSolverr fallback) into SQLite snapshots mirrored "
-            "to PostgreSQL; stale_hours = 3h cadence + 9h slack."
+            "overdue pages every hour through hs-data-api-docker-refresh-hsguru-mulligan.timer "
+            "(plain Scrape.do with 40 parallel pages, FlareSolverr fallback) into SQLite snapshots mirrored "
+            "to PostgreSQL; stale_hours = 1h cadence + 150 min run + slack."
         ),
         stale_hours=12,
         kind="pipeline",

@@ -429,10 +429,11 @@ curl -s "https://api.kolodahearthstone.com/datasets/hsreplay_battlegrounds_comps
 Scrape.do, все параметры и поля): [HSGURU_MULLIGAN.md](HSGURU_MULLIGAN.md).
 
 Источник `hsguru_mulligan` (pipeline). Таймер
-`hs-data-api-docker-refresh-hsguru-mulligan.timer` каждые 3 часа читает самые
+`hs-data-api-docker-refresh-hsguru-mulligan.timer` каждый час читает самые
 просроченные страницы `/card-stats`, `/archetype/<name>` и `/deck/<id>` для
 архетипов `hsguru_meta_matrix` и колод каталогов HSGuru. Страницы идут
-через Scrape.do по 25 параллельно; FlareSolverr — запасной маршрут.
+через Scrape.do по 40 параллельно, сначала без браузера (1 кредит);
+FlareSolverr — запасной маршрут.
 
 | Endpoint | Что возвращает |
 | --- | --- |
