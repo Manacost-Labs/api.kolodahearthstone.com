@@ -8,6 +8,24 @@
 - HSGuru mulligan: class matchup pages that map two labels to one class keep
   the larger sample, and a failed write of one page marks only that target
   failed instead of ending the run (#62).
+
+- HSGuru deck catalogs and archetype analysis ask Scrape.do for a plain page
+  first (1 credit instead of 5): deck, archetype and card-stats pages are
+  LiveView dead renders, and on 2026-10-25 plain and rendered pages gave the
+  same builds, games, winrates, matchups and card rows. A rejected plain page
+  gets one rendered retry; replay pages, whose table loads after the LiveView
+  connects, get one rendered request. Super proxies, Decodo and the paid
+  remote reserves are no longer used for these pages; a page that every route
+  failed is retried after 30 and 120 s instead of climbing the paid ladder.
+  Provider usage keeps recording `render` and the cost of every call.
+- HSGuru replays are asked once per window (the catalog window, plus the
+  whole release for Bans) and their builds and empty lookups are reused for
+  three days, instead of asking every fallback window every night.
+- Every HSGuru archetype catalog row without a build of its own window gets
+  builds from wider windows (Bans: the whole release, then the rolling month)
+  or real deck codes from its public replays, and says where they come from
+  (`decks_period`, `decks_source`, `decks_fallback`).
+
 - Balance Radar: accurate, short, Russian-only texts. Archetypes use
   HearthPulse's own labels (the rest translated once by Claude and cached);
   cards use the ruRU localization. Every reader text is cleaned

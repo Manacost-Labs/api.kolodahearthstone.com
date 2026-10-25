@@ -44,6 +44,11 @@ PUBLISHABLE_CARD_GAP_STATES = {
     "upstream_card_tallies_missing",
 }
 ANALYSIS_WAIT_MS = 0
+# Archetype and card-stats pages are LiveView dead renders: on 2026-10-25 a
+# plain Scrape.do request (1 credit) returned the same matchups and card rows
+# as a rendered one (5 credits). A rejected plain page gets one rendered retry
+# (which also carries the session cookie); no super proxy or paid reserve.
+ANALYSIS_SCRAPE_DO_PROFILES = ((False, False), (True, False))
 ANALYSIS_TIMEOUT_MS = 45_000
 PROVIDER_CIRCUIT_FAILURE_THRESHOLD = 3
 CHECKPOINT_INTERVAL_TARGETS = 5
@@ -830,11 +835,9 @@ async def _fetch_html(url: str) -> tuple[str, dict[str, Any]]:
             max_age_ms=0,
             wait_ms=ANALYSIS_WAIT_MS,
             timeout_ms=ANALYSIS_TIMEOUT_MS,
-            skip_providers={"scrapfly"},
-            brightdata_accept_html=lambda html: _analysis_html_is_valid(url, html),
-            brightdata_render=False,
-            brightdata_anonymous_fallback=True,
+            skip_providers={"brightdata", "decodo", "firecrawl", "scrapfly"},
             accept_result=lambda scraped: _analysis_html_is_valid(url, scraped.html),
+            scrape_do_profiles=ANALYSIS_SCRAPE_DO_PROFILES,
         )
         if not _analysis_html_is_valid(url, result.html):
             raise RuntimeError("content_validation")
