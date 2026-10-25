@@ -73,6 +73,17 @@ def test_clean_text_is_russian_only_and_free_of_field_names() -> None:
     assert "latin:Shredslock" in leftover
 
 
+def test_company_blizzard_is_never_the_mage_spell() -> None:
+    glossary_with_spell = glossary()
+    glossary_with_spell.add("Blizzard", "Снежная буря")
+    text = glossary_with_spell.clean(
+        "Blizzard отметила, что следит за игрой. Снежная буря сообщила о бане, "
+        "а Снежная буря может не спешить."
+    )
+    assert "Снежная буря" not in text
+    assert text.count("Blizzard") == 3
+
+
 def test_mentions_mark_inflected_names_by_ref() -> None:
     found = glossary().mentions("Нерф Ритуала призыва ударит по Зоолоку.")
     assert [(m["ref"], m["text"]) for m in found] == [
