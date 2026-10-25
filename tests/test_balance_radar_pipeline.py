@@ -111,6 +111,19 @@ class FakeClaude:
                 "social_summary": "Просят нерф.",
                 "evidence_post_ids": [ritual_post_id(), "x:made-up"],
                 "precedent_ids": [],
+                "key_numbers": ["55,9% при 18,8%"],
+                "predicted_changes": [
+                    {
+                        "change": "Стоимость 2 → 3",
+                        "field": "cost",
+                        "before": 2,
+                        "after": 3,
+                        "probability": 60,
+                    }
+                ],
+                "meta_impact": "Zoolock ослабнет.",
+                "quotes": [],
+                "developer_signal": "",
             },
             {
                 "ref": "archetype:standard:Zoolock",
@@ -124,12 +137,26 @@ class FakeClaude:
                 "social_summary": "",
                 "evidence_post_ids": [],
                 "precedent_ids": [],
+                "key_numbers": ["55,9% при 18,8%"],
+                "predicted_changes": [
+                    {
+                        "change": "Стоимость 2 → 3",
+                        "field": "cost",
+                        "before": 2,
+                        "after": 3,
+                        "probability": 60,
+                    }
+                ],
+                "meta_impact": "Zoolock ослабнет.",
+                "quotes": [],
+                "developer_signal": "",
             },
         ]
         if self.invent:
             nerfs.append({**nerfs[0], "ref": "card:DOES_NOT_EXIST"})
         output = {
             "summary": "Чернокнижник доминирует.",
+            "timing_outlook": "Патч вероятен через неделю.",
             "nerfs": nerfs,
             "buffs": [
                 {
@@ -144,6 +171,19 @@ class FakeClaude:
                     "social_summary": "",
                     "evidence_post_ids": [],
                     "precedent_ids": [],
+                    "key_numbers": ["55,9% при 18,8%"],
+                    "predicted_changes": [
+                        {
+                            "change": "Стоимость 2 → 3",
+                            "field": "cost",
+                            "before": 2,
+                            "after": 3,
+                            "probability": 60,
+                        }
+                    ],
+                    "meta_impact": "Zoolock ослабнет.",
+                    "quotes": [],
+                    "developer_signal": "",
                 }
             ],
         }

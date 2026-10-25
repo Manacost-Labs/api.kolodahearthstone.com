@@ -29,6 +29,19 @@ def candidate(ref: str, **overrides: Any) -> dict[str, Any]:
         "social_summary": "Игроки просят нерф.",
         "evidence_post_ids": ["reddit:1"],
         "precedent_ids": [],
+        "key_numbers": ["55,9% при 18,8%"],
+        "predicted_changes": [
+            {
+                "change": "Стоимость 2 → 3",
+                "field": "cost",
+                "before": 2,
+                "after": 3,
+                "probability": 60,
+            }
+        ],
+        "meta_impact": "Zoolock ослабнет.",
+        "quotes": [],
+        "developer_signal": "",
         **overrides,
     }
 
@@ -36,6 +49,7 @@ def candidate(ref: str, **overrides: Any) -> dict[str, Any]:
 def output(**overrides: Any) -> dict[str, Any]:
     return {
         "summary": "Чернокнижник доминирует.",
+        "timing_outlook": "Через неделю.",
         "nerfs": [candidate("card:BE_RIT")],
         "buffs": [],
         **overrides,
@@ -116,11 +130,11 @@ def test_unknown_refs_posts_and_duplicates_are_dropped() -> None:
             ],
             buffs=[
                 candidate("card:BE_RIT"),
-                *[candidate(f"class:standard:C{i}") for i in range(12)],
+                *[candidate(f"class:standard:C{i}") for i in range(30)],
             ],
         )
     )
-    allowed = {"card:BE_RIT", *(f"class:standard:C{i}" for i in range(12))}
+    allowed = {"card:BE_RIT", *(f"class:standard:C{i}" for i in range(30))}
     cleaned, dropped = validate_output(raw, allowed, {"reddit:1"})
 
     assert [c.ref for c in cleaned.nerfs] == ["card:BE_RIT"]

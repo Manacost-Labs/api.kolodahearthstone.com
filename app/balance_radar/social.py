@@ -44,6 +44,12 @@ DEFAULT_X_ACCOUNTS = (
     "RduHS",
 )
 OFFICIAL_X_ACCOUNTS = frozenset({"playhearthstone"})
+# Reddit marks Blizzard staff with a flair; developers' own words weigh more.
+_DEVELOPER_FLAIR = re.compile(
+    r"blizzard|game designer|developer|community manager|hearthstone team",
+    re.IGNORECASE,
+)
+DEVELOPER_SEARCH = "flair:Blizzard"
 
 _APOSTROPHES = str.maketrans({"’": "'", "‘": "'", "ʼ": "'"})
 _HAND_BUFF = re.compile(r"hand[\s-]*buff\w*", re.IGNORECASE)
@@ -72,6 +78,9 @@ class SocialPost:
     author_followers: int | None = None
     parent_id: str | None = None
     official: bool = False
+    # "official" (the game's account or a Blizzard-flaired post) or "developer"
+    # (a Blizzard-flaired person); None for everyone else.
+    author_role: str | None = None
     formats: tuple[str, ...] = ("standard", "wild")
 
     @property
@@ -103,6 +112,16 @@ def x_accounts() -> tuple[str, ...]:
         return DEFAULT_X_ACCOUNTS
     names = [name.strip().lstrip("@") for name in raw.split(",")]
     return tuple(name for name in names if re.fullmatch(r"\w{1,15}", name))
+
+
+def developer_x_accounts() -> frozenset[str]:
+    """Blizzard developers on X (``RADAR_X_DEV_ACCOUNTS``); their posts are developer statements."""
+    raw = os.environ.get("RADAR_X_DEV_ACCOUNTS", "")
+    return frozenset(
+        name.strip().lstrip("@").casefold()
+        for name in raw.split(",")
+        if re.fullmatch(r"@?\w{1,15}", name.strip())
+    )
 
 
 def window_days() -> int:
@@ -152,6 +171,17 @@ def reddit_post(raw: Mapping[str, Any]) -> SocialPost | None:
         str(raw.get("created") or "") or _iso_from_epoch(raw.get("created_utc")) or ""
     )
     community_formats = SUBREDDITS.get(subreddit, ("standard", "wild"))
+    author_info = (
+        raw.get("author_info") if isinstance(raw.get("author_info"), dict) else {}
+    )
+    author_flair = (
+        author_info.get("flair") if isinstance(author_info.get("flair"), dict) else {}
+    )
+    role = None
+    if _DEVELOPER_FLAIR.search(str(author_flair.get("text") or "")):
+        role = "developer"
+    elif _DEVELOPER_FLAIR.search(str(raw.get("link_flair_text") or "")):
+        role = "official"
     return SocialPost(
         id=f"reddit:{post_id}",
         platform="reddit",
@@ -164,6 +194,8 @@ def reddit_post(raw: Mapping[str, Any]) -> SocialPost | None:
         community=f"r/{subreddit}",
         title=title,
         text=text,
+        official=role is not None,
+        author_role=role,
         formats=_formats_for(community_formats, f"{title}\n{text}"),
     )
 
@@ -190,6 +222,10 @@ def reddit_comment(raw: Mapping[str, Any], parent: SocialPost) -> SocialPost | N
         community=parent.community,
         text=body,
         parent_id=parent.id,
+        official=bool(_DEVELOPER_FLAIR.search(str(raw.get("author_flair_text") or ""))),
+        author_role="developer"
+        if _DEVELOPER_FLAIR.search(str(raw.get("author_flair_text") or ""))
+        else None,
         formats=parent.formats,
     )
 
@@ -221,7 +257,14 @@ def x_post(raw: Mapping[str, Any]) -> SocialPost | None:
         community="x",
         text=text,
         author_followers=_int(author.get("followers")) or None,
-        official=username.casefold() in OFFICIAL_X_ACCOUNTS,
+        official=username.casefold() in OFFICIAL_X_ACCOUNTS | developer_x_accounts(),
+        author_role=(
+            "official"
+            if username.casefold() in OFFICIAL_X_ACCOUNTS
+            else "developer"
+            if username.casefold() in developer_x_accounts()
+            else None
+        ),
         formats=_formats_for(("standard", "wild"), text),
     )
 
@@ -287,6 +330,14 @@ def collect_reddit(
             reddit_post,
         )
     collector.run(
+        "reddit:r/hearthstone:search:blizzard",
+        "reddit",
+        lambda: client.search(
+            DEVELOPER_SEARCH, subreddit="hearthstone", sort="new", t="month"
+        ),
+        reddit_post,
+    )
+    collector.run(
         "reddit:r/hearthstone:search:balance:new",
         "reddit",
         lambda: client.search(
@@ -335,7 +386,9 @@ def collect_x(
         x_post,
     )
     accounts = x_accounts()
-    official = [name for name in accounts if name.casefold() in OFFICIAL_X_ACCOUNTS]
+    official = [
+        name for name in accounts if name.casefold() in OFFICIAL_X_ACCOUNTS
+    ] + sorted(developer_x_accounts() - {name.casefold() for name in accounts})
     creators = [name for name in accounts if name.casefold() not in OFFICIAL_X_ACCOUNTS]
     # Separate queries: the official account posts often enough to crowd the
     # creators out of a shared "Latest" timeline.

@@ -19,6 +19,9 @@ async def main() -> int:
     print(json.dumps(result))
     if result["state"] == "ok":
         return int(ExitCode.OK)
+    if result["state"] == "locked":
+        # Another run owns the catalogs; this start changed nothing.
+        return int(ExitCode.DEGRADED)
     if result.get("datasets"):
         return int(ExitCode.DEGRADED)
     return int(ExitCode.ERROR)

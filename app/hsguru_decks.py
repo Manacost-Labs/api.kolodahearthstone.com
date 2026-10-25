@@ -999,7 +999,32 @@ def _merge_catalog_rows(*collections: list[dict[str, Any]]) -> list[dict[str, An
     return merged
 
 
-async def _canonicalize_catalog_archetypes(rows: list[dict[str, Any]]) -> None:
+# HSGuru's deck-info names Death Knight builds with their rune spread
+# ("BUU Egg DK") where the meta table and its deck filter say "Egg DK".
+_DK_RUNE_SPREAD = re.compile(r"\b[BFU]{3}\s+")
+
+
+def _requested_archetype(name: str, requested: dict[str, str]) -> str | None:
+    """Return the requested archetype ``name`` denotes, if any."""
+    without_runes = _DK_RUNE_SPREAD.sub("", name)
+    for candidate in (name, without_runes, re.sub(r"^XL\s+", "", without_runes)):
+        match = requested.get(_key(candidate))
+        if match:
+            return match
+    return None
+
+
+async def _canonicalize_catalog_archetypes(
+    rows: list[dict[str, Any]],
+    requested: list[str] | None = None,
+) -> None:
+    """Name each row by HSGuru's archetype, preferring a requested name.
+
+    A shared page lists only the archetypes it was filtered by, so a row whose
+    canonical name is a more specific spelling of one of them (a DK rune
+    spread) keeps the requested name and joins that archetype's catalog row.
+    """
+    requested_keys = {_key(name): name for name in requested or []}
     deck_codes = list(
         dict.fromkeys(
             str(row.get("deck_code") or "").strip()
@@ -1019,7 +1044,10 @@ async def _canonicalize_catalog_archetypes(rows: list[dict[str, Any]]) -> None:
             response.raise_for_status()
             info_by_code = response.json()
     except (httpx.HTTPError, ValueError, TypeError):
-        return
+        if not requested_keys:
+            return
+        # Without deck-info the page headings still name requested archetypes.
+        info_by_code = {}
     for row in rows:
         info = (
             info_by_code.get(str(row.get("deck_code") or ""), {})
@@ -1029,6 +1057,13 @@ async def _canonicalize_catalog_archetypes(rows: list[dict[str, Any]]) -> None:
         canonical = (
             str(info.get("archetype") or "").strip() if isinstance(info, dict) else ""
         )
+        if requested_keys:
+            match = _requested_archetype(canonical, requested_keys) or (
+                _requested_archetype(str(row.get("archetype") or ""), requested_keys)
+            )
+            if match:
+                row["archetype"] = match
+                continue
         if canonical:
             row["archetype"] = canonical
 
@@ -1099,7 +1134,7 @@ async def _fetch_catalog_chunk(
         attempts.extend(page.acquisition)
     _validate_parsed_catalog_rows(page, rows)
     if len(archetypes) > 1:
-        await _canonicalize_catalog_archetypes(rows)
+        await _canonicalize_catalog_archetypes(rows, archetypes)
     acquisition = [
         {
             **attempt,

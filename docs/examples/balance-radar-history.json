@@ -1,6 +1,6 @@
 {
   "data": {
-    "generatedAt": "2026-10-25T10:48:18+00:00",
+    "generatedAt": "2026-10-25T12:29:41+00:00",
     "coverage": {
       "fromBuild": 190920,
       "toBuild": 255130,
@@ -617,6 +617,272 @@
             "popularity": 3.48
           }
         ],
+        "metaBeforeAll": [
+          [
+            "Dragon Warrior",
+            "WARRIOR",
+            52.72,
+            12.84
+          ],
+          [
+            "Hand Warlock",
+            "WARLOCK",
+            49.18,
+            8.94
+          ],
+          [
+            "Quest Priest",
+            "PRIEST",
+            48.33,
+            8.29
+          ],
+          [
+            "Azalina Priest",
+            "PRIEST",
+            47.7,
+            7.84
+          ],
+          [
+            "Coin Rogue",
+            "ROGUE",
+            48.83,
+            7.75
+          ],
+          [
+            "Ramp Druid",
+            "DRUID",
+            49.54,
+            6.14
+          ],
+          [
+            "Mug Shaman",
+            "SHAMAN",
+            52.06,
+            5.97
+          ],
+          [
+            "Broxigar Demon Hunter",
+            "DEMONHUNTER",
+            46.81,
+            3.93
+          ],
+          [
+            "Leyline Mage",
+            "MAGE",
+            46.98,
+            3.58
+          ],
+          [
+            "Cannon Warrior",
+            "WARRIOR",
+            52.95,
+            3.48
+          ],
+          [
+            "Void Demon Hunter",
+            "DEMONHUNTER",
+            49.51,
+            2.79
+          ],
+          [
+            "Contraband Mage",
+            "MAGE",
+            51.19,
+            2.52
+          ],
+          [
+            "Manastorm Mage",
+            "MAGE",
+            44.48,
+            2.27
+          ],
+          [
+            "Unholy Death Knight",
+            "DEATHKNIGHT",
+            50.56,
+            2.21
+          ],
+          [
+            "Herald Shaman",
+            "SHAMAN",
+            47.09,
+            1.77
+          ],
+          [
+            "Zee Shaman",
+            "SHAMAN",
+            51.83,
+            1.6
+          ],
+          [
+            "Stealth Rogue",
+            "ROGUE",
+            49.67,
+            1.39
+          ],
+          [
+            "BBB Control Death Knight",
+            "DEATHKNIGHT",
+            44.37,
+            1.29
+          ],
+          [
+            "Aura Paladin",
+            "PALADIN",
+            47.01,
+            1.27
+          ],
+          [
+            "Agamaggan Warlock",
+            "WARLOCK",
+            50.09,
+            1.26
+          ],
+          [
+            "Rafaam Warlock",
+            "WARLOCK",
+            42.58,
+            1.12
+          ],
+          [
+            "Burn Mage",
+            "MAGE",
+            49.32,
+            1.08
+          ],
+          [
+            "Herald Rogue",
+            "ROGUE",
+            46.06,
+            1.08
+          ],
+          [
+            "Herald Death Knight",
+            "DEATHKNIGHT",
+            39.62,
+            0.97
+          ],
+          [
+            "Egg Death Knight",
+            "DEATHKNIGHT",
+            48.96,
+            0.93
+          ],
+          [
+            "Troublemaker Rogue",
+            "ROGUE",
+            47.18,
+            0.73
+          ],
+          [
+            "Herald Warrior",
+            "WARRIOR",
+            39.49,
+            0.64
+          ],
+          [
+            "Elemental Shaman",
+            "SHAMAN",
+            51.79,
+            0.61
+          ],
+          [
+            "Control Priest",
+            "PRIEST",
+            43.42,
+            0.54
+          ],
+          [
+            "Face Hunter",
+            "HUNTER",
+            41.51,
+            0.54
+          ],
+          [
+            "Imbue Priest",
+            "PRIEST",
+            42.57,
+            0.52
+          ],
+          [
+            "Attack Druid",
+            "DRUID",
+            48.9,
+            0.48
+          ],
+          [
+            "Chef Druid",
+            "DRUID",
+            45.96,
+            0.47
+          ],
+          [
+            "Quest Mage",
+            "MAGE",
+            46.96,
+            0.34
+          ],
+          [
+            "Egg Warrior",
+            "WARRIOR",
+            46.63,
+            0.28
+          ],
+          [
+            "Imbue Rogue",
+            "ROGUE",
+            39.79,
+            0.24
+          ],
+          [
+            "Companion Hunter",
+            "HUNTER",
+            32.19,
+            0.21
+          ],
+          [
+            "Egg Warlock",
+            "WARLOCK",
+            52.64,
+            0.18
+          ],
+          [
+            "Egg Paladin",
+            "PALADIN",
+            35.45,
+            0.18
+          ],
+          [
+            "Dragon Hunter",
+            "HUNTER",
+            45.01,
+            0.17
+          ],
+          [
+            "Herald Demon Hunter",
+            "DEMONHUNTER",
+            45.21,
+            0.13
+          ],
+          [
+            "Quest Warrior",
+            "WARRIOR",
+            38.24,
+            0.11
+          ],
+          [
+            "Tripwire Hunter",
+            "HUNTER",
+            37.98,
+            0.11
+          ],
+          [
+            "Ysera Rogue",
+            "ROGUE",
+            25.87,
+            0.1
+          ]
+        ],
         "summary": "В релизном патче «Власти Темной Империи» подправили несколько карт: Исисет и К'Тун получили усиление, а Хеллрейзер лишился Провокации. Это откат прошлых правок 36.6.3, чтобы новые карты были играбельны.",
         "targetedArchetypes": [
           "Manastorm Mage"
@@ -859,6 +1125,326 @@
             "popularity": 2.58
           }
         ],
+        "metaBeforeAll": [
+          [
+            "Dragon Warrior",
+            "WARRIOR",
+            53.42,
+            14.51
+          ],
+          [
+            "Quest Priest",
+            "PRIEST",
+            48.08,
+            10.77
+          ],
+          [
+            "Ramp Druid",
+            "DRUID",
+            52.08,
+            10.12
+          ],
+          [
+            "Hand Warlock",
+            "WARLOCK",
+            48.74,
+            8.85
+          ],
+          [
+            "Azalina Priest",
+            "PRIEST",
+            47.33,
+            8.65
+          ],
+          [
+            "Coin Rogue",
+            "ROGUE",
+            44.69,
+            3.47
+          ],
+          [
+            "Mug Shaman",
+            "SHAMAN",
+            51.39,
+            3.36
+          ],
+          [
+            "Leyline Mage",
+            "MAGE",
+            46.39,
+            3.32
+          ],
+          [
+            "Void Demon Hunter",
+            "DEMONHUNTER",
+            48.93,
+            3.32
+          ],
+          [
+            "Cannon Warrior",
+            "WARRIOR",
+            50.44,
+            2.58
+          ],
+          [
+            "Unholy Death Knight",
+            "DEATHKNIGHT",
+            51.55,
+            2.27
+          ],
+          [
+            "Stealth Rogue",
+            "ROGUE",
+            47.9,
+            2.14
+          ],
+          [
+            "Agamaggan Warlock",
+            "WARLOCK",
+            47.34,
+            2.04
+          ],
+          [
+            "Corpse Death Knight",
+            "DEATHKNIGHT",
+            51.04,
+            2.01
+          ],
+          [
+            "Rafaam Warlock",
+            "WARLOCK",
+            45.76,
+            1.97
+          ],
+          [
+            "Broxigar Demon Hunter",
+            "DEMONHUNTER",
+            43.42,
+            1.76
+          ],
+          [
+            "Aura Paladin",
+            "PALADIN",
+            49.38,
+            1.51
+          ],
+          [
+            "Zee Shaman",
+            "SHAMAN",
+            50.96,
+            1.48
+          ],
+          [
+            "BBB Control Death Knight",
+            "DEATHKNIGHT",
+            43.58,
+            1.35
+          ],
+          [
+            "Herald Rogue",
+            "ROGUE",
+            47.12,
+            1.29
+          ],
+          [
+            "Attack Druid",
+            "DRUID",
+            51.01,
+            1.23
+          ],
+          [
+            "Herald Shaman",
+            "SHAMAN",
+            48.1,
+            1.2
+          ],
+          [
+            "Egg Death Knight",
+            "DEATHKNIGHT",
+            46.49,
+            1.16
+          ],
+          [
+            "Herald Death Knight",
+            "DEATHKNIGHT",
+            41.42,
+            1.03
+          ],
+          [
+            "Burn Mage",
+            "MAGE",
+            47.65,
+            0.98
+          ],
+          [
+            "Control Priest",
+            "PRIEST",
+            39.49,
+            0.84
+          ],
+          [
+            "Contraband Mage",
+            "MAGE",
+            46.74,
+            0.77
+          ],
+          [
+            "Herald Warrior",
+            "WARRIOR",
+            40.48,
+            0.75
+          ],
+          [
+            "Troublemaker Rogue",
+            "ROGUE",
+            41.64,
+            0.74
+          ],
+          [
+            "Агро шаман",
+            "SHAMAN",
+            49.95,
+            0.7
+          ],
+          [
+            "Chef Druid",
+            "DRUID",
+            44.05,
+            0.57
+          ],
+          [
+            "Elemental Shaman",
+            "SHAMAN",
+            52.44,
+            0.43
+          ],
+          [
+            "Manastorm Mage",
+            "MAGE",
+            38.91,
+            0.42
+          ],
+          [
+            "Quest Mage",
+            "MAGE",
+            43.56,
+            0.41
+          ],
+          [
+            "Face Hunter",
+            "HUNTER",
+            42.94,
+            0.38
+          ],
+          [
+            "Imbue Rogue",
+            "ROGUE",
+            39.77,
+            0.36
+          ],
+          [
+            "Dragon Hunter",
+            "HUNTER",
+            42.94,
+            0.33
+          ],
+          [
+            "Egg Warrior",
+            "WARRIOR",
+            46.83,
+            0.32
+          ],
+          [
+            "Imbue Priest",
+            "PRIEST",
+            40.2,
+            0.32
+          ],
+          [
+            "Companion Hunter",
+            "HUNTER",
+            38.2,
+            0.31
+          ],
+          [
+            "Egg Warlock",
+            "WARLOCK",
+            45.59,
+            0.2
+          ],
+          [
+            "Ysera Rogue",
+            "ROGUE",
+            29.51,
+            0.2
+          ],
+          [
+            "Control Warrior",
+            "WARRIOR",
+            39.41,
+            0.14
+          ],
+          [
+            "Egg Paladin",
+            "PALADIN",
+            39.24,
+            0.14
+          ],
+          [
+            "Imbue Paladin",
+            "PALADIN",
+            30.09,
+            0.13
+          ],
+          [
+            "Mill Rogue",
+            "ROGUE",
+            26.86,
+            0.13
+          ],
+          [
+            "Quest Hunter",
+            "HUNTER",
+            37.95,
+            0.12
+          ],
+          [
+            "Quest Demon Hunter",
+            "DEMONHUNTER",
+            43.15,
+            0.12
+          ],
+          [
+            "Imbue Mage",
+            "MAGE",
+            29.76,
+            0.11
+          ],
+          [
+            "Herald Demon Hunter",
+            "DEMONHUNTER",
+            41.08,
+            0.11
+          ],
+          [
+            "Tripwire Hunter",
+            "HUNTER",
+            39.07,
+            0.11
+          ],
+          [
+            "Quest Warrior",
+            "WARRIOR",
+            36.93,
+            0.1
+          ],
+          [
+            "Wallow Warlock",
+            "WARLOCK",
+            39.72,
+            0.1
+          ]
+        ],
         "summary": "Перед выходом дополнения Blizzard назвали мету здоровой и слегка осадили выбивающиеся колоды: Windpeak Wyrm подорожал по скидке Родни, Infest the Scullery стал дешевле на призыв. Исисет и К'Тун также ослаблены.",
         "targetedArchetypes": [
           "Dragon Warrior",
@@ -987,6 +1573,302 @@
             "popularity": 2.66
           }
         ],
+        "metaBeforeAll": [
+          [
+            "Dragon Warrior",
+            "WARRIOR",
+            54.31,
+            13.88
+          ],
+          [
+            "Quest Priest",
+            "PRIEST",
+            48.6,
+            13.22
+          ],
+          [
+            "Ramp Druid",
+            "DRUID",
+            51.79,
+            11.96
+          ],
+          [
+            "Hand Warlock",
+            "WARLOCK",
+            48.62,
+            9.84
+          ],
+          [
+            "Azalina Priest",
+            "PRIEST",
+            47.4,
+            6.4
+          ],
+          [
+            "Void Demon Hunter",
+            "DEMONHUNTER",
+            49.21,
+            4.18
+          ],
+          [
+            "Stealth Rogue",
+            "ROGUE",
+            47.25,
+            3.97
+          ],
+          [
+            "Cannon Warrior",
+            "WARRIOR",
+            51.77,
+            3.29
+          ],
+          [
+            "Leyline Mage",
+            "MAGE",
+            44.97,
+            3.09
+          ],
+          [
+            "Herald Rogue",
+            "ROGUE",
+            45.77,
+            2.66
+          ],
+          [
+            "Coin Rogue",
+            "ROGUE",
+            45.91,
+            2.47
+          ],
+          [
+            "Broxigar Demon Hunter",
+            "DEMONHUNTER",
+            41.11,
+            2.15
+          ],
+          [
+            "Rafaam Warlock",
+            "WARLOCK",
+            45.5,
+            1.92
+          ],
+          [
+            "Corpse Death Knight",
+            "DEATHKNIGHT",
+            49.12,
+            1.48
+          ],
+          [
+            "Zee Shaman",
+            "SHAMAN",
+            50.12,
+            1.48
+          ],
+          [
+            "Unholy Death Knight",
+            "DEATHKNIGHT",
+            49.56,
+            1.44
+          ],
+          [
+            "Mug Shaman",
+            "SHAMAN",
+            51.42,
+            1.42
+          ],
+          [
+            "Attack Druid",
+            "DRUID",
+            49.84,
+            1.38
+          ],
+          [
+            "BBB Control Death Knight",
+            "DEATHKNIGHT",
+            43.12,
+            1.29
+          ],
+          [
+            "Herald Shaman",
+            "SHAMAN",
+            48.74,
+            1.21
+          ],
+          [
+            "Aura Paladin",
+            "PALADIN",
+            50.13,
+            1.11
+          ],
+          [
+            "Egg Death Knight",
+            "DEATHKNIGHT",
+            47.7,
+            1.11
+          ],
+          [
+            "Burn Mage",
+            "MAGE",
+            47.87,
+            0.98
+          ],
+          [
+            "Herald Death Knight",
+            "DEATHKNIGHT",
+            39.83,
+            0.89
+          ],
+          [
+            "Contraband Mage",
+            "MAGE",
+            48.71,
+            0.76
+          ],
+          [
+            "Herald Warrior",
+            "WARRIOR",
+            40.4,
+            0.58
+          ],
+          [
+            "Egg Warrior",
+            "WARRIOR",
+            49.7,
+            0.53
+          ],
+          [
+            "Troublemaker Rogue",
+            "ROGUE",
+            41.08,
+            0.49
+          ],
+          [
+            "Control Priest",
+            "PRIEST",
+            36.52,
+            0.46
+          ],
+          [
+            "Manastorm Mage",
+            "MAGE",
+            38.87,
+            0.46
+          ],
+          [
+            "Companion Hunter",
+            "HUNTER",
+            39.08,
+            0.43
+          ],
+          [
+            "Chef Druid",
+            "DRUID",
+            43.75,
+            0.4
+          ],
+          [
+            "Quest Mage",
+            "MAGE",
+            38.86,
+            0.39
+          ],
+          [
+            "Ysera Rogue",
+            "ROGUE",
+            30.17,
+            0.38
+          ],
+          [
+            "Imbue Priest",
+            "PRIEST",
+            38.3,
+            0.35
+          ],
+          [
+            "Face Hunter",
+            "HUNTER",
+            42.71,
+            0.31
+          ],
+          [
+            "Агро шаман",
+            "SHAMAN",
+            48.11,
+            0.31
+          ],
+          [
+            "Egg Warlock",
+            "WARLOCK",
+            46.57,
+            0.22
+          ],
+          [
+            "Control Warrior",
+            "WARRIOR",
+            37.76,
+            0.22
+          ],
+          [
+            "Mill Rogue",
+            "ROGUE",
+            30.89,
+            0.19
+          ],
+          [
+            "Imbue Rogue",
+            "ROGUE",
+            36.09,
+            0.18
+          ],
+          [
+            "Egg Paladin",
+            "PALADIN",
+            38.71,
+            0.15
+          ],
+          [
+            "Dragon Hunter",
+            "HUNTER",
+            43.54,
+            0.14
+          ],
+          [
+            "Herald Demon Hunter",
+            "DEMONHUNTER",
+            41.34,
+            0.14
+          ],
+          [
+            "Quest Hunter",
+            "HUNTER",
+            38.63,
+            0.13
+          ],
+          [
+            "Quest Warrior",
+            "WARRIOR",
+            35.35,
+            0.11
+          ],
+          [
+            "Wallow Warlock",
+            "WARLOCK",
+            45.52,
+            0.11
+          ],
+          [
+            "Tripwire Hunter",
+            "HUNTER",
+            37.7,
+            0.11
+          ],
+          [
+            "Imbue Paladin",
+            "PALADIN",
+            28.34,
+            0.1
+          ]
+        ],
         "summary": null,
         "targetedArchetypes": []
       }
@@ -994,7 +1876,7 @@
   },
   "meta": {
     "source_id": "balance_radar",
-    "fetched_at": "2026-10-25T10:48:18+00:00",
+    "fetched_at": "2026-10-25T12:29:41+00:00",
     "stale": false,
     "count": 58,
     "limit": 3,

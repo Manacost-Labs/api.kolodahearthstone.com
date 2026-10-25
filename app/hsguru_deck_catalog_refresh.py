@@ -12,7 +12,12 @@ from .hsguru_decks import (
     reset_hsguru_catalog_provider_state,
 )
 from .hsguru_meta_matrix import refresh_current_catalog_deck_join
+from .resource_locks import ResourceLocked, ResourceLockSet
 from .storage import load_dataset
+
+# One run owns every deck catalog: two runs (an orphaned container and a new
+# start) once interleaved, and the older code overwrote the newer catalogs.
+CATALOG_LOCK_ID = "hsguru_deck_catalog"
 
 CatalogRefresh = Callable[..., Awaitable[list[dict[str, Any]]]]
 CatalogFallbackRefresh = Callable[..., Awaitable[dict[str, Any]]]
@@ -90,6 +95,35 @@ async def refresh_all_deck_catalogs(
     join: CatalogJoin = refresh_current_catalog_deck_join,
     load_persisted: CatalogDatasetLoader = load_dataset,
     catalog_periods: CatalogPeriods = hsguru_catalog_periods,
+) -> dict[str, Any]:
+    """Refresh every catalog unless another run already owns them."""
+    locks = ResourceLockSet(
+        [CATALOG_LOCK_ID],
+        metadata={"operation": "refresh_all_deck_catalogs"},
+    )
+    try:
+        locks.acquire()
+    except ResourceLocked as exc:
+        return {"datasets": {}, "errors": {}, **exc.as_outcome()}
+    try:
+        return await _refresh_all_deck_catalogs_unlocked(
+            refresh=refresh,
+            refresh_fallback=refresh_fallback,
+            join=join,
+            load_persisted=load_persisted,
+            catalog_periods=catalog_periods,
+        )
+    finally:
+        locks.release()
+
+
+async def _refresh_all_deck_catalogs_unlocked(
+    *,
+    refresh: CatalogRefresh,
+    refresh_fallback: CatalogFallbackRefresh,
+    join: CatalogJoin,
+    load_persisted: CatalogDatasetLoader,
+    catalog_periods: CatalogPeriods,
 ) -> dict[str, Any]:
     """Refresh every HSGuru catalog even when an independent slice fails.
 

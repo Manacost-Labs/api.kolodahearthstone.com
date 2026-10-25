@@ -88,6 +88,27 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
         return 0
+    if args.command == "backtest":
+        from .backtest import load_backtest, run_backtest, save_backtest
+        from .history import load_history
+
+        history_data = load_history()
+        if not history_data:
+            print(
+                "build the balance history first: python -m app.balance_radar history",
+                file=sys.stderr,
+            )
+            return 1
+        result = run_backtest(history_data, llm=args.llm, previous=load_backtest())
+        save_backtest(result)
+        print(
+            json.dumps(
+                {key: result[key] for key in ("generatedAt", "statistical", "model")},
+                ensure_ascii=False,
+                indent=2,
+            )[:6000]
+        )
+        return 0
     if args.command == "runs":
         rows, _total = store.list_runs(limit=args.limit)
         print(json.dumps(rows, ensure_ascii=False, indent=2))

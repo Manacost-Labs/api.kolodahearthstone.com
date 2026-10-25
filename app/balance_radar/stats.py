@@ -24,16 +24,22 @@ from ..storage import load_dataset
 logger = logging.getLogger(__name__)
 
 META_MATRIX_SOURCE_ID = "hsguru_meta_matrix"
-ARCHETYPE_RANKS = ("all", "legend")
+# Ranks read for every archetype: ALL is the headline sample, Legend and Top
+# Legend show what the strongest players face, Diamond 4-1 the climb.
+ARCHETYPE_RANKS = ("all", "legend", "top_legend", "diamond_4to1")
+# Ranks whose full period history goes to the model (the rest: primary only).
+TREND_RANKS = ("all", "legend")
 ROLLING_PERIODS = ("past_day", "past_3_days", "past_week")
-CARD_RANKS = ("legend", "diamond_4_1")
+CARD_RANKS = ("legend", "diamond_4_1", "diamond")
 CARD_PERIODS = ("1d", "3d", "7d", "14d", "patch")
-MIN_ARCHETYPE_GAMES = 2_000
+MIN_ARCHETYPE_GAMES = 1_000
+MIN_LEGEND_GAMES = 500
 MIN_CARD_PLAYS = 1_000
-ARCHETYPE_POOL = 40
-CARD_NERF_POOL = 30
-CARD_BUFF_POOL = 25
-CARD_POOL_PER_CLASS = 8
+ARCHETYPE_POOL = 60
+ARCHETYPE_SCORE_POOL = 25
+CARD_NERF_POOL = 60
+CARD_BUFF_POOL = 50
+CARD_POOL_PER_CLASS = 12
 
 CLASS_NAMES_RU = {
     "DEATHKNIGHT": "Рыцарь смерти",
@@ -263,10 +269,16 @@ def archetype_signals(
     records: list[dict[str, Any]] = []
     for name, cells in table.items():
         main = cells.get(("all", primary))
-        if not main or main["games"] < MIN_ARCHETYPE_GAMES or main["winrate"] is None:
+        legend = cells.get(("legend", primary)) or {}
+        if not main or main["winrate"] is None:
+            continue
+        if (
+            main["games"] < MIN_ARCHETYPE_GAMES
+            and legend.get("games", 0) < MIN_LEGEND_GAMES
+        ):
             continue
         class_id = classes.get(name) or class_from_archetype(name)
-        legend = cells.get(("legend", primary)) or {}
+        top = cells.get(("top_legend", primary)) or {}
         day = cells.get(("all", "past_day")) or {}
         week = cells.get(("all", "past_week")) or {}
         current = cells.get(("all", periods["current"] or "")) or {}
@@ -275,6 +287,8 @@ def archetype_signals(
         nerf = max(0.0, winrate - 51.5) * math.sqrt(max(popularity, 0.2))
         if (legend.get("winrate") or 0) >= 53 and legend.get("games", 0) >= 1000:
             nerf += 1.0
+        if (top.get("winrate") or 0) >= 54 and top.get("games", 0) >= 500:
+            nerf += 1.0  # strongest players confirm the edge
         buff = max(0.0, 49.0 - winrate) * (1.5 if popularity < 2 else 1.0)
         ref = f"archetype:{format_name}:{name}"
         records.append(
@@ -295,6 +309,11 @@ def archetype_signals(
                     "legendWinrate": legend.get("winrate"),
                     "legendPopularity": legend.get("popularity"),
                     "legendGames": legend.get("games"),
+                    "ranks": {
+                        rank: cells[(rank, primary)]
+                        for rank in ARCHETYPE_RANKS
+                        if (rank, primary) in cells
+                    },
                     "trend": {
                         "winrateDelta": _delta(day.get("winrate"), week.get("winrate")),
                         "popularityDelta": _delta(
@@ -314,9 +333,11 @@ def archetype_signals(
                     },
                     "periods": [
                         {"rank": rank, "period": period, **cells[(rank, period)]}
-                        for rank in ARCHETYPE_RANKS
+                        for rank in TREND_RANKS
                         for period in wanted
                         if (rank, period) in cells
+                        and period
+                        in {"past_day", "past_week", periods["current"], periods["ban"]}
                     ],
                 },
                 "scores": {"nerf": round(nerf, 3), "buff": round(buff, 3)},
@@ -551,7 +572,7 @@ def card_signals(
         buff_winrate = buff_cells["deckWinrate"]
         # "Winrate when played" is survivorship-biased (expensive cards are
         # played in games already being won), so pools rank on deck winrate.
-        if deck_winrate is not None and popularity >= 4 and deck_winrate >= 52:
+        if deck_winrate is not None and popularity >= 3 and deck_winrate >= 51.5:
             record["scores"] = {
                 "nerf": round((deck_winrate - 50) * math.sqrt(popularity), 3),
                 "buff": 0.0,
@@ -560,7 +581,7 @@ def card_signals(
         elif (
             buff_winrate is not None
             and buff_cells["timesPlayed"] >= MIN_CARD_PLAYS
-            and buff_winrate <= 48.5
+            and buff_winrate <= 49
             and (buff_cells["deckPopularity"] or 0) <= 5
         ):
             weight = (1.5 if record["newSet"] else 1.0) * (
@@ -573,13 +594,17 @@ def card_signals(
             buff_pool.append(record)
         elif (
             record["newSet"]
-            and record["rarity"] == "LEGENDARY"
-            and popularity < 1
+            and record["rarity"] in {"LEGENDARY", "EPIC"}
+            and popularity < 1.5
             and main["timesPlayed"] >= 100
         ):
-            # A new legendary nobody plays is a buff candidate even when the
-            # few decks running it do fine.
-            record["scores"] = {"nerf": 0.0, "buff": round(1.0 - popularity, 3)}
+            # A new legendary or epic nobody plays is a buff candidate even
+            # when the few decks running it do fine.
+            weight = 1.0 if record["rarity"] == "LEGENDARY" else 0.6
+            record["scores"] = {
+                "nerf": 0.0,
+                "buff": round((1.5 - popularity) * weight, 3),
+            }
             buff_pool.append(record)
     return (
         _diverse(nerf_pool, "nerf", CARD_NERF_POOL),
@@ -623,6 +648,9 @@ def build_stats(
     *,
     loader: Callable[[str], Mapping[str, Any] | None] = load_dataset,
     cards_en: Mapping[str, Mapping[str, Any]] | None = None,
+    db: Any = None,
+    archetype_stats: Any = None,
+    today: str | None = None,
 ) -> StatsBundle:
     bundle = StatsBundle(format=format_name)
     archetypes, classes, periods, meta_source = archetype_signals(
@@ -637,8 +665,12 @@ def build_stats(
     if meta_source:
         bundle.sources.append(meta_source)
     bundle.sources.extend(card_sources)
-    by_nerf = sorted(archetypes, key=lambda r: r["scores"]["nerf"], reverse=True)[:12]
-    by_buff = sorted(archetypes, key=lambda r: r["scores"]["buff"], reverse=True)[:12]
+    by_nerf = sorted(archetypes, key=lambda r: r["scores"]["nerf"], reverse=True)[
+        :ARCHETYPE_SCORE_POOL
+    ]
+    by_buff = sorted(archetypes, key=lambda r: r["scores"]["buff"], reverse=True)[
+        :ARCHETYPE_SCORE_POOL
+    ]
     selected = {r["ref"]: r for r in (*archetypes[:ARCHETYPE_POOL], *by_nerf, *by_buff)}
     bundle.archetypes = sorted(
         selected.values(), key=lambda r: r["stats"]["games"], reverse=True
@@ -646,7 +678,180 @@ def build_stats(
     bundle.classes = classes
     bundle.card_nerf_pool = nerf_cards
     bundle.card_buff_pool = buff_cards
+    if db is not None:
+        attach_mulligan(bundle, db)
+    if archetype_stats is not None and today:
+        attach_core_archetypes(bundle, archetype_stats, today)
     for record in (*bundle.archetypes, *classes, *nerf_cards, *buff_cards):
         bundle.entities[record["ref"]] = record
         bundle.aliases[record["ref"]] = list(record.get("aliases") or [])
     return bundle
+
+
+# -- per-card context: HSGuru mulligan and HSReplay core archetypes ------------
+
+MULLIGAN_MIN_COUNT = 1_000
+
+
+def _mulligan_snapshots(
+    conn: Any, format_name: str, periods: Mapping[str, Any]
+) -> dict[str, dict[str, Any]]:
+    """Latest archetype card-stat snapshot per archetype, best period and rank first."""
+    order_period = [
+        p for p in (periods.get("ban"), periods.get("current"), "past_week") if p
+    ]
+    order_rank = ["all", "legend", "diamond_to_legend"]
+    try:
+        rows = conn.execute(
+            """
+            SELECT s.id, s.archetype, s.period, s.rank, s.games, s.fetched_at
+            FROM hsguru_stat_snapshots s
+            JOIN hsguru_stat_targets t ON t.latest_snapshot_id = s.id
+            WHERE s.kind = 'cards' AND s.subject_type = 'archetype' AND s.format = ?
+              AND s.coin = 'any_player' AND s.opponent_class = 'any'
+            """,
+            (format_name,),
+        ).fetchall()
+    except Exception as exc:  # noqa: BLE001 - optional context (table may not exist yet)
+        logger.info("HSGuru mulligan tables unavailable: %s", type(exc).__name__)
+        return {}
+    best: dict[str, tuple[tuple[int, int], dict[str, Any]]] = {}
+    for snapshot_id, archetype, period, rank, games, fetched_at in rows:
+        if period not in order_period or rank not in order_rank:
+            continue
+        key = (order_period.index(period), order_rank.index(rank))
+        current = best.get(archetype)
+        if current is None or key < current[0]:
+            best[archetype] = (
+                key,
+                {
+                    "snapshotId": snapshot_id,
+                    "period": period,
+                    "rank": rank,
+                    "games": games,
+                    "fetchedAt": fetched_at,
+                },
+            )
+    return {name: item for name, (_key, item) in best.items()}
+
+
+def attach_mulligan(bundle: StatsBundle, conn: Any) -> None:
+    """Key cards of each archetype and each card's impact in the decks that run it.
+
+    HSGuru impacts are winrate deltas in percentage points against the deck
+    average (mulligan = kept in the opening hand, drawn = drawn at any time).
+    """
+    snapshots = _mulligan_snapshots(conn, bundle.format, bundle.periods)
+    if not snapshots:
+        return
+    by_id = {item["snapshotId"]: name for name, item in snapshots.items()}
+    marks = ",".join("?" for _ in by_id)
+    rows = conn.execute(
+        f"""
+        SELECT snapshot_id, card_id, dbf_id, card_name, mulligan_impact, mulligan_count,
+               drawn_impact, drawn_count, kept_impact, kept_count
+        FROM hsguru_mulligan_cards WHERE snapshot_id IN ({marks})
+        """,
+        list(by_id),
+    ).fetchall()
+    per_archetype: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    per_card: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    for (
+        snapshot_id,
+        card_id,
+        dbf_id,
+        name,
+        mull,
+        mull_n,
+        drawn,
+        drawn_n,
+        kept,
+        kept_n,
+    ) in rows:
+        if max(mull_n or 0, drawn_n or 0) < MULLIGAN_MIN_COUNT:
+            continue
+        item = {
+            "cardId": card_id,
+            "dbfId": dbf_id,
+            "name": name,
+            "mulliganImpact": mull,
+            "drawnImpact": drawn,
+            "keptImpact": kept,
+            "drawnCount": drawn_n,
+        }
+        archetype = by_id[snapshot_id]
+        per_archetype[archetype].append(item)
+        if isinstance(dbf_id, int):
+            per_card[dbf_id].append(
+                {
+                    "archetype": archetype,
+                    **{
+                        k: item[k]
+                        for k in (
+                            "mulliganImpact",
+                            "drawnImpact",
+                            "keptImpact",
+                            "drawnCount",
+                        )
+                    },
+                }
+            )
+    sources = 0
+    for record in bundle.archetypes:
+        cards = per_archetype.get(record["name"])
+        if not cards:
+            continue
+        meta = snapshots[record["name"]]
+        cards.sort(
+            key=lambda c: c["drawnImpact"] if c["drawnImpact"] is not None else -99,
+            reverse=True,
+        )
+        record["stats"]["mulligan"] = {
+            "period": meta["period"],
+            "rank": meta["rank"],
+            "games": meta["games"],
+            "fetchedAt": meta["fetchedAt"],
+            "keyCards": cards[:5],
+            "weakCards": [c for c in cards if (c["drawnImpact"] or 0) < 0][-3:],
+        }
+        sources += 1
+    for record in (*bundle.card_nerf_pool, *bundle.card_buff_pool):
+        found = per_card.get(record.get("dbfId") or -1)
+        if found:
+            found.sort(key=lambda c: c["drawnCount"] or 0, reverse=True)
+            record["stats"]["mulligan"] = found[:3]
+    if sources:
+        bundle.sources.append(
+            {
+                "id": "hsguru_mulligan",
+                "kind": "stats",
+                "fetchedAt": max(s["fetchedAt"] for s in snapshots.values()),
+                "items": sources,
+            }
+        )
+
+
+def attach_core_archetypes(
+    bundle: StatsBundle, archetype_stats: Any, today: str
+) -> None:
+    """Current HSReplay Legend archetypes built around each card (Standard only).
+
+    Uses the same features as the history calibration: the core archetype's
+    winrate and popularity over the last seven days.
+    """
+    if bundle.format != "standard" or archetype_stats is None:
+        return
+    for record in (*bundle.card_nerf_pool, *bundle.card_buff_pool):
+        dbf_id = record.get("dbfId")
+        if not isinstance(dbf_id, int):
+            continue
+        core = archetype_stats.around(dbf_id, today)
+        if core:
+            record["stats"]["core"] = [
+                {
+                    "archetype": c["archetype"],
+                    "cardShare": c["cardShare"],
+                    **(c.get("before") or {}),
+                }
+                for c in core
+            ]
