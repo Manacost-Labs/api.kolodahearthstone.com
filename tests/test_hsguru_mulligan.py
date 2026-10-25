@@ -973,13 +973,37 @@ def test_a_page_is_parsed_once_for_validation_and_storage(monkeypatch) -> None:
         return document(html)
 
     monkeypatch.setattr(mulligan, "_document", counting_document)
-    mulligan._parse_cached.cache_clear()
     html = card_stats_html([FORGE, DUCK], games=777)
-    # The cascade validates twice, then the run stores the parsed page.
-    assert mulligan.page_is_valid("cards", html) and mulligan.page_is_valid(
-        "cards", html
+
+    async def paid(source, **options):
+        response = SimpleNamespace(html=html, request_credits=1, backend="scrape_do")
+        # The cascade validates one response twice before returning it.
+        assert options["accept_result"](response) and options["accept_result"](response)
+        return response
+
+    acquirer = mulligan.Acquirer(
+        scrape_do_credit_cap=None,
+        routes=mulligan.TRANSPORTS["scrape_do_only"],
+        fetch_paid=paid,
     )
-    first = mulligan.parse_page("cards", html)
-    first["rows"].clear()
-    assert len(mulligan.parse_page("cards", html)["rows"]) == 2
-    assert len(calls) == 1
+    _, meta = _fetch(acquirer)
+    # The parsed page travels with the response; nothing caches HTML globally.
+    assert len(meta["parsed"]["rows"]) == 2 and len(calls) == 1
+    assert not hasattr(mulligan, "_parse_cached")
+
+
+def test_a_rejected_then_accepted_ladder_keeps_only_the_accepted_page() -> None:
+    page = mulligan.ParsedPage("cards")
+    challenge = "<html>Just a moment...</html>"
+    good = card_stats_html([FORGE], games=5)
+    assert page.accept(challenge) is False and page.result_for(challenge) is None
+    assert page.accept(good) is True
+    assert page.result_for(good)["games"] == 5
+
+
+def test_runs_return_freed_memory_to_the_system(isolated, monkeypatch) -> None:
+    trims: list[int] = []
+    monkeypatch.setattr(mulligan, "MALLOC_TRIM_EVERY_PAGES", 2)
+    monkeypatch.setattr(mulligan, "release_freed_memory", lambda: trims.append(1))
+    result = _refresh()
+    assert result["attempted"] == 4 and len(trims) == 2

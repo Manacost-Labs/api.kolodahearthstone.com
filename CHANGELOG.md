@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- HSGuru mulligan no longer grows to gigabytes during a run (5.2 GiB RSS in
+  production). The parse cache keyed by page HTML kept about 130 pages
+  (~230 MB) alive; the parsed result now travels with the page from
+  validation to storage and the HTML is released right after parsing. The
+  rest was glibc arena fragmentation from 40 Scrape.do threads: the unit runs
+  the container with `MALLOC_ARENA_MAX=2` and a run calls `malloc_trim(0)`
+  every 200 pages. Local benchmark with 3,000 distinct pages: peak RSS
+  1,262 → 465 MB, flat at 320–340 MB, throughput unchanged. Documents the
+  class-matchup de-duplication and per-page write isolation from #62.
+
 - Balance Radar: accurate, short, Russian-only texts. Archetypes use
   HearthPulse's own labels (the rest translated once by Claude and cached);
   cards use the ruRU localization. Every reader text is cleaned
