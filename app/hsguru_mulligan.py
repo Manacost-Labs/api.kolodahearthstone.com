@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import copy
+import ctypes
 import functools
 import hashlib
 import json
@@ -197,9 +198,11 @@ class Settings:
 # --- parsing --------------------------------------------------------------------
 #
 # HSGuru pages are ~250-450 KB. lxml builds one tree per page in a few
-# milliseconds, where BeautifulSoup took ~40 ms per tree; the result is
-# memoized because the provider cascade validates a page before the run
-# stores it, so each page is parsed once.
+# milliseconds, where BeautifulSoup took ~40 ms per tree. The provider
+# cascade validates a page before the run stores it; the parsed result of that
+# validation travels with the page (``ParsedPage``), so each page is parsed
+# once and its HTML is released as soon as it is parsed. A process-wide cache
+# keyed by HTML used to keep ~130 pages (~230 MB) alive during a run.
 
 GAMES_RE = re.compile(r">\s*Games\s*:\s*([\d\s,.]+?)\s*<", re.IGNORECASE)
 _HIDDEN_NAME_XPATH = (
@@ -211,7 +214,9 @@ _CARD_NAME_XPATH = (
 )
 _CARD_PATH_RE = re.compile(r"/card/([^/?#]+)(?:/([^/?#]+))?")
 _TILE_RE = re.compile(r"/(?:tiles|render/[^/]+/[^/]+)/([^/.?]+)")
-PARSE_CACHE_SIZE = 128
+# Freed parse trees and page strings fragment glibc's per-thread arenas; a
+# trim every few hundred pages returns that memory to the system.
+MALLOC_TRIM_EVERY_PAGES = 200
 
 
 class PageRejected(RuntimeError):
@@ -420,21 +425,16 @@ def _parse_class_matchups(html: str) -> dict[str, Any]:
     }
 
 
-@functools.lru_cache(maxsize=PARSE_CACHE_SIZE)
-def _parse_cached(kind: str, html: str) -> dict[str, Any]:
-    return _parse_mulligan(html) if kind == "cards" else _parse_class_matchups(html)
-
-
 def parse_mulligan_html(html: str) -> dict[str, Any]:
     """Parse a ``/card-stats`` page: the sample size and every card row."""
 
-    return copy.deepcopy(_parse_cached("cards", html))
+    return _parse_mulligan(html)
 
 
 def parse_class_matchups_page(html: str) -> dict[str, Any]:
     """Parse an archetype or deck page: per-class winrate and the Total row."""
 
-    return copy.deepcopy(_parse_cached("matchups", html))
+    return _parse_class_matchups(html)
 
 
 def parse_page(kind: str, html: str) -> dict[str, Any]:
@@ -447,10 +447,44 @@ def parse_page(kind: str, html: str) -> dict[str, Any]:
 
 def page_is_valid(kind: str, html: str) -> bool:
     try:
-        _parse_cached("cards" if kind == "cards" else "matchups", html)
+        parse_page(kind, html)
     except PageRejected:
         return False
     return True
+
+
+class ParsedPage:
+    """The validated page of one fetch, parsed once for validation and storage."""
+
+    __slots__ = ("html", "kind", "parsed")
+
+    def __init__(self, kind: str) -> None:
+        self.kind = kind
+        self.html: str | None = None
+        self.parsed: dict[str, Any] | None = None
+
+    def accept(self, html: str) -> bool:
+        # The cascade validates the same response object more than once.
+        if html is self.html:
+            return True
+        try:
+            parsed = parse_page(self.kind, html)
+        except PageRejected:
+            return False
+        self.html, self.parsed = html, parsed
+        return True
+
+    def result_for(self, html: str) -> dict[str, Any] | None:
+        return self.parsed if html is self.html else None
+
+
+def release_freed_memory() -> None:
+    """Return freed heap pages of every glibc arena to the system."""
+
+    try:
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except (AttributeError, OSError):
+        pass  # Not glibc: nothing to trim.
 
 
 # --- planning -------------------------------------------------------------------
@@ -825,9 +859,14 @@ class Acquirer:
             raise RuntimeError(f"http_status_{status}")
         if PAYWALL_MARKER in html.casefold():
             raise PageRejected("paywalled")
-        if not page_is_valid(kind, html):
+        page = ParsedPage(kind)
+        if not page.accept(html):
             raise RuntimeError("content_validation")
-        return html, {"backend": "flaresolverr", "request_credits": 0}
+        return html, {
+            "backend": "flaresolverr",
+            "request_credits": 0,
+            "parsed": page.parsed,
+        }
 
     async def _call_paid(self, source: Source, **options: Any) -> Any:
         if self.fetch_paid is not None:
@@ -852,6 +891,7 @@ class Acquirer:
             from .hsguru_auth import hsguru_firecrawl_headers
 
             headers = hsguru_firecrawl_headers()
+        page = ParsedPage(kind)
         # "detail" jobs stop at the Meta-Lab throttle threshold of the shared
         # monthly HSGuru budget, before critical meta refreshes are affected.
         with acquisition_scope(SOURCE_ID, job_class="detail"):
@@ -863,16 +903,21 @@ class Acquirer:
                 max_age_ms=0,
                 timeout_ms=SCRAPE_DO_TIMEOUT_MS,
                 skip_providers={"decodo", "firecrawl", "brightdata", "scrapfly"},
-                accept_result=lambda scraped: page_is_valid(kind, scraped.html),
+                accept_result=lambda scraped: page.accept(scraped.html),
                 scrape_do_profiles=SCRAPE_DO_PROFILES,
             )
         credits = int(getattr(result, "request_credits", 0) or 0)
         self.scrape_do_credits += credits
         self.pages_scrape_do += 1
-        return str(result.html or ""), {
+        html = str(result.html or "")
+        meta: dict[str, Any] = {
             "backend": str(getattr(result, "backend", "scrape_do") or "scrape_do"),
             "request_credits": credits,
         }
+        parsed = page.result_for(result.html)
+        if parsed is not None:
+            meta["parsed"] = parsed
+        return html, meta
 
     def paid_allowed(self) -> bool:
         return self.scrape_do_credit_cap is None or (
@@ -1036,9 +1081,14 @@ async def _refresh_unlocked(
                 url = target_url(target)
                 attempted_at = clock().isoformat()
                 counts["attempted"] += 1
+                if counts["attempted"] % MALLOC_TRIM_EVERY_PAGES == 0:
+                    release_freed_memory()
                 try:
                     html, meta = await fetch(url, str(target["kind"]))
-                    parsed = parse_page(str(target["kind"]), html)
+                    parsed = meta.pop("parsed", None) or parse_page(
+                        str(target["kind"]), html
+                    )
+                    del html
                 except Exception as exc:  # noqa: BLE001 - one target's failure is isolated
                     reason = (
                         exc.reason
