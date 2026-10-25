@@ -151,7 +151,7 @@ GraphQL pagination возвращает `items` и `pageInfo`. Максимал�
 | GET | `/v1/hsguru/mulligan/slices` | `archetype` или `deck_id`, `format` | Сохранённые срезы муллигана и матчапов |
 | GET | `/v1/hsguru/mulligan/history` | срез, `kind`, `card`, `limit` | Снимки среза и строка одной карты по времени |
 | GET | `/v1/hsguru/mulligan/coverage` | `runs` | Покрытие сбора, последние запуски и расход Scrape.do |
-| GET | `/v1/hsguru/brawl/meta` | `rank`, `coin`, `opponent_class`, `min_games` | Мета текущей Потасовки HSGuru |
+| GET | `/v1/hsguru/brawl/meta` | `rank`, `coin`, `opponent_class`, `min_games` | Мета текущей Потасовки HSGuru ([docs](docs/HSGURU_BRAWL_ESPORTS.md)) |
 | GET | `/v1/hsguru/brawl/decks` | `rank`, `class`, `archetype` | Колоды текущей Потасовки с кодами |
 | GET | `/v1/hsguru/esports/upcoming` | — | Ближайшие и идущие турниры HSGuru /esports |
 | GET | `/v1/hsguru/esports/tournaments` | `kind`, `limit`, `offset` | Турниры: победитель, стадии, игроки, топ архетипов составов |

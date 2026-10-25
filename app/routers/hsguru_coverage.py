@@ -14,6 +14,7 @@ from ..hsguru_esports import (
 )
 from ..sources import SOURCE_BY_ID
 from ..storage import load_dataset
+from . import hsguru_coverage_examples as examples
 from .models import ApiMeta, timestamp_is_stale
 
 router = APIRouter(prefix="/v1/hsguru", tags=["v1-hsguru"])
@@ -29,6 +30,15 @@ BrawlRank = Literal[
 ]
 BrawlDeckRank = Literal["all", "legend", "diamond_to_legend"]
 Coin = Literal["any_player", "on_coin", "going_first"]
+
+BRAWL_RANK_QUERY = Query(
+    "all",
+    description="HSGuru rank; Brawl games almost all fall into `all`.",
+)
+BRAWL_COIN_QUERY = Query(
+    "any_player", description="Any player, on coin or going first."
+)
+BRAWL_DECK_RANK_QUERY = Query("all", description="HSGuru rank of the deck list.")
 
 
 def _respond(
@@ -69,14 +79,26 @@ def _respond(
     return {"data": data, "meta": meta}
 
 
-@router.get("/brawl/meta")
+@router.get(
+    "/brawl/meta",
+    summary="HSGuru Tavern Brawl archetype meta",
+    responses=examples.response(examples.BRAWL_META, BRAWL_SOURCE_ID, 72),
+)
 def hsguru_brawl_meta(
-    rank: BrawlRank = "all",
-    coin: Coin = "any_player",
-    opponent_class: str = Query("any", max_length=16),
-    min_games: int = Query(10, ge=0, le=1_000_000),
+    rank: BrawlRank = BRAWL_RANK_QUERY,
+    coin: Coin = BRAWL_COIN_QUERY,
+    opponent_class: str = Query(
+        "any",
+        max_length=16,
+        description="`any` or an upper-case class key such as `MAGE` (all ranks only).",
+    ),
+    min_games: int = Query(
+        10, ge=0, le=1_000_000, description="Drop archetypes with fewer games."
+    ),
 ) -> dict[str, Any]:
-    """Archetype winrate, popularity and games of the current Tavern Brawl."""
+    """Archetype winrate, popularity, games, turns, duration and climbing speed
+    of the current Tavern Brawl (`format=-1&period=brawl`), refreshed every
+    three hours. `meta.count` is the number of archetypes after `min_games`."""
     return _respond(
         BRAWL_SOURCE_ID,
         lambda structured: views.brawl_meta(
@@ -89,13 +111,22 @@ def hsguru_brawl_meta(
     )
 
 
-@router.get("/brawl/decks")
+@router.get(
+    "/brawl/decks",
+    summary="HSGuru Tavern Brawl decks",
+    responses=examples.response(examples.BRAWL_DECKS, BRAWL_SOURCE_ID, 13),
+)
 def hsguru_brawl_decks(
-    rank: BrawlDeckRank = "all",
-    class_name: str | None = Query(None, alias="class", max_length=32),
-    archetype: str | None = Query(None, max_length=120),
+    rank: BrawlDeckRank = BRAWL_DECK_RANK_QUERY,
+    class_name: str | None = Query(
+        None, alias="class", max_length=32, description="Class name, e.g. `Priest`."
+    ),
+    archetype: str | None = Query(
+        None, max_length=120, description="Exact archetype name (case-insensitive)."
+    ),
 ) -> dict[str, Any]:
-    """Most played decks of the current Tavern Brawl with deck codes."""
+    """Most played decks of the current Tavern Brawl (from 50 games) with deck
+    codes, winrate and games."""
     return _respond(
         BRAWL_SOURCE_ID,
         lambda structured: views.brawl_decks(
@@ -104,22 +135,39 @@ def hsguru_brawl_decks(
     )
 
 
-@router.get("/esports/upcoming")
+@router.get(
+    "/esports/upcoming",
+    summary="Upcoming tournaments (HSGuru /esports)",
+    responses=examples.response(examples.UPCOMING, TOURNAMENTS_SOURCE_ID, 15),
+)
 def hsguru_esports_upcoming() -> dict[str, Any]:
-    """Upcoming and running tournaments listed on HSGuru /esports."""
+    """Upcoming and running tournaments listed on HSGuru /esports: Battlefy id,
+    name, UTC start time and tags (Open/Bo3/region/format)."""
     return _respond(
         TOURNAMENTS_SOURCE_ID,
         lambda structured: {"items": list(structured.get("upcoming") or [])},
     )
 
 
-@router.get("/esports/tournaments")
+@router.get(
+    "/esports/tournaments",
+    summary="Tournament summaries",
+    responses=examples.response(
+        examples.TOURNAMENTS, TOURNAMENTS_SOURCE_ID, 32, limit=1, offset=0
+    ),
+)
 def hsguru_esports_tournaments(
-    kind: Literal["tour_stop", "community"] | None = None,
+    kind: Literal["tour_stop", "community"] | None = Query(
+        None,
+        description="`tour_stop` (official Masters Tours) or `community` "
+        "(started within 14 days, from /esports).",
+    ),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ) -> dict[str, Any]:
-    """Tournament summaries: winner, stages, players and top lineup archetypes."""
+    """Tournaments newest first: winner (first place of the last stage), stage
+    names, player count, top five lineup archetypes. `lineups_complete` is
+    false when HSGuru shows only the first 50 of more lineups."""
     return _respond(
         TOURNAMENTS_SOURCE_ID,
         lambda structured: views.tournament_summaries(structured, kind=kind),
@@ -128,24 +176,45 @@ def hsguru_esports_tournaments(
     )
 
 
-@router.get("/esports/tournaments/{tournament_id}")
+@router.get(
+    "/esports/tournaments/{tournament_id}",
+    summary="One tournament with standings and lineups",
+    responses=examples.response(examples.TOURNAMENT, TOURNAMENTS_SOURCE_ID, 1),
+)
 def hsguru_esports_tournament(tournament_id: str) -> dict[str, Any]:
-    """One tournament: standings of every stage, lineups and archetype popularity."""
+    """One tournament by Battlefy id: standings of every stage, player lineups
+    with deck codes and lineup archetype/class popularity. Unknown id: 404."""
     return _respond(
         TOURNAMENTS_SOURCE_ID,
         lambda structured: views.tournament(structured, tournament_id),
     )
 
 
-@router.get("/esports/points")
+@router.get(
+    "/esports/points",
+    summary="HSEsports points of a season",
+    responses=examples.response(
+        examples.POINTS, POINTS_SOURCE_ID, 227, limit=1, offset=0
+    ),
+)
 def hsguru_esports_points(
-    season: str | None = Query(None, max_length=64),
-    leaderboard: Literal["STD", "BG_LL"] = "STD",
-    region: Literal["EU", "AM", "AP", "CN"] | None = None,
+    season: str | None = Query(
+        None,
+        max_length=64,
+        description="Season key, e.g. `2026`, `2026_summer`, `china_2026_spring`; "
+        "default: the latest whole year.",
+    ),
+    leaderboard: Literal["STD", "BG_LL"] = Query(
+        "STD", description="`STD` (Standard) or `BG_LL` (Battlegrounds)."
+    ),
+    region: Literal["EU", "AM", "AP", "CN"] | None = Query(
+        None, description="Only players of this region."
+    ),
     limit: int = Query(500, ge=1, le=3000),
     offset: int = Query(0, ge=0),
 ) -> dict[str, Any]:
-    """HSEsports points of one season and leaderboard (default: current year)."""
+    """HSEsports points: rank, player (region, country, profile), one column
+    per month or tournament of the season and the total."""
     return _respond(
         POINTS_SOURCE_ID,
         lambda structured: views.points(
@@ -156,24 +225,38 @@ def hsguru_esports_points(
     )
 
 
-@router.get("/esports/points/seasons")
+@router.get(
+    "/esports/points/seasons",
+    summary="Collected HSEsports points seasons",
+    responses=examples.response(examples.POINTS_SEASONS, POINTS_SOURCE_ID, 36),
+)
 def hsguru_esports_points_seasons() -> dict[str, Any]:
     """Every collected points season and leaderboard with its player count."""
     return _respond(POINTS_SOURCE_ID, views.points_seasons)
 
 
-@router.get("/esports/legacy/{table}")
+@router.get(
+    "/esports/legacy/{table}",
+    summary="Masters Tour archive table",
+    responses=examples.response(
+        examples.LEGACY, LEGACY_SOURCE_ID, 753, limit=1, offset=0
+    ),
+)
 def hsguru_esports_legacy(
     table: Literal["mt-stats", "qualifier-stats", "mt-points"],
     selector: str | None = Query(
         None,
         max_length=64,
-        description="qualifier-stats: period (all, 2021, a tour stop); mt-points: season.",
+        description="qualifier-stats: period (`current`, `all`, a year or a tour "
+        "stop; default `all`); mt-points: season such as `2022_fall` (default "
+        "the newest). `data.options` lists the values.",
     ),
     limit: int = Query(500, ge=1, le=5000),
     offset: int = Query(0, ge=0),
 ) -> dict[str, Any]:
-    """Archived Masters Tour statistics, qualifier statistics and season points."""
+    """Archived Masters Tour tables: `mt-stats` (players across all tour stops),
+    `qualifier-stats` (cups, top 8/16, winrate) and `mt-points` (legacy season
+    points or earnings 2020–2022)."""
     return _respond(
         LEGACY_SOURCE_ID,
         lambda structured: views.legacy(structured, table, selector=selector),

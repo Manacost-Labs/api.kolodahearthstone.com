@@ -13,8 +13,12 @@
   Standard and Battlegrounds; `hsguru_esports_legacy` the Masters Tour
   archive (weekly). Plain Scrape.do pages, at most 5 at once, as `detail`
   jobs of the shared HSGuru budget. REST `/v1/hsguru/brawl/*`,
-  `/v1/hsguru/esports/*` and GraphQL `hsguruBrawl*`/`hsguruEsports*`. The
-  HSGuru coverage audit is in `docs/DATA_CATALOG.md`.
+  `/v1/hsguru/esports/*` (OpenAPI descriptions and examples) and GraphQL
+  `hsguruBrawl*`/`hsguruEsports*`. A page that fails validation gets one
+  rendered retry (5 credits); super proxies are not used. Docs:
+  `docs/HSGURU_BRAWL_ESPORTS.md`, `docs/API.md`, `docs/GRAPHQL_API.md`,
+  `docs/SCRAPE_PROVIDERS.md`; the HSGuru coverage audit is in
+  `docs/DATA_CATALOG.md`.
 
 
 - HSGuru mulligan no longer grows to gigabytes during a run (5.2 GiB RSS in

@@ -105,6 +105,52 @@ query PatchDelta {
 }
 ```
 
+## HSGuru Brawl and esports
+
+The five fields return JSON with the same shape as the `data` of the REST
+endpoints (`/v1/hsguru/brawl/*`, `/v1/hsguru/esports/*`, see
+[API.md](API.md#hsguru-brawl-and-esports)). They read the latest dataset
+imported into `raw.datasets`, so a new snapshot appears after the next
+import. An unknown tournament, season or table returns `null`; an invalid
+selector returns `VALIDATION_ERROR`.
+
+| Field | Arguments (defaults) |
+|---|---|
+| `hsguruBrawlMeta` | `rank` (`all`), `coin` (`any_player`), `opponentClass` (`any`), `minGames` (`10`) |
+| `hsguruBrawlDecks` | `rank` (`all`), `className`, `archetype` |
+| `hsguruEsportsTournaments` | `tournamentId`; `kind` (`tour_stop`/`community`); `upcoming` (`false`) |
+| `hsguruEsportsPoints` | `season` (latest whole year), `leaderboard` (`STD`/`BG_LL`), `region` (`EU`/`AM`/`AP`/`CN`) |
+| `hsguruEsportsLegacy` | `table` (`mt-stats`, `qualifier-stats`, `mt-points`), `selector` |
+
+```graphql
+query HsguruBrawlAndEsports {
+  brawl: hsguruBrawlMeta(rank: "all", opponentClass: "MAGE", minGames: 50)
+  brawlDecks: hsguruBrawlDecks(className: "Priest")
+  upcoming: hsguruEsportsTournaments(upcoming: true)
+  tourStops: hsguruEsportsTournaments(kind: "tour_stop")
+  summer: hsguruEsportsTournaments(tournamentId: "6a6c88f821e3c30013db3d46")
+  points: hsguruEsportsPoints(season: "2026", leaderboard: "STD", region: "EU")
+  qualifiers: hsguruEsportsLegacy(table: "qualifier-stats", selector: "2021")
+}
+```
+
+Excerpt of the response:
+
+```json
+{
+  "data": {
+    "brawl": {
+      "rank": "all", "coin": "any_player", "opponent_class": "MAGE", "min_games": 50,
+      "items": [{"archetype": "C'Thun Priest", "winrate": 71.3, "popularity": 21.1, "games": 338}]
+    },
+    "points": {
+      "season": "2026", "leaderboard": "STD",
+      "items": [{"rank": 1, "player": {"name": "Gaby59", "region": "EU", "country": "FR"}, "total": 40}]
+    }
+  }
+}
+```
+
 ## Example
 
 ```graphql

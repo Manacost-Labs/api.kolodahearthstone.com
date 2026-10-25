@@ -2,8 +2,9 @@
 
 HSGuru pages are Phoenix LiveView dead renders: the server sends the complete
 first render, so most pages need no browser. Pages are read through Scrape.do
-(plain datacenter request first, residential on failure); the few pages whose
-rows arrive over the LiveView socket ask for a rendered page instead.
+(a plain page first, one rendered retry when it fails validation; no super
+proxy, as for the deck catalogs); the few pages whose rows arrive over the
+LiveView socket ask for a rendered page directly.
 
 Scrape.do allows 50 concurrent requests per account and the mulligan queue uses
 40 of them, so a reader never runs more than five pages at once.
@@ -27,10 +28,11 @@ from .sources import Source
 HSGURU = "https://www.hsguru.com"
 MAX_CONCURRENCY = 5
 PAGE_TIMEOUT_MS = 60_000
-# (render, super): a plain datacenter page costs 1 credit, residential 10,
-# a rendered page 5 and a rendered residential page 25.
-PLAIN_PROFILES = ((False, False), (False, True))
-RENDER_PROFILES = ((True, False), (True, True))
+# (render, super): a plain page costs 1 credit and a rendered one 5. Super
+# proxies (10/25) are not used: on 2026-10-25 a rendered retry recovered the
+# pages a plain request missed.
+PLAIN_PROFILES = ((False, False), (True, False))
+RENDER_PROFILES = ((True, False),)
 PAYWALL_MARKER = "you do not have access to these filters"
 _SKIPPED_PROVIDERS = frozenset({"decodo", "firecrawl", "brightdata", "scrapfly"})
 
