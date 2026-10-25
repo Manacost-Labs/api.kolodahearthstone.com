@@ -452,19 +452,142 @@ FlareSolverr — запасной маршрут.
 ## HSGuru Streamers
 
 Подробно: [HSGURU_STREAMERS.md](HSGURU_STREAMERS.md). Источник
-`hsguru_streamers` (pipeline), таймер
-`hs-data-api-docker-refresh-hsguru-streamers.timer` раз в 5 минут читает
-`/streaming-now`, новые строки `/streamer-decks` (все форматы, ранги и окна)
-и профили каналов Twitch (аватар, YouTube, X, VOD).
+`hsguru_streamers` (pipeline). Таймер
+`hs-data-api-docker-refresh-hsguru-streamers.timer` раз в 5 минут читает:
+
+* `/streaming-now`;
+* новые строки `/streamer-decks` — все форматы, ранги и окна;
+* профили каналов Twitch — аватар, YouTube, X, Telegram и записи
+  трансляций для VOD-ссылок.
+
+Ответ — конверт `{ data, meta }`. `meta.count` — всего строк, которые
+подходят под фильтры. `meta.fetched_at` — окончание последнего запуска.
+`meta.stale` выставляется, если данные старше `stale_hours` источника (2 ч).
 
 | Endpoint | Что возвращает |
 | --- | --- |
-| `GET /v1/hsguru/streamers` | Стримеры с ссылками, эфиром и последними колодами; `q`, `format`, `player_class`, `language`, `live`, `days`, `sort`, `limit`, `offset`, `decks` |
-| `GET /v1/hsguru/streamers/{streamer}` | Профиль, эфир, колоды по формату и классу, VOD |
-| `GET /v1/hsguru/streamers/{streamer}/decks` | Колоды стримера; `format`, `player_class`, `days`, `limit`, `offset` |
-| `GET /v1/hsguru/streamer-decks` | Колоды всех стримеров; `format`, `player_class`, `archetype`, `max_rank`, `days`, `limit`, `offset` |
-| `GET /v1/hsguru/streaming-now` | Кто в эфире, с какой колодой и в каком режиме (без кэша) |
-| `GET /v1/hsguru/streamers/coverage` | Покрытие и последние запуски (без кэша) |
+| `GET /v1/hsguru/streamers` | Стримеры с ссылками, эфиром и последними колодами |
+| `GET /v1/hsguru/streamers/{streamer}` | Профиль, эфир, колоды по формату и классу (`facets`), записи (`vods`), последняя колода (`last_deck`) |
+| `GET /v1/hsguru/streamers/{streamer}/decks` | Колоды стримера, новые сверху; в ответе ещё `streamer` |
+| `GET /v1/hsguru/streamer-decks` | Колоды всех стримеров, новые сверху; у каждой `streamer` (`id`, `slug`, `display_name`, `avatar_url`) |
+| `GET /v1/hsguru/streaming-now` | Кто в эфире, с какой колодой и в каком режиме; `meta.observed_at`, `meta.stale` (старше 20 минут); без кэша |
+| `GET /v1/hsguru/streamers/coverage` | Число стримеров, профилей, колод, VOD, эфиров и последние запуски с расходом Scrape.do; без кэша |
+
+`{streamer}` — Twitch login, ник HSGuru (без учёта регистра) или Twitch user
+id. Неизвестный стример — `404`.
+
+Параметры:
+
+| Параметр | Где | Значения |
+| --- | --- | --- |
+| `format` | все списки | `standard`, `wild`, `classic`, `twist` |
+| `player_class` | все списки | класс заглавными: `PRIEST`, `DEATHKNIGHT`, … |
+| `days` | `/streamers` (30), `/streamers/{s}/decks` (0), `/streamer-decks` (7) | последняя игра за N дней; `0` — за всё время |
+| `q` | `/streamers` | поиск по нику или логину |
+| `language` | `/streamers`, `/streaming-now` | двухбуквенный язык эфира; HSGuru даёт только языки из `HS_HSGURU_STREAMERS_LANGUAGES` (по умолчанию `ru`) |
+| `live` | `/streamers` | `true` — только те, кто сейчас в эфире |
+| `sort` | `/streamers` | `active` (по умолчанию: в эфире, потом недавние), `followers`, `decks`, `rank` |
+| `decks` | `/streamers` | сколько последних колод у каждого (0–10, по умолчанию 3) |
+| `archetype`, `max_rank` | `/streamer-decks` | точное имя архетипа HSGuru; пик Легенды не хуже ранга |
+| `mode`, `known` | `/streaming-now` | режим (`standard`, `battlegrounds`, …); `true` — только стримеры с колодами на HSGuru |
+| `limit`, `offset` | все списки | страницы; `limit` до 100 (`/streamers`), 200 (колоды), 300 (эфиры) |
+
+Колода: `deck_id`, `deck_code`, `archetype` (имя HSGuru), `player_class`,
+`format`, `peak_rank`, `latest_rank`, `worst_rank` (`null` вне Легенды),
+`wins`, `losses`, `games`, `winrate`, `last_played_at`, `first_seen_at`,
+`hsguru_url`, `on_current_stream`, `stream_url`, `vod` (`url` с таймкодом,
+`title`, `started_at`, `offset_seconds` — или `null`).
+
+```bash
+curl -s "https://api.kolodahearthstone.com/v1/hsguru/streamers?days=0&limit=1&decks=1" | jq .
+```
+
+Ответ живого прогона 25.10.2026; название эфира сокращено:
+
+```json
+{
+  "data": [
+    {
+      "id": 86728139,
+      "slug": "moquaitv",
+      "display_name": "MoquaiTV",
+      "login": "moquaitv",
+      "twitch_url": "https://www.twitch.tv/moquaitv",
+      "youtube_url": null,
+      "x_url": null,
+      "links": [],
+      "avatar_url": null,
+      "followers": null,
+      "language": null,
+      "decks_total": 102,
+      "last_played_at": "2026-10-25T16:24:05+00:00",
+      "hsguru_url": "https://www.hsguru.com/streamer-decks?twitch_id=86728139",
+      "live": {
+        "platform": "twitch",
+        "title": "[EU] Legend | WarlockStone",
+        "viewers": 14,
+        "mode": null,
+        "language": null,
+        "started_at": "2026-10-25T15:54:23.312736+00:00",
+        "thumbnail_url": "https://static-cdn.jtvnw.net/previews-ttv/live_user_moquaitv-384x216.jpg",
+        "stream_url": "https://www.twitch.tv/moquaitv",
+        "observed_at": "2026-10-25T16:24:11.312736+00:00"
+      },
+      "window": { "decks": 33, "best_rank": 609, "last_played_at": "2026-10-25T16:24:05+00:00" },
+      "recent_decks": [
+        {
+          "deck_id": 42692433,
+          "deck_code": "AAECAa0GAufYB/OJCAnwnwSFhgevyQes2Qf04Afo8Qfh+gf7iQj8iQgAAA==",
+          "archetype": "Thief Priest",
+          "player_class": "PRIEST",
+          "format": "standard",
+          "peak_rank": 6623,
+          "latest_rank": null,
+          "worst_rank": 8560,
+          "wins": 11,
+          "losses": 8,
+          "games": 19,
+          "winrate": 57.9,
+          "last_played_at": "2026-10-25T16:24:05+00:00",
+          "hsguru_url": "https://www.hsguru.com/deck/42692433",
+          "on_current_stream": true,
+          "stream_url": "https://www.twitch.tv/moquaitv",
+          "vod": null
+        }
+      ]
+    }
+  ],
+  "meta": { "source_id": "hsguru_streamers", "fetched_at": "2026-10-25T16:26:22.512647+00:00", "stale": false, "count": 226, "limit": 1, "offset": 0 }
+}
+```
+
+Колода с записью трансляции (`/v1/hsguru/streamers/nohandsgamer/decks`):
+
+```json
+{
+  "deck_id": 42709303,
+  "archetype": "Egg Priest",
+  "player_class": "PRIEST",
+  "format": "standard",
+  "peak_rank": 20,
+  "wins": 33,
+  "losses": 17,
+  "winrate": 66.0,
+  "last_played_at": "2026-10-25T00:42:46+00:00",
+  "on_current_stream": false,
+  "vod": {
+    "url": "https://www.twitch.tv/videos/2909721478?t=5h41m20s",
+    "title": "Egg Priest going for #1 Legend !hsreplay",
+    "started_at": "2026-10-24T18:56:26+00:00",
+    "offset_seconds": 20480
+  }
+}
+```
+
+Эфир (`/v1/hsguru/streaming-now`): поля `live`, а ещё `login`,
+`display_name`, `mode`, `mode_source` (`hsguru` или `deck`, если режим взят из
+формата колоды эфира), `streamer` (профиль или `null`) и `current_deck`
+(колода, сыгранная после начала эфира, или `null`).
 
 ## HSReplay Archetype Database
 

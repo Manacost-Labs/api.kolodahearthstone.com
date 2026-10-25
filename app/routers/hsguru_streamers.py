@@ -18,6 +18,7 @@ from ..hsguru_streamers import (
     streaming_now,
 )
 from ..sources import SOURCE_BY_ID
+from . import hsguru_streamers_examples as examples
 from .models import ApiMeta
 
 router = APIRouter(prefix="/v1/hsguru", tags=["v1-hsguru"])
@@ -84,7 +85,11 @@ def _not_found() -> HTTPException:
     return HTTPException(status_code=404, detail="HSGuru has no decks of this streamer")
 
 
-@router.get("/streamers")
+@router.get(
+    "/streamers",
+    summary="HSGuru streamers with channel links, live stream and last decks",
+    responses=examples.STREAMERS,
+)
 async def hsguru_streamers(
     q: str | None = Query(
         None, min_length=1, max_length=64, description="Name search."
@@ -101,7 +106,13 @@ async def hsguru_streamers(
     offset: int = Query(0, ge=0, le=100_000),
     decks: int = Query(3, ge=0, le=10, description="Last decks per streamer."),
 ) -> dict[str, Any]:
-    """HSGuru streamers with Twitch/YouTube/X links, live state and last decks."""
+    """HSGuru streamers with Twitch/YouTube/X links, live state and last decks.
+
+    Streamers who played a deck in the last `days` (0 = ever), filtered by deck
+    `format` and `player_class`; `sort=active` lists live streamers first, then by
+    the last game. `recent_decks` holds the last `decks` decks; `window` counts the
+    decks and the best legend rank inside the filters. `meta.count` is the total.
+    """
 
     data = await list_streamers(
         sqlite_fetch,
@@ -122,7 +133,11 @@ async def hsguru_streamers(
     }
 
 
-@router.get("/streamers/coverage")
+@router.get(
+    "/streamers/coverage",
+    summary="Coverage and the last runs of the HSGuru streamers pipeline",
+    responses=examples.COVERAGE,
+)
 async def hsguru_streamers_coverage(
     runs: int = Query(10, ge=1, le=100),
 ) -> dict[str, Any]:
@@ -132,7 +147,11 @@ async def hsguru_streamers_coverage(
     return {"data": data, "meta": _meta(count=int(data["decks"] or 0))}
 
 
-@router.get("/streamers/{streamer}")
+@router.get(
+    "/streamers/{streamer}",
+    summary="One HSGuru streamer: profile, links, live stream, facets, VODs",
+    responses=examples.STREAMER,
+)
 async def hsguru_streamer(streamer: str = STREAMER_PATH) -> dict[str, Any]:
     """One streamer: profile, links, live stream, deck counts by format and class, VODs."""
 
@@ -142,7 +161,11 @@ async def hsguru_streamer(streamer: str = STREAMER_PATH) -> dict[str, Any]:
     return {"data": data, "meta": _meta(count=data["decks_total"])}
 
 
-@router.get("/streamers/{streamer}/decks")
+@router.get(
+    "/streamers/{streamer}/decks",
+    summary="Decks of one HSGuru streamer with VOD links",
+    responses=examples.STREAMER_DECKS,
+)
 async def hsguru_streamer_decks(
     streamer: str = STREAMER_PATH,
     format_name: Format | None = FORMAT_QUERY,
@@ -171,7 +194,11 @@ async def hsguru_streamer_decks(
     }
 
 
-@router.get("/streamer-decks")
+@router.get(
+    "/streamer-decks",
+    summary="Decks of every HSGuru streamer, newest game first",
+    responses=examples.RECENT_DECKS,
+)
 async def hsguru_recent_streamer_decks(
     format_name: Format | None = FORMAT_QUERY,
     player_class: PlayerClass | None = CLASS_QUERY,
@@ -201,14 +228,24 @@ async def hsguru_recent_streamer_decks(
     }
 
 
-@router.get("/streaming-now")
+@router.get(
+    "/streaming-now",
+    summary="Who is live now, with which deck and in which mode",
+    responses=examples.STREAMING_NOW,
+)
 async def hsguru_streaming_now(
     language: str | None = LANGUAGE_QUERY,
     mode: Mode | None = MODE_QUERY,
     known: bool = KNOWN_QUERY,
     limit: int = LIVE_LIMIT_QUERY,
 ) -> dict[str, Any]:
-    """Live Hearthstone streams, with the deck played on the current broadcast."""
+    """Live Hearthstone streams, with the deck played on the current broadcast.
+
+    Ordered by viewers. `mode` is HSGuru's mode or, when HSGuru does not know it,
+    the format of the deck played after the stream started (`mode_source=deck`).
+    `streamer` is set for streamers HSGuru has decks of. `meta.stale` is true when
+    the last read is older than 20 minutes. Never cached.
+    """
 
     data = await streaming_now(
         sqlite_fetch, language=language, mode=mode, known_only=known, limit=limit
