@@ -526,6 +526,62 @@ SOURCES: tuple[Source, ...] = (
         kind="pipeline",
     ),
     Source(
+        id="hsguru_brawl",
+        url="https://www.hsguru.com/meta?format=-1&period=brawl&rank=all",
+        site="hsguru",
+        category="brawl",
+        description=(
+            "HSGuru Tavern Brawl statistics of the current Brawl: archetype winrate, "
+            "popularity, games, turns, duration and climbing speed for seven ranks by "
+            "coin and, for all ranks, by opponent class, plus the most played Brawl "
+            "decks with codes. Plain Scrape.do pages refreshed every three hours by "
+            "hs-data-api-docker-refresh-hsguru-brawl.timer; stale_hours = 3h + slack."
+        ),
+        stale_hours=12,
+        kind="pipeline",
+    ),
+    Source(
+        id="hsguru_esports_tournaments",
+        url="https://www.hsguru.com/mt/tour-stops",
+        site="hsguru",
+        category="esports",
+        description=(
+            "HSGuru esports: upcoming and recent tournaments of /esports and every "
+            "official tour stop with stage standings, player lineups (deck codes) and "
+            "lineup archetype popularity. Finished tournaments are reused from the "
+            "previous snapshot. Daily hs-data-api-docker-refresh-hsguru-esports.timer; "
+            "stale_hours = 24h + 24h slack."
+        ),
+        stale_hours=48,
+        kind="pipeline",
+    ),
+    Source(
+        id="hsguru_esports_points",
+        url="https://www.hsguru.com/leaderboard/points",
+        site="hsguru",
+        category="esports",
+        description=(
+            "HSEsports points from HSGuru for every season and leaderboard (Standard, "
+            "Battlegrounds): rank, player, region, country, per-month points and total. "
+            "Daily hs-data-api-docker-refresh-hsguru-esports.timer; stale_hours = 48."
+        ),
+        stale_hours=48,
+        kind="pipeline",
+    ),
+    Source(
+        id="hsguru_esports_legacy",
+        url="https://www.hsguru.com/legacy-hsesports/mt/stats",
+        site="hsguru",
+        category="esports",
+        description=(
+            "Archived HSGuru Masters Tour pages: player MT statistics, qualifier "
+            "statistics per year and tour stop, and legacy season points or earnings. "
+            "Read at most weekly by the daily esports timer; stale_hours = 7 days + 1 day."
+        ),
+        stale_hours=192,
+        kind="pipeline",
+    ),
+    Source(
         id="hsreplay_battlegrounds_compositions_screenshot",
         url="https://hsreplay.net/battlegrounds/compositions/",
         site="hsreplay",

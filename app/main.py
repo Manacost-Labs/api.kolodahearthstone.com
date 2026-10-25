@@ -51,6 +51,7 @@ from .routers.bg import router as bg_v1_router
 from .routers.constructed import router as constructed_v1_router
 from .routers.hsguru_matchups import router as hsguru_matchups_v1_router
 from .routers.hsguru_meta import router as hsguru_meta_v1_router
+from .routers.hsguru_coverage import router as hsguru_coverage_v1_router
 from .routers.hsguru_stats import router as hsguru_stats_v1_router
 from .routers.hsreplay_mulligan import router as hsreplay_mulligan_v1_router
 from .routers.material_search import router as material_search_router
@@ -211,6 +212,7 @@ app.include_router(canonical_system_v1_router)
 app.include_router(hsguru_meta_v1_router)
 app.include_router(hsguru_matchups_v1_router)
 app.include_router(hsguru_stats_v1_router)
+app.include_router(hsguru_coverage_v1_router)
 app.include_router(hsreplay_mulligan_v1_router)
 app.include_router(api_tokens_router)
 app.include_router(material_search_router)

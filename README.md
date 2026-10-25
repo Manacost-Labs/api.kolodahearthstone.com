@@ -153,6 +153,14 @@ GraphQL pagination возвращает `items` и `pageInfo`. Максимал�
 | GET | `/v1/hsguru/mulligan/slices` | `archetype` или `deck_id`, `format` | Сохранённые срезы муллигана и матчапов |
 | GET | `/v1/hsguru/mulligan/history` | срез, `kind`, `card`, `limit` | Снимки среза и строка одной карты по времени |
 | GET | `/v1/hsguru/mulligan/coverage` | `runs` | Покрытие сбора, последние запуски и расход Scrape.do |
+| GET | `/v1/hsguru/brawl/meta` | `rank`, `coin`, `opponent_class`, `min_games` | Мета текущей Потасовки HSGuru ([docs](docs/HSGURU_BRAWL_ESPORTS.md)) |
+| GET | `/v1/hsguru/brawl/decks` | `rank`, `class`, `archetype` | Колоды текущей Потасовки с кодами |
+| GET | `/v1/hsguru/esports/upcoming` | — | Ближайшие и идущие турниры HSGuru /esports |
+| GET | `/v1/hsguru/esports/tournaments` | `kind`, `limit`, `offset` | Турниры: победитель, стадии, игроки, топ архетипов составов |
+| GET | `/v1/hsguru/esports/tournaments/{tournament_id}` | — | Турнир: standings стадий, составы, популярность архетипов |
+| GET | `/v1/hsguru/esports/points` | `season`, `leaderboard`, `region`, `limit`, `offset` | Очки HSEsports сезона |
+| GET | `/v1/hsguru/esports/points/seasons` | — | Собранные сезоны очков HSEsports |
+| GET | `/v1/hsguru/esports/legacy/{table}` | `selector`, `limit`, `offset` | Архив Masters Tour: `mt-stats`, `qualifier-stats`, `mt-points` |
 | GET | `/v1/hsreplay/mulligan` | `deck` (required), `format`, `rank`, `initiative`, `period`, `opponent_class` | Муллиган HSReplay v2 колоды: % оставляют, винрейт в стартовой руке, при доборе, при розыгрыше, ходов в руке, ход розыгрыша |
 | GET | `/v1/hsreplay/mulligan/decks` | `format`, `rank`, `limit` | Набор колод муллигана HSReplay по формату и рангу |
 | GET | `/v1/hsreplay/mulligan/slices` | `deck` (required), `format` | Срезы одной колоды и их состояние |

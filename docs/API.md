@@ -550,6 +550,194 @@ FlareSolverr — запасной маршрут.
 (`any_player`, `on_coin`, `going_first`), `opponent_class` (`any` или класс
 заглавными буквами). Несобранный срез — `404`.
 
+## HSGuru Brawl And Esports
+
+Описание наборов, полей и аудит покрытия HSGuru:
+[DATA_CATALOG.md](DATA_CATALOG.md#hsguru-потасовка-и-киберспорт).
+
+Источники `hsguru_brawl` (таймер `hs-data-api-docker-refresh-hsguru-brawl.timer`,
+каждые 3 часа), `hsguru_esports_tournaments`, `hsguru_esports_points` и
+`hsguru_esports_legacy` (таймер `hs-data-api-docker-refresh-hsguru-esports.timer`,
+ежедневно; архив — не чаще раза в неделю). Вручную:
+`python -m app.cli refresh-hsguru-brawl`,
+`python -m app.cli refresh-hsguru-esports [--part tournaments|points|legacy] [--force-legacy]`.
+
+| Endpoint | Что возвращает |
+| --- | --- |
+| `GET /v1/hsguru/brawl/meta` | `items[]` архетипов Потасовки: `archetype`, `winrate`, `popularity`, `games`, `turns`, `duration_minutes`, `climbing_speed`; `rank`, `coin`, `opponent_class`, `total_games` |
+| `GET /v1/hsguru/brawl/decks` | `items[]` колод: `archetype`, `class`, `deck_code`, `win_rate`, `games`, `url` |
+| `GET /v1/hsguru/esports/upcoming` | `items[]`: `tournament_id`, `name`, `start_time`, `tags`, `url` |
+| `GET /v1/hsguru/esports/tournaments` | Сводки турниров (пагинация): `winner`, `stages`, `players`, `top_archetypes`, `complete` |
+| `GET /v1/hsguru/esports/tournaments/{tournament_id}` | Полный турнир: `stages[].standings[]`, `lineups[].decks[]`, `lineup_popularity`; неизвестный id — `404` |
+| `GET /v1/hsguru/esports/points` | Сезон очков: `headers`, `items[]` (`rank`, `player`, колонки месяцев/турниров, `total`); без `season` — текущий год |
+| `GET /v1/hsguru/esports/points/seasons` | Пары сезон × лидерборд и число игроков |
+| `GET /v1/hsguru/esports/legacy/{table}` | `mt-stats`, `qualifier-stats` (`selector` — период), `mt-points` (`selector` — сезон); `options` — доступные значения |
+
+Невалидный параметр — `422`, ещё не опубликованный набор — `503`. Все ответы —
+конверт `/v1`: `data` и `meta` (`source_id`, `fetched_at`, `stale`, `count`,
+для списков с пагинацией — `limit`, `offset`). Эксплуатация, расход и
+ограничения: [HSGURU_BRAWL_ESPORTS.md](HSGURU_BRAWL_ESPORTS.md).
+
+### `GET /v1/hsguru/brawl/meta`
+
+| Parameter | Default | Описание |
+| --- | --- | --- |
+| `rank` | `all` | `all`, `top_legend` (Top 1k), `top_5k`, `legend`, `diamond_4to1`, `diamond_to_legend`, `bronze_plat`. В Потасовке почти все игры попадают в `all`. |
+| `coin` | `any_player` | `any_player`, `on_coin`, `going_first`. |
+| `opponent_class` | `any` | `any` или класс заглавными буквами (`MAGE`); собирается для `rank=all`. |
+| `min_games` | `10` | Отбросить архетипы с меньшим числом игр. |
+
+```json
+{
+  "data": {
+    "rank": "all", "coin": "any_player", "opponent_class": "any",
+    "min_games": 10, "total_games": 11740,
+    "source_url": "https://www.hsguru.com/meta?format=-1&period=brawl&rank=all&min_games=10",
+    "items": [
+      {"archetype": "C'Thun Priest", "winrate": 72.6, "popularity": 21.0, "games": 2525,
+       "turns": 9.2, "duration_minutes": 8.5, "climbing_speed": 3.21}
+    ]
+  },
+  "meta": {"source_id": "hsguru_brawl", "fetched_at": "2026-10-25T16:28:34+00:00", "stale": false, "count": 72}
+}
+```
+
+### `GET /v1/hsguru/brawl/decks`
+
+| Parameter | Default | Описание |
+| --- | --- | --- |
+| `rank` | `all` | `all`, `legend`, `diamond_to_legend`. |
+| `class` | — | Класс (`Priest`), без учёта регистра. |
+| `archetype` | — | Точное название архетипа, без учёта регистра. |
+
+```json
+{
+  "data": {
+    "rank": "all", "min_games": 50,
+    "items": [
+      {"archetype": "Shaman", "class": "Shaman", "format": "Brawl",
+       "deck_code": "AAEBAaoIAA/X6Qf87gfF8Afr8Af79QeT9geW+geJ+we3/ge//wfA/wf1/weAgQjegQidgggAAA==",
+       "win_rate": 60.5, "games": 816, "url": "https://www.hsguru.com/deck/42479368"}
+    ]
+  },
+  "meta": {"source_id": "hsguru_brawl", "stale": false, "count": 13}
+}
+```
+
+### `GET /v1/hsguru/esports/upcoming`
+
+Без параметров.
+
+```json
+{
+  "data": {"items": [
+    {"tournament_id": "6acf43976090a5001347461c", "name": "Aventa Cup #3 - 50€ Cashprize",
+     "start_time": "2026-10-23T17:00:17+00:00", "tags": ["Open", "Bo3", "Europe"],
+     "url": "https://www.hsguru.com/battlefy/tournament/6acf43976090a5001347461c"}
+  ]},
+  "meta": {"source_id": "hsguru_esports_tournaments", "stale": false, "count": 15}
+}
+```
+
+### `GET /v1/hsguru/esports/tournaments`
+
+| Parameter | Default | Описание |
+| --- | --- | --- |
+| `kind` | — | `tour_stop` (официальные MT) или `community` (стартовавшие за 14 дней из `/esports`). |
+| `limit` | `50` | 1–500. |
+| `offset` | `0` | Смещение. |
+
+```json
+{
+  "data": [
+    {"tournament_id": "6a6c88f821e3c30013db3d46",
+     "name": "2026 Hearthstone Masters Tour Summer Championship", "kind": "tour_stop",
+     "start_time": "2026-07-31T14:00:00+00:00", "complete": true,
+     "players": 16, "lineups_complete": true,
+     "stages": ["Group A", "Group B", "Group C", "Group D", "Top 8"],
+     "winner": {"name": "demoshadow", "country": "UA"},
+     "top_archetypes": [{"archetype": "Void Soul DH", "lineups": 16, "share": 1.0}]}
+  ],
+  "meta": {"source_id": "hsguru_esports_tournaments", "stale": false, "count": 32, "limit": 1, "offset": 0}
+}
+```
+
+### `GET /v1/hsguru/esports/tournaments/{tournament_id}`
+
+`tournament_id` — id Battlefy из списка. Неизвестный id — `404`.
+
+```json
+{
+  "data": {
+    "tournament_id": "6a6c88f821e3c30013db3d46", "kind": "tour_stop",
+    "stages": [{"stage_id": "6a6f3a399e7a410019bde4e0", "name": "Top 8",
+                "standings": [{"place": 1, "player": {"name": "demoshadow", "country": "UA"},
+                               "score": "3 - 0", "wins": 3, "losses": 0}]}],
+    "lineups": [{"player": {"name": "Che0nsu", "country": "KR"},
+                 "decks": [{"archetype": "Void Soul DH", "class": "DEMONHUNTER",
+                            "deck_code": "AAECAea5AwaongbNngaKqgeSqgeTqgfosQcM4fgFzp4G0J4G054G3v8GtpcHkr8Hlb8HxN0Hxt0Hx90HteEHAAA=",
+                            "url": "https://www.hsguru.com/deck/41269302"}]}],
+    "lineups_total": 16, "lineups_complete": true,
+    "lineup_popularity": {"lineups": 16,
+      "archetypes": [{"archetype": "Void Soul DH", "lineups": 16, "share": 1.0}],
+      "classes": [{"class": "DEMONHUNTER", "lineups": 16, "share": 1.0}]},
+    "complete": true, "reused": true
+  },
+  "meta": {"source_id": "hsguru_esports_tournaments", "stale": false, "count": 1}
+}
+```
+
+### `GET /v1/hsguru/esports/points`
+
+| Parameter | Default | Описание |
+| --- | --- | --- |
+| `season` | последний годовой | `2026`, `2026_summer`, `china_2026_spring` …; список — `/points/seasons`. |
+| `leaderboard` | `STD` | `STD` или `BG_LL` (Battlegrounds). |
+| `region` | — | `EU`, `AM`, `AP`, `CN`. |
+| `limit` / `offset` | `500` / `0` | `limit` 1–3000. |
+
+```json
+{
+  "data": {
+    "season": "2026", "leaderboard": "STD", "leaderboard_label": "Standard",
+    "headers": ["#", "Player", "January", "February", "March", "April", "May", "June", "Total"],
+    "items": [{"rank": 1,
+               "player": {"name": "Gaby59", "battletag": "Gaby59", "region": "EU", "country": "FR",
+                          "profile_url": "https://www.hsguru.com/player-profile/Gaby59"},
+               "january": 6, "february": 7, "march": 7, "april": 7, "may": 7, "june": 6, "total": 40}]
+  },
+  "meta": {"source_id": "hsguru_esports_points", "stale": false, "count": 227, "limit": 1, "offset": 0}
+}
+```
+
+### `GET /v1/hsguru/esports/points/seasons`
+
+```json
+{
+  "data": [{"season": "2026", "season_label": "2026", "leaderboard": "STD",
+            "leaderboard_label": "Standard", "players": 1182}],
+  "meta": {"source_id": "hsguru_esports_points", "stale": false, "count": 36}
+}
+```
+
+### `GET /v1/hsguru/esports/legacy/{table}`
+
+| Parameter | Default | Описание |
+| --- | --- | --- |
+| `table` | — | `mt-stats`, `qualifier-stats`, `mt-points`. |
+| `selector` | `all` / новейший сезон | `qualifier-stats`: `current`, `all`, год или тур-стоп; `mt-points`: сезон (`2022_fall`). Доступные значения — `data.options`. |
+| `limit` / `offset` | `500` / `0` | `limit` 1–5000. |
+
+```json
+{
+  "data": {
+    "table": "qualifier-stats", "options": ["current", "all", "2020", "2021", "2022"],
+    "period": "2021", "headers": ["#", "Player", "Cups", "Top 8", "Top 16", "Winrate %"],
+    "items": [{"rank": 1, "player": {"name": "Rine", "battletag": "Rine#21929"},
+               "cups": 108, "top_8": 15, "top_16": 18, "winrate_pct": 70.57}]
+  },
+  "meta": {"source_id": "hsguru_esports_legacy", "stale": false, "count": 753, "limit": 1, "offset": 0}
+}
 ## HSReplay Mulligan v2 (deck mulligan guide)
 
 Подробно (эндпоинт HSReplay, набор колод, очередь, бюджет Scrape.do,

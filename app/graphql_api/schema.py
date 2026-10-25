@@ -607,6 +607,25 @@ async def _hsreplay_mulligan(
         ) from None
 
 
+async def _hsguru_dataset_view(
+    info: Info[GraphQLContext, None], source_id: str, select: Any
+) -> Any:
+    """Select from the latest imported HSGuru Brawl/esports dataset (REST shape)."""
+
+    from ..hsguru_coverage_views import structured_of
+
+    row = await _call_repository(_repository(info).dataset(source_id, None))
+    structured = structured_of((row or {}).get("payload"))
+    if not structured:
+        return None
+    try:
+        return select(structured)
+    except ValueError as exc:
+        raise _validation_error(str(exc)) from None
+    except LookupError:
+        return None
+
+
 async def _call_repository(operation: Any) -> Any:
     try:
         return await operation
@@ -1386,6 +1405,126 @@ class Query:
             min_games=min_games,
             min_archetype_games=min_archetype_games,
             limit=limit,
+        )
+
+    @strawberry.field(
+        description=(
+            "Archetype meta of the current Tavern Brawl on HSGuru for a rank, coin and "
+            "opponent class; same shape as REST /v1/hsguru/brawl/meta data."
+        )
+    )
+    async def hsguru_brawl_meta(
+        self,
+        info: Info[GraphQLContext, None],
+        rank: str = "all",
+        coin: str = "any_player",
+        opponent_class: str = "any",
+        min_games: int = 10,
+    ) -> JSON | None:
+        from ..hsguru_coverage_views import brawl_meta
+
+        return await _hsguru_dataset_view(
+            info,
+            "hsguru_brawl",
+            lambda structured: brawl_meta(
+                structured,
+                rank=rank,
+                coin=coin,
+                opponent_class=opponent_class,
+                min_games=max(0, min_games),
+            ),
+        )
+
+    @strawberry.field(
+        description=(
+            "Most played decks of the current Tavern Brawl with codes; same shape as "
+            "REST /v1/hsguru/brawl/decks data."
+        )
+    )
+    async def hsguru_brawl_decks(
+        self,
+        info: Info[GraphQLContext, None],
+        rank: str = "all",
+        class_name: str | None = None,
+        archetype: str | None = None,
+    ) -> JSON | None:
+        from ..hsguru_coverage_views import brawl_decks
+
+        return await _hsguru_dataset_view(
+            info,
+            "hsguru_brawl",
+            lambda structured: brawl_decks(
+                structured, rank=rank, class_name=class_name, archetype=archetype
+            ),
+        )
+
+    @strawberry.field(
+        description=(
+            "HSGuru tournaments: summaries (kind tour_stop or community) or, with "
+            "tournamentId, one tournament with stage standings, lineups and lineup "
+            "archetype popularity; upcoming=true lists /esports upcoming tournaments."
+        )
+    )
+    async def hsguru_esports_tournaments(
+        self,
+        info: Info[GraphQLContext, None],
+        tournament_id: str | None = None,
+        kind: str | None = None,
+        upcoming: bool = False,
+    ) -> JSON | None:
+        from ..hsguru_coverage_views import tournament, tournament_summaries
+
+        def select(structured: dict[str, Any]) -> Any:
+            if upcoming:
+                return list(structured.get("upcoming") or [])
+            if tournament_id:
+                return tournament(structured, tournament_id)
+            return tournament_summaries(structured, kind=kind)
+
+        return await _hsguru_dataset_view(info, "hsguru_esports_tournaments", select)
+
+    @strawberry.field(
+        description=(
+            "HSEsports points of one season and leaderboard (STD or BG_LL; default "
+            "season is the current year); same shape as REST /v1/hsguru/esports/points."
+        )
+    )
+    async def hsguru_esports_points(
+        self,
+        info: Info[GraphQLContext, None],
+        season: str | None = None,
+        leaderboard: str = "STD",
+        region: str | None = None,
+    ) -> JSON | None:
+        from ..hsguru_coverage_views import points
+
+        return await _hsguru_dataset_view(
+            info,
+            "hsguru_esports_points",
+            lambda structured: points(
+                structured, season=season, leaderboard=leaderboard, region=region
+            ),
+        )
+
+    @strawberry.field(
+        description=(
+            "Archived Masters Tour tables: mt-stats, qualifier-stats (selector: period) "
+            "or mt-points (selector: season); same shape as REST "
+            "/v1/hsguru/esports/legacy/{table}."
+        )
+    )
+    async def hsguru_esports_legacy(
+        self,
+        info: Info[GraphQLContext, None],
+        table: str,
+        selector: str | None = None,
+    ) -> JSON | None:
+        from ..hsguru_coverage_views import legacy
+
+        return await _hsguru_dataset_view(
+            info,
+            "hsguru_esports_legacy",
+            lambda structured: legacy(structured, table, selector=selector),
         )
 
     @strawberry.field(

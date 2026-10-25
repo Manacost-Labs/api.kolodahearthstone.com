@@ -1779,6 +1779,20 @@ async def _run_pipeline_source(source_id: str) -> dict[str, Any]:
         from .hsguru_mulligan import refresh_hsguru_mulligan
 
         result = await refresh_hsguru_mulligan()
+    elif source_id == "hsguru_brawl":
+        from .hsguru_brawl import refresh_hsguru_brawl
+
+        result = await refresh_hsguru_brawl()
+    elif source_id in {
+        "hsguru_esports_tournaments",
+        "hsguru_esports_points",
+        "hsguru_esports_legacy",
+    }:
+        from .hsguru_esports import LEGACY_SOURCE_ID, REFRESHERS
+
+        # A run requested from the panel reads the weekly archive even when fresh.
+        options = {"force": True} if source_id == LEGACY_SOURCE_ID else {}
+        result = await REFRESHERS[source_id](**options)
     elif source_id == "hsreplay_mulligan":
         from .hsreplay_mulligan import refresh_hsreplay_mulligan
 
@@ -1838,6 +1852,10 @@ async def _run_pipeline_source(source_id: str) -> dict[str, Any]:
             "hsguru_fun_decks": ("fun_retained",),
             "hsguru_archetype_analysis": ("archetypes",),
             "hsguru_mulligan": ("targets_with_data",),
+            "hsguru_brawl": ("archetypes",),
+            "hsguru_esports_tournaments": ("rows",),
+            "hsguru_esports_points": ("rows",),
+            "hsguru_esports_legacy": ("rows",),
             "hsreplay_mulligan": ("targets_with_data",),
             "hsguru_matchups": ("slices_with_data",),
             "hsreplay_battlegrounds_minions": ("minions_ok", "minions_total"),

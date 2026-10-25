@@ -96,6 +96,13 @@ SECTIONS: tuple[ParserSection, ...] = (
         ),
     ),
     ParserSection(
+        id="brawl",
+        label="Потасовка",
+        group="Традиционный режим",
+        description="Архетипы и колоды текущей Потасовки HSGuru.",
+        source_ids=("hsguru_brawl",),
+    ),
+    ParserSection(
         id="arena-classes",
         label="Классы Арены",
         group="Арена",
@@ -180,6 +187,17 @@ SECTIONS: tuple[ParserSection, ...] = (
             *sorted(TRINKET_SLICE_SOURCE_IDS),
         ),
     ),
+    ParserSection(
+        id="esports",
+        label="Киберспорт",
+        group="Киберспорт",
+        description="Турниры, составы игроков, очки HSEsports и архив Masters Tour.",
+        source_ids=(
+            "hsguru_esports_tournaments",
+            "hsguru_esports_points",
+            "hsguru_esports_legacy",
+        ),
+    ),
 )
 
 
@@ -220,6 +238,10 @@ SOURCE_LABELS_RU: dict[str, str] = {
     "hsguru_matchups": "HSGuru · матрицы матчапов архетипов по всем срезам",
     "hsguru_archetype_analysis": "HSGuru · анализ архетипов",
     "hsguru_mulligan": "HSGuru · муллиган и матчапы по классам архетипов и колод",
+    "hsguru_brawl": "HSGuru · Потасовка: архетипы и колоды",
+    "hsguru_esports_tournaments": "HSGuru · турниры: сетки и составы",
+    "hsguru_esports_points": "HSGuru · очки HSEsports по сезонам",
+    "hsguru_esports_legacy": "HSGuru · архив Masters Tour",
     "hsreplay_mulligan": "HSReplay · муллиган колод (v2) по рангам, монетке и классу соперника",
     "hsreplay_battlegrounds_comps": "HSReplay · составы Полей Сражений",
     "hsreplay_battlegrounds_heroes": "HSReplay · герои Полей Сражений",
