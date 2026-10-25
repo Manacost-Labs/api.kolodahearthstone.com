@@ -101,6 +101,42 @@ def _metrics(rows: Sequence[Mapping[str, Any]], key: str) -> dict[str, Any]:
     return out
 
 
+RELIABILITY_BANDS = ((0, 10), (10, 25), (25, 50), (50, 75), (75, 101))
+
+
+def _probability_scores(points: Sequence[tuple[float, bool]]) -> dict[str, Any] | None:
+    """Brier score and a reliability table: how often a stated probability came true."""
+    if not points:
+        return None
+    brier = sum((p - (1.0 if hit else 0.0)) ** 2 for p, hit in points) / len(points)
+    hits = sum(1 for _p, hit in points if hit)
+    base = hits / len(points)
+    reliability = []
+    for low, high in RELIABILITY_BANDS:
+        cell = [(p, hit) for p, hit in points if low <= p * 100 < high]
+        if cell:
+            reliability.append(
+                {
+                    "band": f"{low}-{min(high, 100)}%",
+                    "predictions": len(cell),
+                    "meanPredicted": round(sum(p for p, _ in cell) / len(cell), 3),
+                    "observedRate": round(
+                        sum(1 for _, hit in cell if hit) / len(cell), 3
+                    ),
+                }
+            )
+    return {
+        "brier": round(brier, 4),
+        # Skill against always predicting the base rate (> 0 is better than it).
+        "brierSkill": round(1 - brier / (base * (1 - base)), 3)
+        if 0 < base < 1
+        else None,
+        "baseRate": round(base, 3),
+        "predictions": len(points),
+        "reliability": reliability,
+    }
+
+
 def _evaluable(history: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     return [
         patch
@@ -116,12 +152,20 @@ def _evaluable(history: Mapping[str, Any]) -> list[Mapping[str, Any]]:
 def statistical_backtest(history: Mapping[str, Any]) -> dict[str, Any]:
     patches = list(history.get("patches") or [])
     rows = []
+    points: dict[str, list[tuple[float, bool]]] = {"nerf": [], "buff": []}
     for patch in _evaluable(history):
         others = [p for p in patches if p["version"] != patch["version"]]
         calibration = calibration_tables(others)
         truth = _truth(patch)
         row: dict[str, Any] = {"patch": patch["version"], "date": patch["date"]}
         for direction in ("nerf", "buff"):
+            for name, _class, winrate, popularity in patch["metaBeforeAll"]:
+                rate = (
+                    calibrate(calibration, direction, winrate, popularity) or {}
+                ).get("historicalRate") or 0.0
+                points[direction].append(
+                    (float(rate), name in truth[direction]["archetypes"])
+                )
             scored = []
             for name, _class, winrate, popularity in patch["metaBeforeAll"]:
                 cal = calibrate(calibration, direction, winrate, popularity) or {}
@@ -146,6 +190,7 @@ def statistical_backtest(history: Mapping[str, Any]) -> dict[str, Any]:
         "patches": len(rows),
         "nerf": _metrics(rows, "nerf") if rows else None,
         "buff": _metrics(rows, "buff") if rows else None,
+        "probability": {d: _probability_scores(points[d]) for d in ("nerf", "buff")},
         "perPatch": rows,
     }
 
@@ -174,8 +219,12 @@ BACKTEST_PROMPT = """Ты — аналитик баланса Hearthstone. Да�
 популярностью за предыдущую неделю, ключевые карты этих архетипов, историю
 прошлых правок Blizzard и посчитанные закономерности (пороги, калибровку, сроки).
 Не используй знания о том, что произошло после этой даты.
-Назови до 15 кандидатов на нерф и до 15 на бафф (архетипы и карты), от самого
-вероятного, с confidence 0–100. Используй только ref из входа.
+Те же правила, что у боевого радара: назови до 15 кандидатов на нерф и до 15
+на бафф (архетипы и карты), от самого вероятного, ранжируя по своей оценке
+всех сигналов. calibration архетипа (доля прошлых патчей, задевших архетип с
+такими цифрами) — справка о прошлых решениях Blizzard, а не ответ.
+confidence 0–100 — вероятность, что эту сущность изменят в этом патче.
+Используй только ref из входа.
 """
 
 
@@ -188,6 +237,7 @@ def _model_input(
         earlier, [d for d in history.get("contentDrops") or [] if d["date"] < day]
     )
     archetypes = sorted(patch["metaBeforeAll"], key=lambda row: -row[3])[:40]
+    calibration = patterns.get("calibration")
     names = {row[0] for row in archetypes}
     run = stats._run_for(day)
     cards: dict[int, dict[str, Any]] = {}
@@ -227,6 +277,12 @@ def _model_input(
                 "class": class_id,
                 "winrate": wr,
                 "popularity": pop,
+                "calibration": {
+                    side: (calibrate(calibration, side, wr, pop) or {}).get(
+                        "historicalRate"
+                    )
+                    for side in ("nerf", "buff")
+                },
             }
             for name, class_id, wr, pop in archetypes
         ],
@@ -264,6 +320,7 @@ def model_backtest(
     rows = []
     usage_total = 0.0
     errors = []
+    points: dict[str, list[tuple[float, bool]]] = {"nerf": [], "buff": []}
     for patch in _evaluable(history)[-(limit or 100) :]:
         payload, refs = _model_input(patch, history, stats)
         try:
@@ -315,6 +372,20 @@ def model_backtest(
             }
             row[f"{direction}Top"] = archetypes[:5]
             row[f"{direction}Truth"] = sorted(truth[direction]["archetypes"])
+            # Every archetype of the week counts: unlisted ones were given 0.
+            stated: dict[str, float] = {}
+            for item in ranked:
+                names = (
+                    [item.ref.split(":", 1)[1]]
+                    if item.ref.startswith("archetype:")
+                    else card_archetypes.get(item.ref, [])
+                )
+                for name in names:
+                    stated[name] = max(stated.get(name, 0.0), item.confidence / 100)
+            for name, *_rest in patch["metaBeforeAll"]:
+                points[direction].append(
+                    (stated.get(name, 0.0), name in truth[direction]["archetypes"])
+                )
         rows.append(row)
     return {
         "predictor": "model",
@@ -324,6 +395,7 @@ def model_backtest(
         "buff": _metrics(rows, "buff") if rows else None,
         "nerfCards": _metrics(rows, "nerfCards") if rows else None,
         "buffCards": _metrics(rows, "buffCards") if rows else None,
+        "probability": {d: _probability_scores(points[d]) for d in ("nerf", "buff")},
         "costUsd": round(usage_total, 4),
         "errors": errors,
         "perPatch": rows,
@@ -363,11 +435,17 @@ def backtest_summary(result: Mapping[str, Any] | None) -> dict[str, Any] | None:
     def pick(block: Mapping[str, Any] | None) -> dict[str, Any] | None:
         if not block or not block.get("patches"):
             return None
+        probability = block.get("probability") or {}
         return {
             "patches": block["patches"],
             "nerf@5": (block.get("nerf") or {}).get("@5"),
+            "nerf@10": (block.get("nerf") or {}).get("@10"),
             "buff@5": (block.get("buff") or {}).get("@5"),
+            "buff@10": (block.get("buff") or {}).get("@10"),
             "nerfCards@10": (block.get("nerfCards") or {}).get("@10"),
+            "nerfBrier": (probability.get("nerf") or {}).get("brier"),
+            "nerfBrierSkill": (probability.get("nerf") or {}).get("brierSkill"),
+            "nerfReliability": (probability.get("nerf") or {}).get("reliability"),
         }
 
     return {
@@ -375,4 +453,45 @@ def backtest_summary(result: Mapping[str, Any] | None) -> dict[str, Any] | None:
         "statistical": pick(result.get("statistical")),
         "model": pick(result.get("model")),
         "url": "/v1/constructed/balance-radar/backtest",
+    }
+
+
+def _pct(value: Any) -> str:
+    return (
+        f"{int(float(value) * 100 + 0.5)}%" if isinstance(value, (int, float)) else "—"
+    )
+
+
+def accuracy_block(result: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    """What the backtest proves, for the page: plain Russian plus the numbers."""
+    summary = backtest_summary(result)
+    if not summary:
+        return None
+    best_key = "model" if summary.get("model") else "statistical"
+    best = summary.get(best_key) or {}
+    nerf5, nerf10 = best.get("nerf@5") or {}, best.get("nerf@10") or {}
+    who = "Радар" if best_key == "model" else "Статистический прогноз радара"
+    text = (
+        f"{who} проверен на {best.get('patches')} прошлых балансных патчах на данных до их выхода: "
+        f"из пяти главных кандидатов на нерф сбывалось {_pct(nerf5.get('precision'))}, "
+        f"а среди десяти первых оказывалось {_pct(nerf10.get('recall'))} колод, которые Blizzard "
+        f"действительно ослабила."
+    )
+    reliability = best.get("nerfReliability") or []
+    strong = next((r for r in reversed(reliability) if r["predictions"] >= 5), None)
+    if strong:
+        text += (
+            f" Когда радар давал {strong['band']} вероятности нерфа, его получали "
+            f"{_pct(strong['observedRate'])} таких колод."
+        )
+    return {
+        **summary,
+        "basis": best_key,
+        "text": text,
+        "caveat": (
+            "Модель могла видеть часть этих патч-ноутов при обучении, поэтому её цифры — оценка сверху; "
+            "у статистического прогноза такой утечки нет."
+            if best_key == "model"
+            else None
+        ),
     }

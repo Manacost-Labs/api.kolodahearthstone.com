@@ -36,6 +36,8 @@ services:
       HS_ARENA_POST_PATCH_ENABLED: "false"
       # Expansion release: accept volume/fill drops. Restore 0.30 to block them.
       HS_DATASET_REGRESSION_DROP_RATIO: "1.0"
+      # Balance Radar editor pass; set RADAR_EDITOR_URL= (empty) on the host to disable.
+      RADAR_EDITOR_URL: ${RADAR_EDITOR_URL-http://editorteam:8080}
       DISPLAY: ":99"
     volumes:
       - ./data:/var/lib/hs-data-api
@@ -55,6 +57,9 @@ services:
     networks:
       - default
       - hs-data
+      # Editor Team (ManacostTeam) for the Balance Radar texts; see
+      # docs/BALANCE_RADAR.md. Without the service the radar keeps its own text.
+      - editorteam
 
   flaresolverr:
     image: ghcr.io/flaresolverr/flaresolverr:latest
@@ -80,3 +85,6 @@ networks:
   hs-data:
     external: true
     name: hs-data_default
+  editorteam:
+    external: true
+    name: editorteam-clients

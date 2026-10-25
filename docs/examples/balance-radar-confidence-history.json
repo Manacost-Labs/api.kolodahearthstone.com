@@ -15,6 +15,16 @@
             "runId": "20261025T123813Z-standard-7f9458",
             "generatedAt": "2026-10-25T12:41:05+00:00",
             "confidence": 42
+          },
+          {
+            "runId": "20261025T133931Z-standard-3c895b",
+            "generatedAt": "2026-10-25T13:42:40+00:00",
+            "confidence": 36
+          },
+          {
+            "runId": "20261025T140237Z-standard-db0a59",
+            "generatedAt": "2026-10-25T14:05:09+00:00",
+            "confidence": 33
           }
         ]
       },
@@ -26,6 +36,16 @@
             "runId": "20261025T123813Z-standard-7f9458",
             "generatedAt": "2026-10-25T12:41:05+00:00",
             "confidence": 36
+          },
+          {
+            "runId": "20261025T133931Z-standard-3c895b",
+            "generatedAt": "2026-10-25T13:42:40+00:00",
+            "confidence": 25
+          },
+          {
+            "runId": "20261025T140237Z-standard-db0a59",
+            "generatedAt": "2026-10-25T14:05:09+00:00",
+            "confidence": 27
           }
         ]
       },
@@ -36,6 +56,11 @@
           {
             "runId": "20261025T123813Z-standard-7f9458",
             "generatedAt": "2026-10-25T12:41:05+00:00",
+            "confidence": 18
+          },
+          {
+            "runId": "20261025T133931Z-standard-3c895b",
+            "generatedAt": "2026-10-25T13:42:40+00:00",
             "confidence": 18
           }
         ]
@@ -66,8 +91,8 @@
   },
   "meta": {
     "source_id": "balance_radar",
-    "fetched_at": "2026-10-25T12:41:05+00:00",
+    "fetched_at": "2026-10-25T14:05:09+00:00",
     "stale": false,
-    "count": 17
+    "count": 18
   }
 }

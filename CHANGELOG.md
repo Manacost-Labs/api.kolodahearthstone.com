@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Balance Radar: accurate, short, Russian-only texts. Archetypes use
+  HearthPulse's own labels (the rest translated once by Claude and cached);
+  cards use the ruRU localization. Every reader text is cleaned
+  deterministically (English names, English brackets, rank slang, pipeline
+  field names such as `history.patterns`). Mentions are marked up by `ref`
+  (`textEntities`, `summaryEntities`). Every shown Reddit/X post and quote
+  gets a full Russian translation (`titleRu`, `textRu`, cached). An optional
+  Editor Team pass (`RADAR_EDITOR_URL`, docker network `editorteam-clients`)
+  takes an edit only when it is accepted with all checks passed. Only real
+  candidates are listed now (no quota). The backtest adds Brier score and a
+  reliability table, and runs the Claude predictor automatically after a new
+  patch; the result reaches every payload as `accuracy`.
+
 - Balance Radar v2 (schemaVersion 2, additive): 15–25 nerf and 15–25 buff
   candidates per format (cards, archetypes, classes) from wider pools (HSGuru
   all/legend/top_legend/diamond_4to1 in the Bans window, HSReplay Legend,
