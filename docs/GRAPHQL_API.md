@@ -32,6 +32,9 @@ to the new hostname first and adopt GraphQL separately.
 | `battlegroundMinionStats` | Full HSReplay statistics of one minion (`minion`: dbf or card id; `mmrPercentile`, `timeRange`, `compositionId`): normal/golden totals, per-round arrays, board positions, copy purchase rates and medians; JSON with the same shape as REST `/v1/battlegrounds/minions/{minion}/stats` |
 | `hsguruMulligan` | HSGuru mulligan guide of an archetype (`archetype` + `format`) or deck (`deckId`) for `rank`, `period` (`current` allowed), `coin`, `opponentClass`; optional `minMullCount`/`minDrawnCount`. JSON with the same shape as REST `/v1/hsguru/mulligan` `data` |
 | `hsguruClassMatchups` | HSGuru winrate of an archetype or deck against each class with the Total row; same shape as REST `/v1/hsguru/class-matchups` `data` |
+| `hsguruStreamers` | HSGuru streamers (`q`, `format`, `playerClass`, `language`, `live`, `days`, `sort`, `limit`, `offset`, `decks`): links, live stream, last decks; JSON with the same shape as REST `/v1/hsguru/streamers` (`items`, `total`) |
+| `hsguruStreamer` / `hsguruStreamerDecks` | One streamer (`streamer`: login, name or Twitch id) and their decks (`format`, `playerClass`, `days`, `limit`, `offset`); same shapes as REST `/v1/hsguru/streamers/{streamer}` and `/decks` |
+| `hsguruStreamingNow` | Live streams with the current deck and mode (`language`, `mode`, `known`, `limit`); the mirror trails the five-minute refresh by up to 15 minutes |
 | `sources` | Integrated sources and their last update state |
 | `search` | One search across cards, minions, heroes, archetypes and sources |
 | `datasets` | Latest imported version and payload size for each source |

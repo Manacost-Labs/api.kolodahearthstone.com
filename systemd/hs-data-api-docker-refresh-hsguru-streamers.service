@@ -1,0 +1,20 @@
+[Unit]
+Description=Refresh HSGuru streamers (live now, streamer decks, Twitch profiles) in Docker
+Requires=hs-data-api-docker.service
+After=hs-data-api-docker.service network-online.target
+
+[Service]
+Type=oneshot
+SuccessExitStatus=10
+WorkingDirectory=/srv/hs-data-api
+# `docker compose run` outlives a stopped or timed-out unit; the container is
+# named after the unit so stale ones are removed before start and after stop.
+ExecStartPre=-/usr/bin/docker rm -f %N
+ExecStart=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm --name %N api python -m app.cli refresh-hsguru-streamers --scheduled --schedule-id refresh-hsguru-streamers
+ExecStopPost=-/usr/bin/docker stop --time 20 %N
+ExecStopPost=-/usr/bin/docker rm -f %N
+# A steady run reads two or three pages; the first one walks 120 days of
+# /streamer-decks (~300 pages, five at a time) and stops taking pages after
+# HS_HSGURU_STREAMERS_DEADLINE_SECONDS (25 min).
+TimeoutStartSec=35min
+TimeoutStopSec=1min

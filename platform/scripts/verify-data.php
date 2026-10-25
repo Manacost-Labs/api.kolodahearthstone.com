@@ -194,6 +194,13 @@ function compareSqliteCounts(): array
         'hsguru_stat_runs',
         'hsguru_stat_snapshots',
         'hsguru_stat_targets',
+        // The HSGuru streamers writer runs every five minutes, replaces the
+        // live table and prunes old VODs and runs.
+        'hsguru_streamer_decks',
+        'hsguru_streamer_live',
+        'hsguru_streamer_runs',
+        'hsguru_streamer_vods',
+        'hsguru_streamers',
     ];
     $sourceTotal = 0;
     $targetTotal = 0;

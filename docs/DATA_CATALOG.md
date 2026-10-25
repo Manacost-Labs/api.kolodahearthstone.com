@@ -26,6 +26,7 @@ admin/ops endpoints и правила авторизации находятся 
 | Получить актуальные HSGuru-архетипы со сборками | `GET /v1/hsguru/archetypes?min_games=50&has_decks=true` |
 | Получить каталог архетипов окна Bans | `GET /v1/hsguru/archetypes?period=black_empire_ban` |
 | Получить муллиган архетипа или колоды HSGuru | `GET /v1/hsguru/mulligan` (срезы — `/v1/hsguru/mulligan/slices`) |
+| Получить стримеров, их колоды и кто сейчас в эфире | `GET /v1/hsguru/streamers`, `/v1/hsguru/streamers/{streamer}/decks`, `/v1/hsguru/streaming-now` |
 | Получить BG-героев solo/duos | `GET /v1/battlegrounds/heroes` |
 | Получить BG-существ и их историю | `GET /v1/battlegrounds/minions` и `/api/db/bg/minions/*` |
 | Получить классы Арены | `GET /v1/arena/classes` |
@@ -259,6 +260,7 @@ GET /datasets/firestone_standard
 | `hsguru_matchups_diamond_4to1` | Та же matchup-матрица для Diamond 4–1. |
 | `hsguru_archetype_analysis` | Daily checkpointed Standard/Wild archetype analysis: class matchups and card mulligan/drawn/kept impact, with sparse post-patch samples distinguished from unavailable upstream data. |
 | `hsguru_mulligan` | Муллиган (mulligan/drawn/not drawn/kept impact и count) и матчапы по классам для архетипов и колод по рангу, периоду (включая баны), монетке и классу соперника. История в SQLite `hsguru_*` и PostgreSQL `analytics.hsguru_*`, см. [HSGURU_MULLIGAN.md](HSGURU_MULLIGAN.md). Dataset хранит только сводку покрытия. |
+| `hsguru_streamers` | Все колоды стримеров HSGuru (формат, класс, архетип, ранги Легенды, W-L, последняя игра), кто сейчас в эфире и профили каналов Twitch (YouTube, X, VOD). SQLite `hsguru_streamer*` и PostgreSQL `analytics.hsguru_streamer*`, см. [HSGURU_STREAMERS.md](HSGURU_STREAMERS.md). Dataset хранит только сводку. |
 | `metastats_matchups` | Archetype, opponent, winrate/vs_winrate и games. |
 
 HSGuru meta-строки находятся в `data.structured.strategies[]`, matchup-строки —

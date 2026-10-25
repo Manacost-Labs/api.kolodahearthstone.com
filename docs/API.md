@@ -449,6 +449,23 @@ FlareSolverr — запасной маршрут.
 (`any_player`, `on_coin`, `going_first`), `opponent_class` (`any` или класс
 заглавными буквами). Несобранный срез — `404`.
 
+## HSGuru Streamers
+
+Подробно: [HSGURU_STREAMERS.md](HSGURU_STREAMERS.md). Источник
+`hsguru_streamers` (pipeline), таймер
+`hs-data-api-docker-refresh-hsguru-streamers.timer` раз в 5 минут читает
+`/streaming-now`, новые строки `/streamer-decks` (все форматы, ранги и окна)
+и профили каналов Twitch (аватар, YouTube, X, VOD).
+
+| Endpoint | Что возвращает |
+| --- | --- |
+| `GET /v1/hsguru/streamers` | Стримеры с ссылками, эфиром и последними колодами; `q`, `format`, `player_class`, `language`, `live`, `days`, `sort`, `limit`, `offset`, `decks` |
+| `GET /v1/hsguru/streamers/{streamer}` | Профиль, эфир, колоды по формату и классу, VOD |
+| `GET /v1/hsguru/streamers/{streamer}/decks` | Колоды стримера; `format`, `player_class`, `days`, `limit`, `offset` |
+| `GET /v1/hsguru/streamer-decks` | Колоды всех стримеров; `format`, `player_class`, `archetype`, `max_rank`, `days`, `limit`, `offset` |
+| `GET /v1/hsguru/streaming-now` | Кто в эфире, с какой колодой и в каком режиме (без кэша) |
+| `GET /v1/hsguru/streamers/coverage` | Покрытие и последние запуски (без кэша) |
+
 ## HSReplay Archetype Database
 
 Полная архитектура и эксплуатация описаны в
@@ -1037,6 +1054,7 @@ Query parameters:
 - `hsguru_matchups_diamond_4to1`
 - `hsguru_archetype_analysis`
 - `hsguru_mulligan`
+- `hsguru_streamers`
 
 ### HSReplay
 
