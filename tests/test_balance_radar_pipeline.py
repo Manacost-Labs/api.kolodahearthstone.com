@@ -110,6 +110,7 @@ class FakeClaude:
                 "community_stance": "wants_nerf",
                 "social_summary": "Просят нерф.",
                 "evidence_post_ids": [ritual_post_id(), "x:made-up"],
+                "precedent_ids": [],
             },
             {
                 "ref": "archetype:standard:Zoolock",
@@ -122,6 +123,7 @@ class FakeClaude:
                 "community_stance": "wants_nerf",
                 "social_summary": "",
                 "evidence_post_ids": [],
+                "precedent_ids": [],
             },
         ]
         if self.invent:
@@ -141,6 +143,7 @@ class FakeClaude:
                     "community_stance": "no_data",
                     "social_summary": "",
                     "evidence_post_ids": [],
+                    "precedent_ids": [],
                 }
             ],
         }
@@ -192,7 +195,7 @@ def run(claude: FakeClaude, **kwargs: Any):
         cards_en=CARDS_EN,
         patch=PATCH,
         now=NOW,
-        **kwargs,
+        **{"refresh_history": False, **kwargs},
     )
 
 
@@ -351,3 +354,118 @@ def test_timer_units_follow_the_docker_job_conventions() -> None:
         "${HS_RADAR_ENV_FILE:-/home/debian/server/secrets/hs-data-api/radar.env}"
         in compose
     )
+
+
+HISTORY = {
+    "generatedAt": "2026-10-25T00:00:00+00:00",
+    "coverage": {"from": "2023-12-08", "statsFrom": "2026-04-23"},
+    "patterns": {
+        "balancePatches": 57,
+        "preStats": {"nerf": {"winrate": {"median": 52.5}}},
+    },
+    "narrative": {
+        "summary": "Blizzard нерфит популярные колоды.",
+        "patterns": [{"title": "Порог", "detail": "52,5%"}],
+    },
+    "contentDrops": [],
+    "patches": [
+        {
+            "version": "36.2.2.249896",
+            "date": "2026-08-18",
+            "officialUrl": "https://news.example/36.2.2",
+            "summary": "Ослабили Troublemaker Rogue.",
+            "counts": {"nerf": 2},
+            "daysSinceContentDrop": 15,
+            "changes": [
+                {
+                    "id": "36.2.2.249896:BE_RIT",
+                    "cardId": "BE_RIT",
+                    "dbfId": 900001,
+                    "name": "Ритуал призыва",
+                    "nameEn": "Ritual of Summoning",
+                    "class": "WARLOCK",
+                    "direction": "nerf",
+                    "fields": [{"field": "cost", "before": 1, "after": 2}],
+                    "setAgeDays": 15,
+                    "archetypes": [
+                        {
+                            "archetype": "Ritual Warlock",
+                            "before": {"winrate": 56.0, "popularity": 15.0},
+                            "after": {"winrate": 52.0, "popularity": 9.0},
+                        }
+                    ],
+                },
+                {
+                    "id": "36.2.2.249896:OTHER",
+                    "cardId": "OTHER",
+                    "name": "Другая",
+                    "nameEn": "Other",
+                    "class": "ROGUE",
+                    "direction": "nerf",
+                    "fields": [{"field": "attack", "before": 3, "after": 2}],
+                    "archetypes": [
+                        {
+                            "archetype": "Zoolock",
+                            "before": {"winrate": 61.0, "popularity": 2.0},
+                        }
+                    ],
+                },
+            ],
+        }
+    ],
+}
+
+
+class CitingClaude(FakeClaude):
+    def stream(self, **request: Any) -> Any:
+        model_input = json.loads(request["messages"][0]["content"])
+        history = model_input["history"]
+        assert history["patterns"]["summary"] == "Blizzard нерфит популярные колоды."
+        assert (
+            history["precedents"]["card:BE_RIT"][0]["id"]
+            == "precedent:36.2.2.249896:BE_RIT"
+        )
+        assert "same_card" in history["precedents"]["card:BE_RIT"][0]["similarity"]
+        stream = super().stream(**request)
+        message = stream.get_final_message()
+        output = json.loads(message.content[0].text)
+        for item in output["nerfs"] + output["buffs"]:
+            item["precedent_ids"] = (
+                ["precedent:36.2.2.249896:BE_RIT", "precedent:made-up"]
+                if item["ref"] == "card:BE_RIT"
+                else []
+            )
+        message.content[0].text = json.dumps(output, ensure_ascii=False)
+        return stream
+
+
+def test_past_balance_changes_reach_the_prompt_and_the_candidates(data_dir) -> None:
+    summary = run(CitingClaude(), balance_history=HISTORY)
+    assert summary.outcomes[0].status == "ok"
+    payload = store.latest_ok("standard")["payload"]
+    RadarResult.model_validate(payload)
+
+    ritual = payload["nerfs"][0]
+    first = ritual["precedents"][0]
+    assert (
+        first["id"] == "precedent:36.2.2.249896:BE_RIT"
+        and first["citedByModel"] is True
+    )
+    assert first["changes"] == [{"field": "cost", "before": 1, "after": 2}]
+    assert first["preStats"] == {
+        "archetype": "Ritual Warlock",
+        "winrate": 56.0,
+        "popularity": 15.0,
+    }
+    assert first["postStats"]["winrate"] == 52.0
+    assert first["url"] == "https://news.example/36.2.2"
+    assert (
+        "nerfs:card:BE_RIT:precedent:precedent:made-up"
+        in payload["usage"]["droppedModelItems"]
+    )
+    # Uncited, but similar: Zoolock gets the 61% / Zoolock-core precedent filled in.
+    zoolock = payload["nerfs"][1]
+    assert zoolock["precedents"] and zoolock["precedents"][0]["citedByModel"] is False
+    assert "same_archetype" in zoolock["precedents"][0]["similarity"]
+    assert payload["history"]["balancePatches"] == 57
+    assert payload["history"]["patternsUrl"] == "/v1/constructed/balance-radar/patterns"

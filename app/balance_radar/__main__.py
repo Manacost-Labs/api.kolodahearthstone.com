@@ -40,6 +40,15 @@ def main(argv: list[str] | None = None) -> int:
     show.add_argument("--format", choices=FORMATS, default="standard")
     runs = commands.add_parser("runs", help="list recent runs")
     runs.add_argument("--limit", type=int, default=20)
+    history = commands.add_parser(
+        "history", help="rebuild the balance-change history and patterns"
+    )
+    history.add_argument(
+        "--force", action="store_true", help="rebuild even when it is fresh"
+    )
+    history.add_argument(
+        "--no-label", action="store_true", help="skip the Claude labels and narrative"
+    )
     args = parser.parse_args(argv)
     logging.basicConfig(
         level=logging.INFO, format="%(levelname)s %(name)s: %(message)s"
@@ -51,6 +60,33 @@ def main(argv: list[str] | None = None) -> int:
             print("no successful run", file=sys.stderr)
             return 1
         print(json.dumps(latest["payload"], ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "history":
+        from .history import build_history, ensure_history, load_history, save_history
+
+        if args.no_label:
+            dataset = build_history(label=False, previous=load_history())
+            save_history(dataset)
+        else:
+            dataset = ensure_history(force=args.force)
+        if not dataset:
+            print("balance history is unavailable", file=sys.stderr)
+            return 1
+        patterns = dataset.get("patterns") or {}
+        print(
+            json.dumps(
+                {
+                    "generatedAt": dataset["generatedAt"],
+                    "coverage": dataset["coverage"],
+                    "balancePatches": patterns.get("balancePatches"),
+                    "changes": patterns.get("changes"),
+                    "labelled": bool(dataset.get("narrative")),
+                    "usage": dataset.get("usage"),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
         return 0
     if args.command == "runs":
         rows, _total = store.list_runs(limit=args.limit)

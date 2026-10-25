@@ -23,6 +23,13 @@ from .analysis import (
     select_posts,
 )
 from .clients import GetXApiClient, RedditApisClient
+from .history import (
+    all_changes,
+    ensure_history,
+    find_precedents,
+    model_context,
+    precedent_view,
+)
 from .http import SocialApiError
 from .schema import SCHEMA_VERSION, ModelCandidate, RadarResult
 from .social import SocialBundle, SocialPost, collect_social, match_mentions
@@ -129,6 +136,7 @@ def assemble_candidate(
     stats_fetched_at: str | None,
     social_window: Mapping[str, Any],
     generated_at: str,
+    changes: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     cited_posts = [
         posts_by_id[pid] for pid in item.evidence_post_ids if pid in posts_by_id
@@ -176,6 +184,98 @@ def assemble_candidate(
             "socialWindowFrom": social_window.get("from"),
             "socialWindowTo": social_window.get("to"),
         },
+        "precedents": candidate_precedents(item, entity, side, changes),
+    }
+
+
+def _precedent_side(entity: Mapping[str, Any]) -> str:
+    scores = entity.get("scores") or {}
+    return (
+        "nerfs" if (scores.get("nerf") or 0) >= (scores.get("buff") or 0) else "buffs"
+    )
+
+
+def precedent_digest(
+    entities: Mapping[str, Mapping[str, Any]], changes: Sequence[Mapping[str, Any]]
+) -> dict[str, list[dict[str, Any]]]:
+    """Up to three past changes per candidate, compact for the prompt."""
+    digest: dict[str, list[dict[str, Any]]] = {}
+    for ref, entity in entities.items():
+        found = find_precedents(entity, _precedent_side(entity), changes, limit=3)
+        if not found:
+            continue
+        digest[ref] = [
+            {
+                "id": f"precedent:{change['id']}",
+                "patch": change["patch"],
+                "date": change.get("date"),
+                "card": change.get("nameEn") or change.get("name"),
+                "class": change.get("class"),
+                "direction": change["direction"],
+                "fields": [
+                    [f["field"], f["before"], f["after"]]
+                    for f in change.get("fields") or []
+                ],
+                "textAfter": (change.get("textAfter") or "")[:160] or None,
+                "summary": change.get("summary"),
+                "setAgeDays": change.get("setAgeDays"),
+                "core": [
+                    [
+                        a["archetype"],
+                        (a.get("before") or {}).get("winrate"),
+                        (a.get("before") or {}).get("popularity"),
+                        (a.get("after") or {}).get("winrate"),
+                    ]
+                    for a in (change.get("archetypes") or [])[:1]
+                ],
+                "similarity": reasons,
+            }
+            for change, reasons in found
+        ]
+    return digest
+
+
+def candidate_precedents(
+    item: ModelCandidate,
+    entity: Mapping[str, Any],
+    side: str,
+    changes: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Precedents the model cited first, then the closest matches, at most three."""
+    by_id = {f"precedent:{change['id']}": change for change in changes}
+    retrieved = find_precedents(entity, side, changes, limit=3)
+    reasons_by_id = {
+        f"precedent:{change['id']}": reasons for change, reasons in retrieved
+    }
+    views = [
+        precedent_view(by_id[pid], reasons_by_id.get(pid, ["cited"]), cited=True)
+        for pid in getattr(item, "precedent_ids", []) or []
+        if pid in by_id
+    ]
+    seen = {view["id"] for view in views}
+    for change, reasons in retrieved:
+        if len(views) >= 3:
+            break
+        view = precedent_view(change, reasons)
+        if view["id"] not in seen:
+            views.append(view)
+            seen.add(view["id"])
+    return views[:3]
+
+
+def history_block(history: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    if not history:
+        return None
+    narrative = history.get("narrative") or {}
+    patterns = history.get("patterns") or {}
+    return {
+        "generatedAt": history.get("generatedAt"),
+        "coverage": history.get("coverage"),
+        "balancePatches": patterns.get("balancePatches"),
+        "summary": narrative.get("summary"),
+        "patterns": narrative.get("patterns") or [],
+        "historyUrl": "/v1/constructed/balance-radar/history",
+        "patternsUrl": "/v1/constructed/balance-radar/patterns",
     }
 
 
@@ -224,8 +324,10 @@ def assemble_result(
     history: Mapping[tuple[str, str], Mapping[str, Any]],
     generated_at: str,
     requested_model: str,
+    balance_history: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     posts_by_id = {post.id: post for post in posts}
+    changes = all_changes(balance_history)
     window = {"from": social.window_from, "to": social.window_to}
     meta_fetched = next(
         (s.get("fetchedAt") for s in stats.sources if s["id"] == "hsguru_meta_matrix"),
@@ -254,6 +356,7 @@ def assemble_result(
                 else meta_fetched,
                 social_window=window,
                 generated_at=generated_at,
+                changes=changes,
             )
             for item in items
         ]
@@ -296,6 +399,7 @@ def assemble_result(
             "totalCostUsd": round(social_total + float(analysis_cost or 0), 4),
             "droppedModelItems": analysis.dropped,
         },
+        "history": history_block(balance_history),
     }
 
 
@@ -340,6 +444,8 @@ def run_balance_radar(
     patch: Mapping[str, Any] | None = None,
     now: datetime | None = None,
     dry_run_dir: Any = None,
+    balance_history: Mapping[str, Any] | None = None,
+    refresh_history: bool = True,
 ) -> RunSummary:
     now = now or datetime.now(UTC)
     started_at = now.astimezone(UTC).isoformat(timespec="seconds")
@@ -363,6 +469,13 @@ def run_balance_radar(
     summary.social_sources = social.sources
     summary.balances = _balances(reddit, x)
     patch = patch if patch is not None else _latest_patch()
+    if balance_history is None and refresh_history:
+        try:
+            balance_history = ensure_history(claude=claude)
+        except Exception as exc:  # noqa: BLE001 - history only adds context
+            logger.warning("balance history unavailable: %s", exc)
+    history_context = model_context(balance_history)
+    changes = all_changes(balance_history)
     requested = analysis_model()
     for name, stats in bundles.items():
         run_id = f"{now.strftime('%Y%m%dT%H%M%SZ')}-{name}-{uuid.uuid4().hex[:6]}"
@@ -391,6 +504,8 @@ def run_balance_radar(
             patch=patch,
             previous=_previous_digest(previous),
             generated_at=started_at,
+            history=history_context,
+            precedents=precedent_digest(stats.entities, changes) if changes else None,
         )
         digest = input_hash(model_input)
         if dry_run:
@@ -422,6 +537,7 @@ def run_balance_radar(
                 model_input,
                 allowed_refs=set(stats.entities),
                 allowed_posts={post.id for post in shown},
+                allowed_precedents={f"precedent:{change['id']}" for change in changes},
                 model=requested,
                 client=claude,
             )
@@ -436,6 +552,7 @@ def run_balance_radar(
                 history=store.flag_history(name),
                 generated_at=datetime.now(UTC).isoformat(timespec="seconds"),
                 requested_model=requested,
+                balance_history=balance_history,
             )
             RadarResult.model_validate(payload)
         except (AnalysisError, ValueError) as exc:

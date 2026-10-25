@@ -8,7 +8,14 @@
   (RedditAPIs) and X (GetXAPI) posts, and asks `claude-sonnet-5-5` for a
   structured verdict in Russian. Numbers and post links come from the data,
   never from the model. Runs and their cost are stored; the API keeps serving
-  the last good run. About $0.56 per run for both formats.
+  the last good run. About $0.86 per run for both formats.
+- Balance Radar learns from Blizzard's past decisions: a history dataset of every
+  card change since December 2023 (exact HearthstoneJSON build diffs, patch
+  dates and Russian developer notes from `/api/patches`, HSReplay archetype
+  winrate/popularity a week before and after since April 2026), computed
+  patterns (thresholds, change types, timing after releases), a Claude-written
+  overview, and up to three similar past cases per candidate (`precedents`).
+  New endpoints `/v1/constructed/balance-radar/history` and `/patterns`.
 
 - A HSGuru deck page whose cards all rendered but hold no usable deck (one
   "Highlander Warrior" card with a one-card code) now means "no builds" instead

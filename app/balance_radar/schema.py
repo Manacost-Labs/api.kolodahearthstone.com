@@ -43,6 +43,9 @@ class ModelCandidate(BaseModel):
     evidence_post_ids: list[str] = Field(
         description="id постов из входных данных, подтверждающих вывод"
     )
+    precedent_ids: list[str] = Field(
+        description="id прошлых случаев из history.precedents, на которые опирается вывод (0-3)"
+    )
 
 
 class ModelOutput(BaseModel):
@@ -115,6 +118,31 @@ class RadarDates(_Open):
     socialWindowTo: str | None = None
 
 
+Direction = Literal["nerf", "buff", "rework", "neutral"]
+
+
+class RadarPrecedent(_Open):
+    """A past Blizzard balance change similar to a candidate (from the history dataset)."""
+
+    id: str
+    patch: str
+    date: str | None = None
+    cardId: str
+    dbfId: int | None = None
+    name: str
+    nameEn: str | None = None
+    class_: str | None = Field(default=None, alias="class")
+    direction: Direction
+    changes: list[dict[str, Any]] = Field(default_factory=list)
+    summary: str | None = None
+    setAgeDays: int | None = None
+    preStats: dict[str, Any] | None = None
+    postStats: dict[str, Any] | None = None
+    url: str | None = None
+    similarity: list[str] = Field(default_factory=list)
+    citedByModel: bool = False
+
+
 class RadarCandidate(_Open):
     ref: str
     kind: CandidateKind
@@ -133,6 +161,7 @@ class RadarCandidate(_Open):
     stats: RadarStats
     social: RadarSocial
     dates: RadarDates
+    precedents: list[RadarPrecedent] = Field(default_factory=list)
 
 
 class RadarSource(_Open):
@@ -160,3 +189,4 @@ class RadarResult(_Open):
     sources: list[RadarSource]
     socialWindow: dict[str, Any]
     usage: dict[str, Any]
+    history: dict[str, Any] | None = None

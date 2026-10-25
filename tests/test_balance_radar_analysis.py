@@ -28,6 +28,7 @@ def candidate(ref: str, **overrides: Any) -> dict[str, Any]:
         "community_stance": "wants_nerf",
         "social_summary": "Игроки просят нерф.",
         "evidence_post_ids": ["reddit:1"],
+        "precedent_ids": [],
         **overrides,
     }
 

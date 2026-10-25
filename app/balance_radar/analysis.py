@@ -11,7 +11,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from .. import provider_usage
 from .schema import ModelOutput
@@ -55,6 +55,11 @@ SYSTEM_PROMPT = """Ты — аналитик баланса Hearthstone для �
   упоминают сущность. Сарказм и мемы — слабый сигнал; официальные аккаунты
   (official=true) и подробные разборы — сильный.
 - previousRun — прошлый прогон радара: учитывай устойчивость сигналов.
+- history.patterns — как Blizzard меняла баланс раньше: пороги винрейта и
+  популярности перед нерфами и баффами, типичные правки, частота и сроки
+  балансных патчей после выхода набора, эффект правок.
+- history.precedents[ref] — похожие прошлые правки для каждого кандидата
+  (та же карта, тот же класс или архетип, похожие винрейт и популярность).
 
 Правила ответа:
 - Выбирай кандидатов только из переданных ref (archetypes, classes, cards.*).
@@ -75,6 +80,11 @@ SYSTEM_PROMPT = """Ты — аналитик баланса Hearthstone для �
 - sentiment и community_stance — по постам об этой сущности; если упоминаний
   нет, ставь no_data и пустой social_summary.
 - evidence_post_ids — только id из social.posts, 0–5 штук, самые показательные.
+- Опирайся на прошлые решения Blizzard: сверяй цифры кандидата с порогами из
+  history.patterns и учитывай сроки (сколько дней прошло с выхода набора, как
+  давно был балансный патч). Если есть похожий прошлый случай, назови его в
+  вердикте (карта, патч, что поменяли и с какими цифрами) и укажи его id в
+  precedent_ids (0–3, только из history.precedents этого кандидата).
 - Названия карт пиши по-русски, как в name; английское можно в скобках.
 - summary — общий вывод по формату: 2–4 абзаца по-русски, без маркдаун-заголовков.
 """
@@ -196,6 +206,8 @@ def build_model_input(
     patch: Mapping[str, Any] | None,
     previous: Mapping[str, Any] | None,
     generated_at: str,
+    history: Mapping[str, Any] | None = None,
+    precedents: Mapping[str, list[dict[str, Any]]] | None = None,
 ) -> dict[str, Any]:
     shown = {post.id for post in posts}
     return {
@@ -239,6 +251,9 @@ def build_model_input(
             ],
         },
         "previousRun": previous,
+        "history": {"patterns": history, "precedents": dict(precedents or {})}
+        if history
+        else None,
     }
 
 
@@ -260,11 +275,15 @@ def _cost(model: str, usage: Mapping[str, int]) -> float | None:
 
 
 def validate_output(
-    output: ModelOutput, allowed_refs: set[str], allowed_posts: set[str]
+    output: ModelOutput,
+    allowed_refs: set[str],
+    allowed_posts: set[str],
+    allowed_precedents: set[str] | None = None,
 ) -> tuple[ModelOutput, list[str]]:
-    """Drop unknown refs and post ids, duplicates and anything past the cap."""
+    """Drop unknown refs, post and precedent ids, duplicates and anything past the cap."""
     dropped: list[str] = []
     seen: set[str] = set()
+    precedents = allowed_precedents or set()
 
     def clean(items: list[Any], side: str) -> list[Any]:
         kept = []
@@ -279,10 +298,16 @@ def validate_output(
                 dropped.append(f"{side}:{item.ref}:over_limit")
                 continue
             seen.add(item.ref)
-            bad_posts = [
-                pid for pid in item.evidence_post_ids if pid not in allowed_posts
-            ]
-            dropped.extend(f"{side}:{item.ref}:post:{pid}" for pid in bad_posts)
+            dropped.extend(
+                f"{side}:{item.ref}:post:{pid}"
+                for pid in item.evidence_post_ids
+                if pid not in allowed_posts
+            )
+            dropped.extend(
+                f"{side}:{item.ref}:precedent:{pid}"
+                for pid in item.precedent_ids
+                if pid not in precedents
+            )
             kept.append(
                 item.model_copy(
                     update={
@@ -290,7 +315,10 @@ def validate_output(
                             pid
                             for pid in item.evidence_post_ids
                             if pid in allowed_posts
-                        ][:5]
+                        ][:5],
+                        "precedent_ids": [
+                            pid for pid in item.precedent_ids if pid in precedents
+                        ][:4],
                     }
                 )
             )
@@ -301,8 +329,8 @@ def validate_output(
     return output.model_copy(update={"nerfs": nerfs, "buffs": buffs}), dropped
 
 
-def parse_message(message: Any) -> ModelOutput:
-    """Validate the structured-output text block against ``ModelOutput``."""
+def parse_message(message: Any, output_model: type[BaseModel] = ModelOutput) -> Any:
+    """Validate the structured-output text block against ``output_model``."""
     stop_reason = getattr(message, "stop_reason", None)
     if stop_reason == "refusal":
         details = getattr(message, "stop_details", None)
@@ -317,21 +345,33 @@ def parse_message(message: Any) -> ModelOutput:
     if not text.strip():
         raise AnalysisError("model returned no text block")
     try:
-        return ModelOutput.model_validate_json(text)
+        return output_model.model_validate_json(text)
     except ValidationError as exc:
         raise AnalysisError(
             f"model output failed schema validation: {exc.error_count()} errors"
         ) from exc
 
 
-def analyze(
-    model_input: Mapping[str, Any],
+def _record(started: float, **kwargs: Any) -> None:
+    provider_usage.record_call(
+        "anthropic",
+        url="https://api.anthropic.com/v1/messages",
+        started=started,
+        source_id="balance_radar",
+        **kwargs,
+    )
+
+
+def call_structured(
+    payload: Mapping[str, Any],
     *,
-    allowed_refs: set[str],
-    allowed_posts: set[str],
+    system: str,
+    output_model: type[BaseModel],
     model: str | None = None,
     client: Any = None,
-) -> AnalysisResult:
+    effort: str = "high",
+) -> tuple[Any, str, dict[str, Any], str | None]:
+    """One streamed structured-output request: (parsed, served model, usage, request id)."""
     import anthropic
 
     requested = model or analysis_model()
@@ -345,18 +385,14 @@ def analyze(
         "model": requested,
         "max_tokens": MAX_TOKENS,
         "thinking": {"type": "adaptive"},
-        "output_config": {"effort": "high"},
+        "output_config": {"effort": effort},
         "system": [
-            {
-                "type": "text",
-                "text": SYSTEM_PROMPT,
-                "cache_control": {"type": "ephemeral"},
-            }
+            {"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}
         ],
         "messages": [
-            {"role": "user", "content": json.dumps(model_input, ensure_ascii=False)}
+            {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}
         ],
-        "output_format": ModelOutput,
+        "output_format": output_model,
     }
     if requested.startswith("claude-sonnet-5-5"):
         # Re-run a classifier decline on Anthropic's recommended fallback.
@@ -365,40 +401,22 @@ def analyze(
         with client.beta.messages.stream(**request) as stream:
             message = stream.get_final_message()
     except anthropic.APIStatusError as exc:
-        provider_usage.record_call(
-            "anthropic",
-            url="https://api.anthropic.com/v1/messages",
-            started=started,
+        _record(
+            started,
             status=exc.status_code,
             outcome="failed",
             reason=f"http_{exc.status_code}",
-            source_id="balance_radar",
         )
         raise AnalysisError(f"Claude API returned HTTP {exc.status_code}") from None
     except anthropic.APIConnectionError:
-        provider_usage.record_call(
-            "anthropic",
-            url="https://api.anthropic.com/v1/messages",
-            started=started,
-            outcome="failed",
-            reason="transport",
-            source_id="balance_radar",
-        )
+        _record(started, outcome="failed", reason="transport")
         raise AnalysisError("Claude API connection failed") from None
     except anthropic.AnthropicError as exc:
         # Missing credentials and other client-side failures.
         raise AnalysisError(f"Claude client error: {type(exc).__name__}") from None
     except ValidationError as exc:
         # The SDK parses ``output_format`` itself while assembling the message.
-        provider_usage.record_call(
-            "anthropic",
-            url="https://api.anthropic.com/v1/messages",
-            started=started,
-            status=200,
-            outcome="failed",
-            reason="invalid_output",
-            source_id="balance_radar",
-        )
+        _record(started, status=200, outcome="failed", reason="invalid_output")
         raise AnalysisError(
             f"model output failed schema validation: {exc.error_count()} errors"
         ) from None
@@ -421,31 +439,46 @@ def analyze(
         for item in getattr(raw_usage, "iterations", None) or []
     )
     try:
-        output = parse_message(message)
+        parsed = parse_message(message, output_model)
     except AnalysisError:
-        provider_usage.record_call(
-            "anthropic",
-            url="https://api.anthropic.com/v1/messages",
-            started=started,
+        _record(
+            started,
             status=200,
             outcome="failed",
             reason="invalid_output",
             cost=usage["costUsd"] or 0,
             cost_basis="estimated",
-            source_id="balance_radar",
         )
         raise
-    provider_usage.record_call(
-        "anthropic",
-        url="https://api.anthropic.com/v1/messages",
-        started=started,
+    _record(
+        started,
         status=200,
         cost=usage["costUsd"] or 0,
         cost_basis="estimated",
         profile=served_by,
-        source_id="balance_radar",
     )
-    output, dropped = validate_output(output, allowed_refs, allowed_posts)
+    return parsed, served_by, usage, getattr(message, "_request_id", None)
+
+
+def analyze(
+    model_input: Mapping[str, Any],
+    *,
+    allowed_refs: set[str],
+    allowed_posts: set[str],
+    allowed_precedents: set[str] | None = None,
+    model: str | None = None,
+    client: Any = None,
+) -> AnalysisResult:
+    output, served_by, usage, request_id = call_structured(
+        model_input,
+        system=SYSTEM_PROMPT,
+        output_model=ModelOutput,
+        model=model,
+        client=client,
+    )
+    output, dropped = validate_output(
+        output, allowed_refs, allowed_posts, allowed_precedents
+    )
     if dropped:
         logger.warning(
             "balance radar dropped %d model items: %s", len(dropped), dropped[:10]
@@ -454,6 +487,6 @@ def analyze(
         output=output,
         model=served_by,
         usage=usage,
-        request_id=getattr(message, "_request_id", None),
+        request_id=request_id,
         dropped=dropped,
     )
