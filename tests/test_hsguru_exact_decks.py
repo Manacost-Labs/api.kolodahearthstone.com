@@ -325,7 +325,7 @@ def test_all_rank_catalog_records_valid_zero_sample_without_failing() -> None:
             }
         ],
     )
-    fetch_chunks = AsyncMock(side_effect=[empty_fetch, empty_fetch])
+    fetch_chunks = AsyncMock(return_value=empty_fetch)
     with (
         patch.object(hsguru_decks, "_current_deck_period", return_value="patch_36.2.0"),
         patch.object(hsguru_decks, "_catalog_rows", return_value=existing),
@@ -341,7 +341,7 @@ def test_all_rank_catalog_records_valid_zero_sample_without_failing() -> None:
         rows = asyncio.run(hsguru_decks._refresh_all_rank_catalog("wild"))
 
     assert rows == existing
-    assert fetch_chunks.await_count == 2
+    assert fetch_chunks.await_count == 1
     assert write_catalog.call_args.kwargs["missing_archetypes"] == []
     assert write_catalog.call_args.kwargs["zero_sample_archetypes"] == [
         "No Sample Mage"
@@ -349,9 +349,7 @@ def test_all_rank_catalog_records_valid_zero_sample_without_failing() -> None:
     assert write_catalog.call_args.kwargs["sample_state"] == "sparse_post_patch"
 
 
-def test_all_rank_retry_budget_advances_across_two_runs(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_every_builds_less_target_is_verified_in_one_pass_without_a_cap() -> None:
     existing = [
         {
             "archetype": "Covered Mage",
@@ -359,105 +357,36 @@ def test_all_rank_retry_budget_advances_across_two_runs(
             "deck_code": EVENLOCK_CODE,
         }
     ]
-    # The queue arithmetic below is written for a 64-target nightly cap.
-    monkeypatch.setattr(hsguru_decks, "_ALL_CATALOG_EXACT_RETRY_LIMIT", 64)
-    unresolved = [f"Quiet Deck {index}" for index in range(100)]
+    # More quiet archetypes than the former 200-target nightly retry cap.
+    unresolved = [f"Quiet Archetype {index:03d}" for index in range(300)]
     targets = ["Covered Mage", *unresolved]
-    empty_fetch = (
-        [],
-        0,
-        ["flaresolverr"],
-        [
-            {
-                "backend": "flaresolverr",
-                "state": "accepted",
-                "request_credits": 0,
-            }
-        ],
-    )
-
-    first_fetch = AsyncMock(return_value=empty_fetch)
-    with (
-        patch.object(hsguru_decks, "_catalog_rows", return_value=existing),
-        patch.object(hsguru_decks, "_catalog_snapshot", return_value=None),
-        patch.object(hsguru_decks, "_meta_archetypes", return_value=targets),
-        patch.object(hsguru_decks, "_fetch_catalog_chunks", first_fetch),
-        patch.object(hsguru_decks, "_write_catalog") as first_write,
-        pytest.raises(hsguru_decks.HSGuruCatalogPartial),
-    ):
-        asyncio.run(
-            hsguru_decks._refresh_all_rank_catalog(
-                "wild",
-                period="patch_36.2.0",
-            )
-        )
-
-    first_payload = first_write.call_args.kwargs
-    assert first_payload["zero_sample_archetypes"] == unresolved[:64]
-    assert first_payload["missing_archetypes"] == unresolved[64:]
-
     snapshot = hsguru_decks._CatalogSnapshot(
         rows=existing,
         period="patch_36.2.0",
-        # Recent snapshots stay incremental; stale ones are re-read in full.
         fetched_at=datetime.now(UTC).isoformat(),
-        backend="flaresolverr",
-        provider_backends=("flaresolverr",),
-        missing_archetypes=tuple(first_payload["missing_archetypes"]),
-        zero_sample_archetypes=tuple(first_payload["zero_sample_archetypes"]),
+        backend="scrape_do",
+        provider_backends=("scrape_do",),
+        zero_sample_archetypes=tuple(unresolved[:10]),
+        collection_version=hsguru_decks._CATALOG_COLLECTION_VERSION,
     )
-    second_fetch = AsyncMock(return_value=empty_fetch)
+    fetch = AsyncMock(return_value=([], 0, ["scrape_do"], []))
     with (
         patch.object(hsguru_decks, "_catalog_rows", return_value=existing),
         patch.object(hsguru_decks, "_catalog_snapshot", return_value=snapshot),
         patch.object(hsguru_decks, "_meta_archetypes", return_value=targets),
-        patch.object(hsguru_decks, "_fetch_catalog_chunks", second_fetch),
-        patch.object(hsguru_decks, "_write_catalog") as second_write,
+        patch.object(hsguru_decks, "_fetch_catalog_chunks", fetch),
+        patch.object(hsguru_decks, "_write_catalog") as write,
     ):
         rows = asyncio.run(
-            hsguru_decks._refresh_all_rank_catalog(
-                "wild",
-                period="patch_36.2.0",
-            )
+            hsguru_decks._refresh_all_rank_catalog("wild", period="patch_36.2.0")
         )
 
     assert rows == existing
-    exact_retry = second_fetch.await_args_list[1]
-    assert exact_retry.args[1][:36] == unresolved[64:]
-    second_payload = second_write.call_args.kwargs
-    assert second_payload["missing_archetypes"] == []
-    assert set(second_payload["zero_sample_archetypes"]) == set(unresolved)
-    assert not (
-        set(second_payload["missing_archetypes"])
-        & set(second_payload["zero_sample_archetypes"])
-    )
-
-    third_snapshot = hsguru_decks._CatalogSnapshot(
-        rows=existing,
-        period="patch_36.2.0",
-        fetched_at=datetime.now(UTC).isoformat(),
-        backend="flaresolverr",
-        provider_backends=("flaresolverr",),
-        zero_sample_archetypes=tuple(second_payload["zero_sample_archetypes"]),
-    )
-    third_fetch = AsyncMock(return_value=empty_fetch)
-    with (
-        patch.object(hsguru_decks, "_catalog_rows", return_value=existing),
-        patch.object(hsguru_decks, "_catalog_snapshot", return_value=third_snapshot),
-        patch.object(hsguru_decks, "_meta_archetypes", return_value=targets),
-        patch.object(hsguru_decks, "_fetch_catalog_chunks", third_fetch),
-        patch.object(hsguru_decks, "_write_catalog"),
-    ):
-        asyncio.run(
-            hsguru_decks._refresh_all_rank_catalog(
-                "wild",
-                period="patch_36.2.0",
-            )
-        )
-
-    third_exact_retry = third_fetch.await_args_list[1]
-    assert third_exact_retry.args[1] == unresolved[28:92]
-    assert third_exact_retry.args[1] != unresolved[:64]
+    # Pages already ask for the 50-game floor, so no exact retry pass follows.
+    fetch.assert_awaited_once_with("wild", unresolved, period="patch_36.2.0")
+    payload = write.call_args.kwargs
+    assert payload["missing_archetypes"] == []
+    assert payload["zero_sample_archetypes"] == unresolved
 
 
 def test_patch_catalog_targets_exact_current_matrix_period() -> None:
@@ -866,6 +795,9 @@ def test_unreadable_local_page_is_rendered_again_through_scrape_do() -> None:
     with (
         patch.object(hsguru_decks, "_fetch_catalog_page", fetch_page),
         patch.object(hsguru_decks, "_canonicalize_catalog_archetypes", AsyncMock()),
+        patch.object(
+            hsguru_decks, "hsguru_deck_catalog_local_first", return_value=True
+        ),
     ):
         rows, credits, backend, _attempts = asyncio.run(
             hsguru_decks._fetch_catalog_chunk(
@@ -916,10 +848,10 @@ def test_crowded_shared_page_asks_for_each_archetype_on_its_own() -> None:
         )
 
     # The shared page reached its limit, so each archetype got its own page
-    # with the lower 10-game threshold and HSGuru's full 200-build page.
+    # at HSGuru's 50-game deck floor and its full 200-build page.
     assert fetch_page.await_count == 3
     split_urls = [call_args.args[0].url for call_args in fetch_page.await_args_list[1:]]
-    assert all("min_games=10" in url and "limit=200" in url for url in split_urls)
+    assert all("min_games=50" in url and "limit=200" in url for url in split_urls)
     assert {row["archetype"] for row in rows} >= {"Evenlock"}
 
 
