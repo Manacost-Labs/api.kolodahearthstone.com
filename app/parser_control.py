@@ -1793,6 +1793,14 @@ async def _run_pipeline_source(source_id: str) -> dict[str, Any]:
         # A run requested from the panel reads the weekly archive even when fresh.
         options = {"force": True} if source_id == LEGACY_SOURCE_ID else {}
         result = await REFRESHERS[source_id](**options)
+    elif source_id == "hsreplay_mulligan":
+        from .hsreplay_mulligan import refresh_hsreplay_mulligan
+
+        result = await refresh_hsreplay_mulligan()
+    elif source_id == "hsguru_matchups":
+        from .hsguru_matchups import refresh_hsguru_matchups
+
+        result = await refresh_hsguru_matchups()
     elif source_id == "hsreplay_battlegrounds_compositions_screenshot":
         from .hsreplay_bg_screenshots import capture_compositions_screenshot
 
@@ -1848,6 +1856,8 @@ async def _run_pipeline_source(source_id: str) -> dict[str, Any]:
             "hsguru_esports_tournaments": ("rows",),
             "hsguru_esports_points": ("rows",),
             "hsguru_esports_legacy": ("rows",),
+            "hsreplay_mulligan": ("targets_with_data",),
+            "hsguru_matchups": ("slices_with_data",),
             "hsreplay_battlegrounds_minions": ("minions_ok", "minions_total"),
         }
         rows_total = next(

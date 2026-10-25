@@ -540,6 +540,73 @@ async def _hsguru_statistics(
     )
 
 
+async def _hsreplay_mulligan(
+    info: Info[GraphQLContext, None],
+    *,
+    deck: str,
+    format_name: str | None,
+    rank: str,
+    initiative: str,
+    period: str,
+    opponent_class: str,
+) -> Any:
+    from ..hsreplay_mulligan import (
+        ANY_OPPONENT,
+        FORMATS,
+        INITIATIVES,
+        OPPONENT_CLASSES,
+        PERIODS,
+        RANKS,
+        Selector,
+        SliceUnavailable,
+        resolve_slice,
+    )
+
+    deck_id = _normalize_text(deck, "deck", 40)
+    if not deck_id or not deck_id.isalnum() or len(deck_id) < 8:
+        raise _validation_error("deck must be an HSReplay deck shortid")
+    if format_name is not None and format_name not in FORMATS:
+        raise _validation_error("format must be standard or wild")
+    if rank not in RANKS:
+        raise _validation_error(f"rank must be one of {', '.join(RANKS)}")
+    if initiative not in INITIATIVES:
+        raise _validation_error(f"initiative must be one of {', '.join(INITIATIVES)}")
+    if period not in PERIODS:
+        raise _validation_error(f"period must be one of {', '.join(PERIODS)}")
+    if opponent_class not in {ANY_OPPONENT, *OPPONENT_CLASSES}:
+        raise _validation_error("opponentClass must be any or an upper-case class key")
+    selector = Selector(
+        deck_id=deck_id,
+        format_name=format_name,
+        rank=rank,
+        initiative=initiative,
+        period=period,
+        opponent_class=opponent_class,
+    )
+    found = await _call_repository(
+        _repository(info).hsreplay_mulligan(
+            deck_id=deck_id,
+            format_name=format_name,
+            rank=rank,
+            initiative=initiative,
+            period=period,
+            opponent_class=opponent_class,
+        )
+    )
+    try:
+        return resolve_slice(found, selector)
+    except SliceUnavailable as exc:
+        if exc.status == 404:
+            return None
+        raise GraphQLError(
+            exc.detail,
+            extensions={
+                "code": "PREMIUM_SESSION_UNAVAILABLE",
+                "premiumSession": exc.premium_session,
+            },
+        ) from None
+
+
 async def _hsguru_dataset_view(
     info: Info[GraphQLContext, None], source_id: str, select: Any
 ) -> Any:
@@ -1251,6 +1318,93 @@ class Query:
             period=period,
             coin=coin,
             opponent_class="any",
+        )
+
+    @strawberry.field(
+        description=(
+            "HSReplay mulligan guide (mulligan v2) of one deck slice: per card keep %, "
+            "opening-hand, drawn and played winrate, turns held, turn played and "
+            "*_impact versus the base winrate. deck is the HSReplay shortid; rank "
+            "legend, diamond_4to1, diamond or bronze_gold; initiative all, first or "
+            "coin; period last_30_days, current_patch or current_expansion; "
+            "opponentClass any or a class key. Null when not collected; a "
+            "PREMIUM_SESSION_UNAVAILABLE error when a premium slice cannot be served "
+            "because the HSReplay session is rejected. Same shape as REST "
+            "/v1/hsreplay/mulligan data."
+        )
+    )
+    async def hsreplay_mulligan(
+        self,
+        info: Info[GraphQLContext, None],
+        deck: str,
+        format: str | None = None,
+        rank: str = "legend",
+        initiative: str = "all",
+        period: str = "last_30_days",
+        opponent_class: str = "any",
+    ) -> JSON | None:
+        return await _hsreplay_mulligan(
+            info,
+            deck=deck,
+            format_name=format,
+            rank=rank,
+            initiative=initiative,
+            period=period,
+            opponent_class=opponent_class,
+        )
+
+    @strawberry.field(
+        description=(
+            "HSGuru archetype-versus-archetype matchup matrix of one slice: archetypes "
+            "with games, winrate and popularity, and every matchup cell with winrate and "
+            "games. period defaults to the Bans window; coin is any_player only because "
+            "HSGuru publishes no coin split. Same shape as REST /v1/hsguru/matchups data."
+        )
+    )
+    async def hsguru_matchups(
+        self,
+        format: str = "standard",
+        rank: str = "all",
+        period: str | None = None,
+        coin: str = "any_player",
+        min_games: int = 1,
+        min_archetype_games: int = 1,
+        limit: int | None = None,
+    ) -> JSON | None:
+        from ..hsguru_matchups import (
+            COLLECTED_COINS,
+            FORMAT_IDS,
+            RANKS,
+            default_period,
+            get_matchups,
+            summary,
+        )
+
+        if format not in FORMAT_IDS:
+            raise _validation_error("format must be standard or wild")
+        if rank not in RANKS:
+            raise _validation_error(f"rank must be one of {', '.join(RANKS)}")
+        if coin not in COLLECTED_COINS:
+            raise _validation_error("HSGuru publishes no coin split; coin must be any_player")
+        if not 1 <= min_games <= 1_000_000 or not 1 <= min_archetype_games <= 10_000_000:
+            raise _validation_error("minimum games are out of range")
+        if limit is not None and not 1 <= limit <= 200:
+            raise _validation_error("limit must be between 1 and 200")
+        structured = await asyncio.to_thread(summary)
+        periods = list((structured.get("dimensions") or {}).get("periods") or [])
+        resolved = _normalize_text(period, "period", 64) or default_period(
+            periods, structured.get("current_period")
+        )
+        if not resolved or (periods and resolved not in periods):
+            raise _validation_error(f"period must be one of {', '.join(periods)}")
+        return await asyncio.to_thread(
+            get_matchups,
+            format_name=format,
+            rank=rank,
+            period=resolved,
+            min_games=min_games,
+            min_archetype_games=min_archetype_games,
+            limit=limit,
         )
 
     @strawberry.field(

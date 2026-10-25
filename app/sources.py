@@ -491,6 +491,41 @@ SOURCES: tuple[Source, ...] = (
         kind="pipeline",
     ),
     Source(
+        id="hsreplay_mulligan",
+        url="https://hsreplay.net/decks/",
+        site="hsreplay",
+        category="archetype_analysis",
+        description=(
+            "HSReplay deck mulligan guide (mulligan v2: keep rate, opening-hand, drawn and "
+            "played winrate, turns held, turn played per card) for the top decks of "
+            "list_decks_by_win_rate_v2 in Standard and Wild at Legend, Diamond 4-1, Diamond "
+            "and Bronze-Gold, for ALL/FIRST/COIN and three time ranges, with the split by "
+            "opponent class from the premium session. An incremental queue reads due "
+            "slices every three hours through hs-data-api-docker-refresh-hsreplay-mulligan.timer "
+            "(plain Scrape.do, at most 5 parallel, ~150 credits a UTC day) into SQLite "
+            "snapshots mirrored to PostgreSQL; stale_hours = 3h cadence + 9h slack."
+        ),
+        stale_hours=12,
+        kind="pipeline",
+    ),
+    Source(
+        id="hsguru_matchups",
+        url="https://www.hsguru.com/matchups",
+        site="hsguru",
+        category="matchups",
+        description=(
+            "HSGuru archetype-versus-archetype matchup matrices for every public slice: "
+            "Standard and Wild, seven ranks and every advertised period including the "
+            "Bans window, read with the lowest sample filters and filtered on request. "
+            "Short windows are re-read hourly, wide ones every 6-48 hours, through "
+            "hs-data-api-docker-refresh-hsguru-matchups.timer (plain Scrape.do, five "
+            "pages in parallel, FlareSolverr fallback) into SQLite; stale_hours = 1h "
+            "cadence + 30 min run + slack."
+        ),
+        stale_hours=6,
+        kind="pipeline",
+    ),
+    Source(
         id="hsguru_brawl",
         url="https://www.hsguru.com/meta?format=-1&period=brawl&rank=all",
         site="hsguru",

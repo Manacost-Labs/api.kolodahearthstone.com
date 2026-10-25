@@ -146,6 +146,8 @@ GraphQL pagination возвращает `items` и `pageInfo`. Максимал�
 | GET | `/v1/hsguru/archetypes` | `format`, `period`, `q`, `min_games`, `has_decks`, `sort`, `order`, `limit`, `offset` | Каталог архетипов: текущий или `period=black_empire_ban` (Bans) |
 | GET | `/v1/hsguru/archetypes/history` | `archetype` (required), `format` (required), `limit` | История архетипа |
 | GET | `/v1/hsguru/archetypes/analysis` | `archetype` (required), `format` (required) | Полный анализ архетипа |
+| GET | `/v1/hsguru/matchups` | `format`, `rank`, `period`, `coin`, `min_games`, `min_archetype_games`, `limit` | Матрица матчапов архетипов HSGuru любого среза (по умолчанию окно банов) |
+| GET | `/v1/hsguru/matchups/slices` | — | Срезы матчапов: состояние, свежесть, размер, расход |
 | GET | `/v1/hsguru/mulligan` | `archetype`+`format` или `deck_id`, `rank`, `period`, `coin`, `opponent_class`, `min_mull_count`, `min_drawn_count` | Муллиган HSGuru архетипа или колоды: mulligan/drawn/not drawn/kept impact и count по картам |
 | GET | `/v1/hsguru/class-matchups` | `archetype`+`format` или `deck_id`, `rank`, `period`, `coin` | Винрейт архетипа или колоды против каждого класса |
 | GET | `/v1/hsguru/mulligan/slices` | `archetype` или `deck_id`, `format` | Сохранённые срезы муллигана и матчапов |
@@ -159,6 +161,11 @@ GraphQL pagination возвращает `items` и `pageInfo`. Максимал�
 | GET | `/v1/hsguru/esports/points` | `season`, `leaderboard`, `region`, `limit`, `offset` | Очки HSEsports сезона |
 | GET | `/v1/hsguru/esports/points/seasons` | — | Собранные сезоны очков HSEsports |
 | GET | `/v1/hsguru/esports/legacy/{table}` | `selector`, `limit`, `offset` | Архив Masters Tour: `mt-stats`, `qualifier-stats`, `mt-points` |
+| GET | `/v1/hsreplay/mulligan` | `deck` (required), `format`, `rank`, `initiative`, `period`, `opponent_class` | Муллиган HSReplay v2 колоды: % оставляют, винрейт в стартовой руке, при доборе, при розыгрыше, ходов в руке, ход розыгрыша |
+| GET | `/v1/hsreplay/mulligan/decks` | `format`, `rank`, `limit` | Набор колод муллигана HSReplay по формату и рангу |
+| GET | `/v1/hsreplay/mulligan/slices` | `deck` (required), `format` | Срезы одной колоды и их состояние |
+| GET | `/v1/hsreplay/mulligan/history` | срез, `card`, `limit` | Снимки среза и строка одной карты по времени |
+| GET | `/v1/hsreplay/mulligan/coverage` | `runs` | Покрытие, статус премиум-сессии HSReplay, запуски и расход Scrape.do |
 
 ## REST v1 — System
 

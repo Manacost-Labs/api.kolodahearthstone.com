@@ -447,6 +447,83 @@ curl -s "https://api.kolodahearthstone.com/v1/hsguru/archetypes?period=black_emp
   | jq '.data[] | {archetype, games, deck_count, decks_period, decks_source, decks_fallback}'
 ```
 
+## HSGuru Matchup Matrices
+
+Подробно (что отдаёт HSGuru, срезы, TTL, расход Scrape.do): [HSGURU_MATCHUPS.md](HSGURU_MATCHUPS.md).
+
+Источник `hsguru_matchups` (pipeline). Таймер
+`hs-data-api-docker-refresh-hsguru-matchups.timer` каждый час в :10 читает
+просроченные срезы `/matchups` через Scrape.do без браузера (1 кредит,
+5 параллельно), FlareSolverr — запасной маршрут.
+
+| Endpoint | Что возвращает |
+| --- | --- |
+| `GET /v1/hsguru/matchups` | Матрица одного среза: `archetypes[]` (`archetype`, `class`, `games`, `winrate`, `popularity_pct`) по убыванию игр и `matchups[]` (`archetype`, `opponent`, `winrate`, `games`); `total_games`, `checked_at`, `changed_at`, `stale`, `source_url`. `meta.available` — форматы, ранги, периоды, монетка, пресеты порогов, `default_period`, `current_period` |
+| `GET /v1/hsguru/matchups/slices` | Все срезы с состоянием, временем чтения, числом архетипов и ячеек; `meta.last_run` и `meta.estimate` (кредиты в сутки) |
+
+Параметры: `format` (`standard`, `wild`), `rank` (`all`, `top_legend`,
+`top_5k`, `legend`, `diamond_to_legend`, `diamond_4to1`, `bronze_plat`),
+`period` (из `meta.available.periods`; по умолчанию окно банов), `coin`
+(только `any_player`: HSGuru не публикует матчапы по монетке, другие значения
+— `422`), `min_games` (минимум игр ячейки, от 1), `min_archetype_games`
+(минимум игр архетипа, от 1), `limit` (N самых популярных архетипов, до 200).
+Несобранный срез — `404`.
+
+```bash
+curl -s "https://api.kolodahearthstone.com/v1/hsguru/matchups?format=standard&rank=legend&period=black_empire_ban&min_games=100&limit=2"
+```
+
+```json
+{
+  "data": {
+    "format": "standard",
+    "rank": "legend",
+    "period": "black_empire_ban",
+    "coin": "any_player",
+    "min_games": 100,
+    "min_archetype_games": 1,
+    "total_games": 936588,
+    "checked_at": "2026-10-25T16:31:28.884000+00:00",
+    "changed_at": "2026-10-25T16:31:28.884000+00:00",
+    "stale": false,
+    "source_url": "https://www.hsguru.com/matchups?format=2&rank=legend&period=black_empire_ban&min_archetype_sample=1&min_matchup_sample=1",
+    "archetypes": [
+      {"archetype": "Aggro Warlock", "class": "WARLOCK", "games": 182401, "winrate": 56.5, "popularity_pct": 19.48},
+      {"archetype": "C'Thun DH", "class": "DEMONHUNTER", "games": 121862, "winrate": 51.0, "popularity_pct": 13.01}
+    ],
+    "matchups": [
+      {"archetype": "Aggro Warlock", "opponent": "Aggro Warlock", "winrate": 50.0, "games": 41382},
+      {"archetype": "Aggro Warlock", "opponent": "C'Thun DH", "winrate": 54.3, "games": 26669},
+      {"archetype": "C'Thun DH", "opponent": "Aggro Warlock", "winrate": 45.7, "games": 26669},
+      {"archetype": "C'Thun DH", "opponent": "C'Thun DH", "winrate": 50.0, "games": 18124}
+    ]
+  },
+  "meta": {
+    "source_id": "hsguru_matchups",
+    "fetched_at": "2026-10-25T16:31:28.884000+00:00",
+    "stale": false,
+    "count": 4,
+    "available": {
+      "formats": ["standard", "wild"],
+      "ranks": ["all", "top_legend", "top_5k", "legend", "diamond_to_legend", "diamond_4to1", "bronze_plat"],
+      "periods": ["past_3_hours", "past_6_hours", "past_day", "past_3_days", "past_week", "past_2_weeks", "past_30_days", "patch_36.6.3", "black_empire", "black_empire_ban"],
+      "coins": ["any_player"],
+      "min_games": [1, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000],
+      "min_archetype_games": [1, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 25000, 50000],
+      "current_period": "black_empire",
+      "default_period": "black_empire_ban"
+    }
+  }
+}
+```
+
+`/v1/hsguru/matchups/slices` отдаёт в `data[]` по строке на срез: `key`,
+`format`, `rank`, `period`, `coin`, `active`, `state` (`ok`, `no_data`,
+`failed`, `unavailable`, `pending`), `checked_at`, `changed_at`,
+`total_games`, `archetypes`, `cells`, `stale`, `last_error`; в `meta` —
+`available`, `last_run` (страницы, кредиты, `stop_reason`) и `estimate`
+(кредиты в сутки по TTL).
+
 ## HSGuru Mulligan And Class Matchups
 
 Подробное описание (что отдаёт HSGuru, срезы, очередь обновления, бюджет
@@ -661,6 +738,41 @@ FlareSolverr — запасной маршрут.
   },
   "meta": {"source_id": "hsguru_esports_legacy", "stale": false, "count": 753, "limit": 1, "offset": 0}
 }
+## HSReplay Mulligan v2 (deck mulligan guide)
+
+Подробно (эндпоинт HSReplay, набор колод, очередь, бюджет Scrape.do,
+премиум-сессия, все поля, сравнение с HSGuru):
+[HSREPLAY_MULLIGAN.md](HSREPLAY_MULLIGAN.md).
+
+Источник `hsreplay_mulligan` (pipeline). Таймер
+`hs-data-api-docker-refresh-hsreplay-mulligan.timer` каждые 3 часа (в :50 с
+01:50) читает просроченные срезы `https://hsreplay.net/api/v1/mulligan/` для
+топ-колод HSReplay Стандарта и Вольного на Легенде, Алмазе 4–1, Алмазе и
+Бронзе–Золоте: `ALL`/`FIRST`/`COIN` × `last_30_days`/`current_patch`/
+`current_expansion`. Запросы идут через Scrape.do без рендера (1 кредит),
+не больше 5 параллельно, около 150 кредитов в сутки (UTC).
+
+| Endpoint | Что возвращает |
+| --- | --- |
+| `GET /v1/hsreplay/mulligan` | Муллиган одного среза колоды: `source: "hsreplay"`, `games`, `base_winrate`, `scope` (`deck`/`archetype`/`class`), `deck` (архетип, класс, список), `opponent_classes`, `premium_session`, `rows[]` с `dbf_id`, `card_id`, `card_name`, `keep_percentage`, `opening_hand_winrate`, `winrate_when_drawn`, `winrate_when_played`, `avg_turns_in_hand`, `avg_turn_played_on` и `opening_hand_impact`/`drawn_impact`/`played_impact` |
+| `GET /v1/hsreplay/mulligan/decks` | Набор колод по формату и рангу: архетип, класс, игры, винрейт, причина выбора (`popular`/`winrate`), сколько срезов собрано |
+| `GET /v1/hsreplay/mulligan/slices` | Все срезы одной колоды: состояние, последняя проверка, премиум или нет |
+| `GET /v1/hsreplay/mulligan/history` | Снимки среза; с `card` — строка карты в каждом снимке |
+| `GET /v1/hsreplay/mulligan/coverage` | Покрытие, статус премиум-сессии, последние запуски с расходом Scrape.do (без кэша) |
+
+Срез: `deck` (shortid HSReplay, обязательно), `format` (`standard`/`wild`,
+необязательно), `rank` (`legend`, `diamond_4to1`, `diamond`, `bronze_gold`),
+`initiative` (`all`, `first`, `coin`), `period` (`last_30_days`,
+`current_patch`, `current_expansion`), `opponent_class` (`any` или класс
+заглавными буквами). Несобранный срез — `404`. Премиум-срез, который нельзя
+собрать или отдать из-за отказа HSReplay в сессии (401/403, аккаунт без
+премиума, нет cookie), — `503` с `detail.premium_session`; пустой ответ
+молча не отдаётся. Если у колоды в срезе нет игр (HSReplay 204), ответ `200`
+с `no_data: true` и пустым `rows`.
+
+```bash
+curl -s "https://api.kolodahearthstone.com/v1/hsreplay/mulligan?deck=5Tf8XCaMoKKU7Fk4yaqa8c&rank=legend&initiative=coin" \
+  | jq '.data | {source, games, base_winrate, scope, top: .rows[:3]}'
 ```
 
 ## HSReplay Archetype Database
@@ -1249,11 +1361,13 @@ Query parameters:
 - `hsguru_matchups_legend`
 - `hsguru_matchups_wild_legend`
 - `hsguru_matchups_diamond_4to1`
+- `hsguru_matchups`
 - `hsguru_archetype_analysis`
 - `hsguru_mulligan`
 
 ### HSReplay
 
+- `hsreplay_mulligan`
 - `hsreplay_battlegrounds_comps`
 - `hsreplay_battlegrounds_heroes`
 - `hsreplay_battlegrounds_minions`

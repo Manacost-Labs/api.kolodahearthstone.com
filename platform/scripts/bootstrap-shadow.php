@@ -261,7 +261,10 @@ LOAD DATABASE
                                  'hsguru_archetype_history', 'hsguru_class_matchups',
                                  'hsguru_mulligan_cards', 'hsguru_stat_runs',
                                  'hsguru_stat_snapshots', 'hsguru_stat_targets',
-                                 'hsreplay_archetypes'
+                                 'hsreplay_archetypes', 'hsreplay_mulligan_cards',
+                                 'hsreplay_mulligan_decks', 'hsreplay_mulligan_groups',
+                                 'hsreplay_mulligan_runs', 'hsreplay_mulligan_snapshots',
+                                 'hsreplay_mulligan_targets'
  EXCLUDING TABLE NAMES LIKE 'api_tokens'
 
  ALTER TABLE NAMES MATCHING ~/./ SET SCHEMA '{$analyticsSchema}';

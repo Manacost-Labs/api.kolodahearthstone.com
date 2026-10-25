@@ -178,6 +178,9 @@ assert_contains scripts/stage-analytics.py "'bg_minion_stat_snapshots'" 'minion 
 assert_contains sql/017_hsguru_mulligan.sql 'analytics.hsguru_mulligan_cards' 'HSGuru mulligan tables must exist before the analytics delta stages them'
 assert_migration 017_hsguru_mulligan 'the migration runner must install the HSGuru mulligan tables'
 assert_contains scripts/stage-analytics.py "'hsguru_stat_targets'" 'HSGuru mulligan targets must be mirrored by the analytics delta'
+assert_contains sql/019_hsreplay_mulligan.sql 'analytics.hsreplay_mulligan_cards' 'HSReplay mulligan tables must exist before the analytics delta stages them'
+assert_migration 019_hsreplay_mulligan 'the migration runner must install the HSReplay mulligan tables'
+assert_contains scripts/stage-analytics.py "'hsreplay_mulligan_targets'" 'HSReplay mulligan targets must be mirrored by the analytics delta'
 
 assert_contains systemd/kolodahs-card-history-media.service 'flock -E 75 -w 900' 'a busy sync lock must end the card history turn with a distinct code'
 assert_contains systemd/kolodahs-card-history-media.service 'SuccessExitStatus=75' 'a skipped card history turn must not mark the unit failed'

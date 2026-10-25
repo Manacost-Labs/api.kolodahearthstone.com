@@ -35,12 +35,14 @@ PIPELINE_IDS = (
     "hsguru_esports_points",
     "hsguru_esports_tournaments",
     "hsguru_fun_decks",
+    "hsguru_matchups",
     "hsguru_meta_matrix",
     "hsguru_mulligan",
     "hsreplay_battlegrounds_compositions_screenshot",
     "hsreplay_battlegrounds_hero_details",
     "hsreplay_battlegrounds_minion_stats",
     "hsreplay_archetypes",
+    "hsreplay_mulligan",
 )
 
 
