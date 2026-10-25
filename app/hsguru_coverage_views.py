@@ -118,7 +118,10 @@ def tournament_summaries(
         summary = {field: tournament.get(field) for field in TOURNAMENT_SUMMARY_FIELDS}
         stages = tournament.get("stages") or []
         final = stages[-1].get("standings") if stages else []
-        summary["players"] = len(tournament.get("lineups") or [])
+        summary["players"] = tournament.get("lineups_total") or len(
+            tournament.get("lineups") or []
+        )
+        summary["lineups_complete"] = tournament.get("lineups_complete", True)
         summary["stages"] = [stage.get("name") for stage in stages]
         summary["winner"] = final[0].get("player") if final else None
         summary["top_archetypes"] = (
@@ -220,14 +223,10 @@ def legacy(
             else ("mt_points", "season", None)
         )
         tables = structured.get(key) or []
-        options = [str(item.get(field) or item.get("points_system")) for item in tables]
+        options = [str(item.get(field)) for item in tables]
         wanted = selector or default or (options[0] if options else None)
         selected = next(
-            (
-                item
-                for item in tables
-                if str(item.get(field) or item.get("points_system")) == wanted
-            ),
+            (item for item in tables if str(item.get(field)) == wanted),
             None,
         )
     if not selected:

@@ -99,6 +99,7 @@ def _standings(
 
 
 LINEUPS = """
+<div>Total: 2</div>
 <table><tr><th>Name</th><th>Decks</th></tr>
 <tr><td><a href="/battlefy/tournament/x/player/Che0nsu"><span><span>
 <img src="https://flagcdn.com/64x48/kr.png" alt="kr"></span><span>Che0nsu</span></span></a></td>
@@ -138,9 +139,13 @@ POINTS = """
 """
 
 LEGACY_STATS = """
-<a href="/legacy-hsesports/mt/qualifier-stats/2021">2021</a>
-<a href="/legacy-hsesports/mt/qualifier-stats/all">2020-2026</a>
-<a href="/legacy-hsesports/mt/qualifier-stats/2026?limit=100">100</a>
+<title>
+2026 Qualifier Stats
+</title>
+<a href="/legacy-hsesports/mt/qualifier-stats/2021?limit=5000">2021</a>
+<a href="/legacy-hsesports/mt/qualifier-stats/all?limit=5000">2020-2026</a>
+<a href="/legacy-hsesports/mt/qualifier-stats/2026?limit=100">Show 100</a>
+<a href="/legacy-hsesports/mt/qualifier-stats/2026?direction=desc&amp;sort_by=Cups">Cups</a>
 <table><tr><th>#</th><th>Player</th><th>Tour Stops</th><th>Winrate %↑</th></tr>
 <tr><td>1</td><td><a href="/player-profile/Furyhunter%232166"><span>Furyhunter</span></a></td>
 <td>21</td><td>68.31</td></tr></table>
@@ -149,6 +154,7 @@ LEGACY_STATS = """
 # The archive nests a <tr> inside its header row.
 LEGACY_POINTS = """
 <a href="/legacy-hsesports/mt/earnings?points_system=match_wins&amp;season=2022_fall">2022 Fall</a>
+<a href="/legacy-hsesports/mt/earnings?points_system=points_2021&amp;season=2021_2">2021 Season 2</a>
 <a href="/legacy-hsesports/mt/earnings?points_system=mt_earnings_2020">2020 Earnings</a>
 <a href="/legacy-hsesports/mt/earnings?region=EU">Europe</a>
 <table><thead><tr><tr><th>#</th><th>Name</th><th>Murder</th><th>Total</th></tr></tr></thead>
@@ -374,6 +380,13 @@ def test_tournament_parsers_read_stops_stages_standings_and_lineups() -> None:
     assert popularity["classes"][1] == {"class": "ROGUE", "lineups": 1, "share": 0.5}
 
 
+def test_lineups_beyond_the_first_page_are_reported_as_incomplete() -> None:
+    page = LINEUPS.replace("Total: 2", "Total: 320")
+
+    assert esports.lineups_total(page) == 320
+    assert len(esports.parse_lineups(page)) == 2
+
+
 def test_generic_tables_read_points_and_the_nested_legacy_header() -> None:
     points = esports.parse_table(find_table(POINTS, ("#", "Player", "Total")))
     assert points["headers"] == ["#", "Player", "January", "Total"]
@@ -467,6 +480,7 @@ def test_tournaments_refresh_collects_stops_and_started_community_events(
     assert [stage["name"] for stage in recent["stages"]] == ["Group A", "Top 8"]
     assert recent["stages"][1]["standings"][0]["player"]["name"] == "winner-t8"
     assert recent["lineup_popularity"]["lineups"] == 2
+    assert (recent["lineups_total"], recent["lineups_complete"]) == (2, True)
     assert recent["complete"] is True
     # A single-stage tournament takes its standings from the first page.
     assert (
@@ -539,12 +553,16 @@ def test_legacy_refresh_runs_weekly_unless_forced(isolated) -> None:
     assert second["skipped"] is True and calls_after_skip == calls
     assert forced["published"] is True and len(fetcher.calls) > calls
     structured = load_dataset(esports.LEGACY_SOURCE_ID)["data"]["structured"]
-    assert [item["period"] for item in structured["qualifier_stats"]] == ["2021", "all"]
-    assert [item["points_system"] for item in structured["mt_points"]] == [
-        "match_wins",
-        "mt_earnings_2020",
+    qualifiers = structured["qualifier_stats"]
+    assert [item["period"] for item in qualifiers] == ["current", "2021", "all"]
+    assert qualifiers[0]["label"] == "2026 Qualifier Stats"
+    # A season-less legacy link shows HSGuru's default season; it is skipped.
+    assert [
+        (item["points_system"], item["season"]) for item in structured["mt_points"]
+    ] == [
+        ("match_wins", "2022_fall"),
+        ("points_2021", "2021_2"),
     ]
-    assert structured["mt_points"][0]["season"] == "2022_fall"
 
 
 # --- REST and GraphQL --------------------------------------------------------------
@@ -606,11 +624,11 @@ def test_rest_endpoints_serve_brawl_and_esports(published) -> None:
 
     legacy = client.get("/v1/hsguru/esports/legacy/qualifier-stats").json()
     assert legacy["data"]["period"] == "all"
-    assert legacy["data"]["options"] == ["2021", "all"]
+    assert legacy["data"]["options"] == ["current", "2021", "all"]
     earnings = client.get(
-        "/v1/hsguru/esports/legacy/mt-points", params={"selector": "mt_earnings_2020"}
+        "/v1/hsguru/esports/legacy/mt-points", params={"selector": "2021_2"}
     ).json()
-    assert earnings["data"]["points_system"] == "mt_earnings_2020"
+    assert earnings["data"]["points_system"] == "points_2021"
 
 
 def test_rest_endpoints_answer_503_before_the_first_publication(isolated) -> None:

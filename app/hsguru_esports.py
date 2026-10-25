@@ -295,6 +295,15 @@ def lineups_page_is_valid(page_html: str) -> bool:
     )
 
 
+_LINEUPS_TOTAL_RE = re.compile(r"Total:\s*(\d+)")
+
+
+def lineups_total(page_html: str) -> int | None:
+    """The lineup count HSGuru reports; the page shows the first 50 of them."""
+    match = _LINEUPS_TOTAL_RE.search(text(document(page_html)))
+    return int(match.group(1)) if match else None
+
+
 def parse_lineups(page_html: str) -> list[dict[str, Any]]:
     table = find_table(page_html, ("Name", "Decks"))
     if table is None:
@@ -406,16 +415,21 @@ async def collect_tournament(
                     continue
                 stages.append({**stage, "standings": parse_standings(page.html)})
     lineups: list[dict[str, Any]] = []
+    total: int | None = None
     if lineups_page is None:
         missing.append("lineups")
     else:
         lineups = parse_lineups(lineups_page.html)
+        total = lineups_total(lineups_page.html)
     return {
         **tournament,
         "standings_url": first_url,
         "lineups_url": lineups_url(tournament_id),
         "stages": stages,
         "lineups": lineups,
+        # Further lineup pages switch over the LiveView socket only.
+        "lineups_total": total if total is not None else len(lineups),
+        "lineups_complete": total is None or len(lineups) >= total,
         "lineup_popularity": lineup_popularity(lineups),
         "missing": missing,
         "complete": not missing,
@@ -597,10 +611,19 @@ def _path_values(page_html: str, prefix: str) -> list[tuple[str, str]]:
     for link in document(page_html).xpath(f'//a[starts-with(@href, "{prefix}/")]'):
         parts = urlsplit(str(link.get("href") or ""))
         segment = parts.path[len(prefix) + 1 :]
-        if not segment or "/" in segment or parts.query or segment in seen:
+        label = text(link)
+        # Period links keep the page size (?limit=); sort and page-size links
+        # of the current period are not periods.
+        if (
+            not segment
+            or "/" in segment
+            or set(parse_qs(parts.query)) - {"limit"}
+            or label.startswith("Show ")
+            or segment in seen
+        ):
             continue
         seen.add(segment)
-        values.append((unquote(segment), text(link)))
+        values.append((unquote(segment), label))
     return values
 
 
@@ -610,7 +633,8 @@ def _earnings_targets(page_html: str) -> list[tuple[str, str]]:
     for link in document(page_html).xpath('//a[contains(@href, "points_system=")]'):
         parts = urlsplit(str(link.get("href") or ""))
         query = parse_qs(parts.query)
-        if set(query) - {"points_system", "season"}:
+        # Without a season HSGuru answers with its default season's table.
+        if set(query) != {"points_system", "season"}:
             continue
         key = urlencode(sorted((name, values[0]) for name, values in query.items()))
         if key not in seen:
@@ -658,6 +682,17 @@ async def collect_legacy(reader: PageReader) -> dict[str, Any]:
         reader.read_many(earnings_urls, table_page_validator("#", "Name")),
     )
     qualifier_stats: list[dict[str, Any]] = []
+    if qualifier_base is not None:
+        # The page without a period is the current year, which has no link.
+        title = document(qualifier_base.html).findtext(".//title") or ""
+        qualifier_stats.append(
+            {
+                "period": "current",
+                "label": " ".join(title.split()) or None,
+                "source_url": f"{LEGACY_QUALIFIER_STATS_URL}?limit={LEGACY_LIMIT}",
+                **parse_table(find_table(qualifier_base.html, ("#", "Player"))),
+            }
+        )
     for (period, label), url in zip(qualifier_periods, qualifier_urls, strict=True):
         page = qualifier_pages.get(url)
         if page is None:

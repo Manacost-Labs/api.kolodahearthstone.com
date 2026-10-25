@@ -349,13 +349,20 @@ GET /v1/hsguru/brawl/decks?rank=all&class=Priest
 | Путь | Содержимое |
 | --- | --- |
 | `data.structured.upcoming[]` | `tournament_id` (Battlefy), `name`, `start_time` (UTC), `tags` (Open/Bo3/регион/формат), `url`. |
-| `data.structured.tournaments[]` | `tournament_id`, `name`, `kind` (`tour_stop` или `community`), `start_time`, `battlefy_url`, `standings_url`, `lineups_url`, `stages[]`, `lineups[]`, `lineup_popularity`, `complete`, `collected_at`, `reused`. |
+| `data.structured.tournaments[]` | `tournament_id`, `name`, `kind` (`tour_stop` или `community`), `start_time`, `battlefy_url`, `standings_url`, `lineups_url`, `stages[]`, `lineups[]`, `lineups_total`, `lineups_complete`, `lineup_popularity`, `complete`, `collected_at`, `reused`. |
 | `stages[]` | `stage_id`, `name` (Swiss, Group A, Top 8 …), `standings[]`: `place`, `player`, `score`, `wins`, `losses`. |
 | `lineups[]` | `player` и `decks[]`: `archetype`, `class`, `deck_code`, `url`. |
 | `lineup_popularity` | `lineups` (число составов), `archetypes[]` и `classes[]` с `lineups` и `share` (доля составов). |
 
 `player` — объект `name`, `battletag`, `region` (`EU`/`AM`/`AP`/`CN`, если
 HSGuru его показывает), `country` (ISO-код флага), `profile_url`.
+
+Страница составов HSGuru показывает первые 50 составов; остальные страницы
+переключаются только по сокету LiveView (URL-параметры игнорируются, клик в
+браузере Scrape.do страницу не меняет). Поэтому у турниров больше чем на 50
+игроков (MT 2019–2022, крупные комьюнити-кубки) `lineups_complete: false`,
+`lineups_total` — число составов по HSGuru, а `lineup_popularity` посчитана по
+собранным. Standings всех стадий собираются полностью (до 400 строк Swiss).
 
 Завершённый турнир (старт больше 10 дней назад, полный снимок собран позже
 этого срока) не читается повторно. Если повторное чтение незавершённого турнира
@@ -389,8 +396,8 @@ GET /v1/hsguru/esports/points/seasons
 | Путь | Содержимое |
 | --- | --- |
 | `mt_stats` | Игроки по всем MT: `tour_stops`, `top_8`, `matches_won`, `matches_lost`, `winrate_pct`. |
-| `qualifier_stats[]` | По периоду (`all` = 2020–2026, год или тур-стоп): `cups`, `top_8`, `top_16`, `winrate_pct`. |
-| `mt_points[]` | Legacy-сезоны (`points_system`, `season`): очки или призовые по турнирам и `total`. |
+| `qualifier_stats[]` | По периоду (`current` — текущий год, `all` — 2020–2026, год или тур-стоп): `cups`, `top_8`, `top_16`, `winrate_pct`. |
+| `mt_points[]` | Legacy-сезоны 2020–2022 (`points_system`, `season`): очки или призовые по турнирам и `total`. Ссылки HSGuru без `season` показывают таблицу сезона по умолчанию и не собираются. |
 
 ```http
 GET /v1/hsguru/esports/legacy/mt-stats
