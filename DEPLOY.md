@@ -285,6 +285,24 @@ sudo /srv/hs-data-api/scripts/server-readiness.sh --strict --refresh-all  # пе
 ./venv/bin/python -m app.cli refresh --source hsreplay_cards_legend_included_popularity
 ```
 
+## Ручной запуск задачи вне расписания
+
+Любую Docker-задачу можно запустить сейчас штатным юнитом:
+
+```bash
+sudo systemctl start hs-data-api-docker-refresh-hsreplay-card-periods.service
+journalctl -u hs-data-api-docker-refresh-hsreplay-card-periods.service -n 50
+```
+
+Юниты с `--schedule-id` сначала ищут в schedule ledger слот, который сейчас
+должен выполняться (от времени слота до +2 ч). Вне этого окна слота нет, и
+задача идёт как внеплановое обновление: в журнале будет строка
+`No due schedule occurrence for <schedule>; running as an unscheduled refresh`,
+данные публикуются как обычно, а в метрики выполнения расписания такой запуск
+не засчитывается (пропущенный слот так и остаётся пропущенным). Ошибкой
+остаются только настоящие расхождения конфигурации: несовпадение набора
+источников со слотом (`SourceSetMismatchError`) или неотслеживаемое расписание.
+
 ## Vicious Syndicate после выхода дополнения
 
 Если radar-страницы требуют браузерную сессию, экспортируйте cookies только с

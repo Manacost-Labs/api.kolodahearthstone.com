@@ -368,6 +368,88 @@ class CliTest(unittest.TestCase):
 
         self.assertEqual(exit_code, 10)
 
+    def test_manual_start_of_a_scheduled_unit_runs_unscheduled(self) -> None:
+        # `systemctl start` outside the timer finds no due ledger occurrence.
+        from app.schedule_ledger import OccurrenceNotFoundError
+
+        results = [{"source_id": "hsreplay_arena_cards_advanced", "state": "ok"}]
+        stderr = io.StringIO()
+        with (
+            patch("app.cli.refresh_sources", return_value=results) as refresh,
+            patch(
+                "app.schedule_ledger.claim_occurrence",
+                side_effect=OccurrenceNotFoundError("none due"),
+            ),
+            patch("sys.stderr", new=stderr),
+            redirect_stdout(io.StringIO()),
+        ):
+            exit_code = cli.main(
+                [
+                    "refresh",
+                    "--source",
+                    "hsreplay_arena_cards_advanced",
+                    "--scheduled",
+                    "--schedule-id",
+                    "refresh-api-daily",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        refresh.assert_called_once()
+        self.assertNotIn("refresh_window_id", refresh.call_args.kwargs)
+        self.assertIn("unscheduled refresh", stderr.getvalue())
+        self.assertNotIn("Schedule ledger claim failed", stderr.getvalue())
+
+    def test_schedule_scope_mismatch_still_fails_before_refreshing(self) -> None:
+        from app.schedule_ledger import SourceSetMismatchError
+
+        stderr = io.StringIO()
+        with (
+            patch("app.cli.refresh_sources") as refresh,
+            patch(
+                "app.schedule_ledger.claim_occurrence",
+                side_effect=SourceSetMismatchError("missing=1, extra=0"),
+            ),
+            patch("sys.stderr", new=stderr),
+        ):
+            exit_code = cli.main(
+                [
+                    "refresh",
+                    "--source",
+                    "hsreplay_arena_cards_advanced",
+                    "--scheduled",
+                    "--schedule-id",
+                    "refresh-api-daily",
+                ]
+            )
+
+        self.assertEqual(exit_code, 1)
+        refresh.assert_not_called()
+        self.assertIn("Schedule ledger claim failed: SourceSetMismatchError", stderr.getvalue())
+
+    def test_manual_api_tier_run_without_occurrence_is_unscheduled(self) -> None:
+        from app.schedule_ledger import OccurrenceNotFoundError
+
+        refresh = AsyncMock(return_value=[])
+        with (
+            patch("app.cli.refresh_sources", new=refresh),
+            patch(
+                "app.schedule_ledger.claim_occurrence",
+                side_effect=OccurrenceNotFoundError("none due"),
+            ),
+            patch("sys.stderr", new=io.StringIO()),
+            redirect_stdout(io.StringIO()),
+        ):
+            exit_code = cli.main(
+                ["refresh-api-tiers", "--schedule-id", "refresh-api-daily"]
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(len(refresh.await_args_list), 2)
+        self.assertTrue(
+            all("refresh_window_id" not in call.kwargs for call in refresh.await_args_list)
+        )
+
     def test_scheduled_refresh_without_usable_data_is_error(self) -> None:
         results = [
             {
