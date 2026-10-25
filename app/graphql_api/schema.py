@@ -472,6 +472,74 @@ def _require_full_access(info: Info[GraphQLContext, None]) -> None:
         ) from None
 
 
+async def _hsguru_statistics(
+    info: Info[GraphQLContext, None],
+    *,
+    kind: str,
+    archetype: str | None,
+    deck_id: int | None,
+    format_name: str | None,
+    rank: str,
+    period: str,
+    coin: str,
+    opponent_class: str,
+    min_mull_count: int = 0,
+    min_drawn_count: int = 0,
+) -> Any:
+    from ..hsguru_mulligan import (
+        ANY_OPPONENT,
+        COINS,
+        FORMAT_IDS,
+        OPPONENT_CLASSES,
+        RANKS,
+        assemble_statistics,
+        current_period,
+    )
+
+    name = _normalize_text(archetype, "archetype", 200)
+    if (name is None) == (deck_id is None):
+        raise _validation_error("Pass exactly one of archetype or deckId")
+    if deck_id is not None and not 1 <= deck_id <= 2_000_000_000:
+        raise _validation_error("deckId is out of range")
+    if format_name is not None and format_name not in FORMAT_IDS:
+        raise _validation_error("format must be standard or wild")
+    if name is not None and format_name is None:
+        raise _validation_error("format is required with archetype")
+    if rank not in RANKS:
+        raise _validation_error(f"rank must be one of {', '.join(RANKS)}")
+    if coin not in COINS:
+        raise _validation_error(f"coin must be one of {', '.join(COINS)}")
+    if opponent_class not in {ANY_OPPONENT, *OPPONENT_CLASSES}:
+        raise _validation_error("opponentClass must be any or an upper-case class key")
+    resolved_period = _normalize_text(period, "period", 64)
+    if resolved_period == "current":
+        resolved_period = await asyncio.to_thread(current_period)
+    if not resolved_period:
+        raise _validation_error("period is required")
+    found = await _call_repository(
+        _repository(info).hsguru_statistics(
+            kind=kind,
+            subject_type="archetype" if name is not None else "deck",
+            format_name=format_name,
+            archetype=name,
+            deck_id=deck_id,
+            rank=rank,
+            period=resolved_period,
+            coin=coin,
+            opponent_class=opponent_class,
+        )
+    )
+    if not found:
+        return None
+    return assemble_statistics(
+        found["target"],
+        found["snapshot"],
+        found["rows"],
+        min_mull_count=min_mull_count,
+        min_drawn_count=min_drawn_count,
+    )
+
+
 async def _call_repository(operation: Any) -> Any:
     try:
         return await operation
@@ -1098,6 +1166,72 @@ class Query:
             catalog = {}  # names and images are optional, as in REST
         return assemble_mirrored_stats(
             rows, dbf_id=dbf_id, composition_id=composition_id, catalog=catalog.get(dbf_id)
+        )
+
+    @strawberry.field(
+        description=(
+            "HSGuru mulligan guide of an archetype or deck for one slice: per card "
+            "mulligan, drawn, not drawn and kept impact with counts. Pass exactly one of "
+            "archetype (with format) or deckId; period 'current' is the current HSGuru "
+            "window. Same shape as REST /v1/hsguru/mulligan."
+        )
+    )
+    async def hsguru_mulligan(
+        self,
+        info: Info[GraphQLContext, None],
+        archetype: str | None = None,
+        deck_id: int | None = None,
+        format: str | None = None,
+        rank: str = "all",
+        period: str = "current",
+        coin: str = "any_player",
+        opponent_class: str = "any",
+        min_mull_count: int = 0,
+        min_drawn_count: int = 0,
+    ) -> JSON | None:
+        if not 0 <= min_mull_count <= 1_000_000 or not 0 <= min_drawn_count <= 1_000_000:
+            raise _validation_error("minimum counts must be between 0 and 1000000")
+        return await _hsguru_statistics(
+            info,
+            kind="cards",
+            archetype=archetype,
+            deck_id=deck_id,
+            format_name=format,
+            rank=rank,
+            period=period,
+            coin=coin,
+            opponent_class=opponent_class,
+            min_mull_count=min_mull_count,
+            min_drawn_count=min_drawn_count,
+        )
+
+    @strawberry.field(
+        description=(
+            "HSGuru winrate of an archetype or deck against each class, with the Total "
+            "row. Same arguments as hsguruMulligan without the card filters; same shape "
+            "as REST /v1/hsguru/class-matchups."
+        )
+    )
+    async def hsguru_class_matchups(
+        self,
+        info: Info[GraphQLContext, None],
+        archetype: str | None = None,
+        deck_id: int | None = None,
+        format: str | None = None,
+        rank: str = "all",
+        period: str = "current",
+        coin: str = "any_player",
+    ) -> JSON | None:
+        return await _hsguru_statistics(
+            info,
+            kind="matchups",
+            archetype=archetype,
+            deck_id=deck_id,
+            format_name=format,
+            rank=rank,
+            period=period,
+            coin=coin,
+            opponent_class="any",
         )
 
     @strawberry.field(

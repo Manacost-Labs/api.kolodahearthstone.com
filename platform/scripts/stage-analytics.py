@@ -29,7 +29,9 @@ TABLES = (
     'bg_minion_snapshots', 'bg_minion_stat_medians', 'bg_minion_stat_positions',
     'bg_minion_stat_purchases', 'bg_minion_stat_rounds', 'bg_minion_stat_snapshots',
     'bg_minion_stat_summaries', 'bg_minions', 'card_popularity_history', 'decks',
-    'fetch_log', 'hearthstone_patches', 'hsguru_archetype_history', 'hsreplay_archetypes',
+    'fetch_log', 'hearthstone_patches', 'hsguru_archetype_history',
+    'hsguru_class_matchups', 'hsguru_mulligan_cards', 'hsguru_stat_runs',
+    'hsguru_stat_snapshots', 'hsguru_stat_targets', 'hsreplay_archetypes',
 )
 APPEND_ONLY = frozenset((
     'archetype_deck_cards', 'archetype_decks', 'archetype_matchups',
