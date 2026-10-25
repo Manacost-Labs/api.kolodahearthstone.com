@@ -163,6 +163,15 @@ _SCHEDULES: tuple[_ScheduleSpec, ...] = (
         local_times=_times(*((hour, 50) for hour in range(1, 24, 3))),
     ),
     _ScheduleSpec(
+        id="refresh-hsguru-matchups",
+        label="Каждый час в :10 — матрицы матчапов HSGuru",
+        systemd_unit="hs-data-api-docker-refresh-hsguru-matchups.timer",
+        on_calendar=("*-*-* *:10:00 Europe/Warsaw",),
+        source_ids=frozenset({"hsguru_matchups"}),
+        recurrence="daily",
+        local_times=_times(*((hour, 10) for hour in range(24))),
+    ),
+    _ScheduleSpec(
         id="recover-hsguru-archetype-analysis",
         label="Каждый час в :45 — восстановление checkpoint",
         systemd_unit="hs-data-api-docker-recover-hsguru-archetype-analysis.timer",

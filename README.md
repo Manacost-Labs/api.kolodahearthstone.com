@@ -146,6 +146,8 @@ GraphQL pagination возвращает `items` и `pageInfo`. Максимал�
 | GET | `/v1/hsguru/archetypes` | `format`, `period`, `q`, `min_games`, `has_decks`, `sort`, `order`, `limit`, `offset` | Каталог архетипов: текущий или `period=black_empire_ban` (Bans) |
 | GET | `/v1/hsguru/archetypes/history` | `archetype` (required), `format` (required), `limit` | История архетипа |
 | GET | `/v1/hsguru/archetypes/analysis` | `archetype` (required), `format` (required) | Полный анализ архетипа |
+| GET | `/v1/hsguru/matchups` | `format`, `rank`, `period`, `coin`, `min_games`, `min_archetype_games`, `limit` | Матрица матчапов архетипов HSGuru любого среза (по умолчанию окно банов) |
+| GET | `/v1/hsguru/matchups/slices` | — | Срезы матчапов: состояние, свежесть, размер, расход |
 | GET | `/v1/hsguru/mulligan` | `archetype`+`format` или `deck_id`, `rank`, `period`, `coin`, `opponent_class`, `min_mull_count`, `min_drawn_count` | Муллиган HSGuru архетипа или колоды: mulligan/drawn/not drawn/kept impact и count по картам |
 | GET | `/v1/hsguru/class-matchups` | `archetype`+`format` или `deck_id`, `rank`, `period`, `coin` | Винрейт архетипа или колоды против каждого класса |
 | GET | `/v1/hsguru/mulligan/slices` | `archetype` или `deck_id`, `format` | Сохранённые срезы муллигана и матчапов |

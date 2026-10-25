@@ -1335,6 +1335,60 @@ class Query:
         )
 
     @strawberry.field(
+        description=(
+            "HSGuru archetype-versus-archetype matchup matrix of one slice: archetypes "
+            "with games, winrate and popularity, and every matchup cell with winrate and "
+            "games. period defaults to the Bans window; coin is any_player only because "
+            "HSGuru publishes no coin split. Same shape as REST /v1/hsguru/matchups data."
+        )
+    )
+    async def hsguru_matchups(
+        self,
+        format: str = "standard",
+        rank: str = "all",
+        period: str | None = None,
+        coin: str = "any_player",
+        min_games: int = 1,
+        min_archetype_games: int = 1,
+        limit: int | None = None,
+    ) -> JSON | None:
+        from ..hsguru_matchups import (
+            COLLECTED_COINS,
+            FORMAT_IDS,
+            RANKS,
+            default_period,
+            get_matchups,
+            summary,
+        )
+
+        if format not in FORMAT_IDS:
+            raise _validation_error("format must be standard or wild")
+        if rank not in RANKS:
+            raise _validation_error(f"rank must be one of {', '.join(RANKS)}")
+        if coin not in COLLECTED_COINS:
+            raise _validation_error("HSGuru publishes no coin split; coin must be any_player")
+        if not 1 <= min_games <= 1_000_000 or not 1 <= min_archetype_games <= 10_000_000:
+            raise _validation_error("minimum games are out of range")
+        if limit is not None and not 1 <= limit <= 200:
+            raise _validation_error("limit must be between 1 and 200")
+        structured = await asyncio.to_thread(summary)
+        periods = list((structured.get("dimensions") or {}).get("periods") or [])
+        resolved = _normalize_text(period, "period", 64) or default_period(
+            periods, structured.get("current_period")
+        )
+        if not resolved or (periods and resolved not in periods):
+            raise _validation_error(f"period must be one of {', '.join(periods)}")
+        return await asyncio.to_thread(
+            get_matchups,
+            format_name=format,
+            rank=rank,
+            period=resolved,
+            min_games=min_games,
+            min_archetype_games=min_archetype_games,
+            limit=limit,
+        )
+
+    @strawberry.field(
         description="Integrated data sources and their last refresh state."
     )
     async def sources(
