@@ -1,0 +1,498 @@
+{
+  "data": {
+    "generatedAt": "2026-10-25T10:48:18+00:00",
+    "coverage": {
+      "fromBuild": 190920,
+      "toBuild": 255130,
+      "fromPatch": "28.2.1.190920",
+      "from": "2023-12-08",
+      "to": "2026-10-12",
+      "statsFrom": "2026-04-23",
+      "statsSource": "HSReplay Standard Legend archetypes",
+      "patchCatalog": "/api/patches (wiki.gg, playhearthstone.com, hs-manacost.ru)",
+      "cardSource": "HearthstoneJSON collectible cards per client build"
+    },
+    "patterns": {
+      "balancePatches": 52,
+      "balancePatchesPerYear": {
+        "2023": 1,
+        "2024": 20,
+        "2025": 16,
+        "2026": 15
+      },
+      "daysBetweenBalancePatches": {
+        "n": 51,
+        "min": 8.0,
+        "p25": 13.0,
+        "median": 17.0,
+        "p75": 23.0,
+        "max": 57.0
+      },
+      "daysFromContentDropToFirstBalancePatch": {
+        "expansion": {
+          "n": 8,
+          "min": 16.0,
+          "p25": 17.0,
+          "median": 19.0,
+          "p75": 23.0,
+          "max": 23.0
+        },
+        "miniSetOrCards": {
+          "n": 20,
+          "min": 7.0,
+          "p25": 9.25,
+          "median": 14.5,
+          "p75": 15.0,
+          "max": 28.0
+        },
+        "events": [
+          {
+            "drop": "32.0.0.217964",
+            "kind": "expansion",
+            "date": "2025-03-18",
+            "firstBalancePatch": "2025-04-04",
+            "days": 17
+          },
+          {
+            "drop": "31.6.0.216423",
+            "kind": "mini_set_or_cards",
+            "date": "2025-02-19",
+            "firstBalancePatch": "2025-03-18",
+            "days": 27
+          },
+          {
+            "drop": "31.4.0.214839",
+            "kind": "mini_set_or_cards",
+            "date": "2025-01-21",
+            "firstBalancePatch": "2025-02-04",
+            "days": 14
+          },
+          {
+            "drop": "31.0.0.210009",
+            "kind": "expansion",
+            "date": "2024-10-29",
+            "firstBalancePatch": "2024-11-21",
+            "days": 23
+          },
+          {
+            "drop": "30.6.0.208591",
+            "kind": "mini_set_or_cards",
+            "date": "2024-10-10",
+            "firstBalancePatch": "2024-10-17",
+            "days": 7
+          },
+          {
+            "drop": "30.4.0.206605",
+            "kind": "mini_set_or_cards",
+            "date": "2024-09-10",
+            "firstBalancePatch": "2024-09-26",
+            "days": 16
+          },
+          {
+            "drop": "30.0.0.203120",
+            "kind": "expansion",
+            "date": "2024-07-16",
+            "firstBalancePatch": "2024-08-08",
+            "days": 23
+          },
+          {
+            "drop": "29.6.0.201108",
+            "kind": "mini_set_or_cards",
+            "date": "2024-06-17",
+            "firstBalancePatch": "2024-06-27",
+            "days": 10
+          },
+          {
+            "drop": "29.4.0.198933",
+            "kind": "mini_set_or_cards",
+            "date": "2024-05-14",
+            "firstBalancePatch": "2024-05-23",
+            "days": 9
+          },
+          {
+            "drop": "29.0.0.195635",
+            "kind": "expansion",
+            "date": "2024-03-11",
+            "firstBalancePatch": "2024-03-28",
+            "days": 17
+          },
+          {
+            "drop": "28.6.0.193541",
+            "kind": "mini_set_or_cards",
+            "date": "2024-02-14",
+            "firstBalancePatch": "2024-02-22",
+            "days": 8
+          },
+          {
+            "drop": "28.4.0.192412",
+            "kind": "mini_set_or_cards",
+            "date": "2024-01-18",
+            "firstBalancePatch": "2024-01-29",
+            "days": 11
+          }
+        ]
+      },
+      "changes": {
+        "buff": 340,
+        "nerf": 229,
+        "neutral": 131,
+        "rework": 93
+      },
+      "changeKinds": {
+        "nerf": {
+          "text": 91,
+          "cost": 86,
+          "stats": 28,
+          "text+stats": 13,
+          "cost+stats": 11
+        },
+        "buff": {
+          "cost": 117,
+          "text": 103,
+          "stats": 80,
+          "cost+stats": 28,
+          "text+stats": 12
+        }
+      },
+      "costDeltas": {
+        "nerf": {
+          "+1": 80,
+          "+2": 15,
+          "-1": 8,
+          "+5": 2,
+          "+25": 1,
+          "-2": 1
+        },
+        "buff": {
+          "-1": 135,
+          "-2": 12,
+          "+1": 4,
+          "-25": 1,
+          "-3": 1,
+          "-5": 1
+        }
+      },
+      "attackDeltas": {
+        "nerf": {
+          "-1": 14,
+          "+1": 3,
+          "-2": 2,
+          "-6": 1,
+          "-5": 1,
+          "+2": 1
+        },
+        "buff": {
+          "+1": 38,
+          "-1": 13,
+          "+2": 7,
+          "+6": 1,
+          "-3": 1,
+          "-2": 1
+        }
+      },
+      "healthDeltas": {
+        "nerf": {
+          "-1": 25,
+          "+1": 3,
+          "-2": 2,
+          "-6": 1,
+          "-5": 1
+        },
+        "buff": {
+          "+1": 56,
+          "-1": 14,
+          "+2": 4,
+          "-2": 4,
+          "+6": 1,
+          "-3": 1
+        }
+      },
+      "byClass": {
+        "nerf": {
+          "NEUTRAL": 44,
+          "DRUID": 27,
+          "WARRIOR": 20,
+          "PALADIN": 20,
+          "PRIEST": 18,
+          "ROGUE": 17,
+          "WARLOCK": 15,
+          "SHAMAN": 13,
+          "HUNTER": 13,
+          "DEMONHUNTER": 12,
+          "DEATHKNIGHT": 12,
+          "MAGE": 11,
+          "None": 7
+        },
+        "buff": {
+          "NEUTRAL": 56,
+          "ROGUE": 33,
+          "DEMONHUNTER": 32,
+          "WARLOCK": 29,
+          "MAGE": 28,
+          "PRIEST": 28,
+          "DRUID": 25,
+          "SHAMAN": 23,
+          "DEATHKNIGHT": 23,
+          "WARRIOR": 21,
+          "HUNTER": 17,
+          "PALADIN": 17,
+          "None": 8
+        }
+      },
+      "byRarity": {
+        "nerf": {
+          "RARE": 66,
+          "COMMON": 64,
+          "LEGENDARY": 59,
+          "EPIC": 40
+        },
+        "buff": {
+          "LEGENDARY": 117,
+          "RARE": 88,
+          "COMMON": 82,
+          "EPIC": 50,
+          "FREE": 3
+        }
+      },
+      "setAgeDays": {
+        "nerf": {
+          "n": 133,
+          "min": 15.0,
+          "p25": 92.0,
+          "median": 163.0,
+          "p75": 323.0,
+          "max": 790.0
+        },
+        "buff": {
+          "n": 168,
+          "min": 26.0,
+          "p25": 51.0,
+          "median": 98.0,
+          "p75": 516.0,
+          "max": 916.0
+        }
+      },
+      "newSetShare": {
+        "nerf": 0.05,
+        "buff": 0.08
+      },
+      "preStats": {
+        "basis": "core HSReplay Legend archetype (card in >=50% of its deck games), mean of 7 days before the patch",
+        "nerf": {
+          "winrate": {
+            "n": 15,
+            "min": 42.12,
+            "p25": 49.96,
+            "median": 52.76,
+            "p75": 53.8,
+            "max": 56.22
+          },
+          "popularity": {
+            "n": 15,
+            "min": 0.28,
+            "p25": 2.68,
+            "median": 10.99,
+            "p75": 13.63,
+            "max": 24.82
+          }
+        },
+        "buff": {
+          "winrate": {
+            "n": 13,
+            "min": 28.41,
+            "p25": 29.48,
+            "median": 32.67,
+            "p75": 44.31,
+            "max": 54.19
+          },
+          "popularity": {
+            "n": 13,
+            "min": 0.16,
+            "p25": 0.19,
+            "median": 0.49,
+            "p75": 0.78,
+            "max": 8.08
+          }
+        }
+      },
+      "effect": {
+        "basis": "core archetype winrate, 7 days after minus 7 days before",
+        "nerf": {
+          "n": 15,
+          "min": -11.22,
+          "p25": -7.25,
+          "median": -2.85,
+          "p75": -0.7,
+          "max": 2.03
+        },
+        "buff": {
+          "n": 13,
+          "min": -7.2,
+          "p25": 6.5,
+          "median": 9.15,
+          "p75": 16.25,
+          "max": 20.52
+        }
+      },
+      "sparedArchetypes": [
+        {
+          "patch": "35.6.2.244584",
+          "archetype": "Herald Rogue",
+          "class": "ROGUE",
+          "winrate": 50.64,
+          "popularity": 10.67
+        },
+        {
+          "patch": "35.6.2.244584",
+          "archetype": "Herald Shaman",
+          "class": "SHAMAN",
+          "winrate": 51.01,
+          "popularity": 7.06
+        },
+        {
+          "patch": "35.6.2.244584",
+          "archetype": "Aggro Druid",
+          "class": "DRUID",
+          "winrate": 51.92,
+          "popularity": 5.53
+        },
+        {
+          "patch": "35.6.2.244584",
+          "archetype": "Broxigar Demon Hunter",
+          "class": "DEMONHUNTER",
+          "winrate": 51.72,
+          "popularity": 4.01
+        },
+        {
+          "patch": "35.6.0.243002",
+          "archetype": "Face Hunter",
+          "class": "HUNTER",
+          "winrate": 52.81,
+          "popularity": 11.11
+        },
+        {
+          "patch": "35.6.0.243002",
+          "archetype": "Herald Shaman",
+          "class": "SHAMAN",
+          "winrate": 52.91,
+          "popularity": 7.28
+        },
+        {
+          "patch": "35.6.0.243002",
+          "archetype": "Aggro Druid",
+          "class": "DRUID",
+          "winrate": 53.2,
+          "popularity": 4.82
+        },
+        {
+          "patch": "35.6.0.243002",
+          "archetype": "Broxigar Demon Hunter",
+          "class": "DEMONHUNTER",
+          "winrate": 52.49,
+          "popularity": 4.23
+        },
+        {
+          "patch": "35.4.2.242566",
+          "archetype": "Broxigar Demon Hunter",
+          "class": "DEMONHUNTER",
+          "winrate": 53.04,
+          "popularity": 8.55
+        },
+        {
+          "patch": "35.4.2.242566",
+          "archetype": "Face Hunter",
+          "class": "HUNTER",
+          "winrate": 52.48,
+          "popularity": 7.19
+        },
+        {
+          "patch": "35.4.2.242566",
+          "archetype": "Aggro Druid",
+          "class": "DRUID",
+          "winrate": 54.8,
+          "popularity": 6.82
+        },
+        {
+          "patch": "35.4.2.242566",
+          "archetype": "Herald Shaman",
+          "class": "SHAMAN",
+          "winrate": 53.52,
+          "popularity": 6.02
+        },
+        {
+          "patch": "35.2.2.241135",
+          "archetype": "Spell Demon Hunter",
+          "class": "DEMONHUNTER",
+          "winrate": 54.56,
+          "popularity": 10.45
+        },
+        {
+          "patch": "35.2.2.241135",
+          "archetype": "Herald Shaman",
+          "class": "SHAMAN",
+          "winrate": 53.5,
+          "popularity": 5.03
+        },
+        {
+          "patch": "35.2.2.241135",
+          "archetype": "Bubble Paladin",
+          "class": "PALADIN",
+          "winrate": 54.86,
+          "popularity": 4.76
+        }
+      ]
+    },
+    "narrative": {
+      "summary": "За период с 2023-12-08 по 2026-10-12 вышло 52 балансных патча: 1 в 2023, 20 в 2024, 16 в 2025 и 15 в 2026 году. Медиана между патчами 17 дней (от 8 до 57, p25 13, p75 23), то есть ритм примерно раз в две-три недели. Правок в сумме 340 баффов против 229 нерфов, плюс 93 рефорка: Blizzard больше усиливает, чем ослабляет.\n\nПервый патч после контента выходит быстро: после дополнений медиана 19 дней (16–23), после мини-наборов и карт медиана 14,5 дня (7–28). Часто первый патч после мини-набора идёт уже через 1–2 недели, например 30.6.2 через 7 дней и 28.6.2 через 8.\n\nНерфы бьют по сильным и популярным колодам: по 15 патчам со статистикой медианный винрейт целевого ядра 52,76% и популярность 10,99%, а баффы идут по колодам с медианой винрейта 32,67% и популярностью 0,49%. Нерфы чаще всего простые: подорожание на +1 (80 случаев из 229) либо правка текста (91). Баффы — снижение стоимости на −1 (135 из 340) и правки текста.\n\nBlizzard открыто признаёт ошибки и откатывает: Vicious Voidscale (36.0.3 бафф, 36.2.0 откат), Mister Clocksworth (34.0.0 → 34.2.0), Hellraiser (36.2.2 → 37.0.0), Isiset и К'Тун в 36.6.3 → 37.0.0. Патчи перед дополнением и после ротации часто работают как массовые баффы: 35.0.0 (44 баффа), 32.0.0 (71), 29.0.0 (48).",
+      "patterns": [
+        {
+          "title": "Нерфы приходят к сильным и популярным колодам",
+          "detail": "Медианный винрейт ядра колоды перед нерфом 52,76% (p25 49,96%, p75 53,8%), медианная популярность 10,99% (p75 13,63%, максимум 24,82% у Void Demon Hunter перед 36.2.0). Нерф 36.6.3 Dragon Warrior сделан при 53,42% и 14,51%. Но нерф бывает и из-за популярности и неприятного опыта: 35.6.2 для Face Hunter (52,29%, 13,23%), а Quest Priest при ~48% и 14,59% не ослаблялся."
+        },
+        {
+          "title": "Баффы идут слабым нишевым колодам",
+          "detail": "Перед баффами медианный винрейт 32,67% и популярность 0,49% (p75 44,31% и 0,78%). Примеры: Azalina Priest 34,12% и 0,7% в 36.0.3, Demon Warlock 29,48% и 0,16%, Broxigar Demon Hunter 28,41% в 36.2.2. После баффа винрейт растёт на медиану +9,15 п.п. (до +20,52), хотя в редких случаях падает на 7,2 п.п."
+        },
+        {
+          "title": "Нерфы действуют умеренно",
+          "detail": "Медианное изменение винрейта ядра после нерфа −2,85 п.п. (p25 −7,25, максимум падения −11,22), а иногда даже +2,03. Самые сильные эффекты: Void Demon Hunter 52,86% → 41,64% после 36.2.0, Troublemaker Rogue 49,96% → 41,7% после 36.2.2, Face Hunter 52,76% → 45,51%."
+        },
+        {
+          "title": "Главная нерф-правка — подорожание на +1",
+          "detail": "Из 229 нерфов 91 текстовая правка, 86 по стоимости, 28 по статам. Среди ценовых нерфов +1 даёт 80 случаев, +2 — 15, а +5 — 2 (Jade Guardians 3 → 5 в 36.2.2). По статам нерфы чаще −1 здоровья (25 случаев) и −1 атаки (14), как Spiderling 3 → 2 здоровья в 36.4.2."
+        },
+        {
+          "title": "Главная бафф-правка — скидка на −1 и плюс к статам",
+          "detail": "Из 340 баффов 117 по стоимости, 103 по тексту, 80 по статам. Скидка −1 встречается 135 раз, −2 только 12. По статам +1 здоровья 56 раз, +1 атаки 38. Массовые примеры: 34.6.0 (27 баффов, большинство снижение стоимости) и 35.0.0 (44 баффа)."
+        },
+        {
+          "title": "Баффы чаще нерфов, особенно по легендарным картам",
+          "detail": "Общее число: 340 баффов против 229 нерфов. По редкости баффы Legendary 117, у нерфов 59; нерфы распределены ровнее: Rare 66, Common 64, Legendary 59, Epic 40. По классам больше всего нерфов у нейтральных (44) и Друида (27)."
+        },
+        {
+          "title": "Темп: патч раз в 2–3 недели, первый патч быстро",
+          "detail": "Медиана интервала 17 дней, максимум 57. После дополнений первый балансный патч через 19 дней медианно (16–23), после мини-наборов 14,5 (7–28). Примеры: 32.0.0 → 32.0.3 за 17 дней, 31.0.0 → 31.0.3 за 23 дня, 30.6.0 → 30.6.2 за 7 дней."
+        },
+        {
+          "title": "Новые карты трогают редко, обычно баффами",
+          "detail": "Доля нерфов новых наборов только 5%, баффов 8%. Медианный возраст набора карт при нерфе 163 дня (p25 92), при баффе 98 дней (p25 51). Но при слабом старте новые карты усиливают рано: 33.0.3 (45 дней) и 35.4.2 (98 дней для Mage-карт), а Fyrakk и Ethereal Oracle ослаблялись лишь спустя месяцы."
+        },
+        {
+          "title": "Откаты и осторожность перед дополнениями",
+          "detail": "Blizzard откатывает неудачные правки: Vicious Voidscale (36.0.3 → 36.2.0), Mister Clocksworth (34.0.0 → 34.2.0), Hellraiser (36.2.2 → 37.0.0), Isiset и C'Thun (36.6.3 → 37.0.0), Corpse Bride (28.2.3 бафф, 30.0.0 нерф). Перед ротацией и новым дополнением патчи малые (35.2.2, 34.4.2, 36.6.3) или массово баффающие (35.0.0, 32.0.0)."
+        },
+        {
+          "title": "Нерфы обычно не затрагивают сильных, но не доминирующих",
+          "detail": "В патчах 35.2.2, 35.4.2, 35.6.0 и 35.6.2 ряд колод с винрейтом 51–55% остался нетронутым: Aggro Druid 54,8% (6,82%), Herald Shaman 53,52% (6,02%), Spell Demon Hunter 54,56% (10,45%). Blizzard предпочитает ослабить одну-две лидирующие колоды и ждать, а не выравнивать все."
+        }
+      ]
+    },
+    "model": "claude-sonnet-5-5"
+  },
+  "meta": {
+    "source_id": "balance_radar",
+    "fetched_at": "2026-10-25T10:48:18+00:00",
+    "stale": false,
+    "count": 52
+  }
+}

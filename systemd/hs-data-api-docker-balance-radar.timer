@@ -1,0 +1,12 @@
+[Unit]
+Description=Balance Radar twice a day, after the HSGuru meta matrix refresh (up to 160 min)
+
+[Timer]
+OnCalendar=*-*-* 03:10:00 Europe/Warsaw
+OnCalendar=*-*-* 15:10:00 Europe/Warsaw
+AccuracySec=5min
+RandomizedDelaySec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

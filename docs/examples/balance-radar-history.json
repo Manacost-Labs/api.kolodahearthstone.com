@@ -1,0 +1,1003 @@
+{
+  "data": {
+    "generatedAt": "2026-10-25T10:48:18+00:00",
+    "coverage": {
+      "fromBuild": 190920,
+      "toBuild": 255130,
+      "fromPatch": "28.2.1.190920",
+      "from": "2023-12-08",
+      "to": "2026-10-12",
+      "statsFrom": "2026-04-23",
+      "statsSource": "HSReplay Standard Legend archetypes",
+      "patchCatalog": "/api/patches (wiki.gg, playhearthstone.com, hs-manacost.ru)",
+      "cardSource": "HearthstoneJSON collectible cards per client build"
+    },
+    "contentDrops": [
+      {
+        "version": "37.0.0.254477",
+        "date": "2026-10-12",
+        "title": "Обновление 37.0: «Власть Темной Империи», предрелизная потасовка и новый сезон Арены",
+        "kind": "expansion",
+        "newCards": 132,
+        "sets": [
+          "BE",
+          "EVENT"
+        ]
+      },
+      {
+        "version": "36.6.0.251952",
+        "date": "2026-09-16",
+        "title": "Обновление 36.6: предзаказ Темной Империи, Черный рынок, новое событие",
+        "kind": "mini_set_or_cards",
+        "newCards": 7,
+        "sets": [
+          "BE",
+          "EVENT"
+        ]
+      },
+      {
+        "version": "36.4.0.250339",
+        "date": "2026-08-24",
+        "title": "Обновление 36.4 уже в игре: Классовые наборы, новый сезон Арены",
+        "kind": "mini_set_or_cards",
+        "newCards": 29,
+        "sets": [
+          "ESCAPEFROM_VIOLET_HOLD"
+        ]
+      },
+      {
+        "version": "36.2.0.248348",
+        "date": "2026-08-03",
+        "title": "Обновление 36.2: 14-й сезон Полей сражений, 3 новые карты и нерф в Стандарте",
+        "kind": "mini_set_or_cards",
+        "newCards": 3,
+        "sets": [
+          "EVENT"
+        ]
+      },
+      {
+        "version": "36.0.0.245258",
+        "date": "2026-06-30",
+        "title": "Обновление 36.0: «Побег из Аметистовой крепости», предрелизная потасовка и новый сезон Арены",
+        "kind": "expansion",
+        "newCards": 133,
+        "sets": [
+          "ESCAPEFROM_VIOLET_HOLD"
+        ]
+      },
+      {
+        "version": "35.6.0.243002",
+        "date": "2026-06-03",
+        "title": "Обновление 35.6: новые карты Стандарта, Аномалии на Полях сражений",
+        "kind": "mini_set_or_cards",
+        "newCards": 5,
+        "sets": [
+          "ESCAPEFROM_VIOLET_HOLD",
+          "EVENT"
+        ]
+      },
+      {
+        "version": "35.4.0.241170",
+        "date": "2026-05-05",
+        "title": "Обновление 35.4 уже в игре: «Исцеление Азерота», новое легендарное заклинание, двухклассовая Арена",
+        "kind": "mini_set_or_cards",
+        "newCards": 31,
+        "sets": [
+          "CATACLYSM",
+          "CORE",
+          "EVENT"
+        ]
+      },
+      {
+        "version": "35.2.0.239550",
+        "date": "2026-04-14",
+        "title": "Обновление 35.2 уже в игре: 13-й сезон Полей сражений, 3 новые карты Стандарта",
+        "kind": "mini_set_or_cards",
+        "newCards": 4,
+        "sets": [
+          "CORE",
+          "EVENT"
+        ]
+      },
+      {
+        "version": "35.0.0.237510",
+        "date": "2026-03-10",
+        "title": "Обновление 35.0 уже в игре: «КАТАКЛИЗМ», предрелизная потасовка и новый сезон Арены",
+        "kind": "expansion",
+        "newCards": 203,
+        "sets": [
+          "CATACLYSM",
+          "CORE",
+          "PLACEHOLDER_202204"
+        ]
+      },
+      {
+        "version": "34.6.0.235290",
+        "date": "2026-02-10",
+        "title": "Обновление 34.6 уже в игре: 28 баффов Стандарта, Аномалии на Полях сражений",
+        "kind": "mini_set_or_cards",
+        "newCards": 5,
+        "sets": [
+          "CATACLYSM",
+          "EVENT"
+        ]
+      },
+      {
+        "version": "34.4.0.233275",
+        "date": "2026-01-13",
+        "title": "Обновление 34.4 уже в игре: «Эхо Бесконечности», новый сезон Арены, новый питомец",
+        "kind": "mini_set_or_cards",
+        "newCards": 38,
+        "sets": [
+          "TIME_TRAVEL"
+        ]
+      },
+      {
+        "version": "34.0.0.229984",
+        "date": "2025-10-28",
+        "title": "Обновление 34.0 уже в игре: потасовка «Сквозь потоки времени», новый сезон Арены",
+        "kind": "expansion",
+        "newCards": 141,
+        "sets": [
+          "TIME_TRAVEL"
+        ]
+      },
+      {
+        "version": "33.6.0.228587",
+        "date": "2025-09-30",
+        "title": "Обновление 33.6: компаньоны на Полях сражений, предрелизные карты в Стандарте",
+        "kind": "mini_set_or_cards",
+        "newCards": 5,
+        "sets": [
+          "EVENT",
+          "TIME_TRAVEL"
+        ]
+      },
+      {
+        "version": "33.4.0.226928",
+        "date": "2025-09-02",
+        "title": "Обновление 33.4: «День перерождения», новый сезон Арены, баланс Полей сражений",
+        "kind": "mini_set_or_cards",
+        "newCards": 38,
+        "sets": [
+          "THE_LOST_CITY"
+        ]
+      },
+      {
+        "version": "33.0.0.223542",
+        "date": "2025-07-01",
+        "title": "Обновление 33.0 уже в игре: «Затерянный город Ун’Горо», новый сезон Арены",
+        "kind": "expansion",
+        "newCards": 142,
+        "sets": [
+          "THE_LOST_CITY"
+        ]
+      },
+      {
+        "version": "32.4.0.221908",
+        "date": "2025-06-03",
+        "title": "Обновление 32.4: реворк Арены, 2 бесплатные карты в Стандарте",
+        "kind": "mini_set_or_cards",
+        "newCards": 4,
+        "sets": [
+          "EVENT",
+          "THE_LOST_CITY"
+        ]
+      },
+      {
+        "version": "32.2.0.219846",
+        "date": "2025-04-29",
+        "title": "Обновление 32.2 уже в игре: новые сезоны Полей сражений и Арены, «Тлеющее Древо Жизни»",
+        "kind": "mini_set_or_cards",
+        "newCards": 38,
+        "sets": [
+          "EMERALD_DREAM"
+        ]
+      },
+      {
+        "version": "32.0.0.217964",
+        "date": "2025-03-18",
+        "title": "Обновление 32.0 уже в игре: «Объятия Изумрудного Сна», ротация Стандарта и Арены",
+        "kind": "expansion",
+        "newCards": 212,
+        "sets": [
+          "CORE",
+          "EMERALD_DREAM",
+          "LEGACY",
+          "PLACEHOLDER_202204"
+        ]
+      },
+      {
+        "version": "31.6.0.216423",
+        "date": "2025-02-19",
+        "title": "Обновление 31.6: аномалии на Полях сражений, 2 бесплатные карты, новый сезон Арены",
+        "kind": "mini_set_or_cards",
+        "newCards": 9,
+        "sets": [
+          "EMERALD_DREAM",
+          "EVENT",
+          "PLACEHOLDER_202204"
+        ]
+      },
+      {
+        "version": "31.4.0.214839",
+        "date": "2025-01-21",
+        "title": "Обновление 31.4 уже в игре: «Герои StarCraft», нерф Стандарта, новая карта для Арены",
+        "kind": "mini_set_or_cards",
+        "newCards": 49,
+        "sets": [
+          "SPACE"
+        ]
+      },
+      {
+        "version": "31.0.0.210009",
+        "date": "2024-10-29",
+        "title": "Обновление 31.0 уже в игре: предрелизная потасовка, 10 паков на Twitch и новый сезон Арены",
+        "kind": "expansion",
+        "newCards": 145,
+        "sets": [
+          "EVENT",
+          "SPACE"
+        ]
+      },
+      {
+        "version": "30.6.0.208591",
+        "date": "2024-10-10",
+        "title": "Обновление 30.6: Ренатал и 2 новые карты в Стандарте, Поля сражений и новый сезон Арены",
+        "kind": "mini_set_or_cards",
+        "newCards": 169,
+        "sets": [
+          "CORE",
+          "EVENT",
+          "PLACEHOLDER_202204",
+          "SPACE"
+        ]
+      },
+      {
+        "version": "30.4.0.206605",
+        "date": "2024-09-10",
+        "title": "Обновление 30.4 уже в игре: выход мини-набора, новый сезон Арены, возвращение игровых полей",
+        "kind": "mini_set_or_cards",
+        "newCards": 38,
+        "sets": [
+          "ISLAND_VACATION"
+        ]
+      },
+      {
+        "version": "30.0.0.203120",
+        "date": "2024-07-16",
+        "title": "Обновление 30.0 уже в игре: предрелиз «Раздора в тропиках», изменения Стандарта и Полей сражений, новый сезон Арены",
+        "kind": "expansion",
+        "newCards": 145,
+        "sets": [
+          "CORE",
+          "ISLAND_VACATION"
+        ]
+      },
+      {
+        "version": "29.6.0.201108",
+        "date": "2024-06-17",
+        "title": "Обновление 29.6: новая легендарная карта, Генн и Баку в Стандарте, компаньоны на Полях сражений",
+        "kind": "mini_set_or_cards",
+        "newCards": 3,
+        "sets": [
+          "ISLAND_VACATION",
+          "None"
+        ]
+      },
+      {
+        "version": "29.4.0.198933",
+        "date": "2024-05-14",
+        "title": "Обновление 29.4 уже в игре: выход мини-набора, баланс Стандарта, уникальные герои в Твисте",
+        "kind": "mini_set_or_cards",
+        "newCards": 38,
+        "sets": [
+          "WHIZBANGS_WORKSHOP"
+        ]
+      },
+      {
+        "version": "29.0.0.195635",
+        "date": "2024-03-11",
+        "title": "Обновление 29.0 уже в игре: предрелиз «Мастерской Чудастера», балансные изменения, новый сезон Арены",
+        "kind": "expansion",
+        "newCards": 256,
+        "sets": [
+          "CORE",
+          "LEGACY",
+          "PLACEHOLDER_202204",
+          "WHIZBANGS_WORKSHOP"
+        ]
+      },
+      {
+        "version": "28.6.0.193541",
+        "date": "2024-02-14",
+        "title": "Обновление 28.6: задания снова на Полях сражений, годовщина игры и новые карты",
+        "kind": "mini_set_or_cards",
+        "newCards": 26,
+        "sets": [
+          "EVENT",
+          "PLACEHOLDER_202204",
+          "WHIZBANGS_WORKSHOP"
+        ]
+      },
+      {
+        "version": "28.4.0.192412",
+        "date": "2024-01-18",
+        "title": "Обновление 28.4 уже в игре: «Исследуйте глубины Подземья», новинки Арены и Твиста, Лунный Новый год",
+        "kind": "mini_set_or_cards",
+        "newCards": 38,
+        "sets": [
+          "WILD_WEST"
+        ]
+      }
+    ],
+    "patches": [
+      {
+        "version": "37.0.0.254477",
+        "displayVersion": "37.0.0.254477",
+        "build": 254477,
+        "date": "2026-10-12",
+        "title": "37.0 Patch Notes",
+        "titleRu": "Обновление 37.0: «Власть Темной Империи», предрелизная потасовка и новый сезон Арены",
+        "officialUrl": "https://playhearthstone.com/en-us/blog/24301454",
+        "wikiUrl": "https://hearthstone.wiki.gg/wiki/Patch_37.0.0.254477",
+        "manacostUrl": "https://hs-manacost.ru/obnovlenie-37-0-vlast-temnoj-imperii-predreliznaya-potasovka-i-novyj-sezon-areny/",
+        "devComment": null,
+        "changes": [
+          {
+            "id": "37.0.0.254477:BE_259",
+            "dbfId": 129851,
+            "cardId": "BE_259",
+            "nameEn": "Isiset",
+            "type": "MINION",
+            "set": "BE",
+            "class": "MAGE",
+            "rarity": "LEGENDARY",
+            "fields": [
+              {
+                "field": "cost",
+                "before": 7,
+                "after": 6
+              },
+              {
+                "field": "attack",
+                "before": 3,
+                "after": 5
+              }
+            ],
+            "textBefore": null,
+            "textAfter": null,
+            "direction": "buff",
+            "name": "Изисет",
+            "setReleasedAt": "2026-09-16",
+            "setAgeDays": 26,
+            "archetypes": [],
+            "summary": null
+          },
+          {
+            "id": "37.0.0.254477:JAIL_321",
+            "dbfId": 126253,
+            "cardId": "JAIL_321",
+            "nameEn": "Tricksy Improviser",
+            "type": "MINION",
+            "set": "ESCAPEFROM_VIOLET_HOLD",
+            "class": "MAGE",
+            "rarity": "EPIC",
+            "fields": [
+              {
+                "field": "health",
+                "before": 3,
+                "after": 4
+              }
+            ],
+            "textBefore": null,
+            "textAfter": null,
+            "direction": "buff",
+            "name": "Хитроумный импровизатор",
+            "setReleasedAt": "2026-06-03",
+            "setAgeDays": 131,
+            "archetypes": [
+              {
+                "archetype": "Manastorm Mage",
+                "archetypeId": 593,
+                "class": "MAGE",
+                "cardShare": 1.0,
+                "source": "hsreplay",
+                "rank": "LEGEND",
+                "before": {
+                  "winrate": 44.48,
+                  "popularity": 2.27
+                },
+                "after": {
+                  "winrate": 45.06,
+                  "popularity": 2.2
+                },
+                "deckListsAt": "2026-10-08T01:20:05.232424+00:00"
+              },
+              {
+                "archetype": "Contraband Mage",
+                "archetypeId": 872,
+                "class": "MAGE",
+                "cardShare": 0.93,
+                "source": "hsreplay",
+                "rank": "LEGEND",
+                "before": {
+                  "winrate": 51.19,
+                  "popularity": 2.52
+                },
+                "after": {
+                  "winrate": 50.29,
+                  "popularity": 4.24
+                },
+                "deckListsAt": "2026-10-08T01:20:05.232424+00:00"
+              },
+              {
+                "archetype": "Leyline Mage",
+                "archetypeId": 866,
+                "class": "MAGE",
+                "cardShare": 0.63,
+                "source": "hsreplay",
+                "rank": "LEGEND",
+                "before": {
+                  "winrate": 46.98,
+                  "popularity": 3.58
+                },
+                "after": {
+                  "winrate": 48.45,
+                  "popularity": 4.22
+                },
+                "deckListsAt": "2026-10-08T01:20:05.232424+00:00"
+              }
+            ],
+            "summary": null
+          },
+          {
+            "id": "37.0.0.254477:JAIL_734",
+            "dbfId": 126664,
+            "cardId": "JAIL_734",
+            "nameEn": "Hellraiser",
+            "type": "MINION",
+            "set": "ESCAPEFROM_VIOLET_HOLD",
+            "class": "DEMONHUNTER",
+            "rarity": "EPIC",
+            "fields": [],
+            "textBefore": "Taunt Battlecry: Discover a card in your deck. If it's empty, gain +4/+4 instead.",
+            "textAfter": "Battlecry: Discover a card in your deck. If it's empty, gain +4/+4 instead.",
+            "direction": "nerf",
+            "name": "Призыватель ада",
+            "setReleasedAt": "2026-06-03",
+            "setAgeDays": 131,
+            "archetypes": [],
+            "summary": "Убрана способность «Провокация»",
+            "labelKey": "[[], \"Taunt Battlecry: Discover a card in your deck. If it's empty, gain +4/+4 instead.\", \"Battlecry: Discover a card in your deck. If it's empty, gain +4/+4 instead.\"]",
+            "labelledDirection": "nerf"
+          },
+          {
+            "id": "37.0.0.254477:EDR_271",
+            "dbfId": 115809,
+            "cardId": "EDR_271",
+            "nameEn": "Grove Shaper",
+            "type": "MINION",
+            "set": "EMERALD_DREAM",
+            "class": "DRUID",
+            "rarity": "EPIC",
+            "fields": [],
+            "textBefore": "After you cast a Nature spell, summon a 2/2 Treant with \"Deathrattle: Get a copy of that spell.\"",
+            "textAfter": "After you cast a Nature spell, summon a 2/2 Treant with \"Deathrattle: Get a random Nature spell.\"",
+            "direction": "rework",
+            "name": "Культиватор Рощи",
+            "setReleasedAt": "2025-02-19",
+            "setAgeDays": 600,
+            "archetypes": [],
+            "summary": "Предсмертный хрип теперь даёт случайное заклинание природы вместо копии",
+            "labelKey": "[[], \"After you cast a Nature spell, summon a 2/2 Treant with \\\"Deathrattle: Get a copy of that spell.\\\"\", \"After you cast a Nature spell, summon a 2/2 Treant with \\\"Deathrattle: Get a random Nature spell.\\\"\"]",
+            "labelledDirection": "rework"
+          },
+          {
+            "id": "37.0.0.254477:ETC_386",
+            "dbfId": 94250,
+            "cardId": "ETC_386",
+            "nameEn": "Zok Fogsnout",
+            "type": "MINION",
+            "set": "BATTLE_OF_THE_BANDS",
+            "class": "DRUID",
+            "rarity": "LEGENDARY",
+            "fields": [],
+            "textBefore": "Battlecry: Summon two / Quilboar with Taunt. (Improved by your hero Attack Armor gained this turn!)",
+            "textAfter": "Battlecry: Summon two / Quilboar with Taunt. (Improved by your hero Attack \\ Armor gained this turn!)",
+            "direction": "neutral",
+            "name": "Зок Хмареклык",
+            "setReleasedAt": null,
+            "setAgeDays": null,
+            "archetypes": [],
+            "summary": "Правка форматирования текста",
+            "labelKey": "[[], \"Battlecry: Summon two / Quilboar with Taunt. (Improved by your hero Attack Armor gained this turn!)\", \"Battlecry: Summon two / Quilboar with Taunt. (Improved by your hero Attack \\\\ Armor gained this turn!)\"]",
+            "labelledDirection": "neutral"
+          },
+          {
+            "id": "37.0.0.254477:BE_013",
+            "dbfId": 132339,
+            "cardId": "BE_013",
+            "nameEn": "C'Thun, Eye of the Empire",
+            "type": "MINION",
+            "set": "BE",
+            "class": "NEUTRAL",
+            "rarity": "LEGENDARY",
+            "fields": [
+              {
+                "field": "attack",
+                "before": 6,
+                "after": 12
+              },
+              {
+                "field": "health",
+                "before": 6,
+                "after": 12
+              }
+            ],
+            "textBefore": "Old God. When you use all 4 C'Thun abilities this game, triple this minion's effects.",
+            "textAfter": "Old God. If you've triggered all 4 C'Thun abilities this game, this minion's abilities are tripled.",
+            "direction": "buff",
+            "name": "К'Тун, Око Империи",
+            "setReleasedAt": "2026-09-16",
+            "setAgeDays": 26,
+            "archetypes": [],
+            "summary": "Характеристики 6/6 → 12/12, формулировка эффекта уточнена",
+            "labelKey": "[[{\"field\": \"attack\", \"before\": 6, \"after\": 12}, {\"field\": \"health\", \"before\": 6, \"after\": 12}], \"Old God. When you use all 4 C'Thun abilities this game, triple this minion's effects.\", \"Old God. If you've triggered all 4 C'Thun abilities this game, this minion's abilities are tripled.\"]",
+            "labelledDirection": "buff"
+          }
+        ],
+        "counts": {
+          "buff": 3,
+          "nerf": 1,
+          "rework": 1,
+          "neutral": 1
+        },
+        "lastContentDrop": "37.0.0.254477",
+        "daysSinceContentDrop": 0,
+        "metaBefore": [
+          {
+            "archetype": "Dragon Warrior",
+            "class": "WARRIOR",
+            "winrate": 52.72,
+            "popularity": 12.84
+          },
+          {
+            "archetype": "Hand Warlock",
+            "class": "WARLOCK",
+            "winrate": 49.18,
+            "popularity": 8.94
+          },
+          {
+            "archetype": "Quest Priest",
+            "class": "PRIEST",
+            "winrate": 48.33,
+            "popularity": 8.29
+          },
+          {
+            "archetype": "Azalina Priest",
+            "class": "PRIEST",
+            "winrate": 47.7,
+            "popularity": 7.84
+          },
+          {
+            "archetype": "Coin Rogue",
+            "class": "ROGUE",
+            "winrate": 48.83,
+            "popularity": 7.75
+          },
+          {
+            "archetype": "Ramp Druid",
+            "class": "DRUID",
+            "winrate": 49.54,
+            "popularity": 6.14
+          },
+          {
+            "archetype": "Mug Shaman",
+            "class": "SHAMAN",
+            "winrate": 52.06,
+            "popularity": 5.97
+          },
+          {
+            "archetype": "Broxigar Demon Hunter",
+            "class": "DEMONHUNTER",
+            "winrate": 46.81,
+            "popularity": 3.93
+          },
+          {
+            "archetype": "Leyline Mage",
+            "class": "MAGE",
+            "winrate": 46.98,
+            "popularity": 3.58
+          },
+          {
+            "archetype": "Cannon Warrior",
+            "class": "WARRIOR",
+            "winrate": 52.95,
+            "popularity": 3.48
+          }
+        ],
+        "summary": "В релизном патче «Власти Темной Империи» подправили несколько карт: Исисет и К'Тун получили усиление, а Хеллрейзер лишился Провокации. Это откат прошлых правок 36.6.3, чтобы новые карты были играбельны.",
+        "targetedArchetypes": [
+          "Manastorm Mage"
+        ]
+      },
+      {
+        "version": "36.6.3.253932",
+        "displayVersion": "36.6.3.253932",
+        "build": 253932,
+        "date": "2026-10-01",
+        "title": "36.6.3 Patch Notes",
+        "titleRu": "Обновление 36.6.3: балансные изменения Стандарта и Полей сражений",
+        "officialUrl": "https://playhearthstone.com/en-us/blog/24303864",
+        "wikiUrl": "https://hearthstone.wiki.gg/wiki/Patch_36.6.3.253932",
+        "manacostUrl": "https://hs-manacost.ru/obnovlenie-36-6-3-balansnye-izmeneniya-standarta-i-polej-srazhenij/",
+        "devComment": "Приветствуем! Мы думаем, что мету Стандарта на данный момент можно назвать вполне здоровой. В ней есть лишь пара выбивающихся колод, а именно Дракон Воин и Друид на атаке. В этом обновлении мы постарались поставить эти колоды на один уровень с остальными перед выходом дополнения «Власть Темной Империи». Мы рассчитываем, что прибытие Древних богов основательно встряхнет мету, поэтому размеренно подходим к этому обновлению. Мы продолжим следить за ситуацией после выхода дополнения. Змей ветреных вершин До изменения: Боевой клич: наносит 5 ед. урона. Вы получаете 5 ед. брони. Родня: стоит на (3) меньше. После : Боевой клич: наносит 5 ед. урона. Вы получаете 5 ед. брони. Родня: стоит на (2) меньше . Заражение кладовой До изменения: Призывает двух случайных существ за (3). После : Призывает двух случайных существ за (2) . Змей ветреных вершин и Заражение кладовой будут доступны для распыления",
+        "changes": [
+          {
+            "id": "36.6.3.253932:BE_259",
+            "dbfId": 129851,
+            "cardId": "BE_259",
+            "nameEn": "Isiset",
+            "type": "MINION",
+            "set": "BE",
+            "class": "MAGE",
+            "rarity": "LEGENDARY",
+            "fields": [
+              {
+                "field": "cost",
+                "before": 6,
+                "after": 7
+              },
+              {
+                "field": "attack",
+                "before": 5,
+                "after": 3
+              }
+            ],
+            "textBefore": null,
+            "textAfter": null,
+            "direction": "nerf",
+            "name": "Изисет",
+            "setReleasedAt": "2026-09-16",
+            "setAgeDays": 15,
+            "archetypes": [],
+            "summary": null
+          },
+          {
+            "id": "36.6.3.253932:JAIL_200",
+            "dbfId": 127815,
+            "cardId": "JAIL_200",
+            "nameEn": "Infest the Scullery",
+            "type": "SPELL",
+            "set": "ESCAPEFROM_VIOLET_HOLD",
+            "class": "DRUID",
+            "rarity": "RARE",
+            "fields": [],
+            "textBefore": "Summon two random 3-Cost minions. (Improved by your hero attacks this game.)",
+            "textAfter": "Summon two random 2-Cost minions. (Improved by your hero attacks this game.)",
+            "direction": "nerf",
+            "name": "Заражение кладовой",
+            "setReleasedAt": "2026-06-03",
+            "setAgeDays": 120,
+            "archetypes": [
+              {
+                "archetype": "Attack Druid",
+                "archetypeId": 869,
+                "class": "DRUID",
+                "cardShare": 1.0,
+                "source": "hsreplay",
+                "rank": "LEGEND",
+                "before": {
+                  "winrate": 51.01,
+                  "popularity": 1.23
+                },
+                "after": {
+                  "winrate": 48.04,
+                  "popularity": 0.44
+                },
+                "deckListsAt": "2026-09-28T01:20:05.210260+00:00"
+              }
+            ],
+            "summary": "Призывает существ за (2) вместо (3)",
+            "labelKey": "[[], \"Summon two random 3-Cost minions. (Improved by your hero attacks this game.)\", \"Summon two random 2-Cost minions. (Improved by your hero attacks this game.)\"]",
+            "labelledDirection": "nerf"
+          },
+          {
+            "id": "36.6.3.253932:BE_013",
+            "dbfId": 132339,
+            "cardId": "BE_013",
+            "nameEn": "C'Thun, Eye of the Empire",
+            "type": "MINION",
+            "set": "BE",
+            "class": "NEUTRAL",
+            "rarity": "LEGENDARY",
+            "fields": [
+              {
+                "field": "attack",
+                "before": 12,
+                "after": 6
+              },
+              {
+                "field": "health",
+                "before": 12,
+                "after": 6
+              }
+            ],
+            "textBefore": "Old God. If you've triggered all 4 C'Thun abilities this game, this minion's abilities are tripled.",
+            "textAfter": "Old God. When you use all 4 C'Thun abilities this game, triple this minion's effects.",
+            "direction": "nerf",
+            "name": "К'Тун, Око Империи",
+            "setReleasedAt": "2026-09-16",
+            "setAgeDays": 15,
+            "archetypes": [],
+            "summary": "Характеристики 12/12 → 6/6",
+            "labelKey": "[[{\"field\": \"attack\", \"before\": 12, \"after\": 6}, {\"field\": \"health\", \"before\": 12, \"after\": 6}], \"Old God. If you've triggered all 4 C'Thun abilities this game, this minion's abilities are tripled.\", \"Old God. When you use all 4 C'Thun abilities this game, triple this minion's effects.\"]",
+            "labelledDirection": "nerf"
+          },
+          {
+            "id": "36.6.3.253932:TLC_600",
+            "dbfId": 117714,
+            "cardId": "TLC_600",
+            "nameEn": "Windpeak Wyrm",
+            "type": "MINION",
+            "set": "THE_LOST_CITY",
+            "class": "WARRIOR",
+            "rarity": "COMMON",
+            "fields": [],
+            "textBefore": "Battlecry: Deal 5 damage and gain 5 Armor. Kindred: Costs (3) less.",
+            "textAfter": "Battlecry: Deal 5 damage and gain 5 Armor. Kindred: Costs (2) less.",
+            "direction": "nerf",
+            "name": "Змей ветреных вершин",
+            "setReleasedAt": "2025-06-03",
+            "setAgeDays": 485,
+            "archetypes": [
+              {
+                "archetype": "Dragon Warrior",
+                "archetypeId": 19,
+                "class": "WARRIOR",
+                "cardShare": 1.0,
+                "source": "hsreplay",
+                "rank": "LEGEND",
+                "before": {
+                  "winrate": 53.42,
+                  "popularity": 14.51
+                },
+                "after": {
+                  "winrate": 52.13,
+                  "popularity": 14.64
+                },
+                "deckListsAt": "2026-09-28T01:20:05.210260+00:00"
+              },
+              {
+                "archetype": "Herald Warrior",
+                "archetypeId": 850,
+                "class": "WARRIOR",
+                "cardShare": 1.0,
+                "source": "hsreplay",
+                "rank": "LEGEND",
+                "before": {
+                  "winrate": 40.48,
+                  "popularity": 0.75
+                },
+                "after": {
+                  "winrate": 33.71,
+                  "popularity": 0.49
+                },
+                "deckListsAt": "2026-09-28T01:20:05.210260+00:00"
+              }
+            ],
+            "summary": "Родня: скидка (3) → (2)",
+            "labelKey": "[[], \"Battlecry: Deal 5 damage and gain 5 Armor. Kindred: Costs (3) less.\", \"Battlecry: Deal 5 damage and gain 5 Armor. Kindred: Costs (2) less.\"]",
+            "labelledDirection": "nerf"
+          }
+        ],
+        "counts": {
+          "nerf": 4
+        },
+        "lastContentDrop": "36.6.0.251952",
+        "daysSinceContentDrop": 15,
+        "metaBefore": [
+          {
+            "archetype": "Dragon Warrior",
+            "class": "WARRIOR",
+            "winrate": 53.42,
+            "popularity": 14.51
+          },
+          {
+            "archetype": "Quest Priest",
+            "class": "PRIEST",
+            "winrate": 48.08,
+            "popularity": 10.77
+          },
+          {
+            "archetype": "Ramp Druid",
+            "class": "DRUID",
+            "winrate": 52.08,
+            "popularity": 10.12
+          },
+          {
+            "archetype": "Hand Warlock",
+            "class": "WARLOCK",
+            "winrate": 48.74,
+            "popularity": 8.85
+          },
+          {
+            "archetype": "Azalina Priest",
+            "class": "PRIEST",
+            "winrate": 47.33,
+            "popularity": 8.65
+          },
+          {
+            "archetype": "Coin Rogue",
+            "class": "ROGUE",
+            "winrate": 44.69,
+            "popularity": 3.47
+          },
+          {
+            "archetype": "Mug Shaman",
+            "class": "SHAMAN",
+            "winrate": 51.39,
+            "popularity": 3.36
+          },
+          {
+            "archetype": "Leyline Mage",
+            "class": "MAGE",
+            "winrate": 46.39,
+            "popularity": 3.32
+          },
+          {
+            "archetype": "Void Demon Hunter",
+            "class": "DEMONHUNTER",
+            "winrate": 48.93,
+            "popularity": 3.32
+          },
+          {
+            "archetype": "Cannon Warrior",
+            "class": "WARRIOR",
+            "winrate": 50.44,
+            "popularity": 2.58
+          }
+        ],
+        "summary": "Перед выходом дополнения Blizzard назвали мету здоровой и слегка осадили выбивающиеся колоды: Windpeak Wyrm подорожал по скидке Родни, Infest the Scullery стал дешевле на призыв. Исисет и К'Тун также ослаблены.",
+        "targetedArchetypes": [
+          "Dragon Warrior",
+          "Attack Druid"
+        ]
+      },
+      {
+        "version": "36.6.0.251952",
+        "displayVersion": "36.6.0.251952",
+        "build": 251952,
+        "date": "2026-09-16",
+        "title": "Patch 36.6.0.251952",
+        "titleRu": "Обновление 36.6: предзаказ Темной Империи, Черный рынок, новое событие",
+        "officialUrl": null,
+        "wikiUrl": "https://hearthstone.wiki.gg/wiki/Patch_36.6.0.251952",
+        "manacostUrl": "https://hs-manacost.ru/obnovlenie-36-6-predzakaz-temnoj-imperii-chernyj-rynok-novoe-sobytie/",
+        "devComment": null,
+        "changes": [
+          {
+            "id": "36.6.0.251952:GDB_448",
+            "dbfId": 110881,
+            "cardId": "GDB_448",
+            "nameEn": "Murmur",
+            "type": "MINION",
+            "set": "SPACE",
+            "class": "SHAMAN",
+            "rarity": "LEGENDARY",
+            "fields": [],
+            "textBefore": "Your Battlecry minions costs (1), but immediately die after being played.",
+            "textAfter": "Your Battlecry minions cost (1), but immediately die after being played.",
+            "direction": "neutral",
+            "name": "Рокотун",
+            "setReleasedAt": "2024-10-10",
+            "setAgeDays": 706,
+            "archetypes": [],
+            "summary": "Правка грамматики в тексте",
+            "labelKey": "[[], \"Your Battlecry minions costs (1), but immediately die after being played.\", \"Your Battlecry minions cost (1), but immediately die after being played.\"]",
+            "labelledDirection": "neutral"
+          },
+          {
+            "id": "36.6.0.251952:JAIL_307",
+            "dbfId": 126100,
+            "cardId": "JAIL_307",
+            "nameEn": "Crowd Control",
+            "type": "SPELL",
+            "set": "ESCAPEFROM_VIOLET_HOLD",
+            "class": "WARRIOR",
+            "rarity": "RARE",
+            "fields": [],
+            "textBefore": "Deal 2 damage to all minions twice. If your deck has 25 or more cards, this costs (2) less.",
+            "textAfter": "Deal 2 damage to all minions, twice. If your deck has 25 or more cards, this costs (2) less.",
+            "direction": "neutral",
+            "name": "Контроль толпы",
+            "setReleasedAt": "2026-06-03",
+            "setAgeDays": 105,
+            "archetypes": [],
+            "summary": "Добавлена запятая в тексте",
+            "labelKey": "[[], \"Deal 2 damage to all minions twice. If your deck has 25 or more cards, this costs (2) less.\", \"Deal 2 damage to all minions, twice. If your deck has 25 or more cards, this costs (2) less.\"]",
+            "labelledDirection": "neutral"
+          }
+        ],
+        "counts": {
+          "neutral": 2
+        },
+        "lastContentDrop": "36.6.0.251952",
+        "daysSinceContentDrop": 0,
+        "metaBefore": [
+          {
+            "archetype": "Dragon Warrior",
+            "class": "WARRIOR",
+            "winrate": 54.31,
+            "popularity": 13.88
+          },
+          {
+            "archetype": "Quest Priest",
+            "class": "PRIEST",
+            "winrate": 48.6,
+            "popularity": 13.22
+          },
+          {
+            "archetype": "Ramp Druid",
+            "class": "DRUID",
+            "winrate": 51.79,
+            "popularity": 11.96
+          },
+          {
+            "archetype": "Hand Warlock",
+            "class": "WARLOCK",
+            "winrate": 48.62,
+            "popularity": 9.84
+          },
+          {
+            "archetype": "Azalina Priest",
+            "class": "PRIEST",
+            "winrate": 47.4,
+            "popularity": 6.4
+          },
+          {
+            "archetype": "Void Demon Hunter",
+            "class": "DEMONHUNTER",
+            "winrate": 49.21,
+            "popularity": 4.18
+          },
+          {
+            "archetype": "Stealth Rogue",
+            "class": "ROGUE",
+            "winrate": 47.25,
+            "popularity": 3.97
+          },
+          {
+            "archetype": "Cannon Warrior",
+            "class": "WARRIOR",
+            "winrate": 51.77,
+            "popularity": 3.29
+          },
+          {
+            "archetype": "Leyline Mage",
+            "class": "MAGE",
+            "winrate": 44.97,
+            "popularity": 3.09
+          },
+          {
+            "archetype": "Herald Rogue",
+            "class": "ROGUE",
+            "winrate": 45.77,
+            "popularity": 2.66
+          }
+        ],
+        "summary": null,
+        "targetedArchetypes": []
+      }
+    ]
+  },
+  "meta": {
+    "source_id": "balance_radar",
+    "fetched_at": "2026-10-25T10:48:18+00:00",
+    "stale": false,
+    "count": 58,
+    "limit": 3,
+    "offset": 0
+  }
+}

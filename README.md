@@ -110,6 +110,11 @@ GraphQL pagination возвращает `items` и `pageInfo`. Максимал�
 | GET | `/v1/constructed/hsguru-deck` | `archetype` (required), `format_name`, `rank` | Точные HSGuru decks архетипа |
 | GET | `/v1/constructed/decks` | `class_name`, `format_name`, `source_id`, `min_win_rate`, `q`, `limit`, `offset` | Поиск колод |
 | GET | `/v1/constructed/deck-radar` | `status`, `limit`, `offset` | Новые точные deckstrings из HSGuru streamer snapshots |
+| GET | `/v1/constructed/balance-radar` | `format` | Радар нерфов и баффов: последний прогон ([docs](docs/BALANCE_RADAR.md)) |
+| GET | `/v1/constructed/balance-radar/runs` | `format`, `status`, `limit`, `offset` | История прогонов радара нерфов и баффов |
+| GET | `/v1/constructed/balance-radar/runs/{run_id}` | — | Один прогон радара нерфов и баффов |
+| GET | `/v1/constructed/balance-radar/history` | `card`, `direction`, `class`, `since`, `limit`, `offset` | История балансных патчей Blizzard с точными изменениями карт |
+| GET | `/v1/constructed/balance-radar/patterns` | — | Закономерности Blizzard: пороги, типы правок, сроки патчей |
 | GET | `/v1/constructed/archetypes` | `class_name`, `q`, `rank_range`, `game_type`, `limit`, `offset` | HSReplay archetypes |
 | GET | `/v1/battlegrounds/heroes` | `mode`, `q`, `limit`, `offset` | BG‑герои Solo/Duos |
 | GET | `/v1/battlegrounds/minions` | `q`, `tavern_tier`, `limit`, `offset` | BG‑существа |

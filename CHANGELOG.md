@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- Balance Radar (`/v1/constructed/balance-radar`): nerf and buff candidates for
+  Standard and Wild. A timer twice a day joins HSGuru archetypes by period
+  (including the Bans window) and HSReplay card periods with Reddit
+  (RedditAPIs) and X (GetXAPI) posts, and asks `claude-sonnet-5-5` for a
+  structured verdict in Russian. Numbers and post links come from the data,
+  never from the model. Runs and their cost are stored; the API keeps serving
+  the last good run. About $0.86 per run for both formats.
+- Balance Radar learns from Blizzard's past decisions: a history dataset of every
+  card change since December 2023 (exact HearthstoneJSON build diffs, patch
+  dates and Russian developer notes from `/api/patches`, HSReplay archetype
+  winrate/popularity a week before and after since April 2026), computed
+  patterns (thresholds, change types, timing after releases), a Claude-written
+  overview, and up to three similar past cases per candidate (`precedents`).
+  New endpoints `/v1/constructed/balance-radar/history` and `/patterns`.
 - HSGuru coverage: matrix slices are requested with `min_games=10` instead of
   100 (same request count; Standard Bans ALL grows from 141 to about 226
   archetypes, Wild from 216 to about 628), add the Bronze–Platinum rank, and

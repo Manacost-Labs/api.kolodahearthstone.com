@@ -45,6 +45,7 @@ from .public_cache import PublicCacheMiddleware
 from .redis_cache import close_tiered_cache
 from .routers.api_tokens import router as api_tokens_router
 from .routers.arena import router as arena_v1_router
+from .routers.balance_radar import router as balance_radar_v1_router
 from .routers.bg import canonical_router as canonical_bg_v1_router
 from .routers.bg import router as bg_v1_router
 from .routers.constructed import router as constructed_v1_router
@@ -199,6 +200,7 @@ app.include_router(
     tags=["GraphQL"],
 )
 app.include_router(constructed_v1_router)
+app.include_router(balance_radar_v1_router)
 app.include_router(bg_v1_router)
 app.include_router(canonical_bg_v1_router)
 app.include_router(arena_v1_router)

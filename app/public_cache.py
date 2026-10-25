@@ -143,6 +143,10 @@ def _latest_dataset_timestamp() -> str | None:
 
 def _db_revision(path: str) -> str | None:
     try:
+        if path.startswith("/v1/constructed/balance-radar"):
+            from .balance_radar.store import latest_finished_at
+
+            return latest_finished_at() or "not-cached"
         if path.startswith(("/v1/constructed/decks", "/api/db/decks")):
             from .db import get_db_connection
 
