@@ -21,6 +21,8 @@ hs-data-api.credentials
 .mypy_cache/
 .DS_Store
 .cursor/
+# Agent worktrees and state; deploy-server.sh requires a clean tree.
+/.claude/
 .codegraph/
 /panel/config.php
 /panel/uploads/

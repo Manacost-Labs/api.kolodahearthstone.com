@@ -89,3 +89,46 @@ def test_token_administration_has_a_dedicated_rate_limit() -> None:
     assert "limit_req zone=koloda_api_token_auth" in vhost
     assert "limit_req_status 429" in vhost
     assert "client_max_body_size 16k" in vhost
+
+
+def test_server_deploy_is_the_single_path_for_platform_api_and_units() -> None:
+    script = (ROOT / "scripts" / "deploy-server.sh").read_text(encoding="utf-8")
+
+    pull = script.index('git pull --ff-only --quiet origin "$BRANCH"')
+    platform = script.index("scripts/deploy-platform.sh \\")
+    migrations = script.index('"$PLATFORM_TARGET/scripts/apply-migrations.sh" \\')
+    build = script.index('docker compose -f "$COMPOSE_FILE" build api')
+    health = script.index('say "проверяю здоровье: $HEALTH_URL"')
+    units = script.index("scripts/install-docker-systemd.sh; then")
+    exporter = script.index('if ! verify_host_timer_export; then')
+    stamp = script.index('printf \'%s\\n\' "$COMMIT" > "$STAMP_FILE"')
+
+    # Migrations before the new API starts; units only after it is healthy.
+    assert pull < platform < migrations < build < health < units < exporter < stamp
+    assert "--skip-platform) SKIP_PLATFORM=1" in script
+    assert "--skip-units) SKIP_UNITS=1" in script
+    assert 'flock -n 9 || die "другой деплой уже идёт' in script
+
+
+def test_server_deploy_dry_run_plans_every_step_without_changes() -> None:
+    script = (ROOT / "scripts" / "deploy-server.sh").read_text(encoding="utf-8")
+
+    dry_run = script[
+        script.index('if [[ "$DRY_RUN" -eq 1 ]]; then') : script.index(
+            'git pull --ff-only --quiet origin "$BRANCH"'
+        )
+    ]
+    assert "plan_migrations" in dry_run
+    assert "unit_plan platform/systemd" in dry_run
+    assert "unit_plan systemd 'hs-data-api-docker*'" in dry_run
+    assert dry_run.rstrip().endswith("exit 0\nfi")
+    # The pre-ledger runner ignored arguments and would apply migrations.
+    assert "grep -q -- '--dry-run)'" in script
+
+
+def test_agent_worktrees_never_dirty_the_deploy_checkout() -> None:
+    gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
+    dockerignore = (ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
+
+    assert "/.claude/" in gitignore
+    assert ".claude" in dockerignore
