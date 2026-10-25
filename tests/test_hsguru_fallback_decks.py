@@ -100,6 +100,11 @@ def test_fallback_fills_only_empty_archetypes_from_wider_window(datasets) -> Non
             ],
         ),
         patch.object(hsguru_decks, "_fetch_catalog_chunk", side_effect=fetch_chunk),
+        patch.object(
+            hsguru_decks,
+            "_fetch_replay_decks",
+            AsyncMock(return_value=([], 0, [], [], None)),
+        ) as replays,
     ):
         summary = asyncio.run(
             hsguru_decks.refresh_hsguru_fallback_deck_catalog(
@@ -107,6 +112,9 @@ def test_fallback_fills_only_empty_archetypes_from_wider_window(datasets) -> Non
             )
         )
 
+    # Only the archetype no window could fill is looked up in its replays.
+    assert [call.args[1] for call in replays.await_args_list] == ["Silent Warrior"]
+    assert replays.await_args.kwargs["windows"] == ("black_empire", "past_30_days")
     assert all(archetype != "Popular Mage" for archetype, _, _ in calls)
     # HSGuru lists no build below 50 games, so one 50-game window is asked.
     assert {(period, min_games) for _, period, min_games in calls} == {
@@ -172,13 +180,15 @@ def test_fallback_reuses_fresh_builds_and_refetches_stale_ones(datasets) -> None
     assert summary["with_decks"] == 2
 
 
-def test_fallback_is_skipped_when_current_window_is_already_widest() -> None:
+def test_widest_window_skips_deck_windows_but_still_asks_replays() -> None:
     fetch_chunk = AsyncMock()
+    replays = AsyncMock(return_value=([], 0, [], [], None))
     with (
         patch.object(hsguru_decks, "_catalog_rows", return_value=[]),
         patch.object(hsguru_decks, "_meta_archetypes", return_value=["Quest Mage"]),
         patch.object(hsguru_decks, "_fetch_catalog_chunk", fetch_chunk),
-        patch.object(hsguru_decks, "write_json") as write_json,
+        patch.object(hsguru_decks, "_fetch_replay_decks", replays),
+        patch.object(hsguru_decks, "write_json"),
     ):
         summary = asyncio.run(
             hsguru_decks.refresh_hsguru_fallback_deck_catalog(
@@ -187,9 +197,9 @@ def test_fallback_is_skipped_when_current_window_is_already_widest() -> None:
         )
 
     fetch_chunk.assert_not_awaited()
-    write_json.assert_not_called()
+    assert replays.await_args.kwargs["windows"] == ("past_30_days",)
     assert summary["targets"] == 1
-    assert summary["fetched"] == 0
+    assert summary["zero_sample_archetypes"] == ["Quest Mage"]
 
 
 def test_cached_decks_prefer_current_window_then_fallback(datasets) -> None:
