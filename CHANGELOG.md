@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- HSGuru mulligan parses a page with lxml into one tree, once: the provider
+  cascade validates it twice and the run stores it, and all three now share
+  one memoized result. BeautifulSoup built six trees per page (~140 ms of
+  CPU), so the run was bound to one core at about 20 pages a minute in
+  production. Measured on the real page path with the network mocked at 6 s:
+  122 → 369 pages a minute at concurrency 40 (the network limit is 400),
+  peak RSS 606 → 367 MB; output is identical on eight real HSGuru pages.
+
 - Balance Radar v2 (schemaVersion 2, additive): 15–25 nerf and 15–25 buff
   candidates per format (cards, archetypes, classes) from wider pools (HSGuru
   all/legend/top_legend/diamond_4to1 in the Bans window, HSReplay Legend,

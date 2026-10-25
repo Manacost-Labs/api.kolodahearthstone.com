@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import copy
 import functools
 import hashlib
 import json
@@ -38,21 +39,14 @@ from concurrent.futures import Executor, ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from urllib.parse import quote, urlencode
+from urllib.parse import parse_qs, quote, urlencode, urlparse
 
-from bs4 import Tag
+from lxml import etree
+from lxml import html as lxml_html
 
 from . import hsguru_mulligan_store as store
 from .db import get_db_connection, init_db
-from .hsguru_archetype_analysis import (
-    CLASS_KEYS,
-    _card_identity,
-    _count,
-    _header,
-    _number,
-    _table_with_headers,
-    parse_card_stats_games,
-)
+from .hsguru_archetype_analysis import CLASS_KEYS, _count, _header, _number
 from .resource_locks import ResourceLocked, ResourceLockSet
 from .source_state import SourceState
 from .sources import Source
@@ -200,6 +194,23 @@ class Settings:
 
 
 # --- parsing --------------------------------------------------------------------
+#
+# HSGuru pages are ~250-450 KB. lxml builds one tree per page in a few
+# milliseconds, where BeautifulSoup took ~40 ms per tree; the result is
+# memoized because the provider cascade validates a page before the run
+# stores it, so each page is parsed once.
+
+GAMES_RE = re.compile(r">\s*Games\s*:\s*([\d\s,.]+?)\s*<", re.IGNORECASE)
+_HIDDEN_NAME_XPATH = (
+    ".//*[contains(concat(' ', normalize-space(@class), ' '), ' tw-sr-only ')"
+    " or contains(@style, 'font-size: 0')]"
+)
+_CARD_NAME_XPATH = (
+    ".//*[contains(concat(' ', normalize-space(@class), ' '), ' card-name ')]"
+)
+_CARD_PATH_RE = re.compile(r"/card/([^/?#]+)(?:/([^/?#]+))?")
+_TILE_RE = re.compile(r"/(?:tiles|render/[^/]+/[^/]+)/([^/.?]+)")
+PARSE_CACHE_SIZE = 128
 
 
 class PageRejected(RuntimeError):
@@ -210,57 +221,131 @@ class PageRejected(RuntimeError):
         self.reason = reason
 
 
-def _card_name(cell: Tag, fallback: str) -> str:
-    """The visible card name: HSGuru prefixes it with screen-reader-only text."""
+def _text(element: Any) -> str:
+    """BeautifulSoup ``get_text(" ", strip=True)`` for an lxml element."""
 
-    node = cell.select_one(".card-name")
-    if node is None:
-        return fallback
-    parts = [
-        str(text)
-        for text in node.find_all(string=True)
-        if not any(
-            "tw-sr-only" in (parent.get("class") or [])
-            for parent in text.parents
-            if parent is not node and isinstance(parent, Tag)
-        )
-    ]
-    name = re.sub(r"\s+", " ", "".join(parts)).strip()
-    return name or fallback
+    return " ".join(part.strip() for part in element.itertext() if part.strip())
 
 
-def parse_mulligan_html(html: str) -> dict[str, Any]:
-    """Parse a ``/card-stats`` page: the sample size and every card row."""
+def _document(html: str) -> Any:
+    try:
+        return lxml_html.document_fromstring(html)
+    except ValueError:
+        # A Unicode string with an XML encoding declaration.
+        return lxml_html.document_fromstring(html.encode("utf-8"))
+    except etree.ParserError as exc:
+        raise PageRejected("content_validation") from exc
 
+
+def _cells(row: Any) -> list[Any]:
+    return [cell for cell in row if cell.tag in ("td", "th")]
+
+
+def _table(document: Any, required: set[str]) -> tuple[Any, dict[str, int]] | None:
+    for table in document.iter("table"):
+        header = next(table.iter("thead"), None)
+        if header is None:
+            header = next(table.iter("tr"), None)
+        if header is None:
+            continue
+        names = [_header(_text(cell)) for cell in header.iter("th", "td")]
+        if required.issubset(names):
+            return table, {name: names.index(name) for name in names if name}
+    return None
+
+
+def _rows(table: Any) -> list[Any]:
+    body_rows = [row for body in table.iter("tbody") for row in body.iter("tr")]
+    return body_rows or list(table.iter("tr"))[1:]
+
+
+def _games(html: str) -> int | None:
+    match = GAMES_RE.search(html)
+    if match is None:
+        return None
+    digits = re.sub(r"\D", "", match.group(1))
+    return int(digits) if digits else None
+
+
+def _attribute(cell: Any, *names: str) -> str | None:
+    for node in cell.iter():
+        for name in names:
+            value = node.get(name)
+            if value is not None and value.strip():
+                return value.strip()
+    return None
+
+
+def card_identity(cell: Any) -> tuple[str | None, int | None, str]:
+    """Card id, dbf id and visible name of an HSGuru card cell."""
+
+    name_node = next(iter(cell.xpath(_CARD_NAME_XPATH)), None)
+    if name_node is not None:
+        name_node = copy.deepcopy(name_node)
+        # A screen-reader-only "# ↑x (3)" prefix precedes the visible name.
+        for hidden in name_node.xpath(_HIDDEN_NAME_XPATH):
+            hidden.drop_tree()
+        name = _text(name_node)
+    else:
+        name = _attribute(cell, "data-card-name", "aria-label", "alt") or _text(cell)
+    card_id = _attribute(cell, "data-card-id", "data-cardid")
+    dbf_raw = _attribute(cell, "data-dbf-id", "data-dbfid")
+    dbf_id = int(dbf_raw) if dbf_raw and dbf_raw.isdigit() else None
+    link = next((node for node in cell.iter("a") if node.get("href")), None)
+    if link is not None:
+        parsed = urlparse(link.get("href"))
+        query = parse_qs(parsed.query)
+        card_id = card_id or next(iter(query.get("card_id", [])), None)
+        dbf_query = next(iter(query.get("dbf_id", [])), None)
+        if dbf_id is None and dbf_query and dbf_query.isdigit():
+            dbf_id = int(dbf_query)
+        path = _CARD_PATH_RE.search(parsed.path)
+        if path:
+            first, second = path.groups()
+            if first.isdigit():
+                dbf_id = dbf_id or int(first)
+                card_id = card_id or second
+            else:
+                card_id = card_id or first
+    image = next((node for node in cell.iter("img") if node.get("src")), None)
+    if card_id is None and image is not None:
+        tile = _TILE_RE.search(image.get("src"))
+        if tile:
+            card_id = tile.group(1)
+    if dbf_id is not None:
+        try:
+            from .cards_index import cards_by_dbfid
+
+            metadata = cards_by_dbfid().get(dbf_id) or {}
+            card_id = card_id or metadata.get("id")
+            name = name or str(metadata.get("name") or "")
+        except (OSError, RuntimeError, TypeError, ValueError):
+            pass
+    return card_id, dbf_id, re.sub(r"\s+", " ", name).strip()
+
+
+def _parse_mulligan(html: str) -> dict[str, Any]:
     if PAYWALL_MARKER in html.casefold():
         raise PageRejected("paywalled")
-    table, _ = _table_with_headers(html, CARD_TABLE_HEADERS)
-    games = parse_card_stats_games(html)
-    if table is None or games is None:
+    games = _games(html)
+    found = _table(_document(html), CARD_TABLE_HEADERS) if games is not None else None
+    if found is None:
         raise PageRejected("content_validation")
-    header_row = table.find("thead") or table.find("tr")
-    headers = [
-        _header(cell.get_text(" ", strip=True))
-        for cell in header_row.find_all(["th", "td"])
-    ]
-    index = {name: position for position, name in enumerate(headers)}
+    table, index = found
+    needed = max(index[name] for name in CARD_TABLE_HEADERS)
     rows: list[dict[str, Any]] = []
-    for tr in table.select("tbody tr") or table.find_all("tr")[1:]:
-        cells = tr.find_all(["th", "td"])
-        if len(cells) <= max(index[name] for name in CARD_TABLE_HEADERS):
+    for tr in _rows(table):
+        cells = _cells(tr)
+        if len(cells) <= needed:
             continue
-        card_id, dbf_id, card_name = _card_identity(cells[index["card"]])
-        card_name = _card_name(cells[index["card"]], card_name)
+        card_id, dbf_id, card_name = card_identity(cells[index["card"]])
         if not card_name:
             continue
-
-        def cell(name: str, cells: list[Tag] = cells) -> str | None:
-            position = index.get(name)
-            if position is None or position >= len(cells):
-                return None
-            return cells[position].get_text(" ", strip=True)
-
-        mulligan_count = _count(cell("mulligan count"))
+        values = {
+            name: _text(cells[position]) if position < len(cells) else None
+            for name, position in index.items()
+        }
+        mulligan_count = _count(values["mulligan count"])
         if mulligan_count is None:
             continue
         rows.append(
@@ -268,37 +353,37 @@ def parse_mulligan_html(html: str) -> dict[str, Any]:
                 "card_id": card_id,
                 "dbf_id": dbf_id,
                 "card_name": card_name,
-                "mulligan_impact": _number(cell("mulligan impact")),
+                "mulligan_impact": _number(values["mulligan impact"]),
                 "mulligan_count": mulligan_count,
-                "drawn_impact": _number(cell("drawn impact")),
-                "drawn_count": _count(cell("drawn count")),
-                "not_drawn_impact": _number(cell("not drawn impact")),
-                "not_drawn_count": _count(cell("not drawn count")),
-                "kept_impact": _number(cell("kept impact")),
-                "kept_count": _count(cell("kept count")),
+                "drawn_impact": _number(values["drawn impact"]),
+                "drawn_count": _count(values["drawn count"]),
+                "not_drawn_impact": _number(values.get("not drawn impact")),
+                "not_drawn_count": _count(values.get("not drawn count")),
+                "kept_impact": _number(values["kept impact"]),
+                "kept_count": _count(values["kept count"]),
             }
         )
     return {"games": games, "winrate": None, "rows": rows}
 
 
-def parse_class_matchups_page(html: str) -> dict[str, Any]:
-    """Parse an archetype or deck page: per-class winrate and the Total row."""
-
+def _parse_class_matchups(html: str) -> dict[str, Any]:
     if PAYWALL_MARKER in html.casefold():
         raise PageRejected("paywalled")
-    table, index = _table_with_headers(html, MATCHUP_TABLE_HEADERS)
-    if table is None:
+    found = _table(_document(html), MATCHUP_TABLE_HEADERS)
+    if found is None:
         raise PageRejected("content_validation")
+    table, index = found
+    needed = max(index[name] for name in MATCHUP_TABLE_HEADERS)
     rows: list[dict[str, Any]] = []
     total_games: int | None = None
     total_winrate: float | None = None
-    for tr in table.select("tbody tr") or table.find_all("tr")[1:]:
-        cells = tr.find_all(["th", "td"])
-        if len(cells) <= max(index.values()):
+    for tr in _rows(table):
+        cells = _cells(tr)
+        if len(cells) <= needed:
             continue
-        label = cells[index["class"]].get_text(" ", strip=True)
-        games_text = cells[index["total games"]].get_text(" ", strip=True)
-        winrate = _number(cells[index["winrate"]].get_text(" ", strip=True))
+        label = _text(cells[index["class"]])
+        games_text = _text(cells[index["total games"]])
+        winrate = _number(_text(cells[index["winrate"]]))
         games = _count(games_text)
         if _header(label) == "total":
             total_games, total_winrate = games, winrate
@@ -326,6 +411,23 @@ def parse_class_matchups_page(html: str) -> dict[str, Any]:
     }
 
 
+@functools.lru_cache(maxsize=PARSE_CACHE_SIZE)
+def _parse_cached(kind: str, html: str) -> dict[str, Any]:
+    return _parse_mulligan(html) if kind == "cards" else _parse_class_matchups(html)
+
+
+def parse_mulligan_html(html: str) -> dict[str, Any]:
+    """Parse a ``/card-stats`` page: the sample size and every card row."""
+
+    return copy.deepcopy(_parse_cached("cards", html))
+
+
+def parse_class_matchups_page(html: str) -> dict[str, Any]:
+    """Parse an archetype or deck page: per-class winrate and the Total row."""
+
+    return copy.deepcopy(_parse_cached("matchups", html))
+
+
 def parse_page(kind: str, html: str) -> dict[str, Any]:
     return (
         parse_mulligan_html(html)
@@ -336,7 +438,7 @@ def parse_page(kind: str, html: str) -> dict[str, Any]:
 
 def page_is_valid(kind: str, html: str) -> bool:
     try:
-        parse_page(kind, html)
+        _parse_cached("cards" if kind == "cards" else "matchups", html)
     except PageRejected:
         return False
     return True
