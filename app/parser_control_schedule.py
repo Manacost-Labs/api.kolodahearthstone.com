@@ -20,7 +20,7 @@ from .source_tiers import LIGHT_API_IDS, MEDIUM_API_IDS
 from .sources import SOURCE_BY_ID
 
 SCHEDULE_INVENTORY_SCHEMA_VERSION = 2
-SCHEDULE_INVENTORY_VERSION = "2026-10-25.1"
+SCHEDULE_INVENTORY_VERSION = "2026-10-25.2"
 SCHEDULE_TIMEZONE = "Europe/Warsaw"
 
 _SYSTEMCTL_SEARCH_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
@@ -56,6 +56,9 @@ class _ScheduleSpec:
     source_ids: frozenset[str]
     recurrence: Recurrence
     local_times: tuple[time, ...] = ()
+    # Zone of local_times and of the timer's OnCalendar; a UTC timer with
+    # Warsaw local_times drifts by an hour across every DST switch.
+    timezone: str = SCHEDULE_TIMEZONE
     weekdays: tuple[int, ...] = ()
     explicit_local_datetimes: tuple[datetime, ...] = ()
     purpose: SchedulePurpose = "primary"
@@ -209,14 +212,8 @@ _SCHEDULES: tuple[_ScheduleSpec, ...] = (
         on_calendar=("*-*-* 00,04,08,12,16,20:35:00 UTC",),
         source_ids=frozenset(HSREPLAY_CARD_PERIOD_SOURCE_IDS),
         recurrence="daily",
-        local_times=_times(
-            (2, 35),
-            (6, 35),
-            (10, 35),
-            (14, 35),
-            (18, 35),
-            (22, 35),
-        ),
+        local_times=_times(*((hour, 35) for hour in range(0, 24, 4))),
+        timezone="UTC",
     ),
     _ScheduleSpec(
         id="refresh-hsreplay-arena-classes-firecrawl",
@@ -770,7 +767,7 @@ def _next_run(spec: _ScheduleSpec, *, at: datetime) -> datetime | None:
             None,
         )
 
-    timezone = ZoneInfo(SCHEDULE_TIMEZONE)
+    timezone = ZoneInfo(spec.timezone)
     local_day = moment.astimezone(timezone).date()
     scan_days = 15 if spec.recurrence == "weekly" else 40
     for offset in range(scan_days):
@@ -906,7 +903,7 @@ def build_schedule_inventory(
                 "conditionMet": condition_met,
                 "systemdUnit": spec.systemd_unit,
                 "onCalendar": list(spec.on_calendar),
-                "timezone": SCHEDULE_TIMEZONE,
+                "timezone": spec.timezone,
                 "sourceIds": source_ids,
                 "sectionIds": sorted(
                     {SOURCE_TO_SECTION[source_id] for source_id in source_ids}

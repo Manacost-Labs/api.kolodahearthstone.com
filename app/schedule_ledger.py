@@ -13,7 +13,6 @@ from .config import source_operationally_enabled
 from .parser_control_schedule import (
     _SCHEDULES,
     SCHEDULE_INVENTORY_VERSION,
-    SCHEDULE_TIMEZONE,
     _ScheduleSpec,
 )
 from .sources import SOURCE_BY_ID
@@ -122,7 +121,7 @@ def enumerate_nominal_occurrences(
             if lower <= (moment := value.astimezone(UTC)) < upper
         )
 
-    timezone = ZoneInfo(SCHEDULE_TIMEZONE)
+    timezone = ZoneInfo(spec.timezone)
     local_day = lower.astimezone(timezone).date()
     last_day = upper.astimezone(timezone).date()
     occurrences: list[datetime] = []
