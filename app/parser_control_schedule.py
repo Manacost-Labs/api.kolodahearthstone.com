@@ -20,7 +20,7 @@ from .source_tiers import LIGHT_API_IDS, MEDIUM_API_IDS
 from .sources import SOURCE_BY_ID
 
 SCHEDULE_INVENTORY_SCHEMA_VERSION = 2
-SCHEDULE_INVENTORY_VERSION = "2026-10-25.5"
+SCHEDULE_INVENTORY_VERSION = "2026-10-25.7"
 SCHEDULE_TIMEZONE = "Europe/Warsaw"
 
 _SYSTEMCTL_SEARCH_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
@@ -163,8 +163,52 @@ _SCHEDULES: tuple[_ScheduleSpec, ...] = (
         local_times=_times(*((hour, 50) for hour in range(1, 24, 3))),
     ),
     _ScheduleSpec(
+        id="refresh-hsguru-matchups",
+        label="Каждый час в :10 — матрицы матчапов HSGuru",
+        systemd_unit="hs-data-api-docker-refresh-hsguru-matchups.timer",
+        on_calendar=("*-*-* *:10:00 Europe/Warsaw",),
+        source_ids=frozenset({"hsguru_matchups"}),
+        recurrence="daily",
+        local_times=_times(*((hour, 10) for hour in range(24))),
+    ),
+    _ScheduleSpec(
+        id="refresh-hsguru-brawl",
+        label="Каждые 3 часа в :50 — Потасовка HSGuru",
+        systemd_unit="hs-data-api-docker-refresh-hsguru-brawl.timer",
+        on_calendar=("*-*-* 00/3:50:00 Europe/Warsaw",),
+        source_ids=frozenset({"hsguru_brawl"}),
+        recurrence="daily",
+        local_times=_times(*((hour, 50) for hour in range(0, 24, 3))),
+    ),
+    _ScheduleSpec(
+        id="refresh-hsguru-esports",
+        label="Ежедневно в 05:40 — турниры, очки HSEsports, архив MT (раз в неделю)",
+        systemd_unit="hs-data-api-docker-refresh-hsguru-esports.timer",
+        on_calendar=("*-*-* 05:40:00 Europe/Warsaw",),
+        source_ids=frozenset(
+            {
+                "hsguru_esports_tournaments",
+                "hsguru_esports_points",
+                "hsguru_esports_legacy",
+            }
+        ),
+        recurrence="daily",
+        local_times=_times((5, 40)),
+    ),
+    _ScheduleSpec(
+        id="refresh-hsguru-streamers",
+        label="Каждые 5 минут — стримеры HSGuru: эфиры, колоды, профили",
+        systemd_unit="hs-data-api-docker-refresh-hsguru-streamers.timer",
+        on_calendar=("*-*-* *:00/5:00 Europe/Warsaw",),
+        source_ids=frozenset({"hsguru_streamers"}),
+        recurrence="daily",
+        local_times=_times(
+            *((hour, minute) for hour in range(24) for minute in range(0, 60, 5))
+        ),
+    ),
+    _ScheduleSpec(
         id="refresh-hsreplay-card-choices",
-        label="Ежедневно в 04:35 — что берут из Открытия (HSReplay)",
+        label="Ежедневно в 04:35 — что берут из Раскопки (HSReplay)",
         systemd_unit="hs-data-api-docker-refresh-hsreplay-card-choices.timer",
         on_calendar=("*-*-* 04:35:00 Europe/Warsaw",),
         source_ids=frozenset({"hsreplay_card_choices"}),

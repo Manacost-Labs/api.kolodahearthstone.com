@@ -103,6 +103,30 @@ Meta-Lab (`lab.sqlite3`) фиксирует кредиты страницы.
 
 **Расход полного прогона каталога** (current + Bans, Standard и Wild): DECK_COST_PLACEHOLDER
 
+### Матрицы матчапов HSGuru (`hsguru_matchups`)
+
+`/matchups` HSGuru тоже отдаёт как LiveView dead render: вся матрица (винрейт
+и игры каждой пары) приходит в HTML ответа. Подробности:
+[HSGURU_MATCHUPS.md](HSGURU_MATCHUPS.md).
+
+- **Шаг Scrape.do:** один профиль без браузера (`render=false`, без super,
+  1 кредит). Таймаут 30 с, `skip_providers`: Decodo, Firecrawl, Bright Data,
+  Scrapfly. Если страница не прошла, её читает бесплатный локальный
+  FlareSolverr.
+- **Замер 2026-10-25:** 140 страниц по 1,5–2 МБ, 1 кредит и 1–8 с каждая;
+  140/140 со Scrape.do за 3,5 минуты при 5 параллельных.
+- **Параллельность:** не больше 5 страниц (`HS_HSGURU_MATCHUPS_CONCURRENCY`,
+  верхняя граница 5). Это доля общего лимита аккаунта (50), который делят
+  meta-matrix (5), муллиган (40) и каталоги колод.
+- **Расход:** по TTL около 800 кредитов в сутки (Standard ~590, Wild ~210) и
+  ~24 000 за 30 дней; первое заполнение — 140 кредитов. План:
+  `python -m app.cli refresh-hsguru-matchups --estimate`.
+- **Учёт:** бюджет Meta-Lab HSGuru, класс `detail`; `provider-usage.sqlite3`
+  пишет вызовы под `hsguru_matchups:page`.
+- **Отказы:** повтор через 30 мин с удвоением до 12 ч. Страница «нет доступа к
+  фильтрам» (у среза нет публичного агрегата) повторяется через 24 ч. Десять
+  отказов подряд останавливают запуск.
+
 Профили Scrape.do по умолчанию для HTML HSGuru (meta matrix и прочие
 страницы HSGuru; у каталогов колод, анализа архетипов и муллигана свои шаги,
 см. выше). Замер 2026-10-21, 271 запрос; Scrape.do
@@ -122,6 +146,21 @@ Scrape.do не отключаются (они бесплатны; с `disableRet
 успехе медиана рендера снизилась с 18,5 до 9,4 с. `geoCode` (us/de/gb/ca),
 `blockResources=false`, `waitUntil=networkidle2`, `output=markdown` и `device`
 выигрыша не дали и не включены.
+
+Стримеры HSGuru (`hsguru_streamers`, [HSGURU_STREAMERS.md](HSGURU_STREAMERS.md))
+— исключение из этого правила. `/streamer-decks` и `/streaming-now` отдаются
+как LiveView dead render, и Scrape.do без браузера уже получает полную таблицу
+и карточки эфиров. Замер 25.10.2026: 1 кредит и 2–8 с на страницу, 302
+успешные страницы из 302. Поэтому профиль `(render=false, super=false)` стоит
+первым, а `render=true` (5 кредитов) остаётся только запасным, если страница не
+прошла проверку. Decodo, Firecrawl, Bright Data и Scrapfly пропускаются.
+Одновременно идёт не больше 5 страниц: из 50 одновременных запросов аккаунта
+40 занимает муллиган. Пачки обхода растут 1 → 2 → 4 → 5, чтобы обычный
+запуск раз в 5 минут не платил за страницы за отсечкой. Обычный запуск — около
+3 кредитов (две страницы эфиров и одна страница колод), примерно 860 в сутки.
+Первый обход за 120 дней — около 300 кредитов. Запросы идут в бюджет HSGuru
+Meta-Lab как `detail`. Профили Twitch читаются напрямую, без провайдеров и
+без кредитов.
 
 Период каталога берётся из актуальной HSGuru meta matrix (`patch_*`) и входит в
 disk- и memory-cache key. Snapshot без периода или от другого патча не
@@ -149,6 +188,36 @@ All-rank каталог запрашивает до 20 архетипов на �
 units) и provenance сохранённых строк из совпадающего snapshot, поэтому
 backend новых строк не приписывается старым, а кредиты разных провайдеров не
 складываются в одну неоднозначную величину.
+
+### Потасовка и киберспорт HSGuru
+
+`app/hsguru_pages.py` (`PageReader`) читает страницы `hsguru_brawl` и трёх
+`hsguru_esports_*` через тот же каскад с
+`skip_providers={"decodo", "firecrawl", "brightdata", "scrapfly"}`, без cookie
+сессии. Порядок шагов Scrape.do:
+
+| Страницы | Шаги (`render`, `super`) | Цена |
+| --- | --- | --- |
+| `/meta`, `/decks` Потасовки, `/mt/tour-stops`, `/battlefy/tournament/<id>` (standings, lineups), `/leaderboard/points`, `/legacy-hsesports/*` | без браузера; если не прошла проверка — один повтор с браузером | 1, при повторе 5 |
+| `/esports` (таблица приходит по сокету LiveView) | сразу с браузером | 5 |
+
+Super proxy не используется. Каждая страница проходит валидатор содержимого
+(ожидаемая таблица, нет paywall-маркера), неудачная страница не обрывает
+запуск. Одновременно — не больше 5 страниц на запуск (`MAX_CONCURRENCY`):
+лимит аккаунта Scrape.do — 50, муллиган занимает 40. Страницы идут как
+`detail`-задачи общего месячного бюджета HSGuru (Meta-Lab) и останавливаются
+на его пороге раньше критических обновлений меты.
+
+Расход по живым прогонам 2026-10-25:
+
+| Набор | Страниц за запуск | Кредитов в сутки |
+| --- | ---: | ---: |
+| `hsguru_brawl` (каждые 3 ч) | 35 | ≈ 280 |
+| `hsguru_esports_tournaments` (ежедневно; завершённые турниры переиспользуются) | ≈ 12 (первый запуск 169) | ≈ 36 |
+| `hsguru_esports_points` (ежедневно) | 37 | ≈ 37 |
+| `hsguru_esports_legacy` (раз в неделю) | 43 | ≈ 6 |
+
+Подробнее: [HSGURU_BRAWL_ESPORTS.md](HSGURU_BRAWL_ESPORTS.md).
 
 ## Bright Data: условия включения
 
@@ -286,7 +355,11 @@ Radars требует отдельные номера отчёта и radar-вы
 | `HS_PARSESUNIX_MAX_BODY_BYTES` | Максимальный размер одного ответа, `1..32 MiB`, default `8 MiB`; превышение считается неполным ответом, а не успехом. |
 | `HS_PARSESUNIX_SCRAPE_DO_DAILY_CREDIT_LIMIT` | Долговечный UTC-day лимит Scrape.do credits нового ядра; default `0`, то есть платные вызовы запрещены. |
 | `HS_PARSESUNIX_SCRAPE_DO_MAX_REQUESTS_PER_REFRESH` | Атомарный лимит реальных Scrape.do-вызовов одного refresh; default `0`. Вне контекста refresh вызов запрещён. |
-| `HS_HSGURU_DECK_CATALOG_CONCURRENCY` | Сколько страниц ночных каталогов колод HSGuru качается параллельно; default `15` (1–50). Это доля общего лимита аккаунта Scrape.do, который делится с meta-matrix (5) и муллиганом. |
+| `HS_HSGURU_MATCHUPS_CONCURRENCY` | Сколько страниц `/matchups` HSGuru качается параллельно; default `5` (1–5). Также `HS_HSGURU_MATCHUPS_MAX_PAGES` (default `400`) и `HS_HSGURU_MATCHUPS_DEADLINE_SECONDS` (default `1800`). |
+| `HS_HSGURU_DECK_CATALOG_CONCURRENCY` | Сколько страниц ночных каталогов колод HSGuru качается параллельно; default `15` (1–50). Это доля общего лимита аккаунта Scrape.do, который делится с meta-matrix (5), муллиганом (40), матчапами (5) и стримерами (5). |
+| `HS_HSGURU_STREAMERS_CONCURRENCY` | Сколько страниц HSGuru стримеров (`/streamer-decks`, `/streaming-now`) идёт параллельно через Scrape.do; default и максимум `5`. |
+| `HS_HSGURU_STREAMERS_MAX_DECK_PAGES` | Сколько страниц `/streamer-decks` читает один запуск; default `400` (первый обход за 120 дней — около 300). |
+| `HS_HSGURU_STREAMERS_LANGUAGES` | Языковые страницы `/streaming-now?filter_language=`; default `ru`, каждая стоит 1 кредит за запуск; пусто — не читать. |
 | `HS_HSGURU_DECK_CATALOG_LOCAL_CONCURRENCY` | Параллельные страницы колод через локальный FlareSolverr (fallback); default `2` (1–10). |
 | `HS_HSGURU_DECK_CATALOG_LOCAL_FIRST` | `1` — сначала бесплатный локальный FlareSolverr, потом Scrape.do (прежний порядок); default `0` — сначала Scrape.do. |
 | `HS_PARSESUNIX_SCRAPE_DO_STRATEGIES` | Разрешённые стратегии Scrape.do; default `normal` (1 credit). `render`, `super`, `super_render` требуют явного добавления. |

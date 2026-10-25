@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh HSGuru esports data daily
+
+[Timer]
+OnCalendar=*-*-* 05:40:00 Europe/Warsaw
+AccuracySec=5min
+Persistent=false
+
+[Install]
+WantedBy=timers.target

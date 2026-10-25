@@ -30,9 +30,15 @@ from app.stale_monitor import find_stale_sources
 
 PIPELINE_IDS = (
     "hsguru_archetype_analysis",
+    "hsguru_brawl",
+    "hsguru_esports_legacy",
+    "hsguru_esports_points",
+    "hsguru_esports_tournaments",
     "hsguru_fun_decks",
+    "hsguru_matchups",
     "hsguru_meta_matrix",
     "hsguru_mulligan",
+    "hsguru_streamers",
     "hsreplay_battlegrounds_compositions_screenshot",
     "hsreplay_battlegrounds_hero_details",
     "hsreplay_battlegrounds_minion_stats",

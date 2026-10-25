@@ -1,0 +1,12 @@
+[Unit]
+Description=Refresh HSGuru streamers and who is live every five minutes
+
+[Timer]
+# A run still in progress (the first backfill) makes systemd skip the next
+# trigger; afterwards a run takes well under a minute.
+OnCalendar=*-*-* *:00/5:00 Europe/Warsaw
+AccuracySec=30s
+Persistent=false
+
+[Install]
+WantedBy=timers.target

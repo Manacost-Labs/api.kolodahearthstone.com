@@ -64,6 +64,7 @@ SECTIONS: tuple[ParserSection, ...] = (
             "hsguru_matchups_legend",
             "hsguru_matchups_wild_legend",
             "hsguru_matchups_diamond_4to1",
+            "hsguru_matchups",
             "hsguru_archetype_analysis",
             "hsguru_mulligan",
             "hsreplay_mulligan",
@@ -90,10 +91,18 @@ SECTIONS: tuple[ParserSection, ...] = (
         description="Популярные, стримерские, фановые и высокоранговые сборки.",
         source_ids=(
             "hsguru_streamer_decks_legend_1000",
+            "hsguru_streamers",
             "hsguru_fun_decks",
             "hsreplay_decks_trending",
             "hearthstone_decks",
         ),
+    ),
+    ParserSection(
+        id="brawl",
+        label="Потасовка",
+        group="Традиционный режим",
+        description="Архетипы и колоды текущей Потасовки HSGuru.",
+        source_ids=("hsguru_brawl",),
     ),
     ParserSection(
         id="arena-classes",
@@ -180,6 +189,17 @@ SECTIONS: tuple[ParserSection, ...] = (
             *sorted(TRINKET_SLICE_SOURCE_IDS),
         ),
     ),
+    ParserSection(
+        id="esports",
+        label="Киберспорт",
+        group="Киберспорт",
+        description="Турниры, составы игроков, очки HSEsports и архив Masters Tour.",
+        source_ids=(
+            "hsguru_esports_tournaments",
+            "hsguru_esports_points",
+            "hsguru_esports_legacy",
+        ),
+    ),
 )
 
 
@@ -204,6 +224,7 @@ if _duplicates:
 
 SOURCE_LABELS_RU: dict[str, str] = {
     "hsguru_streamer_decks_legend_1000": "HSGuru · колоды стримеров, топ-1000 Легенды",
+    "hsguru_streamers": "HSGuru · стримеры: все колоды, кто в эфире, ссылки на каналы",
     "hsguru_fun_decks": "HSGuru · фановые / off-meta колоды",
     "hsguru_meta_standard_legend": "HSGuru · Standard, Легенда",
     "hsguru_meta_standard_diamond_4to1": "HSGuru · Standard, Алмаз 4–1",
@@ -217,8 +238,13 @@ SOURCE_LABELS_RU: dict[str, str] = {
     "hsguru_matchups_legend": "HSGuru · Standard, матчапы Легенды",
     "hsguru_matchups_wild_legend": "HSGuru · Wild, матчапы Легенды",
     "hsguru_matchups_diamond_4to1": "HSGuru · матчапы Алмаза 4–1",
+    "hsguru_matchups": "HSGuru · матрицы матчапов архетипов по всем срезам",
     "hsguru_archetype_analysis": "HSGuru · анализ архетипов",
     "hsguru_mulligan": "HSGuru · муллиган и матчапы по классам архетипов и колод",
+    "hsguru_brawl": "HSGuru · Потасовка: архетипы и колоды",
+    "hsguru_esports_tournaments": "HSGuru · турниры: сетки и составы",
+    "hsguru_esports_points": "HSGuru · очки HSEsports по сезонам",
+    "hsguru_esports_legacy": "HSGuru · архив Masters Tour",
     "hsreplay_mulligan": "HSReplay · муллиган колод (v2) по рангам, монетке и классу соперника",
     "hsreplay_card_choices": "HSReplay · что берут из Раскопки и Адаптации (по картам и рангам)",
     "hsreplay_battlegrounds_comps": "HSReplay · составы Полей Сражений",

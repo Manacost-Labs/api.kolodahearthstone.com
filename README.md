@@ -146,11 +146,21 @@ GraphQL pagination возвращает `items` и `pageInfo`. Максимал�
 | GET | `/v1/hsguru/archetypes` | `format`, `period`, `q`, `min_games`, `has_decks`, `sort`, `order`, `limit`, `offset` | Каталог архетипов: текущий или `period=black_empire_ban` (Bans) |
 | GET | `/v1/hsguru/archetypes/history` | `archetype` (required), `format` (required), `limit` | История архетипа |
 | GET | `/v1/hsguru/archetypes/analysis` | `archetype` (required), `format` (required) | Полный анализ архетипа |
+| GET | `/v1/hsguru/matchups` | `format`, `rank`, `period`, `coin`, `min_games`, `min_archetype_games`, `limit` | Матрица матчапов архетипов HSGuru любого среза (по умолчанию окно банов) |
+| GET | `/v1/hsguru/matchups/slices` | — | Срезы матчапов: состояние, свежесть, размер, расход |
 | GET | `/v1/hsguru/mulligan` | `archetype`+`format` или `deck_id`, `rank`, `period`, `coin`, `opponent_class`, `min_mull_count`, `min_drawn_count` | Муллиган HSGuru архетипа или колоды: mulligan/drawn/not drawn/kept impact и count по картам |
 | GET | `/v1/hsguru/class-matchups` | `archetype`+`format` или `deck_id`, `rank`, `period`, `coin` | Винрейт архетипа или колоды против каждого класса |
 | GET | `/v1/hsguru/mulligan/slices` | `archetype` или `deck_id`, `format` | Сохранённые срезы муллигана и матчапов |
 | GET | `/v1/hsguru/mulligan/history` | срез, `kind`, `card`, `limit` | Снимки среза и строка одной карты по времени |
 | GET | `/v1/hsguru/mulligan/coverage` | `runs` | Покрытие сбора, последние запуски и расход Scrape.do |
+| GET | `/v1/hsguru/brawl/meta` | `rank`, `coin`, `opponent_class`, `min_games` | Мета текущей Потасовки HSGuru ([docs](docs/HSGURU_BRAWL_ESPORTS.md)) |
+| GET | `/v1/hsguru/brawl/decks` | `rank`, `class`, `archetype` | Колоды текущей Потасовки с кодами |
+| GET | `/v1/hsguru/esports/upcoming` | — | Ближайшие и идущие турниры HSGuru /esports |
+| GET | `/v1/hsguru/esports/tournaments` | `kind`, `limit`, `offset` | Турниры: победитель, стадии, игроки, топ архетипов составов |
+| GET | `/v1/hsguru/esports/tournaments/{tournament_id}` | — | Турнир: standings стадий, составы, популярность архетипов |
+| GET | `/v1/hsguru/esports/points` | `season`, `leaderboard`, `region`, `limit`, `offset` | Очки HSEsports сезона |
+| GET | `/v1/hsguru/esports/points/seasons` | — | Собранные сезоны очков HSEsports |
+| GET | `/v1/hsguru/esports/legacy/{table}` | `selector`, `limit`, `offset` | Архив Masters Tour: `mt-stats`, `qualifier-stats`, `mt-points` |
 | GET | `/v1/hsreplay/mulligan` | `deck` (required), `format`, `rank`, `initiative`, `period`, `opponent_class` | Муллиган HSReplay v2 колоды: % оставляют, винрейт в стартовой руке, при доборе, при розыгрыше, ходов в руке, ход розыгрыша |
 | GET | `/v1/hsreplay/mulligan/decks` | `format`, `rank`, `limit` | Набор колод муллигана HSReplay по формату и рангу |
 | GET | `/v1/hsreplay/mulligan/slices` | `deck` (required), `format` | Срезы одной колоды и их состояние |
@@ -159,6 +169,12 @@ GraphQL pagination возвращает `items` и `pageInfo`. Максимал�
 | GET | `/v1/hsreplay/card-choices` | `card` (required), `format`, `rank` | Что берут из Раскопки/Адаптации: «берут» и винрейт по вариантам HSReplay + полный пул карты (Добыча — сокровища по уровням) |
 | GET | `/v1/hsreplay/card-choices/cards` | `format`, `kind` | Карты с выбором (Раскопка, Адаптация, Улов, «Выберите эффект», Добыча) и собранные срезы |
 | GET | `/v1/hsreplay/card-choices/coverage` | — | Покрытие выборов HSReplay и последний запуск |
+| GET | `/v1/hsguru/streamers` | `q`, `format`, `player_class`, `language`, `live`, `days`, `sort`, `limit`, `offset`, `decks` | Стримеры HSGuru: Twitch/YouTube/X, эфир, последние колоды |
+| GET | `/v1/hsguru/streamers/coverage` | `runs` | Покрытие сбора стримеров и последние запуски |
+| GET | `/v1/hsguru/streamers/{streamer}` | — | Стример: профиль, эфир, колоды по формату и классу, VOD |
+| GET | `/v1/hsguru/streamers/{streamer}/decks` | `format`, `player_class`, `days`, `limit`, `offset` | Колоды стримера с VOD-ссылками |
+| GET | `/v1/hsguru/streamer-decks` | `format`, `player_class`, `archetype`, `max_rank`, `days`, `limit`, `offset` | Колоды всех стримеров, новые сверху |
+| GET | `/v1/hsguru/streaming-now` | `language`, `mode`, `known`, `limit` | Кто сейчас в эфире, с какой колодой и в каком режиме |
 
 ## REST v1 — System
 

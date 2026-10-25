@@ -30,10 +30,19 @@ to the new hostname first and adopt GraphQL separately.
 | `archetypes` | Latest archetype data split by rank, format and region |
 | `battlegroundMinions` | Minion performance split by tier, MMR and time range |
 | `battlegroundMinionStats` | Full HSReplay statistics of one minion (`minion`: dbf or card id; `mmrPercentile`, `timeRange`, `compositionId`): normal/golden totals, per-round arrays, board positions, copy purchase rates and medians; JSON with the same shape as REST `/v1/battlegrounds/minions/{minion}/stats` |
+| `hsguruMatchups` | HSGuru archetype-versus-archetype matrix of one slice: `format`, `rank`, `period` (default: the Bans window), `coin` (`any_player` only), `minGames`, `minArchetypeGames`, `limit`. Read from the API's own SQLite store, not the PostgreSQL mirror. JSON with the same shape as REST `/v1/hsguru/matchups` `data` |
 | `hsguruMulligan` | HSGuru mulligan guide of an archetype (`archetype` + `format`) or deck (`deckId`) for `rank`, `period` (`current` allowed), `coin`, `opponentClass`; optional `minMullCount`/`minDrawnCount`. JSON with the same shape as REST `/v1/hsguru/mulligan` `data` |
 | `hsguruClassMatchups` | HSGuru winrate of an archetype or deck against each class with the Total row; same shape as REST `/v1/hsguru/class-matchups` `data` |
+| `hsguruBrawlMeta` | Current Tavern Brawl archetype meta (`rank`, `coin`, `opponentClass`, `minGames`); same shape as REST `/v1/hsguru/brawl/meta` `data` |
+| `hsguruBrawlDecks` | Current Tavern Brawl decks (`rank`, `className`, `archetype`); same shape as REST `/v1/hsguru/brawl/decks` `data` |
+| `hsguruEsportsTournaments` | Tournament summaries (`kind`), one tournament with standings and lineups (`tournamentId`) or `/esports` upcoming tournaments (`upcoming: true`) |
+| `hsguruEsportsPoints` | HSEsports points of a season (`season`, `leaderboard` STD/BG_LL, `region`); same shape as REST `/v1/hsguru/esports/points` `data` |
+| `hsguruEsportsLegacy` | Archived Masters Tour table (`table`: mt-stats, qualifier-stats, mt-points; `selector`) |
 | `hsreplayMulligan` | HSReplay mulligan v2 of one deck slice: `deck` (HSReplay shortid), `format`, `rank` (`legend`, `diamond_4to1`, `diamond`, `bronze_gold`), `initiative` (`all`, `first`, `coin`), `period` (`last_30_days`, `current_patch`, `current_expansion`), `opponentClass`. JSON with the same shape as REST `/v1/hsreplay/mulligan` `data` (`source: "hsreplay"`); `null` when not collected; error `PREMIUM_SESSION_UNAVAILABLE` (with `extensions.premiumSession`) when a premium slice cannot be served because the HSReplay session is rejected |
 | `hsreplayCardChoices` | What players pick from one choice card (Discover, Adapt, Dredge) on HSReplay plus the card's full option pool: `card` (card id or dbf id), `format` (`standard`/`wild`, default Standard when legal), `rank` (`legend`, `bronze_gold`; `diamond_4to1`, `diamond` when enabled). JSON with the same shape as REST `/v1/hsreplay/card-choices` `data` (`options[]` with `popularity`, `win_rate`, `low_sample`, `undervalued`; `pool` with `resolved`, `cards[].has_stats`, Excavate `tiers`); `null` for an unknown card or a card without a choice |
+| `hsguruStreamers` | HSGuru streamers (`q`, `format`, `playerClass`, `language`, `live`, `days`, `sort`, `limit`, `offset`, `decks`): links, live stream, last decks; JSON with the same shape as REST `/v1/hsguru/streamers` (`items`, `total`) |
+| `hsguruStreamer` / `hsguruStreamerDecks` | One streamer (`streamer`: login, name or Twitch id) and their decks (`format`, `playerClass`, `days`, `limit`, `offset`); same shapes as REST `/v1/hsguru/streamers/{streamer}` and `/decks` |
+| `hsguruStreamingNow` | Live streams with the current deck and mode (`language`, `mode`, `known`, `limit`); the mirror trails the five-minute refresh by up to 15 minutes |
 | `sources` | Integrated sources and their last update state |
 | `search` | One search across cards, minions, heroes, archetypes and sources |
 | `datasets` | Latest imported version and payload size for each source |
@@ -98,6 +107,52 @@ query PatchDelta {
     before { patch games winRate popularity }
     after { patch games winRate popularity }
     deltas { metric beforeValue afterValue absoluteChange percentChange }
+  }
+}
+```
+
+## HSGuru Brawl and esports
+
+The five fields return JSON with the same shape as the `data` of the REST
+endpoints (`/v1/hsguru/brawl/*`, `/v1/hsguru/esports/*`, see
+[API.md](API.md#hsguru-brawl-and-esports)). They read the latest dataset
+imported into `raw.datasets`, so a new snapshot appears after the next
+import. An unknown tournament, season or table returns `null`; an invalid
+selector returns `VALIDATION_ERROR`.
+
+| Field | Arguments (defaults) |
+|---|---|
+| `hsguruBrawlMeta` | `rank` (`all`), `coin` (`any_player`), `opponentClass` (`any`), `minGames` (`10`) |
+| `hsguruBrawlDecks` | `rank` (`all`), `className`, `archetype` |
+| `hsguruEsportsTournaments` | `tournamentId`; `kind` (`tour_stop`/`community`); `upcoming` (`false`) |
+| `hsguruEsportsPoints` | `season` (latest whole year), `leaderboard` (`STD`/`BG_LL`), `region` (`EU`/`AM`/`AP`/`CN`) |
+| `hsguruEsportsLegacy` | `table` (`mt-stats`, `qualifier-stats`, `mt-points`), `selector` |
+
+```graphql
+query HsguruBrawlAndEsports {
+  brawl: hsguruBrawlMeta(rank: "all", opponentClass: "MAGE", minGames: 50)
+  brawlDecks: hsguruBrawlDecks(className: "Priest")
+  upcoming: hsguruEsportsTournaments(upcoming: true)
+  tourStops: hsguruEsportsTournaments(kind: "tour_stop")
+  summer: hsguruEsportsTournaments(tournamentId: "6a6c88f821e3c30013db3d46")
+  points: hsguruEsportsPoints(season: "2026", leaderboard: "STD", region: "EU")
+  qualifiers: hsguruEsportsLegacy(table: "qualifier-stats", selector: "2021")
+}
+```
+
+Excerpt of the response:
+
+```json
+{
+  "data": {
+    "brawl": {
+      "rank": "all", "coin": "any_player", "opponent_class": "MAGE", "min_games": 50,
+      "items": [{"archetype": "C'Thun Priest", "winrate": 71.3, "popularity": 21.1, "games": 338}]
+    },
+    "points": {
+      "season": "2026", "leaderboard": "STD",
+      "items": [{"rank": 1, "player": {"name": "Gaby59", "region": "EU", "country": "FR"}, "total": 40}]
+    }
   }
 }
 ```

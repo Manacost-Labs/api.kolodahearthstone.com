@@ -21,6 +21,46 @@
   `hs-data-api-docker-refresh-hsreplay-card-choices` daily at 04:35. See
   docs/HSREPLAY_CARD_CHOICES.md.
 
+- HSGuru coverage: Tavern Brawl and esports. `hsguru_brawl` reads the current
+  Brawl meta (7 ranks × 3 coin options and 11 opponent classes, from 10
+  games) and Brawl decks every three hours. `hsguru_esports_tournaments`
+  collects /esports upcoming tournaments and every official tour stop
+  (2019–2026) plus recently started community tournaments with stage
+  standings, player lineups (deck codes) and lineup archetype popularity;
+  finished tournaments are reused from the previous snapshot.
+  `hsguru_esports_points` holds HSEsports points of every season for
+  Standard and Battlegrounds; `hsguru_esports_legacy` the Masters Tour
+  archive (weekly). Plain Scrape.do pages, at most 5 at once, as `detail`
+  jobs of the shared HSGuru budget. REST `/v1/hsguru/brawl/*`,
+  `/v1/hsguru/esports/*` (OpenAPI descriptions and examples) and GraphQL
+  `hsguruBrawl*`/`hsguruEsports*`. A page that fails validation gets one
+  rendered retry (5 credits); super proxies are not used. Docs:
+  `docs/HSGURU_BRAWL_ESPORTS.md`, `docs/API.md`, `docs/GRAPHQL_API.md`,
+  `docs/SCRAPE_PROVIDERS.md`; the HSGuru coverage audit is in
+  `docs/DATA_CATALOG.md`.
+
+
+- HSGuru matchup matrices for every public slice: new pipeline
+  `hsguru_matchups` reads HSGuru `/matchups` for Standard and Wild, seven
+  ranks and every advertised period (Bans window, expansion, patch, rolling
+  windows) with HSGuru's lowest sample filters (1/1) and keeps winrate and
+  games of every cell, so any threshold is applied on request. One API with
+  slice parameters, `GET /v1/hsguru/matchups` (+ `/slices`) and GraphQL
+  `hsguruMatchups`, instead of one source per combination. Short windows are
+  re-read hourly, wide ones every 6-48 hours (plain Scrape.do, five pages in
+  parallel, ~800 credits a day). HSGuru publishes no coin split for matchups,
+  so only `any_player` exists. See docs/HSGURU_MATCHUPS.md.
+- HSGuru streamers (`hsguru_streamers`, every five minutes): every
+  `/streamer-decks` row in all formats, ranks and windows (one walk from the
+  top down to the last complete walk; the first run goes back 120 days), who
+  is live on `/streaming-now` with the deck played on the current broadcast,
+  and the Twitch channel profile (avatar, YouTube, X and other links, past
+  broadcasts, so a deck links to the moment of its VOD). Plain Scrape.do, at
+  most five pages in parallel, ~3 credits a run. REST `/v1/hsguru/streamers`,
+  `/streamers/{streamer}`, `/streamers/{streamer}/decks`, `/streamer-decks`,
+  `/streaming-now`, `/streamers/coverage`; GraphQL `hsguruStreamers`,
+  `hsguruStreamer`, `hsguruStreamerDecks`, `hsguruStreamingNow` from the
+  PostgreSQL mirror (migration 018). See docs/HSGURU_STREAMERS.md.
 - HSGuru mulligan no longer grows to gigabytes during a run (5.2 GiB RSS in
   production). The parse cache keyed by page HTML kept about 130 pages
   (~230 MB) alive; the parsed result now travels with the page from

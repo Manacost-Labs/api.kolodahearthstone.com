@@ -540,6 +540,37 @@ async def _hsguru_statistics(
     )
 
 
+def _streamer_fetch(info: Info[GraphQLContext, None]) -> Any:
+    repository = _repository(info)
+
+    async def fetch(query: str, params: dict[str, Any]) -> list[dict[str, Any]]:
+        return await _call_repository(repository.hsguru_streamer_rows(query, params))
+
+    return fetch
+
+
+def _streamer_filters(
+    format_name: str | None,
+    player_class: str | None,
+    language: str | None = None,
+) -> None:
+    from ..hsguru_streamers import CLASSES, FORMATS
+
+    if format_name is not None and format_name not in FORMATS:
+        raise _validation_error(f"format must be one of {', '.join(FORMATS)}")
+    if player_class is not None and player_class not in CLASSES:
+        raise _validation_error("playerClass must be an upper-case class key")
+    if language is not None and not (len(language) == 2 and language.isalpha()):
+        raise _validation_error("language must be a two-letter code")
+
+
+def _streamer_page(limit: int, offset: int, maximum: int) -> None:
+    if not 1 <= limit <= maximum:
+        raise _validation_error(f"limit must be between 1 and {maximum}")
+    if not 0 <= offset <= 100_000:
+        raise _validation_error("offset must be between 0 and 100000")
+
+
 async def _hsreplay_mulligan(
     info: Info[GraphQLContext, None],
     *,
@@ -605,6 +636,25 @@ async def _hsreplay_mulligan(
                 "premiumSession": exc.premium_session,
             },
         ) from None
+
+
+async def _hsguru_dataset_view(
+    info: Info[GraphQLContext, None], source_id: str, select: Any
+) -> Any:
+    """Select from the latest imported HSGuru Brawl/esports dataset (REST shape)."""
+
+    from ..hsguru_coverage_views import structured_of
+
+    row = await _call_repository(_repository(info).dataset(source_id, None))
+    structured = structured_of((row or {}).get("payload"))
+    if not structured:
+        return None
+    try:
+        return select(structured)
+    except ValueError as exc:
+        raise _validation_error(str(exc)) from None
+    except LookupError:
+        return None
 
 
 async def _hsreplay_card_choices(
@@ -1341,6 +1391,135 @@ class Query:
 
     @strawberry.field(
         description=(
+            "HSGuru streamers who played a deck in the last `days` (0 = ever), live "
+            "ones first: Twitch/YouTube/X links, avatar, live stream and the last "
+            "`decks` decks. Sort: active, followers, decks or rank. Same shape as REST "
+            "/v1/hsguru/streamers (`items`, `total`). Read from the central mirror, "
+            "which trails the five-minute refresh by up to 15 minutes."
+        )
+    )
+    async def hsguru_streamers(
+        self,
+        info: Info[GraphQLContext, None],
+        q: str | None = None,
+        format: str | None = None,
+        player_class: str | None = None,
+        language: str | None = None,
+        live: bool = False,
+        days: int = 30,
+        sort: str = "active",
+        limit: int = 24,
+        offset: int = 0,
+        decks: int = 3,
+    ) -> JSON:
+        from ..hsguru_streamers import POSTGRES_TABLES, SORTS, list_streamers
+
+        _streamer_filters(format, player_class, language)
+        _streamer_page(limit, offset, 100)
+        if sort not in SORTS:
+            raise _validation_error(f"sort must be one of {', '.join(SORTS)}")
+        if not 0 <= days <= 3650 or not 0 <= decks <= 10:
+            raise _validation_error("days must be 0-3650 and decks 0-10")
+        return await list_streamers(
+            _streamer_fetch(info),
+            POSTGRES_TABLES,
+            q=_normalize_text(q, "q", 64),
+            format_name=format,
+            player_class=player_class,
+            language=language,
+            live_only=live,
+            days=days or None,
+            sort=sort,
+            limit=limit,
+            offset=offset,
+            decks_per_streamer=decks,
+        )
+
+    @strawberry.field(
+        description=(
+            "One HSGuru streamer by Twitch login, display name or Twitch user id: "
+            "profile, links, live stream, deck counts by format and class, past "
+            "broadcasts. Same shape as REST /v1/hsguru/streamers/{streamer} `data`."
+        )
+    )
+    async def hsguru_streamer(
+        self, info: Info[GraphQLContext, None], streamer: str
+    ) -> JSON | None:
+        from ..hsguru_streamers import POSTGRES_TABLES, get_streamer
+
+        key = _normalize_text(streamer, "streamer", 64)
+        if not key:
+            raise _validation_error("streamer is required")
+        return await get_streamer(_streamer_fetch(info), POSTGRES_TABLES, streamer=key)
+
+    @strawberry.field(
+        description=(
+            "Decks of one HSGuru streamer, newest game first, with VOD links where "
+            "known; optional format, playerClass and days. Same shape as REST "
+            "/v1/hsguru/streamers/{streamer}/decks (`streamer`, `items`, `total`)."
+        )
+    )
+    async def hsguru_streamer_decks(
+        self,
+        info: Info[GraphQLContext, None],
+        streamer: str,
+        format: str | None = None,
+        player_class: str | None = None,
+        days: int = 0,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> JSON | None:
+        from ..hsguru_streamers import POSTGRES_TABLES, streamer_decks
+
+        key = _normalize_text(streamer, "streamer", 64)
+        if not key:
+            raise _validation_error("streamer is required")
+        _streamer_filters(format, player_class)
+        _streamer_page(limit, offset, MAX_PAGE_SIZE)
+        if not 0 <= days <= 3650:
+            raise _validation_error("days must be between 0 and 3650")
+        return await streamer_decks(
+            _streamer_fetch(info),
+            POSTGRES_TABLES,
+            streamer=key,
+            format_name=format,
+            player_class=player_class,
+            days=days or None,
+            limit=limit,
+            offset=offset,
+        )
+
+    @strawberry.field(
+        description=(
+            "Live Hearthstone streams HSGuru lists, with the deck played on the current "
+            "broadcast and the mode (HSGuru's, or the deck's format). Same shape as REST "
+            "/v1/hsguru/streaming-now (`items`, `observed_at`, `stale`); the mirror "
+            "trails the five-minute refresh by up to 15 minutes."
+        )
+    )
+    async def hsguru_streaming_now(
+        self,
+        info: Info[GraphQLContext, None],
+        language: str | None = None,
+        mode: str | None = None,
+        known: bool = False,
+        limit: int = 100,
+    ) -> JSON:
+        from ..hsguru_streamers import POSTGRES_TABLES, streaming_now
+
+        _streamer_filters(None, None, language)
+        _streamer_page(limit, 0, 300)
+        return await streaming_now(
+            _streamer_fetch(info),
+            POSTGRES_TABLES,
+            language=language,
+            mode=_normalize_text(mode, "mode", 32),
+            known_only=known,
+            limit=limit,
+        )
+
+    @strawberry.field(
+        description=(
             "HSReplay mulligan guide (mulligan v2) of one deck slice: per card keep %, "
             "opening-hand, drawn and played winrate, turns held, turn played and "
             "*_impact versus the base winrate. deck is the HSReplay shortid; rank "
@@ -1370,6 +1549,180 @@ class Query:
             initiative=initiative,
             period=period,
             opponent_class=opponent_class,
+        )
+
+    @strawberry.field(
+        description=(
+            "HSGuru archetype-versus-archetype matchup matrix of one slice: archetypes "
+            "with games, winrate and popularity, and every matchup cell with winrate and "
+            "games. period defaults to the Bans window; coin is any_player only because "
+            "HSGuru publishes no coin split. Same shape as REST /v1/hsguru/matchups data."
+        )
+    )
+    async def hsguru_matchups(
+        self,
+        format: str = "standard",
+        rank: str = "all",
+        period: str | None = None,
+        coin: str = "any_player",
+        min_games: int = 1,
+        min_archetype_games: int = 1,
+        limit: int | None = None,
+    ) -> JSON | None:
+        from ..hsguru_matchups import (
+            COLLECTED_COINS,
+            FORMAT_IDS,
+            RANKS,
+            default_period,
+            get_matchups,
+            summary,
+        )
+
+        if format not in FORMAT_IDS:
+            raise _validation_error("format must be standard or wild")
+        if rank not in RANKS:
+            raise _validation_error(f"rank must be one of {', '.join(RANKS)}")
+        if coin not in COLLECTED_COINS:
+            raise _validation_error("HSGuru publishes no coin split; coin must be any_player")
+        if not 1 <= min_games <= 1_000_000 or not 1 <= min_archetype_games <= 10_000_000:
+            raise _validation_error("minimum games are out of range")
+        if limit is not None and not 1 <= limit <= 200:
+            raise _validation_error("limit must be between 1 and 200")
+        structured = await asyncio.to_thread(summary)
+        periods = list((structured.get("dimensions") or {}).get("periods") or [])
+        resolved = _normalize_text(period, "period", 64) or default_period(
+            periods, structured.get("current_period")
+        )
+        if not resolved or (periods and resolved not in periods):
+            raise _validation_error(f"period must be one of {', '.join(periods)}")
+        return await asyncio.to_thread(
+            get_matchups,
+            format_name=format,
+            rank=rank,
+            period=resolved,
+            min_games=min_games,
+            min_archetype_games=min_archetype_games,
+            limit=limit,
+        )
+
+    @strawberry.field(
+        description=(
+            "Archetype meta of the current Tavern Brawl on HSGuru for a rank, coin and "
+            "opponent class; same shape as REST /v1/hsguru/brawl/meta data."
+        )
+    )
+    async def hsguru_brawl_meta(
+        self,
+        info: Info[GraphQLContext, None],
+        rank: str = "all",
+        coin: str = "any_player",
+        opponent_class: str = "any",
+        min_games: int = 10,
+    ) -> JSON | None:
+        from ..hsguru_coverage_views import brawl_meta
+
+        return await _hsguru_dataset_view(
+            info,
+            "hsguru_brawl",
+            lambda structured: brawl_meta(
+                structured,
+                rank=rank,
+                coin=coin,
+                opponent_class=opponent_class,
+                min_games=max(0, min_games),
+            ),
+        )
+
+    @strawberry.field(
+        description=(
+            "Most played decks of the current Tavern Brawl with codes; same shape as "
+            "REST /v1/hsguru/brawl/decks data."
+        )
+    )
+    async def hsguru_brawl_decks(
+        self,
+        info: Info[GraphQLContext, None],
+        rank: str = "all",
+        class_name: str | None = None,
+        archetype: str | None = None,
+    ) -> JSON | None:
+        from ..hsguru_coverage_views import brawl_decks
+
+        return await _hsguru_dataset_view(
+            info,
+            "hsguru_brawl",
+            lambda structured: brawl_decks(
+                structured, rank=rank, class_name=class_name, archetype=archetype
+            ),
+        )
+
+    @strawberry.field(
+        description=(
+            "HSGuru tournaments: summaries (kind tour_stop or community) or, with "
+            "tournamentId, one tournament with stage standings, lineups and lineup "
+            "archetype popularity; upcoming=true lists /esports upcoming tournaments."
+        )
+    )
+    async def hsguru_esports_tournaments(
+        self,
+        info: Info[GraphQLContext, None],
+        tournament_id: str | None = None,
+        kind: str | None = None,
+        upcoming: bool = False,
+    ) -> JSON | None:
+        from ..hsguru_coverage_views import tournament, tournament_summaries
+
+        def select(structured: dict[str, Any]) -> Any:
+            if upcoming:
+                return list(structured.get("upcoming") or [])
+            if tournament_id:
+                return tournament(structured, tournament_id)
+            return tournament_summaries(structured, kind=kind)
+
+        return await _hsguru_dataset_view(info, "hsguru_esports_tournaments", select)
+
+    @strawberry.field(
+        description=(
+            "HSEsports points of one season and leaderboard (STD or BG_LL; default "
+            "season is the current year); same shape as REST /v1/hsguru/esports/points."
+        )
+    )
+    async def hsguru_esports_points(
+        self,
+        info: Info[GraphQLContext, None],
+        season: str | None = None,
+        leaderboard: str = "STD",
+        region: str | None = None,
+    ) -> JSON | None:
+        from ..hsguru_coverage_views import points
+
+        return await _hsguru_dataset_view(
+            info,
+            "hsguru_esports_points",
+            lambda structured: points(
+                structured, season=season, leaderboard=leaderboard, region=region
+            ),
+        )
+
+    @strawberry.field(
+        description=(
+            "Archived Masters Tour tables: mt-stats, qualifier-stats (selector: period) "
+            "or mt-points (selector: season); same shape as REST "
+            "/v1/hsguru/esports/legacy/{table}."
+        )
+    )
+    async def hsguru_esports_legacy(
+        self,
+        info: Info[GraphQLContext, None],
+        table: str,
+        selector: str | None = None,
+    ) -> JSON | None:
+        from ..hsguru_coverage_views import legacy
+
+        return await _hsguru_dataset_view(
+            info,
+            "hsguru_esports_legacy",
+            lambda structured: legacy(structured, table, selector=selector),
         )
 
     @strawberry.field(

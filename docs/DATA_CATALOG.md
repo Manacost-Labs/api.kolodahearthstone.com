@@ -25,9 +25,15 @@ admin/ops endpoints и правила авторизации находятся 
 | Получить фильтрованный срез меты HSGuru | `GET /v1/hsguru/meta` |
 | Получить актуальные HSGuru-архетипы со сборками | `GET /v1/hsguru/archetypes?min_games=50&has_decks=true` |
 | Получить каталог архетипов окна Bans | `GET /v1/hsguru/archetypes?period=black_empire_ban` |
+| Получить матрицу матчапов архетипов HSGuru любого среза | `GET /v1/hsguru/matchups?format=standard&rank=legend&period=black_empire_ban&min_games=25` (срезы — `/v1/hsguru/matchups/slices`) |
 | Получить муллиган архетипа или колоды HSGuru | `GET /v1/hsguru/mulligan` (срезы — `/v1/hsguru/mulligan/slices`) |
 | Узнать, что берут из Раскопки/Адаптации конкретной карты (HSReplay + полный пул) | `GET /v1/hsreplay/card-choices?card=CORE_YOP_001` (список карт — `/v1/hsreplay/card-choices/cards`) |
+| Получить мету и колоды текущей Потасовки HSGuru | `GET /v1/hsguru/brawl/meta`, `GET /v1/hsguru/brawl/decks` |
+| Получить турниры: сетки, составы, популярность архетипов | `GET /v1/hsguru/esports/tournaments` и `/v1/hsguru/esports/tournaments/{id}` |
+| Получить очки HSEsports по сезонам | `GET /v1/hsguru/esports/points` |
+| Получить архив Masters Tour | `GET /v1/hsguru/esports/legacy/{table}` |
 | Получить муллиган колоды HSReplay (v2: монетка, класс соперника) | `GET /v1/hsreplay/mulligan` (колоды — `/v1/hsreplay/mulligan/decks`, срезы — `/v1/hsreplay/mulligan/slices`) |
+| Получить стримеров, их колоды и кто сейчас в эфире | `GET /v1/hsguru/streamers`, `/v1/hsguru/streamers/{streamer}/decks`, `/v1/hsguru/streaming-now` |
 | Получить BG-героев solo/duos | `GET /v1/battlegrounds/heroes` |
 | Получить BG-существ и их историю | `GET /v1/battlegrounds/minions` и `/api/db/bg/minions/*` |
 | Получить классы Арены | `GET /v1/arena/classes` |
@@ -259,10 +265,12 @@ GET /datasets/firestone_standard
 | `hsguru_matchups_legend` | Standard Legend: `matchups[]` with archetype, opponent (`vs`) and winrate; minimum 100 archetype games and 25 matchup games. |
 | `hsguru_matchups_wild_legend` | Wild Legend: the same matchup matrix and minimum sample thresholds. |
 | `hsguru_matchups_diamond_4to1` | Та же matchup-матрица для Diamond 4–1. |
+| `hsguru_matchups` | Матрицы матчапов архетип против архетипа для каждого публичного среза HSGuru: Standard/Wild, 7 рангов, все периоды меню (включая баны и дополнение), с винрейтом и числом игр каждой ячейки; пороги применяются при запросе. Матрицы в SQLite `hsguru_matchup_slices`, dataset хранит только сводку срезов, см. [HSGURU_MATCHUPS.md](HSGURU_MATCHUPS.md). |
 | `hsguru_archetype_analysis` | Daily checkpointed Standard/Wild archetype analysis: class matchups and card mulligan/drawn/kept impact, with sparse post-patch samples distinguished from unavailable upstream data. |
 | `hsguru_mulligan` | Муллиган (mulligan/drawn/not drawn/kept impact и count) и матчапы по классам для архетипов и колод по рангу, периоду (включая баны), монетке и классу соперника. История в SQLite `hsguru_*` и PostgreSQL `analytics.hsguru_*`, см. [HSGURU_MULLIGAN.md](HSGURU_MULLIGAN.md). Dataset хранит только сводку покрытия. |
 | `hsreplay_mulligan` | Муллиган HSReplay v2 по колодам (% оставляют, винрейт в стартовой руке, при доборе, при розыгрыше, ходов в руке, ход розыгрыша) для топ-колод Стандарта и Вольного на Легенде, Алмазе 4–1, Алмазе и Бронзе–Золоте, по монетке (`all`/`first`/`coin`), периоду и классу соперника (премиум). История в SQLite `hsreplay_mulligan_*` и PostgreSQL `analytics.hsreplay_mulligan_*`, см. [HSREPLAY_MULLIGAN.md](HSREPLAY_MULLIGAN.md). Dataset хранит сводку покрытия и статус премиум-сессии. |
 | `hsreplay_card_choices` | Что берут из Раскопки, Адаптации и Улова: по каждому варианту HSReplay «берут, когда предложен» (`popularity`, сумма > 100%) и винрейт для самых играемых карт Стандарта и Вольного на Легенде и Бронзе–Золоте; полный пул карты и сокровища Добычи — из базы карт. История в SQLite `hsreplay_card_choice_*` и PostgreSQL `analytics.hsreplay_card_choice_*`, см. [HSREPLAY_CARD_CHOICES.md](HSREPLAY_CARD_CHOICES.md). Dataset хранит сводку покрытия. |
+| `hsguru_streamers` | Все колоды стримеров HSGuru (формат, класс, архетип, ранги Легенды, W-L, последняя игра), кто сейчас в эфире и профили каналов Twitch (YouTube, X, VOD). SQLite `hsguru_streamer*` и PostgreSQL `analytics.hsguru_streamer*`, см. [HSGURU_STREAMERS.md](HSGURU_STREAMERS.md). Dataset хранит только сводку. |
 | `metastats_matchups` | Archetype, opponent, winrate/vs_winrate и games. |
 
 HSGuru meta-строки находятся в `data.structured.strategies[]`, matchup-строки —
@@ -301,6 +309,155 @@ HSGuru meta-строки находятся в `data.structured.strategies[]`, m
 показывает только от 50 игр, поэтому у архетипов ниже этого порога `decks[]`
 всегда пуст. Срезы `GET /v1/hsguru/meta` тоже хранятся от 10 игр и включают
 ранг `bronze_plat`; значение `min_games` по умолчанию там остаётся 100.
+
+## HSGuru: Потасовка и киберспорт
+
+Четыре pipeline-набора читают страницы HSGuru через Scrape.do без браузера
+(1 кредит за страницу; если страница не прошла проверку — один повтор с
+браузером за 5 кредитов, super proxy не используется). Единственная страница
+сразу с браузером — `/esports`: её таблица приходит по сокету LiveView.
+Эксплуатация, расход и ограничения — [HSGURU_BRAWL_ESPORTS.md](HSGURU_BRAWL_ESPORTS.md). Каждый запуск читает не больше 5 страниц
+одновременно: лимит аккаунта Scrape.do — 50, муллиган занимает 40. Страницы
+идут как `detail`-задачи общего месячного бюджета HSGuru (Meta-Lab).
+
+| Source ID | Таймер | Что внутри |
+| --- | --- | --- |
+| `hsguru_brawl` | `refresh-hsguru-brawl`, каждые 3 часа в :50 | Мета текущей Потасовки (`format=-1&period=brawl`): 7 рангов × 3 варианта монетки и 11 классов соперника для всех рангов, от 10 игр; колоды Потасовки (от 50 игр, ранги `all`, `legend`, `diamond_to_legend`). |
+| `hsguru_esports_tournaments` | `refresh-hsguru-esports`, ежедневно в 05:40 | Ближайшие турниры `/esports`; все официальные тур-стопы `/mt/tour-stops` (2019–2026) и стартовавшие за 14 дней турниры из `/esports`: standings каждой стадии, составы игроков с кодами колод, популярность архетипов и классов в составах. |
+| `hsguru_esports_points` | тот же таймер | Очки HSEsports `/leaderboard/points` за все сезоны (2023 … 2026, China) для Standard и Battlegrounds: место, игрок, регион, страна, очки по месяцам и итог. |
+| `hsguru_esports_legacy` | тот же таймер, не чаще раза в неделю | Архив Masters Tour: статистика игроков по MT, статистика квалификаций по годам и тур-стопам, очки и призовые legacy-сезонов. |
+
+### Потасовка — `hsguru_brawl`
+
+Путь: `data.structured.meta[]` и `data.structured.decks[]`.
+
+| Поле среза меты | Описание |
+| --- | --- |
+| `key` | `rank|coin|opponent_class`, например `all|any_player|any`. |
+| `rank` | `all`, `top_legend` (Top 1k), `top_5k`, `legend`, `diamond_4to1`, `diamond_to_legend`, `bronze_plat`. В Потасовке почти все игры попадают только в `all`. |
+| `coin` | `any_player`, `on_coin`, `going_first`. |
+| `opponent_class` | `any` или класс заглавными буквами. |
+| `total_games` | Сумма игр строк среза. |
+| `rows[]` | `archetype`, `winrate`, `popularity` (%), `games`, `turns`, `duration_minutes`, `climbing_speed` (звёзд в час). |
+
+Строка колоды: `title`, `archetype`, `class`, `format` (`Brawl`), `deck_code`,
+`win_rate`, `games`, `url`, `sample_rank`, `sample_period`.
+
+HSGuru не называет саму Потасовку на странице: набор описывает текущую
+Потасовку на момент `fetched_at`. Набор публикуется, только если прочитан срез
+`all|any_player|any`; иначе остаётся прошлый снимок (`serving_cached_dataset`).
+Матчапы Потасовки — часть срезов матчапов и здесь не собираются.
+
+```http
+GET /v1/hsguru/brawl/meta?rank=all&coin=any_player&opponent_class=any&min_games=10
+GET /v1/hsguru/brawl/decks?rank=all&class=Priest
+```
+
+### Турниры — `hsguru_esports_tournaments`
+
+| Путь | Содержимое |
+| --- | --- |
+| `data.structured.upcoming[]` | `tournament_id` (Battlefy), `name`, `start_time` (UTC), `tags` (Open/Bo3/регион/формат), `url`. |
+| `data.structured.tournaments[]` | `tournament_id`, `name`, `kind` (`tour_stop` или `community`), `start_time`, `battlefy_url`, `standings_url`, `lineups_url`, `stages[]`, `lineups[]`, `lineups_total`, `lineups_complete`, `lineup_popularity`, `complete`, `collected_at`, `reused`. |
+| `stages[]` | `stage_id`, `name` (Swiss, Group A, Top 8 …), `standings[]`: `place`, `player`, `score`, `wins`, `losses`. |
+| `lineups[]` | `player` и `decks[]`: `archetype`, `class`, `deck_code`, `url`. |
+| `lineup_popularity` | `lineups` (число составов), `archetypes[]` и `classes[]` с `lineups` и `share` (доля составов). |
+
+`player` — объект `name`, `battletag`, `region` (`EU`/`AM`/`AP`/`CN`, если
+HSGuru его показывает), `country` (ISO-код флага), `profile_url`.
+
+Страница составов HSGuru показывает первые 50 составов; остальные страницы
+переключаются только по сокету LiveView (URL-параметры игнорируются, клик в
+браузере Scrape.do страницу не меняет). Поэтому у турниров больше чем на 50
+игроков (MT 2019–2022, крупные комьюнити-кубки) `lineups_complete: false`,
+`lineups_total` — число составов по HSGuru, а `lineup_popularity` посчитана по
+собранным. Standings всех стадий собираются полностью (до 400 строк Swiss).
+
+Завершённый турнир (старт больше 10 дней назад, полный снимок собран позже
+этого срока) не читается повторно. Если повторное чтение незавершённого турнира
+не удалось, остаётся его последний полный снимок с `refresh_failed: true`.
+Винрейты и матчапы архетипов турнира HSGuru считает по сокету («Preparing
+stats…»), их в наборе нет; популярность считается из составов.
+
+```http
+GET /v1/hsguru/esports/upcoming
+GET /v1/hsguru/esports/tournaments?kind=tour_stop&limit=50
+GET /v1/hsguru/esports/tournaments/6a6c88f821e3c30013db3d46
+```
+
+### Очки HSEsports — `hsguru_esports_points`
+
+`data.structured.seasons[]`: `season` (`2026`, `2026_summer`,
+`china_2026_spring` …), `season_label`, `leaderboard` (`STD`, `BG_LL`),
+`leaderboard_label`, `headers[]`, `rows[]`. Строка: `rank`, `player`, по
+колонке на месяц или турнир сезона (`january` … или имя тур-стопа) и `total`.
+Список сезонов берётся со страницы, новые сезоны появятся сами.
+
+```http
+GET /v1/hsguru/esports/points?season=2026&leaderboard=STD&region=EU
+GET /v1/hsguru/esports/points/seasons
+```
+
+Без `season` возвращается последний годовой сезон (как на HSGuru).
+
+### Архив Masters Tour — `hsguru_esports_legacy`
+
+| Путь | Содержимое |
+| --- | --- |
+| `mt_stats` | Игроки по всем MT: `tour_stops`, `top_8`, `matches_won`, `matches_lost`, `winrate_pct`. |
+| `qualifier_stats[]` | По периоду (`current` — текущий год, `all` — 2020–2026, год или тур-стоп): `cups`, `top_8`, `top_16`, `winrate_pct`. |
+| `mt_points[]` | Legacy-сезоны 2020–2022 (`points_system`, `season`): очки или призовые по турнирам и `total`. Ссылки HSGuru без `season` показывают таблицу сезона по умолчанию и не собираются. |
+
+```http
+GET /v1/hsguru/esports/legacy/mt-stats
+GET /v1/hsguru/esports/legacy/qualifier-stats?selector=2021
+GET /v1/hsguru/esports/legacy/mt-points?selector=2022_fall
+```
+
+Все эти endpoint'ы возвращают конверт `/v1` (`data`, `meta`); в `meta` —
+`source_id`, `fetched_at`, `stale` по `stale_hours` источника и `count`.
+GraphQL: `hsguruBrawlMeta`, `hsguruBrawlDecks`, `hsguruEsportsTournaments`,
+`hsguruEsportsPoints`, `hsguruEsportsLegacy` (та же форма, см.
+[GRAPHQL_API.md](GRAPHQL_API.md)).
+
+## Аудит покрытия HSGuru
+
+Обход всех разделов hsguru.com 25.10.2026 через Scrape.do (`render=false`,
+кроме `/esports`). «Сессия» — тема, которую ведёт отдельная параллельная задача.
+
+| Раздел | Данные | Собираем | Source ID / причина |
+| --- | --- | --- | --- |
+| `/meta?format=2`, `format=1` | Мета Standard/Wild по рангам, периодам, монетке | да | `hsguru_meta_matrix`, `hsguru_meta_*` |
+| `/meta?format=-1&period=brawl` | Мета Потасовки | да | `hsguru_brawl` |
+| `/decks?format=2`, `format=1` | Колоды по архетипам | да | `hsguru_deck_catalog_*` |
+| `/decks?format=-1&period=brawl` | Колоды Потасовки | да | `hsguru_brawl` |
+| `/meta?format=4`, `/decks?format=4` | Twist | нет | Страница существует («Twist Decks»), но данных нет: формат не в селекторе, таблица пуста даже с сессией. Других форматов HSGuru не показывает. |
+| `/matchups` | Матрица матчапов | да | `hsguru_matchups_*`; срезы — сессия matchup-slices |
+| `/matchups?format=-1&period=brawl` | Матчапы Потасовки | нет | Относится к срезам матчапов (сессия matchup-slices). |
+| `/card-stats?archetype=…`, `?deck_id=…` | Муллиган архетипа/колоды | да | `hsguru_mulligan` |
+| `/card-stats` без архетипа | Статистика всех карт формата | нет | Закрыта более высоким тарифом Patreon: наша сессия получает «You do not have access to these filters». |
+| `/archetype/<name>`, `/deck/<id>` | Матчапы по классам | да | `hsguru_mulligan`, `hsguru_archetype_analysis` |
+| `/streamer-decks` | Колоды стримеров | да | `hsguru_streamer_decks_legend_1000`; расширение — сессия streamers |
+| `/streaming-now` | Кто стримит сейчас | сессия streamers | — |
+| `/replays` | Последние игры с колодами | частично | Фолбэк сборок `hsguru_deck_catalog_*` |
+| `/leaderboard?region=…` | Ладдерные таблицы лидеров | сессия leaderboards | Берутся из официального API Blizzard. |
+| `/leaderboard/player-stats` | Статистика игроков по таблицам | нет | Требует входа (HTTP 401 без сессии). |
+| `/leaderboard/points` | Очки HSEsports | да | `hsguru_esports_points` |
+| `/player-profile/<ник>` | Финиши игрока в таблицах лидеров, MT и квалификациях | нет | Страница на игрока; финиши в таблицах — тема сессии leaderboards. |
+| `/esports` | Ближайшие и идущие турниры | да | `hsguru_esports_tournaments.upcoming` (рендер, 5 кредитов) |
+| `/mt/tour-stops` | Официальные тур-стопы | да | `hsguru_esports_tournaments` |
+| `/battlefy/tournament/<id>` | Стадии и standings | да | `hsguru_esports_tournaments` |
+| `/battlefy/tournament/<id>/lineups` | Составы игроков | да | `hsguru_esports_tournaments` |
+| `/tournament-lineups/battlefy/<id>/…` | Популярность, винрейт и матчапы архетипов турнира | частично | Популярность считаем из составов; винрейт и матчапы приходят по сокету. |
+| `/battlefy/tournament/<id>/participants` | Зарегистрированные | нет | Приходит по сокету. |
+| `/battlefy/third-party-tournaments` | Турниры сторонних организаторов | частично | Стартовавшие за 14 дней из `/esports` (`kind=community`). |
+| `/battlefy/multi-tournament-stats` | Свод нескольких турниров | нет | Форма ввода, без данных. |
+| `/legacy-hsesports/mt/stats`, `/mt/qualifier-stats/*`, `/mt/points`, `/mt/earnings` | Архив MT | да | `hsguru_esports_legacy` |
+| `/legacy-hsesports/invited`, `/qualifiers` | Приглашённые и квалификации | нет | Пусто с 2026 года. |
+| `/cards` | Карточная база | нет | Дублирует каталог карт HearthstoneJSON. |
+| `/fantasy` | Фэнтези-лиги | нет | Требует входа. |
+| `/deckviewer`, `/deckbuilder`, `/lineup-importer`, `/chat-bot-command-hook/help`, `/discord-bot`, `/hdt-plugin`, `/about`, `/` | Инструменты и служебные страницы | нет | Данных нет. |
+| `/stats` | — | нет | HTTP 404. |
 
 ## Battlegrounds
 

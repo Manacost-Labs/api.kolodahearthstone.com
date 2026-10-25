@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh HSGuru Tavern Brawl statistics every three hours
+
+[Timer]
+OnCalendar=*-*-* 00/3:50:00 Europe/Warsaw
+AccuracySec=5min
+Persistent=false
+
+[Install]
+WantedBy=timers.target
