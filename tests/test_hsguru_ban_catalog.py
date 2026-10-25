@@ -493,3 +493,52 @@ def test_ban_build_failure_degrades_the_job_but_still_joins() -> None:
     assert f"wild_all_{BAN}" in result["errors"]
     assert result["datasets"][f"standard_all_{BAN}"] == {"decks": 1, "state": "ok"}
     assert result["archetype_join"] == {"ok": True}
+
+
+def test_rune_spread_deck_names_join_the_requested_archetype() -> None:
+    rows = [
+        {"archetype": "Some custom title", "deck_code": "AAECAEgg"},
+        {"archetype": "BBB Harold DK", "deck_code": "AAECAHarold"},
+        {"archetype": "XL Druid", "deck_code": "AAECAXL"},
+        {"archetype": "Unrequested Mage", "deck_code": "AAECAMage"},
+    ]
+    info = {
+        "AAECAEgg": {"archetype": "BUU Egg DK"},
+        "AAECAHarold": {"archetype": "BBB Harold DK"},
+        "AAECAXL": {"archetype": "XL Druid"},
+        "AAECAMage": {"archetype": "Burn Mage"},
+    }
+
+    class Response:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return info
+
+    class Client:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args) -> None:
+            return None
+
+        async def post(self, *_args, **_kwargs):
+            return Response()
+
+    with patch.object(hsguru_decks.httpx, "AsyncClient", Client):
+        asyncio.run(
+            hsguru_decks._canonicalize_catalog_archetypes(
+                rows, ["Egg DK", "Harold DK", "XL Druid", "Druid"]
+            )
+        )
+
+    assert [row["archetype"] for row in rows] == [
+        "Egg DK",
+        "Harold DK",
+        "XL Druid",
+        "Burn Mage",
+    ]
