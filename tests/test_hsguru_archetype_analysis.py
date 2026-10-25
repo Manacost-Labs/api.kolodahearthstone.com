@@ -297,30 +297,32 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
                     _load_refresh_checkpoint(target_signature=None, now=now)
                 )
 
-    def test_fetch_html_falls_back_to_firecrawl_then_brightdata(self) -> None:
+    def test_fetch_html_never_pays_reserve_providers_after_scrape_do(self) -> None:
         from app import firecrawl_backend
 
         provider_calls: list[str] = []
+        profiles: list[object] = []
 
-        def fail_provider(name: str):
-            def fail(*_args: object, **_kwargs: object):
+        def fail_scrape_do(*_args: object, **kwargs: object):
+            provider_calls.append("scrape_do")
+            profiles.append(kwargs.get("profiles"))
+            raise RuntimeError("scrape_do unavailable")
+
+        def reserve(name: str):
+            def call(*_args: object, **_kwargs: object):
                 provider_calls.append(name)
-                raise RuntimeError(f"{name} unavailable")
+                raise AssertionError(f"{name} must not be asked")
 
-            return fail
+            return call
 
-        def brightdata_success(*_args: object, **_kwargs: object):
-            provider_calls.append("brightdata")
-            return SimpleNamespace(
+        local_solver = AsyncMock(
+            return_value=SimpleNamespace(
                 html=MATCHUPS_HTML,
-                status_code=200,
+                backend="flaresolverr",
+                http_status=200,
                 final_url="https://www.hsguru.com/archetype/example",
-                billable_requests=1,
-                request_id="test-request",
-                rendered=False,
-                budget_remaining=99,
             )
-
+        )
         with (
             patch(
                 "app.hsguru_archetype_analysis._firecrawl_headers",
@@ -336,33 +338,38 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
             ),
             patch.object(firecrawl_backend, "scrapfly_configured", return_value=True),
             patch.object(
-                firecrawl_backend,
-                "_scrape_via_scrape_do",
-                side_effect=fail_provider("scrape_do"),
+                firecrawl_backend, "_scrape_via_scrape_do", side_effect=fail_scrape_do
             ),
             patch.object(
                 firecrawl_backend,
                 "_scrape_via_firecrawl",
-                side_effect=fail_provider("firecrawl"),
+                side_effect=reserve("firecrawl"),
             ),
             patch.object(
                 firecrawl_backend,
                 "brightdata_scrape_url_sync",
-                side_effect=brightdata_success,
+                side_effect=reserve("brightdata"),
             ),
             patch.object(
                 firecrawl_backend,
                 "_scrape_via_scrapfly",
-                side_effect=fail_provider("scrapfly"),
+                side_effect=reserve("scrapfly"),
+            ),
+            patch(
+                "app.hsguru_archetype_analysis.fetch_via_flaresolverr",
+                new=local_solver,
+                create=True,
             ),
         ):
             html, metadata = asyncio.run(
                 _fetch_html("https://www.hsguru.com/archetype/example")
             )
 
-        self.assertEqual(provider_calls, ["scrape_do", "firecrawl", "brightdata"])
+        # Plain then one rendered Scrape.do request, then the free local solver.
+        self.assertEqual(provider_calls, ["scrape_do"])
+        self.assertEqual(profiles, [((False, False), (True, False))])
         self.assertEqual(html, MATCHUPS_HTML)
-        self.assertEqual(metadata["backend"], "brightdata_web_unlocker")
+        self.assertEqual(metadata["backend"], "flaresolverr")
 
     def test_fetch_html_uses_ssr_wait_timeout_and_schema_validator(self) -> None:
         html = '<span class="tw-font-mono">Games: 0</span>' + CARD_STATS_HTML
@@ -383,8 +390,10 @@ class HSGuruArchetypeAnalysisTest(unittest.TestCase):
         self.assertEqual(options["wait_ms"], ANALYSIS_WAIT_MS)
         self.assertEqual(options["timeout_ms"], ANALYSIS_TIMEOUT_MS)
         self.assertEqual(options["max_age_ms"], 0)
-        self.assertEqual(options["skip_providers"], {"scrapfly"})
-        self.assertTrue(options["brightdata_anonymous_fallback"])
+        self.assertEqual(
+            options["skip_providers"], {"brightdata", "decodo", "firecrawl", "scrapfly"}
+        )
+        self.assertEqual(options["scrape_do_profiles"], ((False, False), (True, False)))
         self.assertTrue(options["accept_result"](result))
         self.assertFalse(
             options["accept_result"](

@@ -49,6 +49,22 @@ _PAGE_LIMIT = 200
 _CROWDED_SPLIT_LIMIT = _PAGE_LIMIT
 # A 200-build page is about 7.5 MB; Scrape.do answered 502 at the former 25 s.
 _CATALOG_PAGE_TIMEOUT_MS = 90_000
+# Scrape.do (render, super_proxy) steps with their own timeout (None: the
+# caller's). Deck pages are LiveView dead renders: a plain request (1 credit,
+# 3-12 s) returned the same builds, games and winrates as a rendered one (5
+# credits, 12-70 s) on 2026-10-25; plain occasionally answers 502 after ~30 s
+# (not billed), so it gets 30 s and one rendered retry. Replay pages load
+# their table after the LiveView connects and always need the browser.
+# Super proxies, Decodo and the paid remote reserves are not used.
+_DECKS_SCRAPE_DO_STEPS: tuple[tuple[tuple[bool, bool], int | None], ...] = (
+    ((False, False), 30_000),
+    ((True, False), None),
+)
+_REPLAYS_SCRAPE_DO_STEPS: tuple[tuple[tuple[bool, bool], int | None], ...] = (
+    ((True, False), None),
+)
+# A page that every provider failed is asked again only after these pauses.
+_PAGE_RETRY_DELAYS_SECONDS = (30.0, 120.0)
 # Bumped whenever the collection rules change, so catalogs written under the
 # old rules are re-read in full instead of being extended incrementally.
 _CATALOG_COLLECTION_VERSION = 2
@@ -65,6 +81,9 @@ _FALLBACK_DECK_WINDOWS: tuple[tuple[str, int], ...] = (
 # HSGuru's public replays of that archetype (no sample statistics).
 _REPLAY_PAGE_ROWS = 20
 _FALLBACK_REUSE_SECONDS = 20 * 60 * 60
+# A replay is a past game, so its build stays valid; replay lookups, found or
+# empty, are repeated every three days instead of every night.
+_REPLAY_REUSE_SECONDS = 3 * 24 * 60 * 60
 _ALLOWED_HSGURU_HOSTS = frozenset({"hsguru.com", "www.hsguru.com"})
 _HSGURU_SEMANTIC_QUERY_KEYS = frozenset(
     {
@@ -459,8 +478,11 @@ async def _fetch_catalog_page(
     timeout_ms: int,
     prefer_local_solver: bool = False,
     marker: str = _DECKS_PAGE_MARKER,
+    scrape_do_steps: tuple[
+        tuple[tuple[bool, bool], int | None], ...
+    ] = _DECKS_SCRAPE_DO_STEPS,
 ) -> _CatalogPage:
-    """Prefer subscribed Scrape.do, then local solver, then remote fallbacks."""
+    """Scrape.do ``scrape_do_steps`` in order, with the local solver as fallback."""
     errors: list[str] = []
     attempts: list[dict[str, Any]] = []
 
@@ -512,67 +534,61 @@ async def _fetch_catalog_page(
         def observe_primary_failure(event: dict[str, Any]) -> None:
             _merge_failure_attempt(primary_attempts, event)
 
-        try:
-            primary = await scrape_source_with_options(
-                source,
-                formats=["html"],
-                only_main_content=True,
-                max_age_ms=max_age_ms,
-                wait_ms=wait_ms,
-                timeout_ms=timeout_ms,
-                skip_providers={"brightdata", "firecrawl", "scrapfly"},
-                accept_result=catalog_result_is_valid,
-                attempt_observer=observe_primary,
-                failure_observer=observe_primary_failure,
-            )
-            attempts.extend(primary_attempts)
-            _record_scrape_do_success()
-            return _page_with_acquisition(
-                _catalog_page(primary, expected_url=source.url, marker=marker),
-                attempts,
-            )
-        except Exception as exc:  # noqa: BLE001 - isolated provider boundary
-            attempts.extend(primary_attempts or [_failed_attempt("scrape_do", exc)])
-            _record_scrape_do_failure()
-            errors.append(f"scrape_do:{type(exc).__name__}")
+        for profile, step_timeout_ms in scrape_do_steps:
+            primary_attempts.clear()
+            try:
+                primary = await scrape_source_with_options(
+                    source,
+                    formats=["html"],
+                    only_main_content=True,
+                    max_age_ms=max_age_ms,
+                    wait_ms=wait_ms,
+                    timeout_ms=min(step_timeout_ms or timeout_ms, timeout_ms),
+                    skip_providers={"brightdata", "decodo", "firecrawl", "scrapfly"},
+                    accept_result=catalog_result_is_valid,
+                    attempt_observer=observe_primary,
+                    failure_observer=observe_primary_failure,
+                    scrape_do_profiles=(profile,),
+                )
+                attempts.extend(primary_attempts)
+                _record_scrape_do_success()
+                return _page_with_acquisition(
+                    _catalog_page(primary, expected_url=source.url, marker=marker),
+                    attempts,
+                )
+            except Exception as exc:  # noqa: BLE001 - isolated provider boundary
+                attempts.extend(
+                    list(primary_attempts) or [_failed_attempt("scrape_do", exc)]
+                )
+                errors.append(
+                    f"scrape_do{'+render' if profile[0] else ''}:{type(exc).__name__}"
+                )
+        _record_scrape_do_failure()
 
     if not prefer_local_solver:
         local_page = await fetch_from_local_solver()
         if local_page is not None:
             return local_page
-
-    remote_attempts: list[dict[str, Any]] = []
-
-    def observe_remote(result: Any, accepted: bool) -> None:
-        remote_attempts.append(
-            _provider_attempt(result, "accepted" if accepted else "rejected")
-        )
-
-    def observe_remote_failure(event: dict[str, Any]) -> None:
-        _merge_failure_attempt(remote_attempts, event)
-
-    try:
-        fallback = await scrape_source_with_options(
-            source,
-            formats=["html"],
-            only_main_content=True,
-            max_age_ms=max_age_ms,
-            wait_ms=wait_ms,
-            timeout_ms=timeout_ms,
-            skip_providers={"scrape_do", "decodo"},
-            accept_result=catalog_result_is_valid,
-            attempt_observer=observe_remote,
-            failure_observer=observe_remote_failure,
-        )
-        attempts.extend(remote_attempts)
-        return _page_with_acquisition(
-            _catalog_page(fallback, expected_url=source.url, marker=marker),
-            attempts,
-        )
-    except Exception as exc:  # noqa: BLE001 - isolated provider boundary
-        attempts.extend(remote_attempts or [_failed_attempt("remote_fallback", exc)])
-        errors.append(f"remote_fallback:{type(exc).__name__}")
     raise RuntimeError("HSGuru deck catalog fetch failed: " + ", ".join(errors))
+
+
+async def _fetch_catalog_page_with_backoff(
+    source: Source,
+    **options: Any,
+) -> _CatalogPage:
+    """Fetch within the shared page slots; a failed page waits, then retries.
+
+    The slot is released during the pause, so other pages keep going.
+    """
+    for delay in (*_PAGE_RETRY_DELAYS_SECONDS, None):
+        try:
+            async with _slots("catalog", hsguru_deck_catalog_concurrency()):
+                return await _fetch_catalog_page(source, **options)
+        except Exception:
+            if delay is None:
+                raise
+        await asyncio.sleep(delay)
+    raise AssertionError("unreachable")
 
 
 def parse_hsguru_decks_html(
@@ -1099,17 +1115,16 @@ async def _fetch_catalog_chunk(
         site="hsguru",
         category="deck_catalog",
     )
-    async with _slots("catalog", hsguru_deck_catalog_concurrency()):
-        page = await _fetch_catalog_page(
-            source,
-            max_age_ms=_CACHE_TTL_SECONDS * 1_000,
-            wait_ms=3_000,
-            timeout_ms=_CATALOG_PAGE_TIMEOUT_MS,
-            # This scheduled fan-out spans hundreds of archetypes per window.
-            # Scrape.do runs it in parallel; the single local browser is the
-            # fallback (or goes first with HS_HSGURU_DECK_CATALOG_LOCAL_FIRST).
-            prefer_local_solver=hsguru_deck_catalog_local_first(),
-        )
+    page = await _fetch_catalog_page_with_backoff(
+        source,
+        max_age_ms=_CACHE_TTL_SECONDS * 1_000,
+        wait_ms=3_000,
+        timeout_ms=_CATALOG_PAGE_TIMEOUT_MS,
+        # This scheduled fan-out spans hundreds of archetypes per window.
+        # Scrape.do runs it in parallel; the single local browser is the
+        # fallback (or goes first with HS_HSGURU_DECK_CATALOG_LOCAL_FIRST).
+        prefer_local_solver=hsguru_deck_catalog_local_first(),
+    )
 
     def parse(candidate: _CatalogPage) -> list[dict[str, Any]]:
         return parse_hsguru_decks_html(
@@ -1130,13 +1145,12 @@ async def _fetch_catalog_chunk(
         # The local browser can hand over deck cards before their copy buttons
         # render. One unreadable page used to fail the whole catalog for days;
         # Scrape.do renders that page again instead.
-        async with _slots("catalog", hsguru_deck_catalog_concurrency()):
-            page = await _fetch_catalog_page(
-                source,
-                max_age_ms=0,
-                wait_ms=3_000,
-                timeout_ms=_CATALOG_PAGE_TIMEOUT_MS,
-            )
+        page = await _fetch_catalog_page_with_backoff(
+            source,
+            max_age_ms=0,
+            wait_ms=3_000,
+            timeout_ms=_CATALOG_PAGE_TIMEOUT_MS,
+        )
         rows = parse(page)
         credits += page.request_credits
         attempts.extend(page.acquisition)
@@ -1393,6 +1407,22 @@ def _fallback_windows(period: str) -> tuple[tuple[str, int], ...]:
     )
 
 
+def _replay_windows(period: str) -> tuple[str, ...]:
+    """Replay windows for ``period``: itself, then the release for Bans."""
+    release = _current_deck_period() if period in CATALOG_PERIODS else ""
+    return tuple(dict.fromkeys(window for window in (period, release) if window))
+
+
+def _seconds_since(value: object) -> float | None:
+    try:
+        moment = datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if moment.tzinfo is None:
+        return None
+    return (datetime.now(UTC) - moment.astimezone(UTC)).total_seconds()
+
+
 def parse_hsguru_replays_html(
     page_html: str,
     *,
@@ -1466,15 +1496,15 @@ async def _fetch_replay_decks(
             category="deck_replays",
         )
         try:
-            async with _slots("catalog", hsguru_deck_catalog_concurrency()):
-                page = await _fetch_catalog_page(
-                    source,
-                    max_age_ms=_CACHE_TTL_SECONDS * 1_000,
-                    wait_ms=3_000,
-                    timeout_ms=_CATALOG_PAGE_TIMEOUT_MS,
-                    prefer_local_solver=hsguru_deck_catalog_local_first(),
-                    marker=_REPLAYS_PAGE_MARKER,
-                )
+            page = await _fetch_catalog_page_with_backoff(
+                source,
+                max_age_ms=_CACHE_TTL_SECONDS * 1_000,
+                wait_ms=3_000,
+                timeout_ms=_CATALOG_PAGE_TIMEOUT_MS,
+                prefer_local_solver=hsguru_deck_catalog_local_first(),
+                marker=_REPLAYS_PAGE_MARKER,
+                scrape_do_steps=_REPLAYS_SCRAPE_DO_STEPS,
+            )
         except Exception as exc:  # noqa: BLE001 - one archetype must not stop others
             attempts.append({**_failed_attempt("hsguru", exc), "window": window})
             return [], credits, backends, attempts, type(exc).__name__
@@ -1629,8 +1659,29 @@ async def refresh_hsguru_fallback_deck_catalog(
         if _key(str(row.get("archetype") or "")) in target_keys
         and str(row.get("sample_fallback_for") or "") == period
         and (age := _row_age_seconds(row)) is not None
-        and 0 <= age <= _FALLBACK_REUSE_SECONDS
+        and 0
+        <= age
+        <= (
+            _REPLAY_REUSE_SECONDS
+            if row.get("sample_source") == "replays"
+            else _FALLBACK_REUSE_SECONDS
+        )
     ]
+    previous_payload = (
+        read_json(dataset_path(_catalog_source_id(format_name, "fallback", period)))
+        if previous is not None
+        and previous.collection_version == _CATALOG_COLLECTION_VERSION
+        else None
+    ) or {}
+    previous_checks = previous_payload.get("replay_checks")
+    recent_replay_checks = {
+        _key(str(name)): str(checked_at)
+        for name, checked_at in (
+            previous_checks.items() if isinstance(previous_checks, dict) else []
+        )
+        if (age := _seconds_since(checked_at)) is not None
+        and 0 <= age <= _REPLAY_REUSE_SECONDS
+    }
     reused_keys = {_key(str(row.get("archetype") or "")) for row in reused_rows}
     pending = (
         [name for name in targets if _key(name) not in reused_keys] if windows else []
@@ -1673,9 +1724,11 @@ async def refresh_hsguru_fallback_deck_catalog(
     replay_pending = [
         name
         for name in replay_targets
-        if (key := _key(name)) not in covered and key not in failed_keys
+        if (key := _key(name)) not in covered
+        and key not in failed_keys
+        and key not in recent_replay_checks
     ]
-    replay_windows = (period, *(window for window, _min_games in windows))
+    replay_windows = _replay_windows(period)
     collect(
         replay_pending,
         await asyncio.gather(
@@ -1699,6 +1752,13 @@ async def refresh_hsguru_fallback_deck_catalog(
         for name in replay_targets
         if (key := _key(name)) not in covered_keys and key not in failed_keys
     ]
+    checked_at = datetime.now(UTC).isoformat()
+    asked_keys = {_key(name) for name in replay_pending}
+    replay_checks = {
+        name: recent_replay_checks.get(_key(name), checked_at)
+        for name in zero_sample
+        if _key(name) in recent_replay_checks or _key(name) in asked_keys
+    }
     source_id = _catalog_source_id(format_name, "fallback", period)
     provider_backends = list(dict.fromkeys(backends))
     write_json(
@@ -1740,6 +1800,9 @@ async def refresh_hsguru_fallback_deck_catalog(
             },
             "missing_archetypes": failed,
             "zero_sample_archetypes": zero_sample,
+            # Archetypes whose replays listed no build, and when they were
+            # last asked; they are asked again after _REPLAY_REUSE_SECONDS.
+            "replay_checks": replay_checks,
             "data": merged,
         },
     )
@@ -1788,11 +1851,11 @@ async def refresh_hsguru_deck_catalog(
         site="hsguru",
         category="deck_catalog",
     )
-    page = await _fetch_catalog_page(
+    page = await _fetch_catalog_page_with_backoff(
         source,
         max_age_ms=_CACHE_TTL_SECONDS * 1_000,
         wait_ms=3_000,
-        timeout_ms=25_000,
+        timeout_ms=_CATALOG_PAGE_TIMEOUT_MS,
     )
     rows = parse_hsguru_decks_html(
         page.html,
