@@ -35,7 +35,9 @@ DECLARE
         'bg_minion_stat_summaries', 'bg_minions', 'card_popularity_history', 'decks',
         'fetch_log', 'hearthstone_patches', 'hsguru_archetype_history',
         'hsguru_class_matchups', 'hsguru_mulligan_cards', 'hsguru_stat_runs',
-        'hsguru_stat_snapshots', 'hsguru_stat_targets', 'hsreplay_archetypes'
+        'hsguru_stat_snapshots', 'hsguru_stat_targets', 'hsreplay_archetypes',
+        'hsreplay_mulligan_cards', 'hsreplay_mulligan_decks', 'hsreplay_mulligan_groups',
+        'hsreplay_mulligan_runs', 'hsreplay_mulligan_snapshots', 'hsreplay_mulligan_targets'
     ];
     append_only_tables text[] := ARRAY[
         'archetype_deck_cards', 'archetype_decks', 'archetype_matchups',

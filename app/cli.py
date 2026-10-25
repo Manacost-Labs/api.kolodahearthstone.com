@@ -541,6 +541,30 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Skip this scheduled pipeline when its admin section is disabled.",
     )
     hsguru_mulligan.add_argument("--schedule-id")
+    hsreplay_mulligan = sub.add_parser(
+        "refresh-hsreplay-mulligan",
+        help=(
+            "Read the most overdue HSReplay deck mulligan (v2) slices through Scrape.do "
+            "within the run and UTC-day credit caps."
+        ),
+    )
+    hsreplay_mulligan.add_argument(
+        "--max-requests",
+        type=int,
+        default=None,
+        help="Extra credit cap for this run (on top of HS_HSREPLAY_MULLIGAN_* caps).",
+    )
+    hsreplay_mulligan.add_argument(
+        "--estimate",
+        action="store_true",
+        help="Print the stored deck pool's targets and requests per day; fetch nothing.",
+    )
+    hsreplay_mulligan.add_argument(
+        "--scheduled",
+        action="store_true",
+        help="Skip this scheduled pipeline when its admin section is disabled.",
+    )
+    hsreplay_mulligan.add_argument("--schedule-id")
     hsguru_analysis = sub.add_parser(
         "refresh-hsguru-archetype-analysis",
         help="Refresh Legend class matchups and card stats for active HSGuru archetypes.",
@@ -678,6 +702,7 @@ def main(argv: list[str] | None = None) -> int:
             {"hsguru_archetype_analysis"}
         ),
         "refresh-hsguru-mulligan": frozenset({"hsguru_mulligan"}),
+        "refresh-hsreplay-mulligan": frozenset({"hsreplay_mulligan"}),
         "capture-bg-compositions-screenshot": frozenset(
             {"hsreplay_battlegrounds_compositions_screenshot"}
         ),
@@ -1403,6 +1428,56 @@ def main(argv: list[str] | None = None) -> int:
         if result.get("ok") and result.get("published"):
             return int(ExitCode.OK)
         if args.scheduled and result.get("published"):
+            return int(ExitCode.DEGRADED)
+        return int(ExitCode.ERROR)
+    if args.command == "refresh-hsreplay-mulligan":
+        source_id = "hsreplay_mulligan"
+        if args.estimate:
+            from .db import get_db_connection, init_db
+            from .hsreplay_mulligan import estimate_plan
+            from .hsreplay_mulligan_store import active_decks
+
+            init_db()
+            conn = get_db_connection()
+            try:
+                result = estimate_plan(active_decks(conn))
+            finally:
+                conn.close()
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+        if args.scheduled:
+            from .parser_control import is_source_scheduled_enabled
+
+            if not is_source_scheduled_enabled(source_id):
+                result = _run_pipeline_command_with_telemetry(
+                    source_id,
+                    lambda: {
+                        "ok": True,
+                        "skipped": True,
+                        "reason": "section_disabled",
+                        "source_id": source_id,
+                    },
+                    refresh_window_id=dedicated_refresh_window_id,
+                )
+                print(json.dumps(result, ensure_ascii=False, indent=2))
+                return 0
+        from .hsreplay_mulligan import refresh_hsreplay_mulligan
+
+        result = _run_pipeline_command_with_telemetry(
+            source_id,
+            lambda: asyncio.run(
+                refresh_hsreplay_mulligan(max_requests=args.max_requests)
+            ),
+            diagnostic=args.max_requests is not None,
+            refresh_window_id=dedicated_refresh_window_id,
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        if args.scheduled and result.get("state") == "locked":
+            return int(ExitCode.DEGRADED)
+        if result.get("ok") and result.get("published"):
+            return int(ExitCode.OK)
+        if result.get("published"):
+            # Partial: some slices failed or the premium session is rejected.
             return int(ExitCode.DEGRADED)
         return int(ExitCode.ERROR)
     if args.command == "refresh-hsguru-archetype-analysis":

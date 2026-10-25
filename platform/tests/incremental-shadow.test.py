@@ -68,6 +68,12 @@ PUBLIC_TABLES = (
     "hsguru_stat_snapshots",
     "hsguru_stat_targets",
     "hsreplay_archetypes",
+    "hsreplay_mulligan_cards",
+    "hsreplay_mulligan_decks",
+    "hsreplay_mulligan_groups",
+    "hsreplay_mulligan_runs",
+    "hsreplay_mulligan_snapshots",
+    "hsreplay_mulligan_targets",
 )
 CONTAINER_ID = ""
 

@@ -151,6 +151,11 @@ GraphQL pagination возвращает `items` и `pageInfo`. Максимал�
 | GET | `/v1/hsguru/mulligan/slices` | `archetype` или `deck_id`, `format` | Сохранённые срезы муллигана и матчапов |
 | GET | `/v1/hsguru/mulligan/history` | срез, `kind`, `card`, `limit` | Снимки среза и строка одной карты по времени |
 | GET | `/v1/hsguru/mulligan/coverage` | `runs` | Покрытие сбора, последние запуски и расход Scrape.do |
+| GET | `/v1/hsreplay/mulligan` | `deck` (required), `format`, `rank`, `initiative`, `period`, `opponent_class` | Муллиган HSReplay v2 колоды: % оставляют, винрейт в стартовой руке, при доборе, при розыгрыше, ходов в руке, ход розыгрыша |
+| GET | `/v1/hsreplay/mulligan/decks` | `format`, `rank`, `limit` | Набор колод муллигана HSReplay по формату и рангу |
+| GET | `/v1/hsreplay/mulligan/slices` | `deck` (required), `format` | Срезы одной колоды и их состояние |
+| GET | `/v1/hsreplay/mulligan/history` | срез, `card`, `limit` | Снимки среза и строка одной карты по времени |
+| GET | `/v1/hsreplay/mulligan/coverage` | `runs` | Покрытие, статус премиум-сессии HSReplay, запуски и расход Scrape.do |
 
 ## REST v1 — System
 

@@ -1,0 +1,535 @@
+{
+ "metadata": {
+  "cache_hit": false,
+  "selected_params": {
+   "PlayerInitiative": "COIN",
+   "deck_id": "3051389100",
+   "GameType": "RANKED_STANDARD",
+   "LeagueRankRange": "LEGEND",
+   "TimeRange": "LAST_30_DAYS",
+   "Region": "ALL"
+  },
+  "as_of": {
+   "ALL": {
+    "deck": "2026-10-25T12:41:53Z",
+    "archetype": "2026-10-25T02:48:05Z",
+    "class": "2026-10-25T11:37:22Z"
+   },
+   "OPPONENT_CLASS": {
+    "deck": "2026-10-24T19:26:53Z",
+    "archetype": "2026-10-25T02:48:04Z",
+    "class": "2026-10-25T11:37:22Z"
+   }
+  }
+ },
+ "ALL": {
+  "query_score_scope": "deck",
+  "cards_by_dbf_id": [
+   {
+    "dbf_id": 129793,
+    "opening_hand_winrate": 42.0,
+    "keep_percentage": 100.0,
+    "winrate_when_drawn": 38.46,
+    "winrate_when_played": 39.0,
+    "avg_turns_in_hand": 1.66,
+    "avg_turn_played_on": 4.29
+   },
+   {
+    "dbf_id": 117892,
+    "opening_hand_winrate": 49.95,
+    "keep_percentage": 21.42,
+    "winrate_when_drawn": 45.45,
+    "winrate_when_played": 42.46,
+    "avg_turns_in_hand": 2.9,
+    "avg_turn_played_on": 7.24
+   },
+   {
+    "dbf_id": 126477,
+    "opening_hand_winrate": 42.0,
+    "keep_percentage": 97.36,
+    "winrate_when_drawn": 47.29,
+    "winrate_when_played": 44.92,
+    "avg_turns_in_hand": 1.38,
+    "avg_turn_played_on": 5.07
+   },
+   {
+    "dbf_id": 69519,
+    "opening_hand_winrate": 47.17,
+    "keep_percentage": 17.39,
+    "winrate_when_drawn": 48.33,
+    "winrate_when_played": 52.17,
+    "avg_turns_in_hand": 2.98,
+    "avg_turn_played_on": 6.94
+   },
+   {
+    "dbf_id": 127067,
+    "opening_hand_winrate": 72.41,
+    "keep_percentage": 91.3,
+    "winrate_when_drawn": 50.74,
+    "winrate_when_played": 57.4,
+    "avg_turns_in_hand": 1.73,
+    "avg_turn_played_on": 5.11
+   },
+   {
+    "dbf_id": 125917,
+    "opening_hand_winrate": 21.62,
+    "keep_percentage": 66.66,
+    "winrate_when_drawn": 37.5,
+    "winrate_when_played": 38.29,
+    "avg_turns_in_hand": 2.74,
+    "avg_turn_played_on": 6.51
+   },
+   {
+    "dbf_id": 129824,
+    "opening_hand_winrate": 50.42,
+    "keep_percentage": 63.04,
+    "winrate_when_drawn": 52.45,
+    "winrate_when_played": 61.17,
+    "avg_turns_in_hand": 2.64,
+    "avg_turn_played_on": 7.19
+   },
+   {
+    "dbf_id": 133415,
+    "opening_hand_winrate": 37.5,
+    "keep_percentage": 24.32,
+    "winrate_when_drawn": 42.37,
+    "winrate_when_played": 38.98,
+    "avg_turns_in_hand": 3.19,
+    "avg_turn_played_on": 7.3
+   },
+   {
+    "dbf_id": 69735,
+    "opening_hand_winrate": 35.0,
+    "keep_percentage": 20.68,
+    "winrate_when_drawn": 35.29,
+    "winrate_when_played": 37.07,
+    "avg_turns_in_hand": 2.3,
+    "avg_turn_played_on": 6.94
+   },
+   {
+    "dbf_id": 130281,
+    "opening_hand_winrate": 51.21,
+    "keep_percentage": 100.0,
+    "winrate_when_drawn": 46.8,
+    "winrate_when_played": 46.51,
+    "avg_turns_in_hand": 0.63,
+    "avg_turn_played_on": 4.2
+   },
+   {
+    "dbf_id": 126125,
+    "opening_hand_winrate": 47.4,
+    "keep_percentage": 2.88,
+    "winrate_when_drawn": 50.36,
+    "winrate_when_played": 57.35,
+    "avg_turns_in_hand": 3.4,
+    "avg_turn_played_on": 8.44
+   },
+   {
+    "dbf_id": 126128,
+    "opening_hand_winrate": 48.43,
+    "keep_percentage": 0.0,
+    "winrate_when_drawn": 42.47,
+    "winrate_when_played": 48.83,
+    "avg_turns_in_hand": 3.16,
+    "avg_turn_played_on": 8.97
+   },
+   {
+    "dbf_id": 126129,
+    "opening_hand_winrate": 62.5,
+    "keep_percentage": 18.18,
+    "winrate_when_drawn": 47.96,
+    "winrate_when_played": 52.87,
+    "avg_turns_in_hand": 2.97,
+    "avg_turn_played_on": 7.55
+   },
+   {
+    "dbf_id": 132339,
+    "opening_hand_winrate": 47.88,
+    "keep_percentage": 0.89,
+    "winrate_when_drawn": 53.0,
+    "winrate_when_played": 74.12,
+    "avg_turns_in_hand": 3.52,
+    "avg_turn_played_on": 11.15
+   },
+   {
+    "dbf_id": 126135,
+    "opening_hand_winrate": 34.78,
+    "keep_percentage": 34.48,
+    "winrate_when_drawn": 41.53,
+    "winrate_when_played": 41.86,
+    "avg_turns_in_hand": 2.38,
+    "avg_turn_played_on": 6.16
+   },
+   {
+    "dbf_id": 132346,
+    "opening_hand_winrate": 50.0,
+    "keep_percentage": 88.0,
+    "winrate_when_drawn": 39.49,
+    "winrate_when_played": 40.0,
+    "avg_turns_in_hand": 2.04,
+    "avg_turn_played_on": 5.08
+   },
+   {
+    "dbf_id": 132347,
+    "opening_hand_winrate": 45.16,
+    "keep_percentage": 63.33,
+    "winrate_when_drawn": 49.64,
+    "winrate_when_played": 50.4,
+    "avg_turns_in_hand": 1.89,
+    "avg_turn_played_on": 6.27
+   }
+  ],
+  "base_winrate": 44.64,
+  "num_games": 1904,
+  "as_of": "2026-10-25T12:41:53Z",
+  "metadata": {
+   "key": "deck_all_req",
+   "deck_games": 1904,
+   "deck_winrate": 44.64,
+   "archetype_games": 347280,
+   "archetype_winrate": 49.93,
+   "class_games": 1752968,
+   "class_winrate": 48.32
+  }
+ },
+ "MAGE": {
+  "query_score_scope": "archetype",
+  "cards_by_dbf_id": [
+   {
+    "dbf_id": 129793,
+    "opening_hand_winrate": 55.08,
+    "keep_percentage": 97.91,
+    "winrate_when_drawn": 52.59,
+    "winrate_when_played": 52.11,
+    "avg_turns_in_hand": 1.19,
+    "avg_turn_played_on": 4.25
+   },
+   {
+    "dbf_id": 117892,
+    "opening_hand_winrate": 54.16,
+    "keep_percentage": 10.21,
+    "winrate_when_drawn": 54.55,
+    "winrate_when_played": 51.24,
+    "avg_turns_in_hand": 2.45,
+    "avg_turn_played_on": 7.25
+   },
+   {
+    "dbf_id": 126477,
+    "opening_hand_winrate": 56.54,
+    "keep_percentage": 84.41,
+    "winrate_when_drawn": 57.04,
+    "winrate_when_played": 57.74,
+    "avg_turns_in_hand": 1.63,
+    "avg_turn_played_on": 5.15
+   },
+   {
+    "dbf_id": 69519,
+    "opening_hand_winrate": 48.17,
+    "keep_percentage": 9.66,
+    "winrate_when_drawn": 53.64,
+    "winrate_when_played": 53.07,
+    "avg_turns_in_hand": 2.95,
+    "avg_turn_played_on": 7.9
+   },
+   {
+    "dbf_id": 127067,
+    "opening_hand_winrate": 56.93,
+    "keep_percentage": 90.08,
+    "winrate_when_drawn": 54.75,
+    "winrate_when_played": 56.83,
+    "avg_turns_in_hand": 1.74,
+    "avg_turn_played_on": 5.16
+   },
+   {
+    "dbf_id": 125917,
+    "opening_hand_winrate": 51.7,
+    "keep_percentage": 61.08,
+    "winrate_when_drawn": 53.08,
+    "winrate_when_played": 51.16,
+    "avg_turns_in_hand": 2.35,
+    "avg_turn_played_on": 6.21
+   },
+   {
+    "dbf_id": 129824,
+    "opening_hand_winrate": 52.63,
+    "keep_percentage": 23.07,
+    "winrate_when_drawn": 54.73,
+    "winrate_when_played": 59.41,
+    "avg_turns_in_hand": 2.64,
+    "avg_turn_played_on": 7.27
+   },
+   {
+    "dbf_id": 133415,
+    "opening_hand_winrate": 53.44,
+    "keep_percentage": 26.71,
+    "winrate_when_drawn": 55.31,
+    "winrate_when_played": 51.11,
+    "avg_turns_in_hand": 3.21,
+    "avg_turn_played_on": 7.52
+   },
+   {
+    "dbf_id": 69735,
+    "opening_hand_winrate": 50.39,
+    "keep_percentage": 18.35,
+    "winrate_when_drawn": 52.61,
+    "winrate_when_played": 48.33,
+    "avg_turns_in_hand": 2.4,
+    "avg_turn_played_on": 6.99
+   },
+   {
+    "dbf_id": 130281,
+    "opening_hand_winrate": 58.02,
+    "keep_percentage": 98.47,
+    "winrate_when_drawn": 54.57,
+    "winrate_when_played": 54.56,
+    "avg_turns_in_hand": 0.55,
+    "avg_turn_played_on": 3.96
+   },
+   {
+    "dbf_id": 126125,
+    "opening_hand_winrate": 46.83,
+    "keep_percentage": 2.67,
+    "winrate_when_drawn": 53.63,
+    "winrate_when_played": 54.54,
+    "avg_turns_in_hand": 3.59,
+    "avg_turn_played_on": 8.32
+   },
+   {
+    "dbf_id": 126128,
+    "opening_hand_winrate": 52.54,
+    "keep_percentage": 1.78,
+    "winrate_when_drawn": 54.05,
+    "winrate_when_played": 53.18,
+    "avg_turns_in_hand": 3.42,
+    "avg_turn_played_on": 9.29
+   },
+   {
+    "dbf_id": 126129,
+    "opening_hand_winrate": 52.25,
+    "keep_percentage": 19.0,
+    "winrate_when_drawn": 55.7,
+    "winrate_when_played": 58.87,
+    "avg_turns_in_hand": 2.57,
+    "avg_turn_played_on": 6.93
+   },
+   {
+    "dbf_id": 132339,
+    "opening_hand_winrate": 56.97,
+    "keep_percentage": 3.6,
+    "winrate_when_drawn": 52.24,
+    "winrate_when_played": 70.45,
+    "avg_turns_in_hand": 3.84,
+    "avg_turn_played_on": 11.39
+   },
+   {
+    "dbf_id": 126135,
+    "opening_hand_winrate": 50.0,
+    "keep_percentage": 40.93,
+    "winrate_when_drawn": 53.62,
+    "winrate_when_played": 50.96,
+    "avg_turns_in_hand": 2.2,
+    "avg_turn_played_on": 6.09
+   },
+   {
+    "dbf_id": 132346,
+    "opening_hand_winrate": 53.61,
+    "keep_percentage": 86.48,
+    "winrate_when_drawn": 52.12,
+    "winrate_when_played": 52.8,
+    "avg_turns_in_hand": 2.01,
+    "avg_turn_played_on": 4.6
+   },
+   {
+    "dbf_id": 132347,
+    "opening_hand_winrate": 51.36,
+    "keep_percentage": 46.53,
+    "winrate_when_drawn": 52.66,
+    "winrate_when_played": 52.5,
+    "avg_turns_in_hand": 1.77,
+    "avg_turn_played_on": 5.94
+   }
+  ],
+  "base_winrate": 52.61,
+  "num_games": 18646,
+  "as_of": "2026-10-25T02:48:04Z",
+  "metadata": {
+   "key": "archetype_req_req",
+   "deck_games": 51,
+   "deck_winrate": 33.33,
+   "archetype_games": 18646,
+   "archetype_winrate": 52.61,
+   "class_games": 120026,
+   "class_winrate": 44.54
+  }
+ },
+ "PRIEST": {
+  "query_score_scope": "deck",
+  "cards_by_dbf_id": [
+   {
+    "dbf_id": 129793,
+    "opening_hand_winrate": 54.93,
+    "keep_percentage": 97.55,
+    "winrate_when_drawn": 52.42,
+    "winrate_when_played": 51.9,
+    "avg_turns_in_hand": 1.33,
+    "avg_turn_played_on": 4.6
+   },
+   {
+    "dbf_id": 117892,
+    "opening_hand_winrate": 50.87,
+    "keep_percentage": 10.77,
+    "winrate_when_drawn": 52.42,
+    "winrate_when_played": 49.19,
+    "avg_turns_in_hand": 2.91,
+    "avg_turn_played_on": 7.35
+   },
+   {
+    "dbf_id": 126477,
+    "opening_hand_winrate": 59.28,
+    "keep_percentage": 89.26,
+    "winrate_when_drawn": 55.07,
+    "winrate_when_played": 55.75,
+    "avg_turns_in_hand": 1.45,
+    "avg_turn_played_on": 5.44
+   },
+   {
+    "dbf_id": 69519,
+    "opening_hand_winrate": 41.39,
+    "keep_percentage": 7.22,
+    "winrate_when_drawn": 51.14,
+    "winrate_when_played": 51.09,
+    "avg_turns_in_hand": 3.44,
+    "avg_turn_played_on": 8.35
+   },
+   {
+    "dbf_id": 127067,
+    "opening_hand_winrate": 59.28,
+    "keep_percentage": 100.0,
+    "winrate_when_drawn": 54.61,
+    "winrate_when_played": 54.95,
+    "avg_turns_in_hand": 1.47,
+    "avg_turn_played_on": 5.23
+   },
+   {
+    "dbf_id": 125917,
+    "opening_hand_winrate": 46.93,
+    "keep_percentage": 44.68,
+    "winrate_when_drawn": 49.07,
+    "winrate_when_played": 46.46,
+    "avg_turns_in_hand": 2.56,
+    "avg_turn_played_on": 6.95
+   },
+   {
+    "dbf_id": 129824,
+    "opening_hand_winrate": 53.92,
+    "keep_percentage": 44.4,
+    "winrate_when_drawn": 51.5,
+    "winrate_when_played": 53.73,
+    "avg_turns_in_hand": 2.44,
+    "avg_turn_played_on": 7.27
+   },
+   {
+    "dbf_id": 133415,
+    "opening_hand_winrate": 46.62,
+    "keep_percentage": 8.17,
+    "winrate_when_drawn": 47.52,
+    "winrate_when_played": 40.88,
+    "avg_turns_in_hand": 3.38,
+    "avg_turn_played_on": 8.45
+   },
+   {
+    "dbf_id": 69735,
+    "opening_hand_winrate": 47.79,
+    "keep_percentage": 5.81,
+    "winrate_when_drawn": 50.06,
+    "winrate_when_played": 48.82,
+    "avg_turns_in_hand": 2.51,
+    "avg_turn_played_on": 7.37
+   },
+   {
+    "dbf_id": 130281,
+    "opening_hand_winrate": 56.96,
+    "keep_percentage": 100.0,
+    "winrate_when_drawn": 54.14,
+    "winrate_when_played": 54.44,
+    "avg_turns_in_hand": 0.6,
+    "avg_turn_played_on": 4.28
+   },
+   {
+    "dbf_id": 126125,
+    "opening_hand_winrate": 54.59,
+    "keep_percentage": 0.59,
+    "winrate_when_drawn": 52.99,
+    "winrate_when_played": 52.43,
+    "avg_turns_in_hand": 3.69,
+    "avg_turn_played_on": 8.62
+   },
+   {
+    "dbf_id": 126128,
+    "opening_hand_winrate": 51.83,
+    "keep_percentage": 0.64,
+    "winrate_when_drawn": 49.62,
+    "winrate_when_played": 35.47,
+    "avg_turns_in_hand": 4.12,
+    "avg_turn_played_on": 10.68
+   },
+   {
+    "dbf_id": 126129,
+    "opening_hand_winrate": 51.19,
+    "keep_percentage": 18.16,
+    "winrate_when_drawn": 50.91,
+    "winrate_when_played": 53.19,
+    "avg_turns_in_hand": 2.7,
+    "avg_turn_played_on": 7.63
+   },
+   {
+    "dbf_id": 132339,
+    "opening_hand_winrate": 53.81,
+    "keep_percentage": 6.76,
+    "winrate_when_drawn": 55.07,
+    "winrate_when_played": 69.87,
+    "avg_turns_in_hand": 3.95,
+    "avg_turn_played_on": 11.45
+   },
+   {
+    "dbf_id": 126135,
+    "opening_hand_winrate": 44.21,
+    "keep_percentage": 33.57,
+    "winrate_when_drawn": 48.01,
+    "winrate_when_played": 45.63,
+    "avg_turns_in_hand": 2.46,
+    "avg_turn_played_on": 6.81
+   },
+   {
+    "dbf_id": 132346,
+    "opening_hand_winrate": 56.11,
+    "keep_percentage": 92.35,
+    "winrate_when_drawn": 54.24,
+    "winrate_when_played": 69.87,
+    "avg_turns_in_hand": 1.97,
+    "avg_turn_played_on": 4.9
+   },
+   {
+    "dbf_id": 132347,
+    "opening_hand_winrate": 50.2,
+    "keep_percentage": 45.69,
+    "winrate_when_drawn": 52.48,
+    "winrate_when_played": 52.17,
+    "avg_turns_in_hand": 1.9,
+    "avg_turn_played_on": 6.4
+   }
+  ],
+  "base_winrate": 27.59,
+  "num_games": 493,
+  "as_of": "2026-10-24T19:26:53Z",
+  "metadata": {
+   "key": "deck_req_req",
+   "deck_games": 493,
+   "deck_winrate": 27.59,
+   "archetype_games": 54168,
+   "archetype_winrate": 53.35,
+   "class_games": 313068,
+   "class_winrate": 59.46
+  }
+ }
+}

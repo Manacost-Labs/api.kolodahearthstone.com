@@ -32,6 +32,7 @@ to the new hostname first and adopt GraphQL separately.
 | `battlegroundMinionStats` | Full HSReplay statistics of one minion (`minion`: dbf or card id; `mmrPercentile`, `timeRange`, `compositionId`): normal/golden totals, per-round arrays, board positions, copy purchase rates and medians; JSON with the same shape as REST `/v1/battlegrounds/minions/{minion}/stats` |
 | `hsguruMulligan` | HSGuru mulligan guide of an archetype (`archetype` + `format`) or deck (`deckId`) for `rank`, `period` (`current` allowed), `coin`, `opponentClass`; optional `minMullCount`/`minDrawnCount`. JSON with the same shape as REST `/v1/hsguru/mulligan` `data` |
 | `hsguruClassMatchups` | HSGuru winrate of an archetype or deck against each class with the Total row; same shape as REST `/v1/hsguru/class-matchups` `data` |
+| `hsreplayMulligan` | HSReplay mulligan v2 of one deck slice: `deck` (HSReplay shortid), `format`, `rank` (`legend`, `diamond_4to1`, `diamond`, `bronze_gold`), `initiative` (`all`, `first`, `coin`), `period` (`last_30_days`, `current_patch`, `current_expansion`), `opponentClass`. JSON with the same shape as REST `/v1/hsreplay/mulligan` `data` (`source: "hsreplay"`); `null` when not collected; error `PREMIUM_SESSION_UNAVAILABLE` (with `extensions.premiumSession`) when a premium slice cannot be served because the HSReplay session is rejected |
 | `sources` | Integrated sources and their last update state |
 | `search` | One search across cards, minions, heroes, archetypes and sources |
 | `datasets` | Latest imported version and payload size for each source |
