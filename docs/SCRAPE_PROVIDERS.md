@@ -232,6 +232,9 @@ Radars требует отдельные номера отчёта и radar-вы
 | `HS_PARSESUNIX_MAX_BODY_BYTES` | Максимальный размер одного ответа, `1..32 MiB`, default `8 MiB`; превышение считается неполным ответом, а не успехом. |
 | `HS_PARSESUNIX_SCRAPE_DO_DAILY_CREDIT_LIMIT` | Долговечный UTC-day лимит Scrape.do credits нового ядра; default `0`, то есть платные вызовы запрещены. |
 | `HS_PARSESUNIX_SCRAPE_DO_MAX_REQUESTS_PER_REFRESH` | Атомарный лимит реальных Scrape.do-вызовов одного refresh; default `0`. Вне контекста refresh вызов запрещён. |
+| `HS_HSGURU_DECK_CATALOG_CONCURRENCY` | Сколько страниц ночных каталогов колод HSGuru качается параллельно; default `15` (1–50). Это доля общего лимита аккаунта Scrape.do, который делится с meta-matrix (5) и муллиганом. |
+| `HS_HSGURU_DECK_CATALOG_LOCAL_CONCURRENCY` | Параллельные страницы колод через локальный FlareSolverr (fallback); default `2` (1–10). |
+| `HS_HSGURU_DECK_CATALOG_LOCAL_FIRST` | `1` — сначала бесплатный локальный FlareSolverr, потом Scrape.do (прежний порядок); default `0` — сначала Scrape.do. |
 | `HS_PARSESUNIX_SCRAPE_DO_STRATEGIES` | Разрешённые стратегии Scrape.do; default `normal` (1 credit). `render`, `super`, `super_render` требуют явного добавления. |
 | `HS_HSREPLAY_JSON_CHANNELS` | Каскад HSReplay JSON; default `flaresolverr,scrape_do,curl_cffi`: бесплатный локальный solver, затем оплаченная подписка Scrape.do, затем residential `curl_cffi`. Предпочтения контракта идут первыми, затем добавляются настроенные каналы без дублей. |
 | `HS_HSREPLAY_SCRAPE_DO_MAX_REQUESTS` | Атомарный лимит зарезервированных HSReplay JSON-вызовов Scrape.do на refresh, default `120`. Этого достаточно для текущего полного набора архетипов с запасом. |

@@ -16,6 +16,9 @@ from bs4 import BeautifulSoup
 from .config import (
     flaresolverr_hsguru_decks_wait_ms,
     hsguru_current_patch_period,
+    hsguru_deck_catalog_concurrency,
+    hsguru_deck_catalog_local_concurrency,
+    hsguru_deck_catalog_local_first,
 )
 from .deck_decode import first_deck_code_from_text
 from .firecrawl_backend import scrape_source_with_options
@@ -33,19 +36,19 @@ _ALL_CATALOG_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
 # follow the growing window instead of waiting for the seven-day expiry.
 _ALL_CATALOG_REFRESH_SECONDS = 20 * 60 * 60
 _ALL_CATALOG_BATCH_SIZE = 20
-_ALL_CATALOG_BATCH_CONCURRENCY = 2
-# Exact one-archetype retries run on the free local browser first; the cap
-# covers a whole catalog's builds-less archetypes in one night.
-_ALL_CATALOG_EXACT_RETRY_LIMIT = 200
-# HSGuru lists no build below 50 games, whatever ``min_games`` asks for, and
-# caps one page at 200 builds without pagination. An archetype below 50 games
-# therefore never has a build to fetch.
+# HSGuru lists no build below 50 games, whatever ``min_games`` asks for (also
+# when logged in), and caps one page at 200 builds without pagination. An
+# archetype below 50 games therefore never has a build to fetch.
 DECK_MIN_GAMES = 50
 _PAGE_LIMIT = 200
 # A shared page that reaches its limit was crowded by prolific archetypes; each
 # of its archetypes is then asked for on its own page with the full limit.
-_CROWDED_SPLIT_MIN_GAMES = 10
 _CROWDED_SPLIT_LIMIT = _PAGE_LIMIT
+# A 200-build page is about 7.5 MB; Scrape.do answered 502 at the former 25 s.
+_CATALOG_PAGE_TIMEOUT_MS = 90_000
+# Bumped whenever the collection rules change, so catalogs written under the
+# old rules are re-read in full instead of being extended incrementally.
+_CATALOG_COLLECTION_VERSION = 2
 # Windows published as their own archetype catalog next to the current one
 # (HSGuru's Bans window). Their builds live in period-suffixed catalogs.
 CATALOG_PERIODS = ("black_empire_ban",)
@@ -53,8 +56,7 @@ CATALOG_PERIODS = ("black_empire_ban",)
 # in the current window. Their builds come from these wider windows, tried in
 # order, and every row keeps the window it was sampled from.
 _FALLBACK_DECK_WINDOWS: tuple[tuple[str, int], ...] = (
-    ("past_30_days", 10),
-    ("past_30_days", 1),
+    ("past_30_days", DECK_MIN_GAMES),
 )
 _FALLBACK_REUSE_SECONDS = 20 * 60 * 60
 _ALLOWED_HSGURU_HOSTS = frozenset({"hsguru.com", "www.hsguru.com"})
@@ -68,7 +70,8 @@ _HSGURU_SEMANTIC_QUERY_KEYS = frozenset(
         "player_deck_archetype[]",
     }
 )
-_SCRAPE_DO_CIRCUIT_THRESHOLD = 2
+# Consecutive failures before Scrape.do rests; concurrent pages fail together.
+_SCRAPE_DO_CIRCUIT_THRESHOLD = 5
 _SCRAPE_DO_CIRCUIT_SECONDS = 5 * 60
 _DECK_CARD_MARKER = re.compile(r"id=[\"']deck_stats-")
 _HSGURU_EMPTY_CATALOG_PATTERN = re.compile(
@@ -78,6 +81,7 @@ _HSGURU_EMPTY_CATALOG_PATTERN = re.compile(
 _cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 _inflight: dict[str, asyncio.Task[list[dict[str, Any]]]] = {}
 _inflight_lock = asyncio.Lock()
+_page_slots: dict[str, tuple[asyncio.AbstractEventLoop, asyncio.Semaphore]] = {}
 _catalog_memory: dict[tuple[str, str, str], tuple[int, _CatalogSnapshot | None]] = {}
 _matrix_period_memory: tuple[str, str, str] | None = None
 _scrape_do_failures = 0
@@ -115,6 +119,7 @@ class _CatalogSnapshot:
     provider_backends: tuple[str, ...]
     missing_archetypes: tuple[str, ...] = ()
     zero_sample_archetypes: tuple[str, ...] = ()
+    collection_version: int = 0
 
 
 class HSGuruCatalogPartial(RuntimeError):
@@ -407,11 +412,22 @@ def _page_with_acquisition(
     )
 
 
+def _slots(name: str, size: int) -> asyncio.Semaphore:
+    """Per-event-loop page slots shared by every concurrent catalog fetch."""
+    loop = asyncio.get_running_loop()
+    current = _page_slots.get(name)
+    if current is None or current[0] is not loop:
+        current = (loop, asyncio.Semaphore(size))
+        _page_slots[name] = current
+    return current[1]
+
+
 def reset_hsguru_catalog_provider_state() -> None:
     """Close the short-lived provider circuit at the start of a scheduled run."""
     global _scrape_do_failures, _scrape_do_open_until
     _scrape_do_failures = 0
     _scrape_do_open_until = 0.0
+    _page_slots.clear()
 
 
 def _scrape_do_circuit_open() -> bool:
@@ -449,10 +465,11 @@ async def _fetch_catalog_page(
     async def fetch_from_local_solver() -> _CatalogPage | None:
         solver_result: Any | None = None
         try:
-            solver_result = await fetch_via_flaresolverr(
-                source,
-                wait_ms=flaresolverr_hsguru_decks_wait_ms(),
-            )
+            async with _slots("local", hsguru_deck_catalog_local_concurrency()):
+                solver_result = await fetch_via_flaresolverr(
+                    source,
+                    wait_ms=flaresolverr_hsguru_decks_wait_ms(),
+                )
             page = _catalog_page(solver_result, expected_url=source.url)
             attempts.append(_provider_attempt(solver_result, "accepted"))
             return _page_with_acquisition(page, attempts)
@@ -762,6 +779,7 @@ def _catalog_snapshot(
                     )
                     if str(name).strip()
                 ),
+                collection_version=int(payload.get("collection_version") or 0),
             )
     except (OSError, ValueError, TypeError):
         return None
@@ -770,6 +788,8 @@ def _catalog_snapshot(
 
 
 def _snapshot_needs_full_refresh(snapshot: _CatalogSnapshot) -> bool:
+    if snapshot.collection_version != _CATALOG_COLLECTION_VERSION:
+        return True
     try:
         fetched_at = datetime.fromisoformat(snapshot.fetched_at.replace("Z", "+00:00"))
     except ValueError:
@@ -1019,8 +1039,8 @@ async def _fetch_catalog_chunk(
     *,
     batch_number: int,
     period: str,
-    min_games: int = 100,
-    limit: int = 200,
+    min_games: int = DECK_MIN_GAMES,
+    limit: int = _PAGE_LIMIT,
 ) -> tuple[list[dict[str, Any]], int, str, list[dict[str, Any]]]:
     format_id = 2 if format_name == "standard" else 1
     params: list[tuple[str, object]] = [
@@ -1037,17 +1057,17 @@ async def _fetch_catalog_chunk(
         site="hsguru",
         category="deck_catalog",
     )
-    page = await _fetch_catalog_page(
-        source,
-        max_age_ms=_CACHE_TTL_SECONDS * 1_000,
-        wait_ms=3_000,
-        timeout_ms=25_000,
-        # This scheduled fan-out spans hundreds of patch archetypes. The
-        # local browser is materially faster and free; subscribed Scrape.do
-        # remains the immediate fallback when the solver cannot validate a
-        # page. Interactive/exact requests keep the remote-first policy.
-        prefer_local_solver=True,
-    )
+    async with _slots("catalog", hsguru_deck_catalog_concurrency()):
+        page = await _fetch_catalog_page(
+            source,
+            max_age_ms=_CACHE_TTL_SECONDS * 1_000,
+            wait_ms=3_000,
+            timeout_ms=_CATALOG_PAGE_TIMEOUT_MS,
+            # This scheduled fan-out spans hundreds of archetypes per window.
+            # Scrape.do runs it in parallel; the single local browser is the
+            # fallback (or goes first with HS_HSGURU_DECK_CATALOG_LOCAL_FIRST).
+            prefer_local_solver=hsguru_deck_catalog_local_first(),
+        )
     def parse(candidate: _CatalogPage) -> list[dict[str, Any]]:
         return parse_hsguru_decks_html(
             candidate.html,
@@ -1067,12 +1087,13 @@ async def _fetch_catalog_chunk(
         # The local browser can hand over deck cards before their copy buttons
         # render. One unreadable page used to fail the whole catalog for days;
         # Scrape.do renders that page again instead.
-        page = await _fetch_catalog_page(
-            source,
-            max_age_ms=0,
-            wait_ms=3_000,
-            timeout_ms=25_000,
-        )
+        async with _slots("catalog", hsguru_deck_catalog_concurrency()):
+            page = await _fetch_catalog_page(
+                source,
+                max_age_ms=0,
+                wait_ms=3_000,
+                timeout_ms=_CATALOG_PAGE_TIMEOUT_MS,
+            )
         rows = parse(page)
         credits += page.request_credits
         attempts.extend(page.acquisition)
@@ -1088,20 +1109,20 @@ async def _fetch_catalog_chunk(
         for attempt in attempts
     ]
     if len(archetypes) > 1 and len(rows) >= limit:
-        for name in archetypes:
-            (
-                single_rows,
-                single_credits,
-                _,
-                single_attempts,
-            ) = await _fetch_catalog_chunk(
-                format_name,
-                [name],
-                batch_number=batch_number,
-                period=period,
-                min_games=_CROWDED_SPLIT_MIN_GAMES,
-                limit=_CROWDED_SPLIT_LIMIT,
+        singles = await asyncio.gather(
+            *(
+                _fetch_catalog_chunk(
+                    format_name,
+                    [name],
+                    batch_number=batch_number,
+                    period=period,
+                    min_games=min_games,
+                    limit=_CROWDED_SPLIT_LIMIT,
+                )
+                for name in archetypes
             )
+        )
+        for single_rows, single_credits, _, single_attempts in singles:
             rows.extend(single_rows)
             credits += single_credits
             acquisition.extend(single_attempts)
@@ -1114,35 +1135,32 @@ async def _fetch_catalog_chunks(
     *,
     period: str,
     size: int = _ALL_CATALOG_BATCH_SIZE,
-    min_games: int = 100,
-    limit: int = 200,
+    min_games: int = DECK_MIN_GAMES,
+    limit: int = _PAGE_LIMIT,
 ) -> tuple[list[dict[str, Any]], int, list[str], list[dict[str, Any]]]:
-    chunks = _catalog_chunks(archetypes, size)
+    # Every chunk starts at once; the shared page slots bound the parallelism.
+    results = await asyncio.gather(
+        *(
+            _fetch_catalog_chunk(
+                format_name,
+                chunk,
+                batch_number=index + 1,
+                period=period,
+                min_games=min_games,
+                limit=limit,
+            )
+            for index, chunk in enumerate(_catalog_chunks(archetypes, size))
+        )
+    )
     rows: list[dict[str, Any]] = []
     credits = 0
     backends: list[str] = []
     attempts: list[dict[str, Any]] = []
-    for offset in range(0, len(chunks), _ALL_CATALOG_BATCH_CONCURRENCY):
-        results = await asyncio.gather(
-            *(
-                _fetch_catalog_chunk(
-                    format_name,
-                    chunk,
-                    batch_number=offset + index + 1,
-                    period=period,
-                    min_games=min_games,
-                    limit=limit,
-                )
-                for index, chunk in enumerate(
-                    chunks[offset : offset + _ALL_CATALOG_BATCH_CONCURRENCY]
-                )
-            )
-        )
-        for batch_rows, batch_credits, batch_backend, batch_attempts in results:
-            rows.extend(batch_rows)
-            credits += batch_credits
-            backends.append(batch_backend)
-            attempts.extend(batch_attempts)
+    for batch_rows, batch_credits, batch_backend, batch_attempts in results:
+        rows.extend(batch_rows)
+        credits += batch_credits
+        backends.append(batch_backend)
+        attempts.extend(batch_attempts)
     return rows, credits, backends, attempts
 
 
@@ -1206,6 +1224,7 @@ def _write_catalog(
         dataset_path(source_id),
         {
             "source_id": source_id,
+            "collection_version": _CATALOG_COLLECTION_VERSION,
             "state": "ok" if not missing_archetypes else "partial",
             "sample_state": sample_state,
             "fetched_at": fetched_at,
@@ -1244,6 +1263,13 @@ async def _refresh_all_rank_catalog(
     *,
     period: str | None = None,
 ) -> list[dict[str, Any]]:
+    """Fetch every builds page an archetype of ``period`` can have.
+
+    Chunk pages and single-archetype pages ask for HSGuru's 50-game deck
+    floor, so one pass answers every target: a target without a row after it
+    has no build HSGuru lists and is recorded as zero-sample. A snapshot older
+    than a day, or written under older collection rules, is re-read in full.
+    """
     period = period or _current_deck_period()
     existing_rows = _catalog_rows(
         format_name,
@@ -1280,116 +1306,17 @@ async def _refresh_all_rank_catalog(
         missing,
         period=period,
     )
-    acquired_rows = list(batch_rows)
     merged = _merge_catalog_rows(existing_rows, batch_rows)
+    if not merged:
+        raise RuntimeError(f"HSGuru {format_name} all-rank catalog is empty")
     merged_keys = {
         _key(str(row.get("archetype") or row.get("title") or ""))
         for row in merged
         if isinstance(row, dict)
     }
-    unresolved = [name for name in targets if _key(name) not in merged_keys]
-    previous_missing_keys = (
-        {_key(name) for name in snapshot.missing_archetypes}
-        if snapshot is not None
-        else set()
-    )
-    previous_zero_keys = (
-        {_key(name) for name in snapshot.zero_sample_archetypes}
-        if snapshot is not None
-        else set()
-    )
-    unresolved_by_key = {_key(name): name for name in unresolved}
-
-    def queued_targets(names: tuple[str, ...]) -> list[str]:
-        return [
-            unresolved_by_key[key]
-            for name in names
-            if (key := _key(name)) in unresolved_by_key
-        ]
-
-    previous_missing_queue = queued_targets(
-        snapshot.missing_archetypes if snapshot is not None else ()
-    )
-    previous_zero_queue = queued_targets(
-        snapshot.zero_sample_archetypes if snapshot is not None else ()
-    )
-    # First verify targets that did not fit into the previous bounded retry
-    # budget, then newly discovered targets, and only then recheck previously
-    # confirmed zero-sample targets. This prevents the same quiet archetypes
-    # from starving the rest of the catalog every day.
-    retry_targets = list(
-        dict.fromkeys(
-            [
-                *previous_missing_queue,
-                *(
-                    name
-                    for name in unresolved
-                    if _key(name) not in previous_missing_keys | previous_zero_keys
-                ),
-                *previous_zero_queue,
-            ]
-        )
-    )[:_ALL_CATALOG_EXACT_RETRY_LIMIT]
-    if retry_targets:
-        # A prolific archetype can fill a shared 200-row page. Exact one-name
-        # retries guarantee that quieter archetypes are not crowded out.
-        (
-            retry_rows,
-            retry_credits,
-            retry_backends,
-            retry_attempts,
-        ) = await _fetch_catalog_chunks(
-            format_name,
-            retry_targets,
-            period=period,
-            size=1,
-            min_games=10,
-            limit=_PAGE_LIMIT,
-        )
-        credits += retry_credits
-        backends.extend(retry_backends)
-        attempts.extend(retry_attempts)
-        acquired_rows.extend(retry_rows)
-        merged = _merge_catalog_rows(merged, retry_rows)
-        merged_keys = {
-            _key(str(row.get("archetype") or row.get("title") or ""))
-            for row in merged
-            if isinstance(row, dict)
-        }
-        unresolved = [name for name in targets if _key(name) not in merged_keys]
-
-    if not merged:
-        raise RuntimeError(f"HSGuru {format_name} all-rank catalog is empty")
-
-    retried_keys = {_key(name) for name in retry_targets}
-    unresolved_by_key = {_key(name): name for name in unresolved}
-    # Persist zero-sample targets as a rotating queue: entries not checked in
-    # this run stay at the front, while freshly checked entries move to the
-    # back. Even catalogs larger than the retry cap are therefore revisited
-    # completely over successive scheduled runs.
-    zero_sample_archetypes = list(
-        dict.fromkeys(
-            [
-                *(
-                    unresolved_by_key[key]
-                    for name in previous_zero_queue
-                    if (key := _key(name)) in unresolved_by_key
-                    and key not in retried_keys
-                ),
-                *(
-                    unresolved_by_key[key]
-                    for name in retry_targets
-                    if (key := _key(name)) in unresolved_by_key
-                ),
-            ]
-        )
-    )
-    unverified_archetypes = [
-        name
-        for name in unresolved
-        if _key(name) not in retried_keys | previous_zero_keys
+    zero_sample_archetypes = [
+        name for name in targets if _key(name) not in merged_keys
     ]
-
     _write_catalog(
         format_name,
         "all",
@@ -1398,23 +1325,16 @@ async def _refresh_all_rank_catalog(
         credits_used=credits,
         backends=backends,
         attempts=attempts,
-        missing_archetypes=unverified_archetypes,
+        missing_archetypes=[],
         zero_sample_archetypes=zero_sample_archetypes,
         sample_state=_catalog_sample_state(
             merged,
             period,
-            zero_sample_archetypes=(zero_sample_archetypes + unverified_archetypes),
+            zero_sample_archetypes=zero_sample_archetypes,
         ),
         retained_snapshot=snapshot,
-        acquired_rows=len(acquired_rows),
+        acquired_rows=len(batch_rows),
     )
-    if unverified_archetypes:
-        raise HSGuruCatalogPartial(
-            format_name,
-            merged,
-            missing_archetypes=unverified_archetypes,
-            zero_sample_archetypes=zero_sample_archetypes,
-        )
     return merged
 
 
@@ -1523,46 +1443,49 @@ async def refresh_hsguru_fallback_deck_catalog(
         return summary
 
     target_keys = {_key(name) for name in targets}
+    previous = _catalog_snapshot(format_name, "fallback", expected_period=period)
+    reusable = (
+        previous.rows
+        if previous is not None
+        and previous.collection_version == _CATALOG_COLLECTION_VERSION
+        else []
+    )
     reused_rows = [
         row
-        for row in _catalog_rows(format_name, "fallback", expected_period=period)
+        for row in reusable
         if _key(str(row.get("archetype") or "")) in target_keys
         and str(row.get("sample_fallback_for") or "") == period
         and (age := _row_age_seconds(row)) is not None
         and 0 <= age <= _FALLBACK_REUSE_SECONDS
     ]
     reused_keys = {_key(str(row.get("archetype") or "")) for row in reused_rows}
-    pending = [name for name in targets if _key(name) not in reused_keys][
-        :_ALL_CATALOG_EXACT_RETRY_LIMIT
-    ]
+    pending = [name for name in targets if _key(name) not in reused_keys]
 
     rows: list[dict[str, Any]] = []
     credits = 0
     backends: list[str] = []
     attempts: list[dict[str, Any]] = []
     failed: list[str] = []
-    for offset in range(0, len(pending), _ALL_CATALOG_BATCH_CONCURRENCY):
-        group = pending[offset : offset + _ALL_CATALOG_BATCH_CONCURRENCY]
-        results = await asyncio.gather(
-            *(
-                _fetch_fallback_decks(
-                    format_name,
-                    archetype,
-                    batch_number=offset + index + 1,
-                    period=period,
-                    windows=windows,
-                )
-                for index, archetype in enumerate(group)
+    results = await asyncio.gather(
+        *(
+            _fetch_fallback_decks(
+                format_name,
+                archetype,
+                batch_number=index + 1,
+                period=period,
+                windows=windows,
             )
+            for index, archetype in enumerate(pending)
         )
-        for archetype, result in zip(group, results, strict=True):
-            item_rows, item_credits, item_backends, item_attempts, error = result
-            rows.extend(item_rows)
-            credits += item_credits
-            backends.extend(item_backends)
-            attempts.extend(item_attempts)
-            if error is not None:
-                failed.append(archetype)
+    )
+    for archetype, result in zip(pending, results, strict=True):
+        item_rows, item_credits, item_backends, item_attempts, error = result
+        rows.extend(item_rows)
+        credits += item_credits
+        backends.extend(item_backends)
+        attempts.extend(item_attempts)
+        if error is not None:
+            failed.append(archetype)
 
     merged = _merge_catalog_rows(reused_rows, rows)
     covered_keys = {_key(str(row.get("archetype") or "")) for row in merged}
@@ -1585,6 +1508,7 @@ async def refresh_hsguru_fallback_deck_catalog(
         dataset_path(source_id),
         {
             "source_id": source_id,
+            "collection_version": _CATALOG_COLLECTION_VERSION,
             "state": "ok" if not failed else "partial",
             "fetched_at": datetime.now(UTC).isoformat(),
             "backend": (

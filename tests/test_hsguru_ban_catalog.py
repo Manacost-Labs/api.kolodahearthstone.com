@@ -288,6 +288,7 @@ def _snapshot(rows: list[dict], fetched_at: datetime) -> hsguru_decks._CatalogSn
         fetched_at=fetched_at.isoformat(),
         backend="flaresolverr",
         provider_backends=("flaresolverr",),
+        collection_version=hsguru_decks._CATALOG_COLLECTION_VERSION,
     )
 
 
@@ -326,28 +327,94 @@ def test_covered_all_rank_catalog_is_reread_once_it_is_a_day_old() -> None:
     write.assert_not_called()
 
 
-def test_exact_retries_ask_for_the_full_200_build_page() -> None:
-    fetch = AsyncMock(return_value=([], 0, ["flaresolverr"], []))
+def test_catalog_pages_ask_scrape_do_first_for_the_full_50_game_page() -> None:
+    page = hsguru_decks._CatalogPage(html="", backend="scrape_do", request_credits=10)
+    fetch_page = AsyncMock(return_value=page)
     with (
-        patch.object(hsguru_decks, "_catalog_rows", return_value=[]),
-        patch.object(hsguru_decks, "_catalog_snapshot", return_value=None),
-        patch.object(hsguru_decks, "_meta_archetypes", return_value=["Zoolock"]),
-        patch.object(hsguru_decks, "_fetch_catalog_chunks", fetch),
-        patch.object(hsguru_decks, "_write_catalog"),
+        patch.object(hsguru_decks, "_fetch_catalog_page", fetch_page),
+        patch.object(hsguru_decks, "parse_hsguru_decks_html", return_value=[]),
+        patch.object(hsguru_decks, "_validate_parsed_catalog_rows"),
+        patch.object(hsguru_decks, "_canonicalize_catalog_archetypes", AsyncMock()),
     ):
-        try:
-            asyncio.run(
-                hsguru_decks._refresh_all_rank_catalog(
-                    "standard", period="black_empire"
-                )
+        asyncio.run(
+            hsguru_decks._fetch_catalog_chunk(
+                "standard", ["Zoolock", "Egg Paladin"], batch_number=1, period=BAN
             )
-        except RuntimeError:
-            pass
+        )
 
-    exact = fetch.await_args_list[1]
-    assert exact.args[1] == ["Zoolock"]
-    assert exact.kwargs["size"] == 1
-    assert exact.kwargs["limit"] == 200
+    call = fetch_page.await_args
+    assert "min_games=50" in call.args[0].url
+    assert "limit=200" in call.args[0].url
+    assert call.args[0].id == f"hsguru_deck_catalog_standard_all_{BAN}"
+    assert call.kwargs["prefer_local_solver"] is False
+    assert call.kwargs["timeout_ms"] == 90_000
+
+
+def test_catalog_pages_share_the_configured_scrape_do_concurrency(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("HS_HSGURU_DECK_CATALOG_CONCURRENCY", "15")
+    active = 0
+    peak = 0
+
+    async def fetch_page(source, **_kwargs):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        await asyncio.sleep(0.01)
+        active -= 1
+        return hsguru_decks._CatalogPage(
+            html="", backend="scrape_do", request_credits=0
+        )
+
+    hsguru_decks.reset_hsguru_catalog_provider_state()
+    with (
+        patch.object(hsguru_decks, "_fetch_catalog_page", side_effect=fetch_page),
+        patch.object(hsguru_decks, "parse_hsguru_decks_html", return_value=[]),
+        patch.object(hsguru_decks, "_validate_parsed_catalog_rows"),
+    ):
+        asyncio.run(
+            hsguru_decks._fetch_catalog_chunks(
+                "wild",
+                [f"Archetype {index}" for index in range(40)],
+                period=BAN,
+                size=1,
+            )
+        )
+
+    assert peak == 15
+
+
+def test_deck_catalog_concurrency_settings_are_bounded(monkeypatch) -> None:
+    from app import config
+
+    monkeypatch.delenv("HS_HSGURU_DECK_CATALOG_CONCURRENCY", raising=False)
+    monkeypatch.delenv("HS_HSGURU_DECK_CATALOG_LOCAL_FIRST", raising=False)
+    assert config.hsguru_deck_catalog_concurrency() == 15
+    assert config.hsguru_deck_catalog_local_concurrency() == 2
+    assert config.hsguru_deck_catalog_local_first() is False
+    monkeypatch.setenv("HS_HSGURU_DECK_CATALOG_CONCURRENCY", "500")
+    monkeypatch.setenv("HS_HSGURU_DECK_CATALOG_LOCAL_FIRST", "1")
+    assert config.hsguru_deck_catalog_concurrency() == 50
+    assert config.hsguru_deck_catalog_local_first() is True
+
+
+def test_catalog_written_under_older_rules_is_reread_in_full() -> None:
+    old = {"archetype": "Zoolock", "deck_code": "AAECAOld", "games": 60}
+    fresh = {"archetype": "Zoolock", "deck_code": "AAECANew", "games": 90}
+    recent_but_old_rules = hsguru_decks._CatalogSnapshot(
+        rows=[old],
+        period="black_empire",
+        fetched_at=datetime.now(UTC).isoformat(),
+        backend="flaresolverr",
+        provider_backends=("flaresolverr",),
+    )
+    rows, fetch, _write = _run_all_rank(
+        recent_but_old_rules, [old], ["Zoolock"], [fresh]
+    )
+
+    assert fetch.await_args.args[1] == ["Zoolock"]
+    assert rows == [fresh]
 
 
 def test_catalog_job_refreshes_ban_builds_after_the_current_window() -> None:
