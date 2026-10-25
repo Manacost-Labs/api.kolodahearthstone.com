@@ -20,7 +20,6 @@ in parallel, the local FlareSolverr as fallback.
 from __future__ import annotations
 
 import asyncio
-import functools
 import hashlib
 import json
 import logging
@@ -473,16 +472,14 @@ def parse_matchups_page(html: str) -> dict[str, Any]:
     return {"total_games": total_games, "archetypes": archetypes, "cells": cells}
 
 
-@functools.lru_cache(maxsize=8)
-def _parse_cached(html: str) -> dict[str, Any]:
-    return parse_matchups_page(html)
-
-
 def page_is_valid(html: str) -> bool:
-    """Accept a parsed matrix, or HSGuru's statement that no public one exists."""
+    """Accept a parsed matrix, or HSGuru's statement that no public one exists.
+
+    The run parses the page again (~40 ms): no cache keyed by 2 MB pages.
+    """
 
     try:
-        _parse_cached(html)
+        parse_matchups_page(html)
     except PageUnavailable:
         return True
     except Exception:  # noqa: BLE001 - the provider retries a rejected page
@@ -767,7 +764,7 @@ async def _refresh_unlocked(
                 counts["attempted"] += 1
                 try:
                     html, meta = await fetch(url)
-                    parsed = _parse_cached(html)
+                    parsed = parse_matchups_page(html)
                 except PageUnavailable as exc:
                     counts["unavailable"] += 1
                     record_failure(
