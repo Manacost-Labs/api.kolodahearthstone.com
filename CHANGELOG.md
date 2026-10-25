@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- HSGuru mulligan asks Scrape.do for a plain page first: HSGuru serves
+  card-stats and archetype pages as LiveView dead renders, so a request
+  without a browser has the full tables (8 s and 1 credit instead of 54 s
+  and 5 credits). A rejected page still climbs the render and residential
+  profiles; other HSGuru jobs keep their ladder. Concurrency defaults to 40
+  and the timer fires hourly, so the whole plan loads in under an hour and
+  costs about 8,800 credits; keeping it fresh about 1,300 a day.
+
 - HSGuru mulligan reads pages through Scrape.do first, 25 in parallel
   (`HS_HSGURU_MULLIGAN_CONCURRENCY`, up to 50), so the shared server's
   FlareSolverr is only the fallback (`HS_HSGURU_MULLIGAN_TRANSPORT=scrape_do_only`

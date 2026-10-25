@@ -1142,8 +1142,13 @@ def _scrape_sync(
     accept_result: ProviderResultValidator | None = None,
     attempt_observer: ProviderAttemptObserver | None = None,
     failure_observer: ProviderFailureObserver | None = None,
+    scrape_do_profiles: tuple[tuple[bool, bool], ...] | None = None,
 ) -> FirecrawlScrape:
-    """Try cheap HSGuru HTML, Decodo, then paid escalation and reserves."""
+    """Try cheap HSGuru HTML, Decodo, then paid escalation and reserves.
+
+    ``scrape_do_profiles`` replaces the measured HSGuru (render, super) ladder
+    for a caller that knows its pages need less, e.g. no browser at all.
+    """
     with provider_usage.usage_source(source.id):
         return _scrape_cascade(
             source,
@@ -1160,6 +1165,7 @@ def _scrape_sync(
             accept_result=accept_result,
             attempt_observer=attempt_observer,
             failure_observer=failure_observer,
+            scrape_do_profiles=scrape_do_profiles,
         )
 
 
@@ -1179,6 +1185,7 @@ def _scrape_cascade(
     accept_result: ProviderResultValidator | None,
     attempt_observer: ProviderAttemptObserver | None,
     failure_observer: ProviderFailureObserver | None,
+    scrape_do_profiles: tuple[tuple[bool, bool], ...] | None = None,
 ) -> FirecrawlScrape:
     errors: list[str] = []
     skip = frozenset(skip_providers or ())
@@ -1251,7 +1258,9 @@ def _scrape_cascade(
 
     if "scrape_do" not in skip and scrape_do_token():
         phases = (
-            (_HSGURU_SCRAPE_DO_PROFILES[:1], _HSGURU_SCRAPE_DO_PROFILES[1:])
+            (scrape_do_profiles,)
+            if scrape_do_profiles
+            else (_HSGURU_SCRAPE_DO_PROFILES[:1], _HSGURU_SCRAPE_DO_PROFILES[1:])
             if decodo_enabled
             else (None,)
         )
