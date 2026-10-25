@@ -137,6 +137,7 @@ class ParserControlScheduleTest(unittest.TestCase):
                         "app.cli refresh-bg-hero-details",
                         "app.cli refresh-bg-minion-stats",
                         "app.cli refresh-bg-minions-db",
+                        "app.cli refresh-hsguru-mulligan",
                     )
                 ) and " --scheduled" not in line:
                     offenders.append(f"{path.name}: {line}")

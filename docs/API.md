@@ -422,6 +422,31 @@ curl -s "https://api.kolodahearthstone.com/datasets/hsreplay_battlegrounds_comps
   | jq '.data.structured.comps[] | {tier, title, difficulty, core: [.main_cards[].name], when: [.when_to_commit_cards[].name]}'
 ```
 
+## HSGuru Mulligan And Class Matchups
+
+Подробное описание (что отдаёт HSGuru, срезы, очередь обновления, бюджет
+Scrape.do, все параметры и поля): [HSGURU_MULLIGAN.md](HSGURU_MULLIGAN.md).
+
+Источник `hsguru_mulligan` (pipeline). Таймер
+`hs-data-api-docker-refresh-hsguru-mulligan.timer` каждые 3 часа читает самые
+просроченные страницы `/card-stats`, `/archetype/<name>` и `/deck/<id>` для
+архетипов `hsguru_meta_matrix` и колод каталогов HSGuru. Сначала через
+бесплатный FlareSolverr, затем — через Scrape.do в пределах лимита кредитов.
+
+| Endpoint | Что возвращает |
+| --- | --- |
+| `GET /v1/hsguru/mulligan` | Муллиган одного среза: `rows[]` с `card_id`, `dbf_id`, `card_name`, `mulligan_impact/count`, `drawn_impact/count`, `not_drawn_impact/count`, `kept_impact/count`; `games`, `changed_at`, `checked_at`, `stale` |
+| `GET /v1/hsguru/class-matchups` | `rows[]` с `opponent_class`, `winrate`, `games`, `share_pct`; итог в `games`/`winrate` |
+| `GET /v1/hsguru/mulligan/slices` | Какие срезы сохранены у архетипа или колоды |
+| `GET /v1/hsguru/mulligan/history` | Снимки среза; с `card` — строка карты в каждом снимке |
+| `GET /v1/hsguru/mulligan/coverage` | Покрытие и последние запуски с расходом Scrape.do (без кэша) |
+
+Срез: ровно один из `archetype` (с `format`) или `deck_id`; `rank` (`all`,
+`diamond_4to1`, `diamond_to_legend`, `legend`, `top_5k`, `top_legend`),
+`period` (период HSGuru, включая `*_ban`, или `current`), `coin`
+(`any_player`, `on_coin`, `going_first`), `opponent_class` (`any` или класс
+заглавными буквами). Несобранный срез — `404`.
+
 ## HSReplay Archetype Database
 
 Полная архитектура и эксплуатация описаны в
@@ -1008,6 +1033,8 @@ Query parameters:
 - `hsguru_matchups_legend`
 - `hsguru_matchups_wild_legend`
 - `hsguru_matchups_diamond_4to1`
+- `hsguru_archetype_analysis`
+- `hsguru_mulligan`
 
 ### HSReplay
 
