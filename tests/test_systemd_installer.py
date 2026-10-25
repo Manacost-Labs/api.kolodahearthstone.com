@@ -356,3 +356,55 @@ def test_docker_systemd_installer_keeps_deliberately_disabled_timers(
     ).read_text(encoding="utf-8")
     assert "enable --now hs-data-api-docker-freshness-check.timer" in calls
     assert oct((staged_systemd / disabled).stat().st_mode & 0o777) == "0o644"
+
+
+def test_job_units_remove_their_container_on_stop_and_timeout(tmp_path: Path) -> None:
+    """`systemctl stop` killed only the compose CLI; the job container ran on.
+
+    Regression (2026-10-25): orphaned deck-catalog and mulligan containers of
+    old revisions kept running for over an hour, overwrote a new dataset and
+    held a resource lock.
+    """
+
+    staged_systemd = tmp_path / "systemd"
+    fake_systemctl = tmp_path / "systemctl"
+    fake_systemctl.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    fake_systemctl.chmod(0o755)
+    subprocess.run(
+        ["bash", str(ROOT / "scripts/install-docker-systemd.sh")],
+        check=True,
+        cwd=ROOT,
+        env={
+            **os.environ,
+            "INSTALL_DIR": "/custom/hs-api",
+            "SYSTEMD_DIR": str(staged_systemd),
+            "SYSTEMCTL_BIN": str(fake_systemctl),
+        },
+        capture_output=True,
+        text=True,
+    )
+
+    job_units = [
+        path
+        for path in sorted(staged_systemd.glob("hs-data-api-docker-*.service"))
+        if " compose " in path.read_text(encoding="utf-8")
+        and " run " in path.read_text(encoding="utf-8")
+    ]
+    assert len(job_units) >= 30
+    for unit in job_units:
+        lines = unit.read_text(encoding="utf-8").splitlines()
+        exec_start = [line for line in lines if line.startswith("ExecStart=")]
+        assert len(exec_start) == 1, unit.name
+        assert " run --rm " in exec_start[0], unit.name
+        assert " --name %N api " in exec_start[0], unit.name
+        assert "ExecStartPre=-/usr/bin/docker rm -f %N" in lines, unit.name
+        stop_post = [line for line in lines if line.startswith("ExecStopPost=")]
+        # Graceful stop first, then removal; both before any cache-bust hook.
+        assert stop_post[:2] == [
+            "ExecStopPost=-/usr/bin/docker stop --time 20 %N",
+            "ExecStopPost=-/usr/bin/docker rm -f %N",
+        ], unit.name
+        timeout_stop = [line for line in lines if line.startswith("TimeoutStopSec=")]
+        assert timeout_stop in ([], ["TimeoutStopSec=30s"], ["TimeoutStopSec=1min"]), (
+            unit.name
+        )

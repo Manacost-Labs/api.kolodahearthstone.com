@@ -9,5 +9,10 @@ SuccessExitStatus=10
 WorkingDirectory=/srv/hs-data-api
 ExecCondition=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm api python -m app.recovery_condition --source hsguru_streamer_decks_legend_1000 --min-age-seconds 300
 ExecCondition=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm api python -m app.cli scheduled-check --source hsguru_streamer_decks_legend_1000
-ExecStart=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm api python /app/scripts/firecrawl-streamer-decks.py
+# `docker compose run` outlives a stopped or timed-out unit; the container is
+# named after the unit so stale ones are removed before start and after stop.
+ExecStartPre=-/usr/bin/docker rm -f %N
+ExecStart=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm --name %N api python /app/scripts/firecrawl-streamer-decks.py
+ExecStopPost=-/usr/bin/docker stop --time 20 %N
+ExecStopPost=-/usr/bin/docker rm -f %N
 TimeoutStartSec=15min
