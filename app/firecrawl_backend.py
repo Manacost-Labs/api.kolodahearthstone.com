@@ -1472,6 +1472,7 @@ async def scrape_source_with_options(
     accept_result: ProviderResultValidator | None = None,
     attempt_observer: ProviderAttemptObserver | None = None,
     failure_observer: ProviderFailureObserver | None = None,
+    scrape_do_profiles: tuple[tuple[bool, bool], ...] | None = None,
 ) -> FirecrawlScrape:
     return await asyncio.to_thread(
         _scrape_sync,
@@ -1489,4 +1490,5 @@ async def scrape_source_with_options(
         accept_result=accept_result,
         attempt_observer=attempt_observer,
         failure_observer=failure_observer,
+        scrape_do_profiles=scrape_do_profiles,
     )

@@ -423,6 +423,30 @@ curl -s "https://api.kolodahearthstone.com/datasets/hsreplay_battlegrounds_comps
   | jq '.data.structured.comps[] | {tier, title, difficulty, core: [.main_cards[].name], when: [.when_to_commit_cards[].name]}'
 ```
 
+## HSGuru Archetype Catalogs
+
+| Endpoint | Что возвращает |
+| --- | --- |
+| `GET /v1/hsguru/archetypes` | Каталог архетипов текущего окна; с `period=black_empire_ban` — окна Bans (`meta.available_periods`). Фильтры: `format`, `q`, `min_games` (по умолчанию 10), `has_decks`, `sort`, `order`, `limit`, `offset` |
+
+Строка архетипа: `format`, `archetype`, `games`, `winrate`, `popularity_pct`,
+`avg_turns`, `avg_duration_minutes`, `climbing_speed_stars_per_hour`,
+`archetype_url`, `decks_url`, `decks[]`, `deck_count`, `has_decks` и поля
+происхождения сборок:
+
+- `decks_period` — окно, из которого взяты сборки (`null` без сборок);
+- `decks_source` — `stats` (страница `/decks`, сборки от 50 игр), `replays`
+  (реальные колоды из публичных реплеев, без `games`/`win_rate`) или
+  `mixed`;
+- `decks_fallback` — `true`, если сборки не из окна каталога или из реплеев.
+
+Подробнее: [DATA_CATALOG.md](DATA_CATALOG.md).
+
+```bash
+curl -s "https://api.kolodahearthstone.com/v1/hsguru/archetypes?period=black_empire_ban&format=standard&limit=5" \
+  | jq '.data[] | {archetype, games, deck_count, decks_period, decks_source, decks_fallback}'
+```
+
 ## HSGuru Mulligan And Class Matchups
 
 Подробное описание (что отдаёт HSGuru, срезы, очередь обновления, бюджет
