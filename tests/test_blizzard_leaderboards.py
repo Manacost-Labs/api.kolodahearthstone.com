@@ -447,6 +447,10 @@ def test_rest_and_graphql_read_the_store() -> None:
     client = TestClient(app)
     assert client.get("/v1/leaderboards?mode=standard&region=EU").status_code == 404
     assert client.get("/v1/leaderboards?mode=unknown").status_code == 422
+    paths = app.openapi()["paths"]
+    for path in ("", "/stats", "/players", "/player", "/seasons"):
+        content = paths[f"/v1/leaderboards{path}"]["get"]["responses"]["200"]["content"]
+        assert content["application/json"]["example"]["data"], path
 
     _run(_fake(), "live")
     response = client.get(

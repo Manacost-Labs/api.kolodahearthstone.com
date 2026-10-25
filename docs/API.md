@@ -934,6 +934,49 @@ curl -s "https://api.kolodahearthstone.com/v1/hsreplay/mulligan?deck=5Tf8XCaMoKK
 `undergroundarena`, `twist`; `region`: `EU`, `US`, `AP`. Несобранная таблица —
 `404`.
 
+Пример `GET /v1/leaderboards?mode=battlegrounds&region=EU&limit=2` (живой
+прогон 25.10.2026):
+
+```json
+{
+  "data": {
+    "board": {"region": "EU", "mode": "battlegrounds", "season_id": 19, "season_start": null,
+              "is_latest": true, "final": false, "rated": true},
+    "snapshot": {"day": "2026-10-25", "captured_at": "2026-10-25T16:42:14+00:00", "total_size": 6549,
+                 "stored_rows": 6547, "truncated": false, "final": false, "stale": false},
+    "days": ["2026-10-25"],
+    "query": null,
+    "total": 6547,
+    "rows": [
+      {"rank": 1, "name": "XQN", "rating": 20104.0, "previous_rank": null},
+      {"rank": 2, "name": "СтоякБезДела", "rating": 19861.0, "previous_rank": null}
+    ]
+  },
+  "meta": {"source_id": "blizzard_leaderboards", "fetched_at": "2026-10-25T16:42:14+00:00",
+           "stale": false, "count": 6547, "limit": 2, "offset": 0}
+}
+```
+
+Пример `GET /v1/leaderboards/stats?mode=battlegrounds&region=EU` (сокращён):
+
+```json
+{
+  "data": {
+    "top_rating": 20104.0,
+    "thresholds": [
+      {"rank": 100, "reached": true, "rating": 13259.0},
+      {"rank": 1000, "reached": true, "rating": 9563.0},
+      {"rank": 5000, "reached": true, "rating": 8035.0}
+    ],
+    "rating": {"rated_players": 6547, "min": 8000.0, "max": 20104.0, "mean": 8753.79, "median": 8230.0},
+    "histogram": [{"from": 8000, "to": 8500, "players": 4101}, {"from": 8500, "to": 9000, "players": 858}],
+    "histogram_bucket": 500,
+    "series": [{"day": "2026-10-25", "total_size": 6549, "rating_at_1": 20104.0, "rating_at_100": 13259.0,
+                "rating_at_1000": 9563.0, "rating_at_5000": 8035.0}]
+  }
+}
+```
+
 ## HSReplay Archetype Database
 
 Полная архитектура и эксплуатация описаны в

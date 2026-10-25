@@ -43,6 +43,182 @@ DAY_QUERY = Query(
 )
 
 
+def _example(data: Any, count: int = 1, **meta: Any) -> dict[int | str, dict[str, Any]]:
+    """OpenAPI 200 example in the {data, meta} envelope of this router."""
+
+    return {
+        200: {
+            "content": {
+                "application/json": {
+                    "example": {
+                        "data": data,
+                        "meta": {
+                            "source_id": SOURCE_ID,
+                            "stale": False,
+                            "count": count,
+                            **meta,
+                        },
+                    }
+                }
+            }
+        }
+    }
+
+
+# Live run of 2026-10-25 (EU Battlegrounds, season 19), shortened.
+_BOARD = {
+    "region": "EU",
+    "mode": "battlegrounds",
+    "season_id": 19,
+    "season_start": None,
+    "is_latest": True,
+    "final": False,
+    "rated": True,
+}
+_SNAPSHOT = {
+    "day": "2026-10-25",
+    "captured_at": "2026-10-25T16:42:14+00:00",
+    "total_size": 6549,
+    "stored_rows": 6547,
+    "truncated": False,
+    "final": False,
+    "stale": False,
+}
+TABLE_EXAMPLE = _example(
+    {
+        "board": _BOARD,
+        "snapshot": _SNAPSHOT,
+        "days": ["2026-10-25"],
+        "query": None,
+        "total": 6547,
+        "rows": [
+            {"rank": 1, "name": "XQN", "rating": 20104.0, "previous_rank": None},
+            {
+                "rank": 2,
+                "name": "СтоякБезДела",
+                "rating": 19861.0,
+                "previous_rank": None,
+            },
+        ],
+    },
+    count=6547,
+    fetched_at="2026-10-25T16:42:14+00:00",
+    limit=2,
+    offset=0,
+)
+STATS_EXAMPLE = _example(
+    {
+        "board": _BOARD,
+        "snapshot": _SNAPSHOT,
+        "top_rating": 20104.0,
+        "thresholds": [
+            {"rank": 100, "reached": True, "rating": 13259.0},
+            {"rank": 1000, "reached": True, "rating": 9563.0},
+            {"rank": 5000, "reached": True, "rating": 8035.0},
+        ],
+        "rating": {
+            "rated_players": 6547,
+            "min": 8000.0,
+            "max": 20104.0,
+            "mean": 8753.79,
+            "median": 8230.0,
+        },
+        "histogram": [
+            {"from": 8000, "to": 8500, "players": 4101},
+            {"from": 8500, "to": 9000, "players": 858},
+        ],
+        "histogram_bucket": 500,
+        "series": [
+            {
+                "day": "2026-10-25",
+                "captured_at": "2026-10-25T16:42:14+00:00",
+                "total_size": 6549,
+                "stored_rows": 6547,
+                "truncated": 0,
+                "final": 0,
+                "rating_at_1": 20104.0,
+                "rating_at_100": 13259.0,
+                "rating_at_1000": 9563.0,
+                "rating_at_5000": 8035.0,
+            }
+        ],
+    }
+)
+PLAYERS_EXAMPLE = _example(
+    [
+        {
+            "region": "EU",
+            "name": "XQN",
+            "current": [
+                {"mode": "battlegrounds", "season_id": 19, "rank": 1, "rating": 20104.0}
+            ],
+        }
+    ],
+    limit=20,
+)
+PLAYER_EXAMPLE = _example(
+    {
+        "player": {"region": "EU", "name": "XQN"},
+        "shared_name": False,
+        "seasons": [
+            {
+                "mode": "battlegrounds",
+                "season_id": 19,
+                "season_start": None,
+                "is_latest": True,
+                "final": False,
+                "rated": True,
+                "best_rank": 1,
+                "best_day": "2026-10-25",
+                "last_rank": 1,
+                "last_rating": 20104.0,
+                "last_day": "2026-10-25",
+                "in_latest_snapshot": True,
+                "days": 1,
+                "series": [
+                    {
+                        "day": "2026-10-25",
+                        "rank": 1,
+                        "rating": 20104.0,
+                        "total_size": 6549,
+                        "final": False,
+                    }
+                ],
+            }
+        ],
+    }
+)
+SEASONS_EXAMPLE = _example(
+    {
+        "regions": ["EU", "US", "AP"],
+        "modes": [
+            {
+                "mode": "standard",
+                "rated": False,
+                "regions": {
+                    "EU": {
+                        "latest_season": 156,
+                        "seasons": [
+                            {
+                                "season_id": 156,
+                                "season_start": "2026-10-01",
+                                "is_latest": True,
+                                "final": False,
+                                "has_data": True,
+                                "day": "2026-10-25",
+                                "total_size": 16668,
+                                "truncated": False,
+                            }
+                        ],
+                    }
+                },
+            }
+        ],
+    },
+    count=490,
+)
+
+
 def _meta(
     *,
     fetched_at: str | None,
@@ -71,7 +247,7 @@ def _not_collected() -> HTTPException:
     )
 
 
-@router.get("/seasons")
+@router.get("/seasons", responses=SEASONS_EXAMPLE)
 async def leaderboard_seasons() -> dict[str, Any]:
     """Modes, regions and seasons served by Blizzard and what is stored for each."""
 
@@ -84,7 +260,7 @@ async def leaderboard_seasons() -> dict[str, Any]:
     return {"data": data, "meta": _meta(fetched_at=None, stale=False, count=count)}
 
 
-@router.get("")
+@router.get("", responses=TABLE_EXAMPLE)
 async def leaderboard_table(
     mode: Mode = "standard",
     region: Region = "EU",
@@ -123,7 +299,7 @@ async def leaderboard_table(
     }
 
 
-@router.get("/stats")
+@router.get("/stats", responses=STATS_EXAMPLE)
 async def leaderboard_stats(
     mode: Mode = "standard",
     region: Region = "EU",
@@ -150,7 +326,7 @@ async def leaderboard_stats(
     }
 
 
-@router.get("/players")
+@router.get("/players", responses=PLAYERS_EXAMPLE)
 async def leaderboard_players(
     q: str = Query(..., min_length=2, max_length=64, description="Name prefix."),
     region: Region | None = None,
@@ -167,7 +343,7 @@ async def leaderboard_players(
     }
 
 
-@router.get("/player")
+@router.get("/player", responses=PLAYER_EXAMPLE)
 async def leaderboard_player(
     name: str = Query(..., min_length=1, max_length=64),
     region: Region = "EU",
