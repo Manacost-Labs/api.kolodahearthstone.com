@@ -16,6 +16,7 @@ from app.schedule_ledger import (
     SourceSetMismatchError,
     build_current_eligibility,
     claim_occurrence,
+    claim_occurrence_or_unscheduled,
     deterministic_occurrence_id,
     ensure_schema,
     enumerate_nominal_occurrences,
@@ -326,6 +327,39 @@ def test_claim_does_not_create_a_retroactive_occurrence(tmp_path: Path) -> None:
         claim_occurrence(
             api_spec.id,
             api_spec.source_ids,
+            now=datetime(2026, 8, 14, 16, 1, tzinfo=UTC),
+            path=path,
+        )
+
+
+def test_claim_outside_the_schedule_runs_unscheduled(tmp_path: Path) -> None:
+    path = tmp_path / "ledger.sqlite3"
+    connection = sqlite3.connect(path)
+    ensure_schema(connection)
+    materialize_schedule_windows(
+        connection,
+        now=datetime(2026, 8, 14, 15, 59, tzinfo=UTC),
+    )
+    connection.commit()
+    connection.close()
+    api_spec = next(
+        spec for spec in tracked_schedule_specs() if spec.id == "refresh-api-daily"
+    )
+
+    # 13:00 UTC: the 16:00 UTC occurrence is not due yet.
+    assert (
+        claim_occurrence_or_unscheduled(
+            api_spec.id,
+            api_spec.source_ids,
+            now=datetime(2026, 8, 14, 13, 0, tzinfo=UTC),
+            path=path,
+        )
+        is None
+    )
+    with pytest.raises(SourceSetMismatchError):
+        claim_occurrence_or_unscheduled(
+            api_spec.id,
+            set(api_spec.source_ids) - {min(api_spec.source_ids)},
             now=datetime(2026, 8, 14, 16, 1, tzinfo=UTC),
             path=path,
         )

@@ -3,13 +3,17 @@
 Regression: the BG compositions screenshot timer fired at 04:10, 10:10, 16:10
 and 22:10 while its ledger-tracked schedule only planned 04:10, so every retry
 run exited 1 with ``Schedule ledger claim failed: OccurrenceNotFoundError``.
+
+Regression: the HSReplay card periods timer fires at fixed UTC hours while its
+schedule listed the summer-time Warsaw equivalents, so after the 2026-10-25
+switch to CET every run failed the same way.
 """
 
 from __future__ import annotations
 
 import re
 import sqlite3
-from datetime import UTC, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -27,7 +31,7 @@ from app.schedule_ledger import (
 
 ROOT = Path(__file__).resolve().parents[1]
 SYSTEMD = ROOT / "systemd"
-_SIMPLE_DAILY = re.compile(r"^\*-\*-\* (\d{2}):(\d{2}):00 Europe/Warsaw$")
+_SIMPLE_DAILY = re.compile(r"^\*-\*-\* (\d{2}(?:,\d{2})*):(\d{2}):00 (\S+)$")
 _SCHEDULE_ID = re.compile(r"--schedule-id\s+(\S+)")
 WARSAW = ZoneInfo("Europe/Warsaw")
 
@@ -58,14 +62,73 @@ def test_schedule_spec_matches_every_timer_calendar_entry(spec) -> None:
     assert _on_calendar(timer) == spec.on_calendar
     simple = [_SIMPLE_DAILY.fullmatch(value) for value in spec.on_calendar]
     if spec.recurrence == "daily" and all(simple):
+        assert {match.group(3) for match in simple if match is not None} == {
+            spec.timezone
+        }
         assert (
             tuple(
-                time(int(match.group(1)), int(match.group(2)))
-                for match in simple
-                if match is not None
+                sorted(
+                    time(int(hour), int(match.group(2)))
+                    for match in simple
+                    if match is not None
+                    for hour in match.group(1).split(",")
+                )
             )
             == spec.local_times
         )
+
+
+def _timer_fires(spec, day: date) -> list[datetime]:
+    """Nominal fire times of a simple daily timer on one day, in UTC."""
+
+    fires = []
+    for value in spec.on_calendar:
+        match = _SIMPLE_DAILY.fullmatch(value)
+        assert match is not None, value
+        zone = ZoneInfo(match.group(3))
+        for hour in match.group(1).split(","):
+            local = datetime.combine(day, time(int(hour), int(match.group(2))))
+            fires.append(local.replace(tzinfo=zone).astimezone(UTC))
+    return fires
+
+
+@pytest.mark.parametrize(
+    "day",
+    [date(2026, 10, 24), date(2026, 10, 26), date(2027, 3, 27), date(2027, 3, 29)],
+    ids=str,
+)
+def test_simple_daily_timers_stay_claimable_across_dst(
+    tmp_path: Path, day: date
+) -> None:
+    """Every fire of a ledger-claiming daily timer must find its occurrence."""
+
+    claims = _claiming_services()
+    specs = [
+        spec
+        for spec in tracked_schedule_specs()
+        if spec.recurrence == "daily"
+        and spec.systemd_unit in claims
+        and all(_SIMPLE_DAILY.fullmatch(value) for value in spec.on_calendar)
+    ]
+    assert any(spec.id == "refresh-hsreplay-card-periods" for spec in specs)
+
+    path = tmp_path / "ledger.sqlite3"
+    connection = sqlite3.connect(path)
+    ensure_schema(connection)
+    start = datetime.combine(day, time(0, 0), tzinfo=UTC) - timedelta(hours=2)
+    materialize_schedule_windows(connection, now=start)
+    connection.commit()
+    connection.close()
+
+    for spec in specs:
+        for fire in _timer_fires(spec, day):
+            # RandomizedDelaySec/AccuracySec start the unit a few minutes late.
+            assert claim_occurrence(
+                spec.id,
+                sorted(spec.source_ids),
+                now=fire + timedelta(minutes=10),
+                path=path,
+            ) == deterministic_occurrence_id(spec.id, fire), (spec.id, fire)
 
 
 def test_every_ledger_claim_comes_from_its_own_primary_timer() -> None:
