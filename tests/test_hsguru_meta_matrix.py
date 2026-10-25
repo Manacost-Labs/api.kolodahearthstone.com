@@ -4,6 +4,7 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 from starlette.testclient import TestClient
@@ -85,18 +86,21 @@ def _valid_current_acquisition(format_name: str, rows: int = 1) -> dict:
     }
 
 
-def test_matrix_has_420_remote_slices_and_six_local_min_game_filters() -> None:
+def test_matrix_has_600_remote_slices_and_nine_local_min_game_filters() -> None:
     from app.hsguru_meta_matrix import MIN_GAMES, iter_slice_specs
 
     specs = list(iter_slice_specs())
 
-    assert MIN_GAMES == (100, 250, 500, 1000, 2500, 5000)
+    assert MIN_GAMES == (10, 25, 50, 100, 250, 500, 1000, 2500, 5000)
     assert 7500 not in MIN_GAMES
-    # Any Player for 9 ranks, plus both coin sides for the 6 ranks the site
-    # serves: 2 formats x 10 periods x (9 + 6 * 2).
-    assert len(specs) == 420
-    assert len({spec.key for spec in specs}) == 420
-    assert all("min_games=100" in spec.url for spec in specs)
+    # Any Player and both coin sides for every rank: 2 formats x 10 periods x
+    # 10 ranks x 3 coins.
+    assert len(specs) == 600
+    assert len({spec.key for spec in specs}) == 600
+    # One request per slice serves every local view down to 10 games.
+    assert all(
+        parse_qs(urlparse(spec.url).query)["min_games"] == ["10"] for spec in specs
+    )
     assert all("7500" not in spec.url for spec in specs)
     assert {spec.period for spec in specs} == {
         "past_3_hours",
@@ -112,6 +116,7 @@ def test_matrix_has_420_remote_slices_and_six_local_min_game_filters() -> None:
     }
     assert {spec.rank for spec in specs} == {
         "all",
+        "bronze_plat",
         "diamond",
         "diamond_4to1",
         "diamond_to_legend",
@@ -134,12 +139,7 @@ def test_matrix_has_420_remote_slices_and_six_local_min_game_filters() -> None:
         "player_has_coin=no" in spec.url for spec in specs if spec.coin == "going_first"
     )
     assert {spec.rank for spec in specs if spec.coin != "any_player"} == {
-        "all",
-        "diamond",
-        "diamond_to_legend",
-        "legend",
-        "top_5k",
-        "top_legend",
+        spec.rank for spec in specs
     }
 
 
@@ -451,7 +451,7 @@ def test_deck_catalog_join_skips_while_matrix_resource_is_locked(tmp_path) -> No
     save_dataset.assert_not_called()
 
 
-def test_refresh_publishes_one_unified_dataset_after_420_firecrawl_pages() -> None:
+def test_refresh_publishes_one_unified_dataset_after_600_firecrawl_pages() -> None:
     from app.firecrawl_backend import FirecrawlScrape
     from app.hsguru_meta_matrix import refresh_hsguru_meta_matrix
 
@@ -516,14 +516,17 @@ def test_refresh_publishes_one_unified_dataset_after_420_firecrawl_pages() -> No
         )
 
     assert result["ok"] is True
-    assert result["base_slices"] == 420
-    assert result["logical_slices"] == 2520
-    assert result["firecrawl_credits_used"] == 422
+    assert result["base_slices"] == 600
+    assert result["logical_slices"] == 5400
+    assert result["firecrawl_credits_used"] == 602
     assert result["current_catalog_archetypes"] == 2
-    assert len(calls) == 420
+    assert len(calls) == 600
     save_dataset.assert_called_once()
     dataset = save_dataset.call_args.args[1]
     assert dataset["data"]["structured"]["dimensions"]["min_games"] == [
+        10,
+        25,
+        50,
         100,
         250,
         500,
@@ -539,14 +542,19 @@ def test_refresh_publishes_one_unified_dataset_after_420_firecrawl_pages() -> No
     assert dataset["data"]["structured"]["current_catalog"]["criteria"] == {
         "period": "patch_36.0.3",
         "rank": "all",
-        "minimum_games": 50,
+        "minimum_games": 10,
         "formats": ["standard", "wild"],
     }
+    # The Bans catalog comes from the matrix slices without another request.
+    ban_catalog = dataset["data"]["structured"]["period_catalogs"]["black_empire_ban"]
+    assert ban_catalog["criteria"]["period"] == "black_empire_ban"
+    assert {row["format"] for row in ban_catalog["archetypes"]} == {"standard", "wild"}
+    assert all(row["period"] == "black_empire_ban" for row in ban_catalog["archetypes"])
     save_status.assert_called_once()
     status = save_status.call_args.args[1]
-    assert status["rows_total"] == 2520
-    assert status["base_slices"] == 420
-    assert status["fresh_base_slices"] == 420
+    assert status["rows_total"] == 5400
+    assert status["base_slices"] == 600
+    assert status["fresh_base_slices"] == 600
     assert status["cached_base_slices"] == 0
 
 
@@ -1668,7 +1676,7 @@ def test_hsguru_matrix_systemd_unit_has_outer_hard_timeout() -> None:
     )
     unit = unit_path.read_text(encoding="utf-8")
 
-    assert "TimeoutStartSec=100min" in unit
+    assert "TimeoutStartSec=160min" in unit
     assert "TimeoutStopSec=30s" in unit
     assert "Restart=on-failure" in unit
     assert "RestartSec=10min" in unit

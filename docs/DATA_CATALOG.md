@@ -24,6 +24,7 @@ admin/ops endpoints и правила авторизации находятся 
 | Получить актуальные HSReplay-архетипы | `GET /v1/constructed/archetypes` |
 | Получить фильтрованный срез меты HSGuru | `GET /v1/hsguru/meta` |
 | Получить актуальные HSGuru-архетипы со сборками | `GET /v1/hsguru/archetypes?min_games=50&has_decks=true` |
+| Получить каталог архетипов окна Bans | `GET /v1/hsguru/archetypes?period=black_empire_ban` |
 | Получить BG-героев solo/duos | `GET /v1/battlegrounds/heroes` |
 | Получить BG-существ и их историю | `GET /v1/battlegrounds/minions` и `/api/db/bg/minions/*` |
 | Получить классы Арены | `GET /v1/arena/classes` |
@@ -265,9 +266,20 @@ HSGuru meta-строки находятся в `data.structured.strategies[]`, m
 `data.structured.current_catalog.archetypes[]`. У строки есть `games`,
 `winrate`, `popularity_pct`, `deck_count`, `has_decks` и `decks[]`; каждая
 сборка содержит deck code, число игр, winrate, класс и ссылку HSGuru.
-`GET /v1/hsguru/archetypes` поддерживает фильтры `format`, `min_games`,
-`has_decks`, поиск, сортировку и пагинацию. Временной ряд доступен через
-`GET /v1/hsguru/archetypes/history`.
+`GET /v1/hsguru/archetypes` поддерживает фильтры `format`, `period`,
+`min_games`, `has_decks`, поиск, сортировку и пагинацию. Временной ряд доступен
+через `GET /v1/hsguru/archetypes/history`.
+
+Каталог окна Bans (`period=black_empire_ban`) лежит в
+`data.structured.period_catalogs.black_empire_ban` с той же структурой. Он
+строится из среза матрицы ALL/Any Player без отдельного запроса; его сборки
+берутся из `hsguru_deck_catalog_{format}_all_black_empire_ban` и не дополняются
+сборками из более широких окон, которые могли бы содержать забаненные карты.
+`meta.available_periods` перечисляет опубликованные окна. Каталоги содержат
+архетипы от 10 игр (значение `min_games` по умолчанию); сборки HSGuru
+показывает только от 50 игр, поэтому у архетипов ниже этого порога `decks[]`
+всегда пуст. Срезы `GET /v1/hsguru/meta` тоже хранятся от 10 игр и включают
+ранг `bronze_plat`; значение `min_games` по умолчанию там остаётся 100.
 
 ## Battlegrounds
 

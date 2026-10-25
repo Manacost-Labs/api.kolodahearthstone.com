@@ -8,5 +8,5 @@ Type=oneshot
 SuccessExitStatus=10
 WorkingDirectory=/srv/hs-data-api
 ExecStart=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm api python /app/scripts/refresh-hsguru-deck-catalog.py
-TimeoutStartSec=2h
+TimeoutStartSec=4h
 TimeoutStopSec=30s

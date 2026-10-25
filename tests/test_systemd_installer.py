@@ -300,7 +300,8 @@ def test_scrape_do_map_and_daily_audit_schedules_are_canonical() -> None:
     assert (
         "hs-data-api-docker-refresh-hsguru-meta-matrix.service" in deck_catalog_service
     )
-    assert "TimeoutStartSec=2h" in deck_catalog_service
+    # Current and Bans windows, each re-read daily, through the local solver.
+    assert "TimeoutStartSec=4h" in deck_catalog_service
 
     patch_timer = (systemd_dir / "hs-data-api-docker-refresh-patches.timer").read_text(
         encoding="utf-8"

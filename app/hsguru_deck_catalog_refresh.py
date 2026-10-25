@@ -6,6 +6,7 @@ from typing import Any
 from .hsguru_decks import (
     HSGuruCatalogPartial,
     current_hsguru_deck_period,
+    hsguru_catalog_periods,
     refresh_hsguru_deck_catalog,
     refresh_hsguru_fallback_deck_catalog,
     reset_hsguru_catalog_provider_state,
@@ -17,6 +18,7 @@ CatalogRefresh = Callable[..., Awaitable[list[dict[str, Any]]]]
 CatalogFallbackRefresh = Callable[..., Awaitable[dict[str, Any]]]
 CatalogJoin = Callable[[], dict[str, Any]]
 CatalogDatasetLoader = Callable[[str], dict[str, Any] | None]
+CatalogPeriods = Callable[[], tuple[str, ...]]
 
 
 def _error_summary(exc: Exception) -> str:
@@ -87,6 +89,7 @@ async def refresh_all_deck_catalogs(
     refresh_fallback: CatalogFallbackRefresh = refresh_hsguru_fallback_deck_catalog,
     join: CatalogJoin = refresh_current_catalog_deck_join,
     load_persisted: CatalogDatasetLoader = load_dataset,
+    catalog_periods: CatalogPeriods = hsguru_catalog_periods,
 ) -> dict[str, Any]:
     """Refresh every HSGuru catalog even when an independent slice fails.
 
@@ -95,7 +98,9 @@ async def refresh_all_deck_catalogs(
     advance without rerunning already successful format/rank combinations.
     Other failures are reported without preventing independent combinations
     from becoming fresh. Archetypes that the all-rank catalog leaves without
-    a build then get one from a wider HSGuru window before the join.
+    a build then get one from a wider HSGuru window before the join. Secondary
+    windows (the Bans catalog) get all-rank builds of their own afterwards;
+    they get no wider-window fallback, whose builds may predate the bans.
     """
     reset_hsguru_catalog_provider_state()
     run_period = current_hsguru_deck_period()
@@ -108,10 +113,15 @@ async def refresh_all_deck_catalogs(
         ("standard", "all"),
         ("wild", "all"),
     )
-    for format_name, rank in specs:
-        key = f"{format_name}_{rank}"
+
+    async def refresh_one(
+        key: str,
+        format_name: str,
+        rank: str,
+        period: str,
+    ) -> list[dict[str, Any]] | None:
         try:
-            rows = await refresh(format_name, rank, period=run_period)
+            return await refresh(format_name, rank, period=period)
         except HSGuruCatalogPartial as exc:
             initial_error = _error_summary(exc)
             continuations[key] = {
@@ -119,7 +129,7 @@ async def refresh_all_deck_catalogs(
                 "initial_error": initial_error,
             }
             try:
-                rows = await refresh(format_name, rank, period=run_period)
+                rows = await refresh(format_name, rank, period=period)
             except HSGuruCatalogPartial as continuation_exc:
                 final_error = _error_summary(continuation_exc)
                 datasets[key] = _partial_dataset(continuation_exc)
@@ -128,7 +138,7 @@ async def refresh_all_deck_catalogs(
                     state="partial",
                     final_error=final_error,
                 )
-                continue
+                return None
             except Exception as continuation_exc:
                 final_error = _error_summary(continuation_exc)
                 datasets[key] = _partial_dataset(exc)
@@ -137,10 +147,17 @@ async def refresh_all_deck_catalogs(
                     state="error",
                     final_error=final_error,
                 )
-                continue
+                return None
             continuations[key]["state"] = "ok"
+            return rows
         except Exception as exc:
             errors[key] = _error_summary(exc)
+            return None
+
+    for format_name, rank in specs:
+        key = f"{format_name}_{rank}"
+        rows = await refresh_one(key, format_name, rank, run_period)
+        if rows is None:
             continue
         summary: dict[str, Any] = {"decks": len(rows), "state": "ok"}
         if rank == "all":
@@ -170,6 +187,20 @@ async def refresh_all_deck_catalogs(
         if failed:
             errors[key] = f"{len(failed)} archetypes could not be fetched"
 
+    try:
+        secondary_periods = catalog_periods()
+    except Exception as exc:  # noqa: BLE001 - the current catalogs still join
+        secondary_periods = ()
+        errors["catalog_periods"] = _error_summary(exc)
+    for period in secondary_periods:
+        if period == run_period:
+            continue
+        for format_name in ("standard", "wild"):
+            key = f"{format_name}_all_{period}"
+            rows = await refresh_one(key, format_name, "all", period)
+            if rows is not None:
+                datasets[key] = {"decks": len(rows), "state": "ok"}
+
     archetype_join: dict[str, Any] | None = None
     current_period = current_hsguru_deck_period()
     if current_period != run_period:
@@ -191,5 +222,6 @@ async def refresh_all_deck_catalogs(
         "fallbacks": fallbacks,
         "archetype_join": archetype_join,
         "period": run_period,
+        "secondary_periods": list(secondary_periods),
         **{f"{key}_decks": int(value["decks"]) for key, value in datasets.items()},
     }
