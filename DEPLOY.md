@@ -104,13 +104,13 @@ curl -s -H "X-API-Key: ${HS_API_KEY}" http://127.0.0.1:8000/ops/health | jq .
 
 ```bash
 sudo ./scripts/deploy-panel.sh
-sudo ./scripts/deploy-platform.sh
 ```
 
 Скрипт создаёт неизменяемый release и атомарно переключает symlink `current`.
 Он не удаляет `panel-data` и не копирует секреты в Git.
-`deploy-platform.sh` обновляет только код, SQL, тесты и systemd units платформы;
-PostgreSQL credentials, connection metadata и backups остаются на месте.
+`deploy-platform.sh` (его вызывает `deploy-server.sh`) обновляет только код,
+SQL, тесты и systemd units платформы; PostgreSQL credentials, connection
+metadata и backups остаются на месте.
 
 ## Зависимости
 
@@ -127,12 +127,24 @@ PostgreSQL credentials, connection metadata и backups остаются на м�
 sudo /srv/hs-data-api/scripts/deploy-server.sh
 ```
 
-Скрипт делает `git pull --ff-only`, собирает образ, перезапускает контейнер и
-ждёт `200` на `/v1/health`. Если сервис не поднялся, прежний образ
-возвращается автоматически. Развёрнутый коммит остаётся в
+Это единственный путь деплоя; он по шагам делает всё нужное:
+
+1. `git pull --ff-only` чистого `origin/main`;
+2. платформа: `scripts/deploy-platform.sh` (код, SQL и юниты в
+   `/srv/hs-data-platform`) и `platform/scripts/apply-migrations.sh` — до
+   рестарта API. Миграции применяются по леджеру `platform.schema_migrations`,
+   повторный прогон безопасен. Если миграция упала, API не перезапускается;
+3. сборка образа, перезапуск контейнера и ожидание `200` на `/v1/health`.
+   Если сервис не поднялся, прежний образ возвращается автоматически;
+4. `scripts/install-docker-systemd.sh` (юниты Docker-задач; намеренно
+   выключенные таймеры остаются выключенными) и проверка host-side exporter.
+
+Одновременно может идти только один деплой (`flock`). Аварийный обход шага:
+`--skip-platform` или `--skip-units`. Развёрнутый коммит остаётся в
 `/srv/hs-data-api/.deployed-commit` и в теге `hs-data-api:rollback-<коммит>`.
 
-Посмотреть, что приедет, ничего не меняя:
+Посмотреть, что приедет — коммиты, изменения `platform/`, ожидающие миграции,
+новые и изменённые юниты, — ничего не меняя:
 
 ```bash
 sudo /srv/hs-data-api/scripts/deploy-server.sh --dry-run
@@ -169,12 +181,12 @@ docker compose up -d --no-deps --no-build api
 Перед деплоем merge PR и выбор release commit выполняются отдельно. Не
 деплойте непроверенную feature-ветку.
 
-Если после обновления кода нужно переустановить зависимости хоста или юниты:
+Юниты и миграции ставит `deploy-server.sh`. Если после обновления кода нужно
+освежить env-файл хоста:
 
 ```bash
 cd /srv/hs-data-api
 sudo ./scripts/merge-env-example.sh /etc/hs-data-api.env
-sudo ./scripts/install-docker-systemd.sh
 ./scripts/audit.sh
 ```
 
@@ -227,9 +239,11 @@ Production refresh schedule:
   hero dataset and the compatible `hsreplay_battlegrounds_heroes` index from
   the same quality-gated HSReplay JSON response. Premium HTML failure therefore
   cannot leave the public hero index stale while fresh detail data is serving.
-- `scripts/install-docker-systemd.sh`: автоматически устанавливает и включает все
-  `hs-data-api-docker-*.timer`, поэтому новый pipeline timer не останется только
-  в репозитории после следующего деплоя.
+- `scripts/install-docker-systemd.sh` (вызывается из `deploy-server.sh`):
+  устанавливает все `hs-data-api-docker-*` юниты и включает новые таймеры,
+  поэтому новый pipeline timer не останется только в репозитории после
+  следующего деплоя. Уже установленный и выключенный вручную таймер остаётся
+  выключенным.
 - Parser-control показывает primary и recovery schedules отдельно: recovery не
   подменяет обычный `nextRunAt`, а публикуется как `nextRecoveryRunAt`.
 - `hs-data-api-docker-export-timer-state.timer`: раз в минуту атомарно экспортирует
