@@ -9,7 +9,12 @@ StartLimitBurst=3
 Type=oneshot
 SuccessExitStatus=10
 WorkingDirectory=/srv/hs-data-api
-ExecStart=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm api python -m app.cli refresh-post-patch --schedule-id refresh-post-patch-tierlists
+# `docker compose run` outlives a stopped or timed-out unit; the container is
+# named after the unit so stale ones are removed before start and after stop.
+ExecStartPre=-/usr/bin/docker rm -f %N
+ExecStart=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm --name %N api python -m app.cli refresh-post-patch --schedule-id refresh-post-patch-tierlists
+ExecStopPost=-/usr/bin/docker stop --time 20 %N
+ExecStopPost=-/usr/bin/docker rm -f %N
 ExecStopPost=-/usr/bin/curl --fail --silent --show-error --max-time 20 --request POST http://127.0.0.1:3101/_internal/tierlist/cache-bust?source=hsreplay
 ExecStopPost=-/usr/bin/curl --fail --silent --show-error --max-time 20 --request POST http://127.0.0.1:3101/_internal/tierlist/cache-bust?source=heartharena
 ExecStopPost=-/usr/bin/curl --fail --silent --show-error --max-time 20 --request POST http://127.0.0.1:3101/_internal/tierlist/cache-bust?source=firestone

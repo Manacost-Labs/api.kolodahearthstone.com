@@ -6,4 +6,9 @@ After=hs-data-api-docker.service network-online.target
 [Service]
 Type=oneshot
 WorkingDirectory=/srv/hs-data-api
-ExecStart=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm api python -m app.cli refresh-bg-minions-db --scheduled --schedule-id refresh-bg-minions-db
+# `docker compose run` outlives a stopped or timed-out unit; the container is
+# named after the unit so stale ones are removed before start and after stop.
+ExecStartPre=-/usr/bin/docker rm -f %N
+ExecStart=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm --name %N api python -m app.cli refresh-bg-minions-db --scheduled --schedule-id refresh-bg-minions-db
+ExecStopPost=-/usr/bin/docker stop --time 20 %N
+ExecStopPost=-/usr/bin/docker rm -f %N

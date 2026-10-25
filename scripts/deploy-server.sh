@@ -32,6 +32,7 @@ PLATFORM_TARGET="${HS_DATA_PLATFORM_TARGET_ROOT:-/srv/hs-data-platform}"
 PLATFORM_DB_CONTAINER="${PLATFORM_DB_CONTAINER:-hs-data-postgres-1}"
 SYSTEMD_DIR="${SYSTEMD_DIR:-/etc/systemd/system}"
 LOCK_FILE="${DEPLOY_LOCK_FILE:-/run/lock/hs-data-api-deploy.lock}"
+COMPOSE_PROJECT="${COMPOSE_PROJECT_NAME:-$(basename "$INSTALL_DIR")}"
 
 DRY_RUN=0
 SKIP_PLATFORM=0
@@ -124,6 +125,24 @@ unit_plan() {
   [[ "$changes" -gt 0 ]] || echo "    без изменений"
 }
 
+# Job-контейнеры (`docker compose run` из юнитов) прежней ревизии доживают
+# свой прогон на старом коде: могут перезаписать результат нового кода или
+# держать lock. Деплой их не убивает (прогон может идти часами), а называет.
+report_old_job_containers() {
+  local revision="$1" rows
+  rows="$(docker ps \
+    --filter label=com.docker.compose.oneoff=True \
+    --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
+    --format '{{.Names}}|{{.Label "org.opencontainers.image.revision"}}|{{.RunningFor}}' \
+    | awk -F'|' -v rev="$revision" '$2 != rev {printf "    %s (ревизия %.7s, запущен %s)\n", $1, $2, $3}' \
+    || true)"
+  [[ -n "$rows" ]] || return 0
+  echo "ВНИМАНИЕ: job-контейнеры работают не на ревизии ${revision:0:7}:" >&2
+  echo "$rows" >&2
+  echo "    Дождитесь окончания или остановите: sudo systemctl stop <имя контейнера>.service" >&2
+  echo "    (контейнер без имени юнита: docker stop <имя>)" >&2
+}
+
 [[ "$(id -u)" -eq 0 ]] || die "запускать через sudo"
 [[ -d "$INSTALL_DIR/.git" ]] || die "$INSTALL_DIR не git-репозиторий"
 
@@ -170,6 +189,7 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
     unit_plan platform/systemd '*' 0
   fi
   say "API: соберу образ из origin/$BRANCH, перезапущу, проверю $HEALTH_URL"
+  report_old_job_containers "$(git rev-parse "origin/$BRANCH")"
   if [[ "$SKIP_UNITS" -eq 1 ]]; then
     say "юниты Docker-задач: пропущу (--skip-units)"
   else
@@ -262,5 +282,6 @@ if ! verify_host_timer_export; then
   exit 1
 fi
 
+report_old_job_containers "$REVISION"
 printf '%s\n' "$COMMIT" > "$STAMP_FILE"
 say "готово: в проде $COMMIT"
