@@ -10,7 +10,9 @@ WorkingDirectory=/srv/hs-data-api
 # `docker compose run` outlives a stopped or timed-out unit; the container is
 # named after the unit so stale ones are removed before start and after stop.
 ExecStartPre=-/usr/bin/docker rm -f %N
-ExecStart=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm --name %N api python -m app.cli refresh-hsguru-mulligan --scheduled --schedule-id refresh-hsguru-mulligan
+# Forty Scrape.do threads with 250-450 KB pages fragment one glibc arena per
+# thread (RSS grew to 5 GiB in production); two arenas keep the heap compact.
+ExecStart=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm -e MALLOC_ARENA_MAX=2 --name %N api python -m app.cli refresh-hsguru-mulligan --scheduled --schedule-id refresh-hsguru-mulligan
 ExecStopPost=-/usr/bin/docker stop --time 20 %N
 ExecStopPost=-/usr/bin/docker rm -f %N
 # The run stops taking pages after HS_HSGURU_MULLIGAN_DEADLINE_SECONDS
