@@ -26,6 +26,7 @@ admin/ops endpoints и правила авторизации находятся 
 | Получить актуальные HSGuru-архетипы со сборками | `GET /v1/hsguru/archetypes?min_games=50&has_decks=true` |
 | Получить каталог архетипов окна Bans | `GET /v1/hsguru/archetypes?period=black_empire_ban` |
 | Получить муллиган архетипа или колоды HSGuru | `GET /v1/hsguru/mulligan` (срезы — `/v1/hsguru/mulligan/slices`) |
+| Получить муллиган колоды HSReplay (v2: монетка, класс соперника) | `GET /v1/hsreplay/mulligan` (колоды — `/v1/hsreplay/mulligan/decks`, срезы — `/v1/hsreplay/mulligan/slices`) |
 | Получить BG-героев solo/duos | `GET /v1/battlegrounds/heroes` |
 | Получить BG-существ и их историю | `GET /v1/battlegrounds/minions` и `/api/db/bg/minions/*` |
 | Получить классы Арены | `GET /v1/arena/classes` |
@@ -259,6 +260,7 @@ GET /datasets/firestone_standard
 | `hsguru_matchups_diamond_4to1` | Та же matchup-матрица для Diamond 4–1. |
 | `hsguru_archetype_analysis` | Daily checkpointed Standard/Wild archetype analysis: class matchups and card mulligan/drawn/kept impact, with sparse post-patch samples distinguished from unavailable upstream data. |
 | `hsguru_mulligan` | Муллиган (mulligan/drawn/not drawn/kept impact и count) и матчапы по классам для архетипов и колод по рангу, периоду (включая баны), монетке и классу соперника. История в SQLite `hsguru_*` и PostgreSQL `analytics.hsguru_*`, см. [HSGURU_MULLIGAN.md](HSGURU_MULLIGAN.md). Dataset хранит только сводку покрытия. |
+| `hsreplay_mulligan` | Муллиган HSReplay v2 по колодам (% оставляют, винрейт в стартовой руке, при доборе, при розыгрыше, ходов в руке, ход розыгрыша) для топ-колод Стандарта и Вольного на Легенде, Алмазе 4–1, Алмазе и Бронзе–Золоте, по монетке (`all`/`first`/`coin`), периоду и классу соперника (премиум). История в SQLite `hsreplay_mulligan_*` и PostgreSQL `analytics.hsreplay_mulligan_*`, см. [HSREPLAY_MULLIGAN.md](HSREPLAY_MULLIGAN.md). Dataset хранит сводку покрытия и статус премиум-сессии. |
 | `metastats_matchups` | Archetype, opponent, winrate/vs_winrate и games. |
 
 HSGuru meta-строки находятся в `data.structured.strategies[]`, matchup-строки —

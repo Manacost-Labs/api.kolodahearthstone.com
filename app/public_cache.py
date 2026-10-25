@@ -25,6 +25,7 @@ def _no_store_path(path: str) -> bool:
             "/v1/constructed/hsguru-deck",
             "/v1/hsguru/archetypes/analysis",
             "/v1/hsguru/mulligan/coverage",
+            "/v1/hsreplay/mulligan/coverage",
             "/v1/system/parsing-reliability",
             "/v1/search",
             "/v1/materials/",
@@ -47,7 +48,7 @@ def _cacheable_path(path: str) -> bool:
         # ETag can race their reads and return a false 304 for changed freshness
         # metadata. Keep this endpoint coherent by evaluating every request.
         return False
-    if path.startswith("/v1/hsguru/mulligan/coverage"):
+    if path.startswith(("/v1/hsguru/mulligan/coverage", "/v1/hsreplay/mulligan/coverage")):
         # Run rows change without a new snapshot (failed or unchanged pages).
         return False
     if path.startswith("/v1/system/parsing-reliability"):
@@ -165,6 +166,10 @@ def _db_revision(path: str) -> str | None:
             from .hsguru_mulligan import latest_revision as hsguru_stats_revision
 
             return hsguru_stats_revision()
+        if path.startswith("/v1/hsreplay/mulligan"):
+            from .hsreplay_mulligan import latest_revision as hsreplay_mulligan_revision
+
+            return hsreplay_mulligan_revision()
         if path.startswith("/v1/battlegrounds/minions") and (
             path.endswith(("/stats", "/stats/history", "/stats/slices"))
         ):

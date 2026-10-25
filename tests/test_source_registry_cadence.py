@@ -37,6 +37,7 @@ PIPELINE_IDS = (
     "hsreplay_battlegrounds_hero_details",
     "hsreplay_battlegrounds_minion_stats",
     "hsreplay_archetypes",
+    "hsreplay_mulligan",
 )
 
 

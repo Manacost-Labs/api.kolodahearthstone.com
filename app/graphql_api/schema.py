@@ -540,6 +540,73 @@ async def _hsguru_statistics(
     )
 
 
+async def _hsreplay_mulligan(
+    info: Info[GraphQLContext, None],
+    *,
+    deck: str,
+    format_name: str | None,
+    rank: str,
+    initiative: str,
+    period: str,
+    opponent_class: str,
+) -> Any:
+    from ..hsreplay_mulligan import (
+        ANY_OPPONENT,
+        FORMATS,
+        INITIATIVES,
+        OPPONENT_CLASSES,
+        PERIODS,
+        RANKS,
+        Selector,
+        SliceUnavailable,
+        resolve_slice,
+    )
+
+    deck_id = _normalize_text(deck, "deck", 40)
+    if not deck_id or not deck_id.isalnum() or len(deck_id) < 8:
+        raise _validation_error("deck must be an HSReplay deck shortid")
+    if format_name is not None and format_name not in FORMATS:
+        raise _validation_error("format must be standard or wild")
+    if rank not in RANKS:
+        raise _validation_error(f"rank must be one of {', '.join(RANKS)}")
+    if initiative not in INITIATIVES:
+        raise _validation_error(f"initiative must be one of {', '.join(INITIATIVES)}")
+    if period not in PERIODS:
+        raise _validation_error(f"period must be one of {', '.join(PERIODS)}")
+    if opponent_class not in {ANY_OPPONENT, *OPPONENT_CLASSES}:
+        raise _validation_error("opponentClass must be any or an upper-case class key")
+    selector = Selector(
+        deck_id=deck_id,
+        format_name=format_name,
+        rank=rank,
+        initiative=initiative,
+        period=period,
+        opponent_class=opponent_class,
+    )
+    found = await _call_repository(
+        _repository(info).hsreplay_mulligan(
+            deck_id=deck_id,
+            format_name=format_name,
+            rank=rank,
+            initiative=initiative,
+            period=period,
+            opponent_class=opponent_class,
+        )
+    )
+    try:
+        return resolve_slice(found, selector)
+    except SliceUnavailable as exc:
+        if exc.status == 404:
+            return None
+        raise GraphQLError(
+            exc.detail,
+            extensions={
+                "code": "PREMIUM_SESSION_UNAVAILABLE",
+                "premiumSession": exc.premium_session,
+            },
+        ) from None
+
+
 async def _call_repository(operation: Any) -> Any:
     try:
         return await operation
@@ -1232,6 +1299,39 @@ class Query:
             period=period,
             coin=coin,
             opponent_class="any",
+        )
+
+    @strawberry.field(
+        description=(
+            "HSReplay mulligan guide (mulligan v2) of one deck slice: per card keep %, "
+            "opening-hand, drawn and played winrate, turns held, turn played and "
+            "*_impact versus the base winrate. deck is the HSReplay shortid; rank "
+            "legend, diamond_4to1, diamond or bronze_gold; initiative all, first or "
+            "coin; period last_30_days, current_patch or current_expansion; "
+            "opponentClass any or a class key. Null when not collected; a "
+            "PREMIUM_SESSION_UNAVAILABLE error when a premium slice cannot be served "
+            "because the HSReplay session is rejected. Same shape as REST "
+            "/v1/hsreplay/mulligan data."
+        )
+    )
+    async def hsreplay_mulligan(
+        self,
+        info: Info[GraphQLContext, None],
+        deck: str,
+        format: str | None = None,
+        rank: str = "legend",
+        initiative: str = "all",
+        period: str = "last_30_days",
+        opponent_class: str = "any",
+    ) -> JSON | None:
+        return await _hsreplay_mulligan(
+            info,
+            deck=deck,
+            format_name=format,
+            rank=rank,
+            initiative=initiative,
+            period=period,
+            opponent_class=opponent_class,
         )
 
     @strawberry.field(
