@@ -449,6 +449,31 @@ FlareSolverr — запасной маршрут.
 (`any_player`, `on_coin`, `going_first`), `opponent_class` (`any` или класс
 заглавными буквами). Несобранный срез — `404`.
 
+## HSGuru Brawl And Esports
+
+Описание наборов, полей и аудит покрытия HSGuru:
+[DATA_CATALOG.md](DATA_CATALOG.md#hsguru-потасовка-и-киберспорт).
+
+Источники `hsguru_brawl` (таймер `hs-data-api-docker-refresh-hsguru-brawl.timer`,
+каждые 3 часа), `hsguru_esports_tournaments`, `hsguru_esports_points` и
+`hsguru_esports_legacy` (таймер `hs-data-api-docker-refresh-hsguru-esports.timer`,
+ежедневно; архив — не чаще раза в неделю). Вручную:
+`python -m app.cli refresh-hsguru-brawl`,
+`python -m app.cli refresh-hsguru-esports [--part tournaments|points|legacy] [--force-legacy]`.
+
+| Endpoint | Что возвращает |
+| --- | --- |
+| `GET /v1/hsguru/brawl/meta` | `items[]` архетипов Потасовки: `archetype`, `winrate`, `popularity`, `games`, `turns`, `duration_minutes`, `climbing_speed`; `rank`, `coin`, `opponent_class`, `total_games` |
+| `GET /v1/hsguru/brawl/decks` | `items[]` колод: `archetype`, `class`, `deck_code`, `win_rate`, `games`, `url` |
+| `GET /v1/hsguru/esports/upcoming` | `items[]`: `tournament_id`, `name`, `start_time`, `tags`, `url` |
+| `GET /v1/hsguru/esports/tournaments` | Сводки турниров (пагинация): `winner`, `stages`, `players`, `top_archetypes`, `complete` |
+| `GET /v1/hsguru/esports/tournaments/{tournament_id}` | Полный турнир: `stages[].standings[]`, `lineups[].decks[]`, `lineup_popularity`; неизвестный id — `404` |
+| `GET /v1/hsguru/esports/points` | Сезон очков: `headers`, `items[]` (`rank`, `player`, колонки месяцев/турниров, `total`); без `season` — текущий год |
+| `GET /v1/hsguru/esports/points/seasons` | Пары сезон × лидерборд и число игроков |
+| `GET /v1/hsguru/esports/legacy/{table}` | `mt-stats`, `qualifier-stats` (`selector` — период), `mt-points` (`selector` — сезон); `options` — доступные значения |
+
+Невалидный параметр — `422`, ещё не опубликованный набор — `503`.
+
 ## HSReplay Archetype Database
 
 Полная архитектура и эксплуатация описаны в

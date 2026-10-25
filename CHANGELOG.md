@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- HSGuru coverage: Tavern Brawl and esports. `hsguru_brawl` reads the current
+  Brawl meta (7 ranks × 3 coin options and 11 opponent classes, from 10
+  games) and Brawl decks every three hours. `hsguru_esports_tournaments`
+  collects /esports upcoming tournaments and every official tour stop
+  (2019–2026) plus recently started community tournaments with stage
+  standings, player lineups (deck codes) and lineup archetype popularity;
+  finished tournaments are reused from the previous snapshot.
+  `hsguru_esports_points` holds HSEsports points of every season for
+  Standard and Battlegrounds; `hsguru_esports_legacy` the Masters Tour
+  archive (weekly). Plain Scrape.do pages, at most 5 at once, as `detail`
+  jobs of the shared HSGuru budget. REST `/v1/hsguru/brawl/*`,
+  `/v1/hsguru/esports/*` and GraphQL `hsguruBrawl*`/`hsguruEsports*`. The
+  HSGuru coverage audit is in `docs/DATA_CATALOG.md`.
+
 - Balance Radar: accurate, short, Russian-only texts. Archetypes use
   HearthPulse's own labels (the rest translated once by Claude and cached);
   cards use the ruRU localization. Every reader text is cleaned

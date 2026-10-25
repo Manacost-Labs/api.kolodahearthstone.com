@@ -220,6 +220,17 @@ def cache_revision(path: str, query_string: bytes) -> str:
         from .hsguru_decks import hsguru_matrix_cache_revision
 
         return hsguru_matrix_cache_revision()
+    if path.startswith(("/v1/hsguru/brawl/", "/v1/hsguru/esports/")):
+        source_id = (
+            "hsguru_brawl"
+            if path.startswith("/v1/hsguru/brawl/")
+            else "hsguru_esports_points"
+            if path.startswith("/v1/hsguru/esports/points")
+            else "hsguru_esports_legacy"
+            if path.startswith("/v1/hsguru/esports/legacy/")
+            else "hsguru_esports_tournaments"
+        )
+        return _dataset_timestamp(source_id) or "not-cached"
     db_revision = _db_revision(path)
     if db_revision:
         return db_revision

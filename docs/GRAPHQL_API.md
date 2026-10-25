@@ -32,6 +32,11 @@ to the new hostname first and adopt GraphQL separately.
 | `battlegroundMinionStats` | Full HSReplay statistics of one minion (`minion`: dbf or card id; `mmrPercentile`, `timeRange`, `compositionId`): normal/golden totals, per-round arrays, board positions, copy purchase rates and medians; JSON with the same shape as REST `/v1/battlegrounds/minions/{minion}/stats` |
 | `hsguruMulligan` | HSGuru mulligan guide of an archetype (`archetype` + `format`) or deck (`deckId`) for `rank`, `period` (`current` allowed), `coin`, `opponentClass`; optional `minMullCount`/`minDrawnCount`. JSON with the same shape as REST `/v1/hsguru/mulligan` `data` |
 | `hsguruClassMatchups` | HSGuru winrate of an archetype or deck against each class with the Total row; same shape as REST `/v1/hsguru/class-matchups` `data` |
+| `hsguruBrawlMeta` | Current Tavern Brawl archetype meta (`rank`, `coin`, `opponentClass`, `minGames`); same shape as REST `/v1/hsguru/brawl/meta` `data` |
+| `hsguruBrawlDecks` | Current Tavern Brawl decks (`rank`, `className`, `archetype`); same shape as REST `/v1/hsguru/brawl/decks` `data` |
+| `hsguruEsportsTournaments` | Tournament summaries (`kind`), one tournament with standings and lineups (`tournamentId`) or `/esports` upcoming tournaments (`upcoming: true`) |
+| `hsguruEsportsPoints` | HSEsports points of a season (`season`, `leaderboard` STD/BG_LL, `region`); same shape as REST `/v1/hsguru/esports/points` `data` |
+| `hsguruEsportsLegacy` | Archived Masters Tour table (`table`: mt-stats, qualifier-stats, mt-points; `selector`) |
 | `sources` | Integrated sources and their last update state |
 | `search` | One search across cards, minions, heroes, archetypes and sources |
 | `datasets` | Latest imported version and payload size for each source |
