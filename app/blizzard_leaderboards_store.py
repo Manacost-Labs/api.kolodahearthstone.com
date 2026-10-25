@@ -1,0 +1,679 @@
+"""SQLite storage for the official Blizzard Hearthstone leaderboards.
+
+One *board* is one leaderboard: region (EU, US, AP), mode (standard,
+battlegrounds, ...) and season. A board gets at most one *snapshot* per UTC
+day: a later read on the same day replaces that day's rows, so the history is
+"rank and rating of a player by day". A season that is no longer the latest one
+gets one last read flagged ``final`` and is never read again.
+
+The tables live in their own database file (``blizzard_leaderboards.db``)
+instead of ``hs_parses.db``: a live sweep stores about 100,000 rows a day and the
+history backfill several million, which the PostgreSQL analytics mirror of
+``hs_parses.db`` re-hashes on every sync. REST and GraphQL read this file.
+
+Leaderboards publish a BattleTag without its number, so a name is not unique:
+two accounts called "Bob" in one region share one ``lb_players`` row, and both
+of their lines stay in the snapshot (the primary key is the rank).
+"""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+from collections.abc import Iterable, Mapping, Sequence
+from pathlib import Path
+from typing import Any
+
+from .config import data_dir
+
+DB_FILENAME = "blizzard_leaderboards.db"
+THRESHOLD_RANKS = (1, 100, 1000, 5000)
+_SQL_CHUNK = 500
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS lb_boards (
+    id INTEGER PRIMARY KEY,
+    region TEXT NOT NULL,
+    mode TEXT NOT NULL,
+    season_id INTEGER NOT NULL,
+    season_start TEXT,
+    is_latest INTEGER NOT NULL DEFAULT 0,
+    final INTEGER NOT NULL DEFAULT 0,
+    total_size INTEGER,
+    total_pages INTEGER,
+    latest_snapshot_id INTEGER,
+    first_seen_at TEXT NOT NULL,
+    last_fetched_at TEXT,
+    last_error TEXT,
+    last_error_at TEXT,
+    failures INTEGER NOT NULL DEFAULT 0,
+    UNIQUE (region, mode, season_id)
+);
+CREATE TABLE IF NOT EXISTS lb_players (
+    id INTEGER PRIMARY KEY,
+    region TEXT NOT NULL,
+    name TEXT NOT NULL,
+    name_key TEXT NOT NULL,
+    UNIQUE (region, name)
+);
+CREATE INDEX IF NOT EXISTS idx_lb_players_key ON lb_players(name_key, region);
+CREATE TABLE IF NOT EXISTS lb_snapshots (
+    id INTEGER PRIMARY KEY,
+    board_id INTEGER NOT NULL REFERENCES lb_boards(id),
+    day TEXT NOT NULL,
+    captured_at TEXT NOT NULL,
+    total_size INTEGER NOT NULL,
+    total_pages INTEGER NOT NULL,
+    stored_rows INTEGER NOT NULL,
+    truncated INTEGER NOT NULL DEFAULT 0,
+    final INTEGER NOT NULL DEFAULT 0,
+    rating_at_1 REAL,
+    rating_at_100 REAL,
+    rating_at_1000 REAL,
+    rating_at_5000 REAL,
+    UNIQUE (board_id, day)
+);
+CREATE TABLE IF NOT EXISTS lb_entries (
+    snapshot_id INTEGER NOT NULL,
+    rank INTEGER NOT NULL,
+    player_id INTEGER NOT NULL,
+    rating REAL,
+    PRIMARY KEY (snapshot_id, rank)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS idx_lb_entries_player ON lb_entries(player_id, snapshot_id);
+CREATE TABLE IF NOT EXISTS lb_runs (
+    id INTEGER PRIMARY KEY,
+    scope TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    state TEXT NOT NULL DEFAULT 'running',
+    summary TEXT
+);
+"""
+
+
+def db_path() -> Path:
+    return data_dir() / DB_FILENAME
+
+
+def connect(path: Path | None = None) -> sqlite3.Connection:
+    target = path or db_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(target), timeout=30.0)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.executescript(SCHEMA)
+    return conn
+
+
+def name_key(name: str) -> str:
+    return name.casefold()
+
+
+def _like_pattern(text: str, *, prefix_only: bool = False) -> str:
+    escaped = text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"{escaped}%" if prefix_only else f"%{escaped}%"
+
+
+def _chunks(values: Sequence[Any], size: int = _SQL_CHUNK) -> Iterable[Sequence[Any]]:
+    for start in range(0, len(values), size):
+        yield values[start : start + size]
+
+
+# --- boards -----------------------------------------------------------------
+
+
+def sync_boards(
+    conn: sqlite3.Connection,
+    seasons: Mapping[tuple[str, str], Sequence[int]],
+    season_starts: Mapping[tuple[str, int], str],
+    now: str,
+) -> None:
+    """Insert every advertised board and mark the newest season of each pair."""
+
+    with conn:
+        for (region, mode), season_ids in seasons.items():
+            if not season_ids:
+                continue
+            latest = max(season_ids)
+            conn.executemany(
+                """
+                INSERT INTO lb_boards (region, mode, season_id, season_start, first_seen_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT (region, mode, season_id) DO UPDATE
+                SET season_start = COALESCE(excluded.season_start, lb_boards.season_start)
+                """,
+                [
+                    (region, mode, season_id, season_starts.get((mode, season_id)), now)
+                    for season_id in season_ids
+                ],
+            )
+            conn.execute(
+                """
+                UPDATE lb_boards SET is_latest = (season_id = ?)
+                WHERE region = ? AND mode = ?
+                """,
+                (latest, region, mode),
+            )
+
+
+def live_boards(
+    conn: sqlite3.Connection, regions: Sequence[str], modes: Sequence[str]
+) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        "SELECT * FROM lb_boards WHERE is_latest = 1 ORDER BY region, mode"
+    ).fetchall()
+    return _ordered(rows, regions, modes)
+
+
+def history_boards(
+    conn: sqlite3.Connection, regions: Sequence[str], modes: Sequence[str]
+) -> list[dict[str, Any]]:
+    """Past seasons without their final read: ended live seasons first, newest first."""
+
+    rows = conn.execute(
+        "SELECT * FROM lb_boards WHERE is_latest = 0 AND final = 0"
+    ).fetchall()
+    boards = _ordered(rows, regions, modes)
+    mode_order = {mode: index for index, mode in enumerate(modes)}
+    region_order = {region: index for index, region in enumerate(regions)}
+    boards.sort(
+        key=lambda board: (
+            board["latest_snapshot_id"] is None,
+            board["failures"] >= 3,
+            -board["season_id"],
+            mode_order[board["mode"]],
+            region_order[board["region"]],
+        )
+    )
+    return boards
+
+
+def _ordered(
+    rows: Iterable[sqlite3.Row], regions: Sequence[str], modes: Sequence[str]
+) -> list[dict[str, Any]]:
+    mode_order = {mode: index for index, mode in enumerate(modes)}
+    region_order = {region: index for index, region in enumerate(regions)}
+    boards = [
+        dict(row)
+        for row in rows
+        if row["mode"] in mode_order and row["region"] in region_order
+    ]
+    boards.sort(
+        key=lambda board: (mode_order[board["mode"]], region_order[board["region"]])
+    )
+    return boards
+
+
+def record_board_failure(
+    conn: sqlite3.Connection, board_id: int, error: str, now: str
+) -> None:
+    with conn:
+        conn.execute(
+            """
+            UPDATE lb_boards
+            SET last_error = ?, last_error_at = ?, failures = failures + 1
+            WHERE id = ?
+            """,
+            (error[:500], now, board_id),
+        )
+
+
+# --- snapshots --------------------------------------------------------------
+
+
+def _player_ids(
+    conn: sqlite3.Connection, region: str, names: Sequence[str]
+) -> dict[str, int]:
+    unique = list(dict.fromkeys(names))
+    conn.executemany(
+        "INSERT OR IGNORE INTO lb_players (region, name, name_key) VALUES (?, ?, ?)",
+        [(region, name, name_key(name)) for name in unique],
+    )
+    ids: dict[str, int] = {}
+    for chunk in _chunks(unique):
+        placeholders = ",".join("?" * len(chunk))
+        for row in conn.execute(
+            f"SELECT id, name FROM lb_players WHERE region = ? AND name IN ({placeholders})",
+            (region, *chunk),
+        ):
+            ids[row["name"]] = int(row["id"])
+    return ids
+
+
+def _thresholds(
+    rows: Sequence[tuple[int, str, float | None]],
+) -> dict[str, float | None]:
+    by_rank = {rank: rating for rank, _name, rating in rows}
+    return {f"rating_at_{rank}": by_rank.get(rank) for rank in THRESHOLD_RANKS}
+
+
+def write_snapshot(
+    conn: sqlite3.Connection,
+    board: Mapping[str, Any],
+    *,
+    day: str,
+    captured_at: str,
+    total_size: int,
+    total_pages: int,
+    rows: Sequence[tuple[int, str, float | None]],
+    truncated: bool,
+    final: bool,
+) -> int:
+    """Store one complete read of a board as that day's snapshot, atomically."""
+
+    board_id = int(board["id"])
+    thresholds = _thresholds(rows)
+    with conn:
+        ids = _player_ids(
+            conn, str(board["region"]), [name for _rank, name, _r in rows]
+        )
+        existing = conn.execute(
+            "SELECT id FROM lb_snapshots WHERE board_id = ? AND day = ?",
+            (board_id, day),
+        ).fetchone()
+        values = (
+            captured_at,
+            total_size,
+            total_pages,
+            len(rows),
+            int(truncated),
+            int(final),
+            thresholds["rating_at_1"],
+            thresholds["rating_at_100"],
+            thresholds["rating_at_1000"],
+            thresholds["rating_at_5000"],
+        )
+        if existing:
+            snapshot_id = int(existing["id"])
+            conn.execute("DELETE FROM lb_entries WHERE snapshot_id = ?", (snapshot_id,))
+            conn.execute(
+                """
+                UPDATE lb_snapshots
+                SET captured_at = ?, total_size = ?, total_pages = ?, stored_rows = ?,
+                    truncated = ?, final = ?, rating_at_1 = ?, rating_at_100 = ?,
+                    rating_at_1000 = ?, rating_at_5000 = ?
+                WHERE id = ?
+                """,
+                (*values, snapshot_id),
+            )
+        else:
+            cursor = conn.execute(
+                """
+                INSERT INTO lb_snapshots (
+                    board_id, day, captured_at, total_size, total_pages, stored_rows,
+                    truncated, final, rating_at_1, rating_at_100, rating_at_1000,
+                    rating_at_5000
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (board_id, day, *values),
+            )
+            snapshot_id = int(cursor.lastrowid or 0)
+        conn.executemany(
+            "INSERT OR REPLACE INTO lb_entries (snapshot_id, rank, player_id, rating) "
+            "VALUES (?, ?, ?, ?)",
+            [(snapshot_id, rank, ids[name], rating) for rank, name, rating in rows],
+        )
+        conn.execute(
+            """
+            UPDATE lb_boards
+            SET latest_snapshot_id = ?, total_size = ?, total_pages = ?,
+                last_fetched_at = ?, final = ?, last_error = NULL, failures = 0
+            WHERE id = ?
+            """,
+            (snapshot_id, total_size, total_pages, captured_at, int(final), board_id),
+        )
+    return snapshot_id
+
+
+# --- runs ---------------------------------------------------------------------
+
+
+def start_run(conn: sqlite3.Connection, scope: str, started_at: str) -> int:
+    with conn:
+        cursor = conn.execute(
+            "INSERT INTO lb_runs (scope, started_at) VALUES (?, ?)", (scope, started_at)
+        )
+    return int(cursor.lastrowid or 0)
+
+
+def finish_run(
+    conn: sqlite3.Connection,
+    run_id: int,
+    *,
+    state: str,
+    finished_at: str,
+    summary: Mapping[str, Any],
+) -> None:
+    with conn:
+        conn.execute(
+            "UPDATE lb_runs SET state = ?, finished_at = ?, summary = ? WHERE id = ?",
+            (state, finished_at, json.dumps(summary, ensure_ascii=False), run_id),
+        )
+
+
+# --- reads ----------------------------------------------------------------------
+
+
+def latest_revision(conn: sqlite3.Connection) -> str | None:
+    row = conn.execute(
+        "SELECT MAX(captured_at) AS captured_at, COUNT(*) AS snapshots FROM lb_snapshots"
+    ).fetchone()
+    if not row or not row["captured_at"]:
+        return None
+    return f"{row['captured_at']}:{row['snapshots']}"
+
+
+def catalog(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        """
+        SELECT b.region, b.mode, b.season_id, b.season_start, b.is_latest, b.final,
+               b.total_size, b.last_fetched_at, s.day, s.stored_rows, s.truncated
+        FROM lb_boards b
+        LEFT JOIN lb_snapshots s ON s.id = b.latest_snapshot_id
+        ORDER BY b.mode, b.region, b.season_id DESC
+        """
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def find_board(
+    conn: sqlite3.Connection, region: str, mode: str, season_id: int | None
+) -> dict[str, Any] | None:
+    """The asked season, or the newest season of the pair that has data."""
+
+    if season_id is not None:
+        row = conn.execute(
+            "SELECT * FROM lb_boards WHERE region = ? AND mode = ? AND season_id = ?",
+            (region, mode, season_id),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            """
+            SELECT * FROM lb_boards
+            WHERE region = ? AND mode = ? AND latest_snapshot_id IS NOT NULL
+            ORDER BY season_id DESC LIMIT 1
+            """,
+            (region, mode),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def find_snapshot(
+    conn: sqlite3.Connection, board: Mapping[str, Any], day: str | None
+) -> dict[str, Any] | None:
+    if day is None:
+        snapshot_id = board.get("latest_snapshot_id")
+        if snapshot_id is None:
+            return None
+        row = conn.execute(
+            "SELECT * FROM lb_snapshots WHERE id = ?", (snapshot_id,)
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT * FROM lb_snapshots WHERE board_id = ? AND day = ?",
+            (board["id"], day),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def snapshot_days(conn: sqlite3.Connection, board_id: int) -> list[str]:
+    return [
+        str(row["day"])
+        for row in conn.execute(
+            "SELECT day FROM lb_snapshots WHERE board_id = ? ORDER BY day", (board_id,)
+        )
+    ]
+
+
+def table_rows(
+    conn: sqlite3.Connection,
+    snapshot: Mapping[str, Any],
+    *,
+    query: str | None,
+    limit: int,
+    offset: int,
+) -> tuple[list[dict[str, Any]], int]:
+    """One page of a snapshot, optionally filtered by a name substring."""
+
+    snapshot_id = int(snapshot["id"])
+    where = "e.snapshot_id = ?"
+    params: list[Any] = [snapshot_id]
+    if query:
+        where += " AND p.name_key LIKE ? ESCAPE '\\'"
+        params.append(_like_pattern(name_key(query)))
+        total = int(
+            conn.execute(
+                f"SELECT COUNT(*) FROM lb_entries e JOIN lb_players p ON p.id = e.player_id "
+                f"WHERE {where}",
+                params,
+            ).fetchone()[0]
+        )
+    else:
+        total = int(snapshot["stored_rows"])
+    rows = [
+        dict(row)
+        for row in conn.execute(
+            f"""
+            SELECT e.rank, p.name, e.rating, e.player_id
+            FROM lb_entries e JOIN lb_players p ON p.id = e.player_id
+            WHERE {where}
+            ORDER BY e.rank LIMIT ? OFFSET ?
+            """,
+            (*params, limit, offset),
+        )
+    ]
+    previous = conn.execute(
+        """
+        SELECT id FROM lb_snapshots
+        WHERE board_id = ? AND day < ? ORDER BY day DESC LIMIT 1
+        """,
+        (snapshot["board_id"], snapshot["day"]),
+    ).fetchone()
+    previous_ranks: dict[int, int] = {}
+    if previous and rows:
+        player_ids = [row["player_id"] for row in rows]
+        placeholders = ",".join("?" * len(player_ids))
+        for row in conn.execute(
+            f"""
+            SELECT player_id, MIN(rank) AS rank FROM lb_entries
+            WHERE snapshot_id = ? AND player_id IN ({placeholders})
+            GROUP BY player_id
+            """,
+            (previous["id"], *player_ids),
+        ):
+            previous_ranks[int(row["player_id"])] = int(row["rank"])
+    for row in rows:
+        row["previous_rank"] = previous_ranks.get(int(row.pop("player_id")))
+    return rows, total
+
+
+def rating_histogram(
+    conn: sqlite3.Connection, snapshot_id: int, bucket: float
+) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        """
+        SELECT CAST(rating / ? AS INTEGER) AS bucket, COUNT(*) AS players
+        FROM lb_entries WHERE snapshot_id = ? AND rating IS NOT NULL
+        GROUP BY bucket ORDER BY bucket
+        """,
+        (bucket, snapshot_id),
+    ).fetchall()
+    return [
+        {
+            "from": round(int(row["bucket"]) * bucket, 4),
+            "to": round((int(row["bucket"]) + 1) * bucket, 4),
+            "players": int(row["players"]),
+        }
+        for row in rows
+    ]
+
+
+def rating_summary(conn: sqlite3.Connection, snapshot_id: int) -> dict[str, Any] | None:
+    row = conn.execute(
+        """
+        SELECT COUNT(rating) AS rated, MIN(rating) AS min, MAX(rating) AS max,
+               AVG(rating) AS mean
+        FROM lb_entries WHERE snapshot_id = ?
+        """,
+        (snapshot_id,),
+    ).fetchone()
+    if not row or not row["rated"]:
+        return None
+    rated = int(row["rated"])
+    median = conn.execute(
+        """
+        SELECT rating FROM lb_entries WHERE snapshot_id = ? AND rating IS NOT NULL
+        ORDER BY rating LIMIT 1 OFFSET ?
+        """,
+        (snapshot_id, rated // 2),
+    ).fetchone()
+    return {
+        "rated_players": rated,
+        "min": row["min"],
+        "max": row["max"],
+        "mean": round(float(row["mean"]), 2),
+        "median": median["rating"] if median else None,
+    }
+
+
+def snapshot_series(conn: sqlite3.Connection, board_id: int) -> list[dict[str, Any]]:
+    return [
+        dict(row)
+        for row in conn.execute(
+            """
+            SELECT day, captured_at, total_size, stored_rows, truncated, final,
+                   rating_at_1, rating_at_100, rating_at_1000, rating_at_5000
+            FROM lb_snapshots WHERE board_id = ? ORDER BY day
+            """,
+            (board_id,),
+        )
+    ]
+
+
+def search_players(
+    conn: sqlite3.Connection, query: str, *, region: str | None, limit: int
+) -> list[dict[str, Any]]:
+    """Players whose name starts with ``query`` (case-insensitive), exact first."""
+
+    key = name_key(query)
+    params: list[Any] = [_like_pattern(key, prefix_only=True)]
+    where = "name_key LIKE ? ESCAPE '\\'"
+    if region:
+        where += " AND region = ?"
+        params.append(region)
+    players = [
+        dict(row)
+        for row in conn.execute(
+            f"""
+            SELECT id, region, name FROM lb_players WHERE {where}
+            ORDER BY name_key = ? DESC, length(name), name_key, region LIMIT ?
+            """,
+            (*params, key, limit),
+        )
+    ]
+    if not players:
+        return []
+    by_id = {player["id"]: {**player, "current": []} for player in players}
+    placeholders = ",".join("?" * len(by_id))
+    for row in conn.execute(
+        f"""
+        SELECT e.player_id, b.mode, b.season_id, MIN(e.rank) AS rank, e.rating
+        FROM lb_entries e
+        JOIN lb_boards b ON b.latest_snapshot_id = e.snapshot_id
+        WHERE e.player_id IN ({placeholders}) AND b.is_latest = 1
+        GROUP BY e.player_id, b.id ORDER BY b.mode
+        """,
+        tuple(by_id),
+    ):
+        by_id[row["player_id"]]["current"].append(
+            {
+                "mode": row["mode"],
+                "season_id": row["season_id"],
+                "rank": row["rank"],
+                "rating": row["rating"],
+            }
+        )
+    out = []
+    for player in by_id.values():
+        player.pop("id")
+        out.append(player)
+    return out
+
+
+def find_player(
+    conn: sqlite3.Connection, region: str, name: str
+) -> dict[str, Any] | None:
+    row = conn.execute(
+        "SELECT id, region, name FROM lb_players WHERE region = ? AND name = ?",
+        (region, name),
+    ).fetchone()
+    if row is None:
+        row = conn.execute(
+            """
+            SELECT id, region, name FROM lb_players
+            WHERE region = ? AND name_key = ? ORDER BY name LIMIT 1
+            """,
+            (region, name_key(name)),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def player_entries(
+    conn: sqlite3.Connection, player_id: int, *, mode: str | None
+) -> list[dict[str, Any]]:
+    where = "e.player_id = ?"
+    params: list[Any] = [player_id]
+    if mode:
+        where += " AND b.mode = ?"
+        params.append(mode)
+    return [
+        dict(row)
+        for row in conn.execute(
+            f"""
+            SELECT b.id AS board_id, b.mode, b.season_id, b.season_start, b.is_latest,
+                   b.final AS board_final, b.latest_snapshot_id, s.id AS snapshot_id,
+                   s.day, s.final, s.total_size, e.rank, e.rating
+            FROM lb_entries e
+            JOIN lb_snapshots s ON s.id = e.snapshot_id
+            JOIN lb_boards b ON b.id = s.board_id
+            WHERE {where}
+            ORDER BY b.mode, b.season_id DESC, s.day, e.rank
+            """,
+            params,
+        )
+    ]
+
+
+def coverage(conn: sqlite3.Connection, runs: int) -> dict[str, Any]:
+    boards = [
+        dict(row)
+        for row in conn.execute(
+            """
+            SELECT mode, region,
+                   COUNT(*) AS boards,
+                   SUM(latest_snapshot_id IS NOT NULL) AS with_data,
+                   SUM(final) AS final,
+                   SUM(is_latest = 0 AND final = 0) AS history_pending,
+                   SUM(failures > 0) AS failing,
+                   MAX(CASE WHEN is_latest = 1 THEN season_id END) AS latest_season,
+                   MAX(CASE WHEN is_latest = 1 THEN last_fetched_at END) AS latest_fetched_at
+            FROM lb_boards GROUP BY mode, region ORDER BY mode, region
+            """
+        )
+    ]
+    totals = conn.execute(
+        "SELECT COUNT(*) AS snapshots, COALESCE(SUM(stored_rows), 0) AS rows FROM lb_snapshots"
+    ).fetchone()
+    last_runs = []
+    for row in conn.execute("SELECT * FROM lb_runs ORDER BY id DESC LIMIT ?", (runs,)):
+        item = dict(row)
+        item["summary"] = json.loads(item["summary"]) if item["summary"] else None
+        last_runs.append(item)
+    return {
+        "boards": boards,
+        "snapshots": int(totals["snapshots"]),
+        "stored_rows": int(totals["rows"]),
+        "runs": last_runs,
+    }

@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- New pipeline `blizzard_leaderboards` collects the official Blizzard
+  leaderboards from the keyless community API: Standard, Wild, Battlegrounds
+  solo and duos, Arena, Underground Arena and Twist for EU, US and AP, the
+  live season in full every six hours and every past season the API still
+  serves (490 boards) once through an hourly backfill. One snapshot per board
+  and UTC day keeps the rank and rating of every player by day in a separate
+  SQLite file. Requests are paced to two a second with two in flight,
+  gzip-compressed, retried with backoff; Blizzard's burst 403/429 pauses
+  every request (30 s doubling to 5 min) and halves the pace. New REST
+  `/v1/leaderboards`, `/stats`, `/players`, `/player`, `/seasons`,
+  `/coverage` and GraphQL `leaderboard`, `leaderboardStats`,
+  `leaderboardPlayers`, `leaderboardPlayer`, `leaderboardSeasons`. See
+  docs/BLIZZARD_LEADERBOARDS.md.
 - HSGuru coverage: Tavern Brawl and esports. `hsguru_brawl` reads the current
   Brawl meta (7 ranks × 3 coin options and 11 opponent classes, from 10
   games) and Brawl decks every three hours. `hsguru_esports_tournaments`

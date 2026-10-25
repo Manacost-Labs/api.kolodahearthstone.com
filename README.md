@@ -173,6 +173,19 @@ GraphQL pagination возвращает `items` и `pageInfo`. Максимал�
 | GET | `/v1/hsguru/streamer-decks` | `format`, `player_class`, `archetype`, `max_rank`, `days`, `limit`, `offset` | Колоды всех стримеров, новые сверху |
 | GET | `/v1/hsguru/streaming-now` | `language`, `mode`, `known`, `limit` | Кто сейчас в эфире, с какой колодой и в каком режиме |
 
+## REST v1 — официальные таблицы лидеров Blizzard
+
+Подробно: [docs/BLIZZARD_LEADERBOARDS.md](docs/BLIZZARD_LEADERBOARDS.md).
+
+| Метод | Путь | Параметры | Что возвращает |
+| --- | --- | --- | --- |
+| GET | `/v1/leaderboards` | `mode`, `region`, `season`, `day`, `q`, `limit`, `offset` | Страница снимка таблицы: ранг, ник, рейтинг, ранг за прошлый день; поиск по нику |
+| GET | `/v1/leaderboards/stats` | `mode`, `region`, `season`, `bucket` | Пороги топ-100/1000/5000, число игроков и пороги по дням, распределение рейтинга |
+| GET | `/v1/leaderboards/players` | `q` (≥2 символа), `region`, `limit` | Игроки по началу ника и их места в текущих сезонах |
+| GET | `/v1/leaderboards/player` | `name`, `region`, `mode` | Профиль: все сезоны, лучший и последний ранг, ранг по дням |
+| GET | `/v1/leaderboards/seasons` | — | Режимы, регионы и сезоны Blizzard и что из них сохранено |
+| GET | `/v1/leaderboards/coverage` | `runs` | Прогресс сбора и последние запуски (без кэша) |
+
 ## REST v1 — System
 
 | Метод | Path | Query parameters | Назначение |

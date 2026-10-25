@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh the live seasons of the official Blizzard leaderboards every six hours
+
+[Timer]
+OnCalendar=*-*-* 00/6:10:00 Europe/Warsaw
+AccuracySec=5min
+Persistent=false
+
+[Install]
+WantedBy=timers.target

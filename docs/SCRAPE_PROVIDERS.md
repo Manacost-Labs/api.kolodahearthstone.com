@@ -14,6 +14,14 @@
 `skip_providers={"scrape_do", "firecrawl", "scrapfly", "brightdata"}` для
 callers, которые намеренно уже использовали конкретный слой.
 
+### Источники вне каскада: официальные таблицы лидеров Blizzard
+
+`blizzard_leaderboards` читает открытый JSON API
+`hearthstone.blizzard.com/en-us/api/community/leaderboardsData` напрямую через
+`httpx`, без провайдеров каскада и прокси: ключ и рендеринг не нужны, расход
+Scrape.do, Firecrawl, Bright Data и Scrapfly — ноль. Темп и поведение при
+`403`/`429` Blizzard описаны в [BLIZZARD_LEADERBOARDS.md](BLIZZARD_LEADERBOARDS.md).
+
 ## Поведение каскада
 
 Scrape.do target headers по умолчанию используют `extraHeaders=true` и имена
