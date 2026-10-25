@@ -84,6 +84,14 @@ def localize(
     cards_ru = cards_ru if cards_ru is not None else _load_ru_cards()
     ru_by_en = card_maps(cards_en, cards_ru)
     glossary = Glossary()
+    english_names = {
+        " ".join(str(card["name"]).split()).casefold(): " ".join(
+            str(card["name"]).split()
+        )
+        for card in cards_en.values()
+        if card.get("collectible") and card.get("name")
+    }
+    glossary.add_cards(ru_by_en, english_names)
     for english, russian in CLASS_NAMES.items():
         glossary.add(english, russian)
     archetypes = _archetype_names(bundles, changes)

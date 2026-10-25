@@ -392,3 +392,53 @@ def test_clean_text_localizes_company_format_and_points() -> None:
         glossary().clean("Близард понерфит в Диком на 10,1 п.п.")
         == "Blizzard понерфит в Вольном на 10,1 пункта"
     )
+
+
+def test_transliterations_become_russian_names() -> None:
+    g = glossary()
+    g.add("Blazing Invocation", "Огненное заклятье")
+    g.add("Godfather Kazakus", "Крестный отец Казакус")
+    issues: list[str] = []
+    text = g.clean(
+        "Похоже на Блазинг Инвокейшн в 36.0.3, а Годфазер Казакус ещё силён; Ритуал призыва тоже.",
+        issues,
+    )
+    assert (
+        text
+        == "Похоже на Огненное заклятье в 36.0.3, а Крестный отец Казакус ещё силён; Ритуал призыва тоже."
+    )
+    assert "transliteration_replaced" in issues
+    # Real Russian names and short words are left alone.
+    assert g.clean("Маги и Друид, Чернокнижник") == "Маги и Друид, Чернокнижник"
+    assert g.clean_tree(
+        {
+            "a": ["Zoolock is up", {"b": "Ritual of Summoning"}],
+            "code": "same_card",
+            "n": 3,
+        }
+    ) == {"a": ["Зоолок is up", {"b": "Ритуал призыва"}], "code": "same_card", "n": 3}
+
+
+def test_transliteration_fix_leaves_inflected_russian_words_alone() -> None:
+    g = glossary()
+    g.add("Magmar", "Магмарь")
+    g.add("Demonlock", "Демонолок")
+    g.add("C'Thun DH", "К'тун Охотник на демонов")
+    assert g.clean("Игроки жалуются на Мага, а К'тун Охотник на демонов силён") == (
+        "Игроки жалуются на Мага, а К'тун Охотник на демонов силён"
+    )
+
+
+def test_any_collectible_card_and_game_terms_are_russian() -> None:
+    g = glossary()
+    g.add_cards(
+        {"divergence": "Расхождение", "bat mask": "Маска летучей мыши"},
+        {"divergence": "Divergence", "bat mask": "Bat Mask"},
+    )
+    assert (
+        g.clean("Баны Divergence и Bat Mask, плюс Rush на ходу 2")
+        == "Баны Расхождение и Маска летучей мыши, плюс Натиск на ходу 2"
+    )
+    assert (
+        "Divergence" not in g.as_lines()
+    )  # the full card list is not sent to the model

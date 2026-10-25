@@ -392,7 +392,7 @@ def precedent_digest(
                 "id": f"precedent:{change['id']}",
                 "patch": change["patch"],
                 "date": change.get("date"),
-                "card": change.get("nameEn") or change.get("name"),
+                "card": change.get("name") or change.get("nameEn"),
                 "class": change.get("class"),
                 "direction": change["direction"],
                 "fields": [
@@ -823,6 +823,9 @@ def run_balance_radar(
             developer=developer,
         )
         model_input["glossary"] = glossary.as_lines()
+        if model_input.get("history"):
+            # Past narratives were written with English names; the model copies them.
+            model_input["history"] = glossary.clean_tree(model_input["history"])
         digest = input_hash(model_input)
         if dry_run:
             if dry_run_dir is not None:

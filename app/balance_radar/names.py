@@ -15,6 +15,7 @@ and marks up mentions of candidates so the site can link them by ``ref``.
 
 from __future__ import annotations
 
+import difflib
 import json
 import logging
 import os
@@ -62,6 +63,20 @@ RANK_WORDS = (
     (re.compile(r"\bДикому\b"), "Вольному"),
     (re.compile(r"(\d)\s*п\.\s?п\."), r"\1 пункта"),
 )
+# Game terms the model borrows from English posts.
+TERMS = {
+    "Rush": "Натиск",
+    "Taunt": "Провокация",
+    "Battlecry": "Боевой клич",
+    "Deathrattle": "Предсмертный хрип",
+    "Lifesteal": "Похищение жизни",
+    "Discover": "Раскопка",
+    "Mulligan": "муллиган",
+    "The Coin": "Монетка",
+    "Coin": "Монетка",
+    "Mill": "милл",
+    "Handbuff": "усиление в руке",
+}
 ALLOWED_LATIN = frozenset(
     {
         "blizzard",
@@ -88,6 +103,73 @@ _DUPLICATE_BRACKETS = re.compile(r"(?P<name>[\wЁё'][\wЁё' -]{2,60}?)\s*\((?P
 _LATIN_WORD = re.compile(r"[A-Za-z][A-Za-z'’]+")
 _SPACES = re.compile(r"[ \t]{2,}")
 _SPACE_PUNCT = re.compile(r"\s+([,.;:!?)])")
+
+
+# Rough English -> Cyrillic phonetics, longest rules first: enough to spot a
+# model's transliteration ("Блазинг Инвокейшн") of a name it should translate.
+_TRANSLIT_RULES = (
+    ("tion", "шн"),
+    ("sion", "жн"),
+    ("igh", "ай"),
+    ("sh", "ш"),
+    ("ch", "ч"),
+    ("th", "т"),
+    ("ph", "ф"),
+    ("ee", "и"),
+    ("ea", "и"),
+    ("oo", "у"),
+    ("ou", "ау"),
+    ("ck", "к"),
+    ("qu", "кв"),
+    ("kh", "х"),
+    ("ai", "ей"),
+    ("ay", "ей"),
+    ("ow", "оу"),
+    ("a", "а"),
+    ("b", "б"),
+    ("c", "к"),
+    ("d", "д"),
+    ("e", "е"),
+    ("f", "ф"),
+    ("g", "г"),
+    ("h", "х"),
+    ("i", "и"),
+    ("j", "дж"),
+    ("k", "к"),
+    ("l", "л"),
+    ("m", "м"),
+    ("n", "н"),
+    ("o", "о"),
+    ("p", "п"),
+    ("q", "к"),
+    ("r", "р"),
+    ("s", "с"),
+    ("t", "т"),
+    ("u", "у"),
+    ("v", "в"),
+    ("w", "в"),
+    ("x", "кс"),
+    ("y", "и"),
+    ("z", "з"),
+)
+TRANSLIT_SIMILARITY = 0.8
+# One-word names collide with ordinary inflected words ("Мага", "демонов").
+TRANSLIT_SIMILARITY_ONE_WORD = 0.9
+_CYRILLIC_WORD = re.compile(r"[А-Яа-яЁё][А-Яа-яЁё'-]*")
+
+
+def transliterate(english: str) -> str:
+    text, out, index = english.casefold(), [], 0
+    while index < len(text):
+        for source, target in _TRANSLIT_RULES:
+            if text.startswith(source, index):
+                out.append(target)
+                index += len(source)
+                break
+        else:
+            out.append(text[index])
+            index += 1
+    return "".join(out)
 
 
 @lru_cache(maxsize=1)
@@ -225,11 +307,28 @@ def archetype_name(
     return name, False
 
 
+@lru_cache(maxsize=4096)
+def _inflected(russian: str) -> re.Pattern[str]:
+    """A Russian name with free case endings ("Ритуал призыва" ~ "Ритуала призыва")."""
+    parts = []
+    for word in russian.split():
+        if len(word) > 4 and word[-1].isalpha():
+            parts.append(re.escape(word[:-2]) + r"[\wёЁ]{0,4}")
+        else:
+            parts.append(re.escape(word))
+    return re.compile(
+        r"(?<![\wЁё])" + r"\s+".join(parts) + r"(?![\wЁё])", re.IGNORECASE
+    )
+
+
 class Glossary:
     """English → Russian names for one run, with text cleanup and mention markup."""
 
     def __init__(self) -> None:
         self.ru_by_en: dict[str, str] = {}
+        # Every collectible card and game term: replaced when written in
+        # English, but too many to search for transliterations or to send.
+        self.extra_ru_by_en: dict[str, str] = dict(TERMS)
         self.entities: dict[str, dict[str, Any]] = {}  # Russian name -> entity link
 
     def add(
@@ -264,15 +363,35 @@ class Glossary:
             if en.casefold() in lowered or ru.casefold() in lowered
         ]
 
+    def add_cards(
+        self, ru_by_en_casefold: Mapping[str, str], english_names: Mapping[str, str]
+    ) -> None:
+        """All collectible cards (English name -> ruRU) for English-name replacement."""
+        for key, russian in ru_by_en_casefold.items():
+            english = english_names.get(key, key)
+            if len(english) >= 4:
+                self.extra_ru_by_en.setdefault(english, russian)
+        self.__dict__.pop("_compiled", None)
+
+    @property
+    def _all_names(self) -> dict[str, str]:
+        return {**self.extra_ru_by_en, **self.ru_by_en}
+
     @property
     def _english_pattern(self) -> re.Pattern[str] | None:
-        names = sorted(self.ru_by_en, key=len, reverse=True)
+        cached = self.__dict__.get("_compiled")
+        names_map = self._all_names
+        if cached and cached[0] == len(names_map):
+            return cached[1]
+        names = sorted(names_map, key=len, reverse=True)
         if not names:
             return None
-        return re.compile(
+        compiled = re.compile(
             r"(?<![\w'])(?:" + "|".join(re.escape(n) for n in names) + r")(?![\w'])",
             re.IGNORECASE,
         )
+        self.__dict__["_compiled"] = (len(names_map), compiled)
+        return compiled
 
     def clean(self, text: str | None, issues: list[str] | None = None) -> str:
         """Russian-only reader text: no English names, brackets, field names or rank slang."""
@@ -285,11 +404,12 @@ class Glossary:
         )  # English duplicates before names are replaced
         pattern = self._english_pattern
         if pattern is not None:
-            lookup = {k.casefold(): v for k, v in self.ru_by_en.items()}
+            lookup = {k.casefold(): v for k, v in self._all_names.items()}
             text = pattern.sub(
                 lambda m: lookup.get(m.group(0).casefold(), m.group(0)), text
             )
         text = _LATIN_BRACKETS.sub("", text)
+        text = self._replace_transliterations(text, issues)
         text = _DUPLICATE_BRACKETS.sub(lambda m: m.group("name"), text)
         for regex, replacement in RANK_WORDS:
             text = regex.sub(replacement, text)
@@ -311,6 +431,87 @@ class Glossary:
                 issues.append("changed")
         return text
 
+    def _replace_transliterations(self, text: str, issues: list[str] | None) -> str:
+        """Swap Cyrillic transliterations of glossary names for the Russian names."""
+        words = list(_CYRILLIC_WORD.finditer(text))
+        if not words:
+            return text
+        protected = self._russian_spans(text)
+        replacements: list[tuple[int, int, str]] = []
+        for english, russian in self.ru_by_en.items():
+            parts = english.split()
+            spelled = transliterate(english)
+            if len(parts) == 1 and len(spelled) < 6 or spelled == russian.casefold():
+                continue
+            size = len(parts)
+            for start in range(len(words) - size + 1):
+                first, last = words[start], words[start + size - 1]
+                if text[last.end() : last.end() + 1].isalpha():
+                    continue
+                phrase = " ".join(w.group(0) for w in words[start : start + size])
+                if (
+                    phrase.casefold() == russian.casefold()
+                    or phrase[0].casefold() != spelled[0]
+                ):
+                    continue
+                if " ".join(text[first.start() : last.end()].split()) != phrase:
+                    continue  # the words are not adjacent
+                span = (first.start(), last.end())
+                if any(span[0] < end and start < span[1] for start, end in protected):
+                    continue  # part of a real Russian name ("Охотник на демонов")
+                if size == 1 and not -1 <= len(phrase) - len(spelled) <= 2:
+                    continue
+                threshold = (
+                    TRANSLIT_SIMILARITY if size > 1 else TRANSLIT_SIMILARITY_ONE_WORD
+                )
+                ratio = difflib.SequenceMatcher(
+                    None, spelled, phrase.casefold()
+                ).ratio()
+                if ratio >= threshold and not any(
+                    span[0] < end and start < span[1] for start, end, _ in replacements
+                ):
+                    replacements.append((span[0], span[1], russian))
+        if not replacements:
+            return text
+        if issues is not None:
+            issues.append("transliteration_replaced")
+        for start, end, russian in sorted(replacements, reverse=True):
+            text = text[:start] + russian + text[end:]
+        return text
+
+    def rename(self, text: str) -> str:
+        """Names only (English and transliterated to Russian); codes and keys stay."""
+        text = text.replace("’", "'")
+        pattern = self._english_pattern
+        if pattern is not None:
+            lookup = {k.casefold(): v for k, v in self._all_names.items()}
+            text = pattern.sub(
+                lambda m: lookup.get(m.group(0).casefold(), m.group(0)), text
+            )
+        return self._replace_transliterations(text, None)
+
+    def _russian_spans(self, text: str) -> list[tuple[int, int]]:
+        names = {*self.ru_by_en.values(), *self.entities, *CLASS_NAMES.values()}
+        return [
+            (m.start(), m.end())
+            for name in names
+            for m in _inflected(name).finditer(text)
+        ]
+
+    def clean_tree(self, value: Any) -> Any:
+        """``rename`` applied to every prose string of a nested structure (model context)."""
+        if isinstance(value, str):
+            return (
+                self.rename(value)
+                if " " in value.strip() or not value.isascii()
+                else value
+            )
+        if isinstance(value, list):
+            return [self.clean_tree(item) for item in value]
+        if isinstance(value, dict):
+            return {key: self.clean_tree(item) for key, item in value.items()}
+        return value
+
     def mentions(self, text: str | None) -> list[dict[str, Any]]:
         """Spans of candidate names in ``text`` (inflected endings allowed)."""
         if not text:
@@ -318,17 +519,7 @@ class Glossary:
         found: list[dict[str, Any]] = []
         taken: list[tuple[int, int]] = []
         for russian in sorted(self.entities, key=len, reverse=True):
-            words = russian.split()
-            parts = []
-            for word in words:
-                escaped = re.escape(word)
-                if len(word) > 4 and word[-1].isalpha():
-                    parts.append(re.escape(word[:-2]) + r"[\wёЁ]{0,4}")
-                else:
-                    parts.append(escaped)
-            regex = re.compile(
-                r"(?<![\wЁё])" + r"\s+".join(parts) + r"(?![\wЁё])", re.IGNORECASE
-            )
+            regex = _inflected(russian)
             for match in regex.finditer(text):
                 span = (match.start(), match.end())
                 if any(span[0] < end and start < span[1] for start, end in taken):
