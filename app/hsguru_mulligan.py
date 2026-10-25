@@ -34,6 +34,7 @@ import json
 import logging
 import os
 import re
+import sqlite3
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from concurrent.futures import Executor, ThreadPoolExecutor
 from dataclasses import dataclass
@@ -402,6 +403,14 @@ def _parse_class_matchups(html: str) -> dict[str, Any]:
                 "share_pct": _number(share.group(1)) if share else None,
             }
         )
+    # Two labels can map to one class key; storage keeps one row per class,
+    # so the larger sample wins.
+    by_class: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        kept = by_class.get(row["class_key"])
+        if kept is None or int(row["games"]) > int(kept["games"]):
+            by_class[row["class_key"]] = row
+    rows = list(by_class.values())
     if total_games is None:
         total_games = sum(int(row["games"]) for row in rows)
     return {
@@ -1055,19 +1064,34 @@ async def _refresh_unlocked(
                     failures_in_row = 0
                 games = parsed.get("games")
                 state = "ok" if parsed["rows"] else "no_data"
-                _, changed = store.record_success(
-                    conn,
-                    target,
-                    fetched_at=attempted_at,
-                    games=int(games) if games is not None else None,
-                    winrate=parsed.get("winrate"),
-                    rows=parsed["rows"],
-                    content_hash=_content_hash(parsed),
-                    source_url=url,
-                    backend=str(meta.get("backend") or "unknown"),
-                    request_credits=int(meta.get("request_credits") or 0),
-                    state=state,
-                )
+                try:
+                    _, changed = store.record_success(
+                        conn,
+                        target,
+                        fetched_at=attempted_at,
+                        games=int(games) if games is not None else None,
+                        winrate=parsed.get("winrate"),
+                        rows=parsed["rows"],
+                        content_hash=_content_hash(parsed),
+                        source_url=url,
+                        backend=str(meta.get("backend") or "unknown"),
+                        request_credits=int(meta.get("request_credits") or 0),
+                        state=state,
+                    )
+                except sqlite3.Error as exc:
+                    # The write rolled back; one bad page must not end the run.
+                    counts["failed"] += 1
+                    store.record_failure(
+                        conn,
+                        target,
+                        attempted_at=attempted_at,
+                        state="failed",
+                        error=f"store: {type(exc).__name__}: {exc}"[:300],
+                        retry_after=_retry_after(
+                            int(target.get("consecutive_failures") or 0), clock()
+                        ).isoformat(),
+                    )
+                    continue
                 counts["changed" if changed else "unchanged"] += 1
                 if state == "no_data":
                     counts["no_data"] += 1

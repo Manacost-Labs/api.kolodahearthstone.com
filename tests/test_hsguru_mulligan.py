@@ -171,6 +171,21 @@ def test_class_matchups_keep_the_total_row_and_class_keys() -> None:
     assert empty == {"games": 0, "winrate": None, "rows": []}
 
 
+def test_class_matchups_keep_one_row_per_class() -> None:
+    # Production run of 2026-10-25 died on UNIQUE(snapshot_id, opponent_class).
+    parsed = mulligan.parse_class_matchups_page(
+        matchups_html(
+            [
+                ("Mage", "52.0", "1,000 (10.7%)"),
+                ("Mage", "40.0", "12 (0.1%)"),
+                ("Total", "50.1", "1012"),
+            ]
+        )
+    )
+    assert [row["class_key"] for row in parsed["rows"]] == ["mage"]
+    assert parsed["rows"][0]["games"] == 1000
+
+
 # --- planning --------------------------------------------------------------------
 
 
