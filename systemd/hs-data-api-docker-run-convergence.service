@@ -7,5 +7,10 @@ After=hs-data-api-docker.service hs-data-api-docker-plan-convergence.service net
 [Service]
 Type=oneshot
 WorkingDirectory=/srv/hs-data-api
-ExecStart=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm --no-deps api python -m app.convergence_worker
+# `docker compose run` outlives a stopped or timed-out unit; the container is
+# named after the unit so stale ones are removed before start and after stop.
+ExecStartPre=-/usr/bin/docker rm -f %N
+ExecStart=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm --no-deps --name %N api python -m app.convergence_worker
+ExecStopPost=-/usr/bin/docker stop --time 20 %N
+ExecStopPost=-/usr/bin/docker rm -f %N
 TimeoutStartSec=25min

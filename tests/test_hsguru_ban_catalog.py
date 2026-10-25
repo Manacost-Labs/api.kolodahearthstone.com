@@ -456,7 +456,9 @@ def test_catalog_job_refreshes_ban_builds_after_the_current_window() -> None:
         "fallback:standard:black_empire",
         "fallback:wild:black_empire",
         f"refresh:standard_all:{BAN}",
+        f"fallback:standard:{BAN}",
         f"refresh:wild_all:{BAN}",
+        f"fallback:wild:{BAN}",
         "join",
     ]
     assert result["state"] == "ok"
@@ -542,3 +544,139 @@ def test_rune_spread_deck_names_join_the_requested_archetype() -> None:
         "XL Druid",
         "Burn Mage",
     ]
+
+
+REPLAY_CODE = (
+    "AAECAa0GApb9BoO/Bw7LoASg+waFhgftrAedrQfksgeFvweWvweixAevyQew3wfo8Qfh+gfk+gcAAA=="
+)
+SECOND_REPLAY_CODE = (
+    "AAECAa0GBJb9BoO/B+SyB/rKBw3LoASg+waFhgftrAedrQeFvweWvweixAevyQew3wfo8Qfh+gcAAA=="
+)
+
+
+def _replay_row(code: str, played: str) -> str:
+    return f"""
+    <tr>
+      <td><div class="decklist-info priest">
+        <button data-clipboard-text="### Tyrande Priest
+{code}
+### You can view this deck at https://www.hsguru.com/deck/42750207
+">copy</button></div></td>
+      <td>Opponent</td><td>{played}</td>
+    </tr>"""
+
+
+def _replays_page(*rows: str) -> str:
+    return (
+        '<table id="replays_table"><thead><tr><th>Deck</th><th>Opponent</th>'
+        f"<th>Played</th></tr></thead><tbody>{''.join(rows)}</tbody></table>"
+    )
+
+
+def test_ban_fallback_borrows_the_release_window_before_the_month() -> None:
+    with patch.object(
+        hsguru_decks, "_current_deck_period", return_value="black_empire"
+    ):
+        assert hsguru_decks._fallback_windows(BAN) == (
+            ("black_empire", 50),
+            ("past_30_days", 50),
+        )
+        assert hsguru_decks._fallback_windows("black_empire") == (("past_30_days", 50),)
+
+
+def test_replay_page_yields_distinct_real_deck_codes() -> None:
+    page = _replays_page(
+        _replay_row(REPLAY_CODE, "9 hours ago"),
+        _replay_row(REPLAY_CODE, "10 hours ago"),
+        _replay_row(SECOND_REPLAY_CODE, "1 day ago"),
+    )
+
+    rows = hsguru_decks.parse_hsguru_replays_html(
+        page, archetype="Tyrande Priest", format_name="standard"
+    )
+
+    assert [row["deck_code"] for row in rows] == [REPLAY_CODE, SECOND_REPLAY_CODE]
+    assert rows[0]["archetype"] == "Tyrande Priest"
+    assert rows[0]["class"] == "Priest"
+    assert rows[0]["games"] is None
+    assert rows[0]["sample_source"] == "replays"
+    assert rows[0]["url"] == "https://www.hsguru.com/deck/42750207"
+
+
+def test_replay_lookup_stops_at_the_first_window_with_replays() -> None:
+    empty = hsguru_decks._CatalogPage(
+        html=_replays_page(), backend="scrape_do", request_credits=5
+    )
+    found = hsguru_decks._CatalogPage(
+        html=_replays_page(_replay_row(REPLAY_CODE, "1 day ago")),
+        backend="scrape_do",
+        request_credits=5,
+    )
+    fetch_page = AsyncMock(side_effect=[empty, found])
+    with patch.object(hsguru_decks, "_fetch_catalog_page", fetch_page):
+        rows, credits, _backends, _attempts, error = asyncio.run(
+            hsguru_decks._fetch_replay_decks(
+                "standard",
+                "Tyrande Priest",
+                period=BAN,
+                windows=(BAN, "black_empire", "past_30_days"),
+            )
+        )
+
+    assert error is None
+    assert fetch_page.await_count == 2
+    first, second = (call.args[0].url for call in fetch_page.await_args_list)
+    assert first.startswith("https://www.hsguru.com/replays?")
+    assert f"period={BAN}" in first and "period=black_empire" in second
+    assert fetch_page.await_args.kwargs["marker"] == 'id="replays_table"'
+    assert credits == 10
+    assert rows[0]["sample_period"] == "black_empire"
+    assert rows[0]["sample_fallback_for"] == BAN
+
+
+def test_catalog_rows_label_where_their_builds_come_from() -> None:
+    from app.hsguru_meta_matrix import enrich_current_rows_with_cached_decks
+
+    decks = {
+        "Zoolock": [{"deck_code": "AAECAZoo", "games": 84, "sample_period": BAN}],
+        "Vanessa Rogue": [
+            {
+                "deck_code": "AAECAVan",
+                "games": 60,
+                "sample_period": "black_empire",
+                "sample_fallback_for": BAN,
+            }
+        ],
+        "Tyrande Priest": [
+            {
+                "deck_code": "AAECATyr",
+                "games": None,
+                "sample_period": BAN,
+                "sample_source": "replays",
+            }
+        ],
+    }
+    rows = [
+        {"format": "standard", "archetype": name, "games": 100}
+        for name in (*decks, "Quiet Mage")
+    ]
+    with patch(
+        "app.hsguru_meta_matrix.cached_hsguru_catalog_decks",
+        side_effect=lambda archetype, *_args, **_kwargs: decks.get(archetype, []),
+    ):
+        enrich_current_rows_with_cached_decks(rows, None, sample_period=BAN)
+
+    labels = {
+        row["archetype"]: (
+            row["decks_period"],
+            row["decks_source"],
+            row["decks_fallback"],
+        )
+        for row in rows
+    }
+    assert labels == {
+        "Zoolock": (BAN, "stats", False),
+        "Vanessa Rogue": ("black_empire", "stats", True),
+        "Tyrande Priest": (BAN, "replays", True),
+        "Quiet Mage": (None, None, False),
+    }

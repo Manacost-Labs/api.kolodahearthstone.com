@@ -44,7 +44,13 @@ def test_timer_survives_reboots_and_contains_no_expired_patch_date() -> None:
 def test_refresh_retries_failures_and_always_attempts_all_cache_busts() -> None:
     service_lines = SERVICE_PATH.read_text(encoding="utf-8").splitlines()
     service = "\n".join(service_lines)
-    cache_busts = [line for line in service_lines if line.startswith("ExecStopPost=")]
+    stop_posts = [line for line in service_lines if line.startswith("ExecStopPost=")]
+    # Container cleanup runs first, shared by every job unit.
+    assert stop_posts[:2] == [
+        "ExecStopPost=-/usr/bin/docker stop --time 20 %N",
+        "ExecStopPost=-/usr/bin/docker rm -f %N",
+    ]
+    cache_busts = stop_posts[2:]
 
     assert "python -m app.cli refresh-post-patch" in service
     assert "HS_ARENA_POST_PATCH_FROM" not in service

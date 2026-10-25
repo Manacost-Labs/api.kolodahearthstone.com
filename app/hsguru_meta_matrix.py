@@ -1121,6 +1121,22 @@ def enrich_current_rows_with_cached_decks(
         row["decks"] = merged
         row["deck_count"] = len(merged)
         row["has_decks"] = bool(merged)
+        # Where the builds come from, so a consumer can label borrowed ones
+        # ("builds of the whole release", "builds from replays").
+        windows = {str(deck.get("sample_period") or "") for deck in merged}
+        sources = {str(deck.get("sample_source") or "stats") for deck in merged}
+        row["decks_period"] = (
+            (windows.pop() if len(windows) == 1 else effective_sample_period)
+            if merged
+            else None
+        )
+        row["decks_source"] = (
+            (sources.pop() if len(sources) == 1 else "mixed") if merged else None
+        )
+        row["decks_fallback"] = bool(merged) and (
+            row["decks_period"] != effective_sample_period
+            or row["decks_source"] != "stats"
+        )
 
 
 def _deck_catalog_join(period: str, joined_at: str) -> dict[str, Any]:

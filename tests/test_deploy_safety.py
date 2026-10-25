@@ -100,7 +100,7 @@ def test_server_deploy_is_the_single_path_for_platform_api_and_units() -> None:
     build = script.index('docker compose -f "$COMPOSE_FILE" build api')
     health = script.index('say "проверяю здоровье: $HEALTH_URL"')
     units = script.index("scripts/install-docker-systemd.sh; then")
-    exporter = script.index('if ! verify_host_timer_export; then')
+    exporter = script.index("if ! verify_host_timer_export; then")
     stamp = script.index('printf \'%s\\n\' "$COMMIT" > "$STAMP_FILE"')
 
     # Migrations before the new API starts; units only after it is healthy.
@@ -132,3 +132,52 @@ def test_agent_worktrees_never_dirty_the_deploy_checkout() -> None:
 
     assert "/.claude/" in gitignore
     assert ".claude" in dockerignore
+
+
+def test_server_deploy_names_job_containers_of_other_revisions(tmp_path: Path) -> None:
+    script = (ROOT / "scripts" / "deploy-server.sh").read_text(encoding="utf-8")
+    function = script[
+        script.index("report_old_job_containers() {") : script.index(
+            "\n}\n", script.index("report_old_job_containers() {")
+        )
+        + 3
+    ]
+    fake_docker = tmp_path / "docker"
+    fake_docker.write_text(
+        "#!/usr/bin/env bash\n"
+        'printf "%s\\n" "$*" > "$DOCKER_ARGS_FILE"\n'
+        "echo 'hs-data-api-docker-refresh-hsguru-deck-catalog|5d56addfeed|2 hours ago'\n"
+        "echo 'hs-data-api-docker-run-convergence|newrev|10 seconds ago'\n",
+        encoding="utf-8",
+    )
+    fake_docker.chmod(0o755)
+    args_file = tmp_path / "args"
+
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            f"set -euo pipefail\n{function}\nreport_old_job_containers newrev",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+        env={
+            "PATH": f"{tmp_path}:/usr/bin:/bin",
+            "COMPOSE_PROJECT": "hs-data-api",
+            "DOCKER_ARGS_FILE": str(args_file),
+        },
+    )
+
+    assert (
+        "hs-data-api-docker-refresh-hsguru-deck-catalog (ревизия 5d56add"
+        in result.stderr
+    )
+    assert "run-convergence" not in result.stderr
+    docker_args = args_file.read_text(encoding="utf-8")
+    assert "label=com.docker.compose.oneoff=True" in docker_args
+    assert "label=com.docker.compose.project=hs-data-api" in docker_args
+    # Called in the dry-run plan and before the deploy is marked successful.
+    assert script.count("report_old_job_containers ") == 2
+    stamp = script.index('printf \'%s\\n\' "$COMMIT" > "$STAMP_FILE"')
+    assert script.rindex('report_old_job_containers "$REVISION"') < stamp

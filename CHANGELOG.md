@@ -14,6 +14,13 @@
   candidates are listed now (no quota). The backtest adds Brier score and a
   reliability table, and runs the Claude predictor automatically after a new
   patch; the result reaches every payload as `accuracy`.
+- HSGuru mulligan parses a page with lxml into one tree, once: the provider
+  cascade validates it twice and the run stores it, and all three now share
+  one memoized result. BeautifulSoup built six trees per page (~140 ms of
+  CPU), so the run was bound to one core at about 20 pages a minute in
+  production. Measured on the real page path with the network mocked at 6 s:
+  122 → 369 pages a minute at concurrency 40 (the network limit is 400),
+  peak RSS 606 → 367 MB; output is identical on eight real HSGuru pages.
 
 - Balance Radar v2 (schemaVersion 2, additive): 15–25 nerf and 15–25 buff
   candidates per format (cards, archetypes, classes) from wider pools (HSGuru
@@ -28,6 +35,24 @@
   changes since the previous run, counts. New `/backtest` (statistical
   nerf precision@5 0.28 / recall@10 0.59; Claude 0.33 / 0.77) and
   `/confidence-history` endpoints. About $1.14 per run for both formats.
+
+- HSGuru deck catalogs fetch through Scrape.do first, 15 pages in parallel
+  (`HS_HSGURU_DECK_CATALOG_CONCURRENCY`; the local FlareSolverr is the
+  fallback, or goes first with `HS_HSGURU_DECK_CATALOG_LOCAL_FIRST=1`), with a
+  90 s page timeout instead of 25 s. Every page asks for HSGuru's 50-game deck
+  floor, so one pass verifies every archetype and the 200-target retry cap is
+  gone; catalogs written under older rules are re-read in full. A live run
+  took 28 minutes and 2,700 Scrape.do credits: Black Empire builds grew from
+  458 to 2,634 (Standard) and 772 to 1,689 (Wild), and the Bans catalogs went
+  from none to 1,826 and 840 builds. HSGuru lists no build below 50 games,
+  also when logged in, so 88 of 243 Standard archetypes (0.3% of games) have
+  none.
+- One HSGuru deck-catalog run at a time: a flock makes a second run exit
+  DEGRADED without writing, and the unit removes its named container when it
+  stops. An orphaned container of the previous release had overwritten the
+  Wild catalog of the next run. Death Knight builds that HSGuru names with
+  their rune spread ("BUU Egg DK") now join their archetype ("Egg DK").
+
 - HSGuru mulligan asks Scrape.do for a plain page first: HSGuru serves
   card-stats and archetype pages as LiveView dead renders, so a request
   without a browser has the full tables (8 s and 1 credit instead of 54 s
