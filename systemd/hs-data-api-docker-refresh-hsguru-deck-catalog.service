@@ -7,6 +7,9 @@ After=hs-data-api-docker.service network-online.target hs-data-api-docker-refres
 Type=oneshot
 SuccessExitStatus=10
 WorkingDirectory=/srv/hs-data-api
-ExecStart=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm api python /app/scripts/refresh-hsguru-deck-catalog.py
+ExecStart=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm --name hs-data-api-refresh-hsguru-deck-catalog api python /app/scripts/refresh-hsguru-deck-catalog.py
+# Stopping the unit only stops the compose client; remove the container too so
+# an interrupted run cannot keep writing catalogs next to the next one.
+ExecStopPost=-/usr/bin/docker rm -f hs-data-api-refresh-hsguru-deck-catalog
 TimeoutStartSec=4h
 TimeoutStopSec=30s

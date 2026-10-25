@@ -302,6 +302,14 @@ def test_scrape_do_map_and_daily_audit_schedules_are_canonical() -> None:
     )
     # Current and Bans windows, each re-read daily, through the local solver.
     assert "TimeoutStartSec=4h" in deck_catalog_service
+    # A stopped unit must not leave its container writing catalogs.
+    assert "run --rm --name hs-data-api-refresh-hsguru-deck-catalog api" in (
+        deck_catalog_service
+    )
+    assert (
+        "ExecStopPost=-/usr/bin/docker rm -f hs-data-api-refresh-hsguru-deck-catalog"
+        in deck_catalog_service
+    )
 
     patch_timer = (systemd_dir / "hs-data-api-docker-refresh-patches.timer").read_text(
         encoding="utf-8"
