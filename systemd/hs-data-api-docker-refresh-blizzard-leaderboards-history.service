@@ -1,0 +1,12 @@
+[Unit]
+Description=Read past seasons of the official Blizzard leaderboards once in Docker
+Requires=hs-data-api-docker.service
+After=hs-data-api-docker.service network-online.target
+
+[Service]
+Type=oneshot
+SuccessExitStatus=10
+WorkingDirectory=/srv/hs-data-api
+ExecStart=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm api python -m app.cli refresh-blizzard-leaderboards --scope history --scheduled --schedule-id refresh-blizzard-leaderboards-history
+TimeoutStartSec=45min
+TimeoutStopSec=1min

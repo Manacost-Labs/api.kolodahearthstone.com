@@ -20,7 +20,7 @@ from .source_tiers import LIGHT_API_IDS, MEDIUM_API_IDS
 from .sources import SOURCE_BY_ID
 
 SCHEDULE_INVENTORY_SCHEMA_VERSION = 2
-SCHEDULE_INVENTORY_VERSION = "2026-10-25.6"
+SCHEDULE_INVENTORY_VERSION = "2026-10-25.7"
 SCHEDULE_TIMEZONE = "Europe/Warsaw"
 
 _SYSTEMCTL_SEARCH_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
@@ -122,6 +122,24 @@ _SCHEDULES: tuple[_ScheduleSpec, ...] = (
             *((hour, minute) for hour in range(24) for minute in range(0, 60, 10))
         ),
         purpose="recovery",
+    ),
+    _ScheduleSpec(
+        id="refresh-blizzard-leaderboards",
+        label="Каждые 6 часов в :10 — текущие сезоны таблиц лидеров Blizzard",
+        systemd_unit="hs-data-api-docker-refresh-blizzard-leaderboards.timer",
+        on_calendar=("*-*-* 00/6:10:00 Europe/Warsaw",),
+        source_ids=frozenset({"blizzard_leaderboards"}),
+        recurrence="daily",
+        local_times=_times(*((hour, 10) for hour in range(0, 24, 6))),
+    ),
+    _ScheduleSpec(
+        id="refresh-blizzard-leaderboards-history",
+        label="Каждый час в :40 — прошлые сезоны таблиц лидеров (один раз)",
+        systemd_unit="hs-data-api-docker-refresh-blizzard-leaderboards-history.timer",
+        on_calendar=("*-*-* *:40:00 Europe/Warsaw",),
+        source_ids=frozenset({"blizzard_leaderboards"}),
+        recurrence="daily",
+        local_times=_times(*((hour, 40) for hour in range(24))),
     ),
     _ScheduleSpec(
         id="refresh-hsguru-meta-matrix",

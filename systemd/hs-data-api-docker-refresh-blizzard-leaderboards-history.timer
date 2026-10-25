@@ -1,0 +1,10 @@
+[Unit]
+Description=Backfill past seasons of the official Blizzard leaderboards every hour until done
+
+[Timer]
+OnCalendar=*-*-* *:40:00 Europe/Warsaw
+AccuracySec=5min
+Persistent=false
+
+[Install]
+WantedBy=timers.target

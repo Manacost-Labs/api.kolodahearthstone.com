@@ -1805,6 +1805,10 @@ async def _run_pipeline_source(source_id: str) -> dict[str, Any]:
         from .hsguru_streamers import refresh_hsguru_streamers
 
         result = await refresh_hsguru_streamers()
+    elif source_id == "blizzard_leaderboards":
+        from .blizzard_leaderboards import refresh_blizzard_leaderboards
+
+        result = await refresh_blizzard_leaderboards(scope="live")
     elif source_id == "hsreplay_battlegrounds_compositions_screenshot":
         from .hsreplay_bg_screenshots import capture_compositions_screenshot
 
@@ -1863,6 +1867,7 @@ async def _run_pipeline_source(source_id: str) -> dict[str, Any]:
             "hsreplay_mulligan": ("targets_with_data",),
             "hsguru_matchups": ("slices_with_data",),
             "hsguru_streamers": ("decks",),
+            "blizzard_leaderboards": ("rows",),
             "hsreplay_battlegrounds_minions": ("minions_ok", "minions_total"),
         }
         rows_total = next(
