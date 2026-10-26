@@ -185,7 +185,8 @@ GraphQL pagination возвращает `items` и `pageInfo`. Максимал�
 | GET | `/v1/leaderboards` | `mode`, `region`, `season`, `day`, `q`, `limit`, `offset` | Страница снимка таблицы: ранг, ник, рейтинг, ранг за прошлый день; поиск по нику |
 | GET | `/v1/leaderboards/stats` | `mode`, `region`, `season`, `bucket` | Пороги топ-100/1000/5000, число игроков и пороги по дням, распределение рейтинга |
 | GET | `/v1/leaderboards/players` | `q` (≥2 символа), `region`, `limit` | Игроки по началу ника и их места в текущих сезонах |
-| GET | `/v1/leaderboards/player` | `name`, `region`, `mode` | Профиль: все сезоны, лучший и последний ранг, ранг по дням |
+| GET | `/v1/leaderboards/player` | `name`, `region`, `mode` | Профиль: все сезоны, лучший и последний ранг, пик рейтинга, финал сезона, ранг по дням |
+| GET | `/v1/leaderboards/player/history` | `name`, `mode`, `region`, `from`, `to` | Ранг и рейтинг игрока по дням через все сезоны одного режима, пики и финалы сезонов |
 | GET | `/v1/leaderboards/seasons` | — | Режимы, регионы и сезоны Blizzard и что из них сохранено |
 | GET | `/v1/leaderboards/coverage` | `runs` | Прогресс сбора и последние запуски (без кэша) |
 

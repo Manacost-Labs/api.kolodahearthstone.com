@@ -8,7 +8,7 @@ import json
 from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
-from typing import Any
+from typing import Annotated, Any
 
 import strawberry
 from fastapi import Request
@@ -1846,6 +1846,43 @@ class Query:
         if not player:
             raise _validation_error("name is required")
         return await asyncio.to_thread(get_player, region=region, name=player, mode=mode)
+
+    @strawberry.field(
+        description=(
+            "One mode of a leaderboard player as one rank/rating series by day across "
+            "seasons (points), with per-season best rank, peak rating and final "
+            "standing (seasons). from/to are UTC days YYYY-MM-DD. Same shape as REST "
+            "/v1/leaderboards/player/history data."
+        )
+    )
+    async def leaderboard_player_history(
+        self,
+        name: str,
+        mode: str,
+        region: str = "EU",
+        from_day: Annotated[str | None, strawberry.argument(name="from")] = None,
+        to_day: Annotated[str | None, strawberry.argument(name="to")] = None,
+    ) -> JSON | None:
+        from ..blizzard_leaderboards import get_player_history
+
+        _leaderboard_selector(region, mode, None)
+        player = _normalize_text(name, "name", 64)
+        if not player:
+            raise _validation_error("name is required")
+        for value in (from_day, to_day):
+            if value is not None:
+                try:
+                    date.fromisoformat(value)
+                except ValueError:
+                    raise _validation_error("from and to must be YYYY-MM-DD") from None
+        return await asyncio.to_thread(
+            get_player_history,
+            region=region,
+            name=player,
+            mode=mode,
+            day_from=from_day,
+            day_to=to_day,
+        )
 
     @strawberry.field(
         description=(
