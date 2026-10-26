@@ -423,11 +423,13 @@ async def refresh_blizzard_leaderboards(
     transport: httpx.AsyncBaseTransport | None = None,
     clock: Any = None,
     max_boards: int | None = None,
+    wait_for_lock: bool = True,
 ) -> dict[str, Any]:
     """Read live boards or the history backfill unless another run owns the lock.
 
     A live run waits up to ``lock_wait_seconds`` for a history run to finish;
-    history never waits (the next hour retries it).
+    history never waits (the next hour retries it), nor does a run started
+    with ``wait_for_lock=False`` (a manual run from the panel).
     """
 
     if scope not in SCOPES:
@@ -436,7 +438,7 @@ async def refresh_blizzard_leaderboards(
     locks = ResourceLockSet(
         [SOURCE_ID], metadata={"operation": f"refresh_{SOURCE_ID}_{scope}"}
     )
-    wait = 0.0 if scope == "history" else settings.lock_wait_seconds
+    wait = settings.lock_wait_seconds if wait_for_lock and scope != "history" else 0.0
     deadline = time.monotonic() + wait
     while True:
         try:

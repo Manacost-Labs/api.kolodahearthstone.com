@@ -1812,7 +1812,7 @@ async def _run_pipeline_source(source_id: str) -> dict[str, Any]:
     elif source_id == "blizzard_leaderboards":
         from .blizzard_leaderboards import refresh_blizzard_leaderboards
 
-        result = await refresh_blizzard_leaderboards(scope="live")
+        result = await refresh_blizzard_leaderboards(scope="live", wait_for_lock=False)
     elif source_id == "hsreplay_battlegrounds_compositions_screenshot":
         from .hsreplay_bg_screenshots import capture_compositions_screenshot
 

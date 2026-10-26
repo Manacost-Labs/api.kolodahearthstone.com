@@ -28,7 +28,7 @@ import hashlib
 import json
 import sqlite3
 from collections.abc import Iterable, Mapping, Sequence
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -188,9 +188,14 @@ def sync_boards(
     season_starts: Mapping[tuple[str, int], str],
     now: str,
 ) -> None:
-    """Insert every advertised board and mark the newest season of each pair."""
+    """Insert every advertised board and mark the newest season of each pair.
+
+    Also points snapshots an older writer stored after the migration at their
+    own rows, so no day drops out of player history after a deploy.
+    """
 
     with conn:
+        conn.execute("UPDATE lb_snapshots SET entries_id = id WHERE entries_id IS NULL")
         for (region, mode), season_ids in seasons.items():
             if not season_ids:
                 continue
@@ -812,9 +817,16 @@ def coverage(conn: sqlite3.Connection, runs: int) -> dict[str, Any]:
     }
 
 
-def live_days(conn: sqlite3.Connection) -> list[dict[str, Any]]:
-    """Daily coverage of every latest season: UTC days without a snapshot."""
+def live_days(
+    conn: sqlite3.Connection, today: date | None = None
+) -> list[dict[str, Any]]:
+    """Daily coverage of every latest season: UTC days without a snapshot.
 
+    Days run from the first snapshot to yesterday (UTC), so trailing missing
+    days count too; today is not missing before its runs.
+    """
+
+    yesterday = (today or datetime.now(UTC).date()) - timedelta(days=1)
     out = []
     for board in conn.execute(
         "SELECT id, region, mode, season_id FROM lb_boards WHERE is_latest = 1 "
@@ -831,7 +843,7 @@ def live_days(conn: sqlite3.Connection) -> list[dict[str, Any]]:
         missing = (
             [
                 (days[0] + timedelta(days=offset)).isoformat()
-                for offset in range((days[-1] - days[0]).days + 1)
+                for offset in range((max(days[-1], yesterday) - days[0]).days + 1)
                 if days[0] + timedelta(days=offset) not in have
             ]
             if days

@@ -702,20 +702,44 @@ def test_live_run_waits_for_a_history_run_holding_the_lock() -> None:
 
 
 def test_coverage_reports_missing_live_days() -> None:
+    from datetime import date
+
     fake = _fake()
     _run(fake, "live")
     _run(fake, "live", when=datetime(2026, 10, 28, 12, 0, tzinfo=UTC))
-    coverage = lb.get_coverage(runs=0)
-    standard = next(
-        item for item in coverage["live_days"] if item["mode"] == "standard"
-    )
+    conn = store.connect()
+    days = store.live_days(conn, today=date(2026, 10, 29))
+    standard = next(item for item in days if item["mode"] == "standard")
     assert standard["missing_days"] == ["2026-10-26", "2026-10-27"]
     assert (standard["first_day"], standard["last_day"], standard["days"]) == (
         "2026-10-25",
         "2026-10-28",
         2,
     )
-    assert coverage["shared_snapshots"] == 2
+    later = store.live_days(conn, today=date(2026, 10, 31))
+    assert next(item for item in later if item["mode"] == "standard")[
+        "missing_days"
+    ] == ["2026-10-26", "2026-10-27", "2026-10-29", "2026-10-30"]
+
+    # A snapshot an older writer stored after the migration is healed on the next run.
+    conn.execute("UPDATE lb_snapshots SET entries_id = NULL WHERE day = '2026-10-25'")
+    conn.commit()
+    conn.close()
+    stale = lb.get_player(region="EU", name="p1", mode="standard")
+    assert stale is not None
+    assert [p["day"] for p in stale["seasons"][0]["series"]] == ["2026-10-28"]
+    _run(fake, "history")
+    conn = store.connect()
+    assert not conn.execute(
+        "SELECT COUNT(*) FROM lb_snapshots WHERE entries_id IS NULL"
+    ).fetchone()[0]
+    conn.close()
+    profile = lb.get_player(region="EU", name="p1", mode="standard")
+    assert profile is not None
+    assert [p["day"] for p in profile["seasons"][0]["series"]] == [
+        "2026-10-25",
+        "2026-10-28",
+    ]
 
 
 def test_rest_and_graphql_player_history() -> None:
@@ -751,6 +775,13 @@ def test_rest_and_graphql_player_history() -> None:
         client.get(
             "/v1/leaderboards/player/history",
             params={"name": "bg2", "mode": "standard", "from": "25.10.2026"},
+        ).status_code
+        == 422
+    )
+    assert (
+        client.get(
+            "/v1/leaderboards/player/history",
+            params={"name": "bg2", "mode": "standard", "to": "2026-13-45"},
         ).status_code
         == 422
     )

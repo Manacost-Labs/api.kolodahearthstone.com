@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import date
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query
@@ -465,6 +466,15 @@ async def leaderboard_player_history(
     ),
 ) -> dict[str, Any]:
     """Rank and rating of a player by day across seasons, with season peaks and finals."""
+
+    for value in (day_from, day_to):
+        if value is not None:
+            try:
+                date.fromisoformat(value)
+            except ValueError:
+                raise HTTPException(
+                    status_code=422, detail="from and to must be real days YYYY-MM-DD"
+                ) from None
 
     data = await asyncio.to_thread(
         get_player_history,

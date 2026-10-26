@@ -53,7 +53,7 @@ GET https://hearthstone.blizzard.com/en-us/api/community/leaderboardsData
 
 | Таймер | Когда | Что делает |
 | --- | --- | --- |
-| `hs-data-api-docker-refresh-blizzard-leaderboards.timer` | каждые 6 часов в :10 (Europe/Warsaw) | `refresh-blizzard-leaderboards --scope live`: последний сезон каждой пары регион × режим целиком (~40 минут). Сначала таблицы, у которых ещё нет снимка за текущий UTC-день. Если lock держит запуск истории, живой обход ждёт его до 20 минут (`HS_LEADERBOARDS_LOCK_WAIT_SECONDS`), а не пропускает слот |
+| `hs-data-api-docker-refresh-blizzard-leaderboards.timer` | каждые 6 часов в :10 (Europe/Warsaw) | `refresh-blizzard-leaderboards --scope live`: последний сезон каждой пары регион × режим целиком (~40 минут). Сначала таблицы, у которых ещё нет снимка за текущий UTC-день. Если lock держит запуск истории, живой обход ждёт его до 20 минут (`HS_LEADERBOARDS_LOCK_WAIT_SECONDS`), а не пропускает слот (ручной запуск из панели не ждёт) |
 | `hs-data-api-docker-refresh-blizzard-leaderboards-history.timer` | каждый час в :40, кроме 00, 06, 12 и 18 часов (там идёт живой обход) | `--scope history`: прошлые сезоны, до 2000 страниц и 25 минут за запуск; сначала сезоны, которые только что перестали быть текущими (их финальное чтение), затем от новых к старым. Когда история дочитана, запуск делает один запрос метаданных |
 
 Вежливость: глобальный темп 2 запроса в секунду (`HS_LEADERBOARDS_RPS`), не
@@ -162,7 +162,7 @@ Blizzard (по умолчанию самый новый сохранённый).
 | `GET /v1/leaderboards/player` | `name`, `region`, `mode` | `seasons[]`: `best_rank`/`best_day`, `peak_rating`/`peak_rating_day` (лучший рейтинг сезона, `null` без рейтинга), `final_rank`/`final_rating` (место в финальном снимке завершённого сезона, иначе `null`), `first_day`, `last_rank`/`last_rating`/`last_day`, `in_latest_snapshot`, `days`, `series[]` по дням; `shared_name = true`, если под этим ником в одной таблице несколько аккаунтов |
 | `GET /v1/leaderboards/player/history` | `name`, `mode` (обязателен), `region`, `from`, `to` (UTC-дни YYYY-MM-DD) | Один режим через все сезоны: `points[]` — `{season_id, day, rank, rating, total_size, final}` по возрастанию дня (в день смены сезона — финал старого и первый день нового); `seasons[]` — сводка каждого сезона, как в `/player`, без `series`, по возрастанию `season_id`; `rated`, `from`, `to`. `meta.count` — число точек |
 | `GET /v1/leaderboards/seasons` | — | Все режимы, регионы и сезоны, `has_data`, `final`, `is_latest`, `total_size` |
-| `GET /v1/leaderboards/coverage` | `runs` | Прогресс по режимам и регионам; `live_days[]` — для каждого текущего сезона `first_day`, `last_day`, `days` и `missing_days` (UTC-дни без снимка между первым и последним); `shared_snapshots`; последние запуски (без кэша) |
+| `GET /v1/leaderboards/coverage` | `runs` | Прогресс по режимам и регионам; `live_days[]` — для каждого текущего сезона `first_day`, `last_day`, `days` и `missing_days` (UTC-дни без снимка от первого снимка по вчерашний день); `shared_snapshots`; последние запуски (без кэша) |
 
 Режимы без рейтинга (Стандарт, Вольный, Twist) отдают `rating = null`, пороги
 без рейтинга и `histogram = null`; число игроков есть всегда.
