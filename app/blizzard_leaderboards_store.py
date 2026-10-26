@@ -12,6 +12,12 @@ move for a day) stores no rows of its own: ``entries_id`` names the snapshot
 whose ``lb_entries`` it shares, ``rows_hash`` detects the match. Readers always
 go through ``entries_id``.
 
+``day`` is the UTC day of the read. ``as_of_day`` is the day the standings
+belong to: the read day for a live season, the season's end for a final read
+(the backfill reads seasons that ended months ago). ``lb_boards.season_end`` is
+the day before the next season's start where Blizzard dates seasons (Standard,
+Wild), else the last day the season was read live.
+
 The tables live in their own database file (``blizzard_leaderboards.db``)
 instead of ``hs_parses.db``: a live sweep stores about 100,000 rows a day and the
 history backfill several million, which the PostgreSQL analytics mirror of
@@ -36,7 +42,7 @@ from .config import data_dir
 
 DB_FILENAME = "blizzard_leaderboards.db"
 THRESHOLD_RANKS = (1, 100, 1000, 5000)
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 _SQL_CHUNK = 500
 # Above every character a name can hold: the upper bound of a prefix range.
 _PREFIX_END = "\U0010ffff"
@@ -58,6 +64,7 @@ CREATE TABLE IF NOT EXISTS lb_boards (
     last_error TEXT,
     last_error_at TEXT,
     failures INTEGER NOT NULL DEFAULT 0,
+    season_end TEXT,
     UNIQUE (region, mode, season_id)
 );
 CREATE TABLE IF NOT EXISTS lb_players (
@@ -84,6 +91,7 @@ CREATE TABLE IF NOT EXISTS lb_snapshots (
     rating_at_5000 REAL,
     entries_id INTEGER,
     rows_hash TEXT,
+    as_of_day TEXT,
     UNIQUE (board_id, day)
 );
 CREATE TABLE IF NOT EXISTS lb_entries (
@@ -123,37 +131,110 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
-    """Version 1: shared entries and row hashes. Additive; old rows keep their own."""
+    """Bring an older file to ``SCHEMA_VERSION``; every step only adds data."""
 
     with conn:
         conn.execute("BEGIN IMMEDIATE")
-        if conn.execute("PRAGMA user_version").fetchone()[0] >= SCHEMA_VERSION:
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        if version >= SCHEMA_VERSION:
             return
-        columns = {row[1] for row in conn.execute("PRAGMA table_info(lb_snapshots)")}
-        for column, kind in (("entries_id", "INTEGER"), ("rows_hash", "TEXT")):
-            if column not in columns:
-                conn.execute(f"ALTER TABLE lb_snapshots ADD COLUMN {column} {kind}")
-        conn.execute("UPDATE lb_snapshots SET entries_id = id WHERE entries_id IS NULL")
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_lb_snapshots_entries "
-            "ON lb_snapshots(entries_id)"
-        )
-        for (snapshot_id,) in conn.execute(
-            "SELECT id FROM lb_snapshots WHERE rows_hash IS NULL"
-        ).fetchall():
-            rows = conn.execute(
-                """
-                SELECT e.rank, p.name, e.rating FROM lb_entries e
-                JOIN lb_players p ON p.id = e.player_id
-                WHERE e.snapshot_id = ? ORDER BY e.rank
-                """,
-                (snapshot_id,),
-            ).fetchall()
-            conn.execute(
-                "UPDATE lb_snapshots SET rows_hash = ? WHERE id = ?",
-                (rows_hash([tuple(row) for row in rows]), snapshot_id),
-            )
+        if version < 1:
+            _migrate_shared_entries(conn)
+        if version < 2:
+            _migrate_as_of_days(conn)
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+
+def _add_columns(
+    conn: sqlite3.Connection, table: str, columns: Sequence[tuple[str, str]]
+) -> None:
+    existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+    for column, kind in columns:
+        if column not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
+
+
+def _migrate_shared_entries(conn: sqlite3.Connection) -> None:
+    """Version 1: shared entries and row hashes; old rows keep their own."""
+
+    _add_columns(
+        conn, "lb_snapshots", (("entries_id", "INTEGER"), ("rows_hash", "TEXT"))
+    )
+    conn.execute("UPDATE lb_snapshots SET entries_id = id WHERE entries_id IS NULL")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_lb_snapshots_entries ON lb_snapshots(entries_id)"
+    )
+    for (snapshot_id,) in conn.execute(
+        "SELECT id FROM lb_snapshots WHERE rows_hash IS NULL"
+    ).fetchall():
+        rows = conn.execute(
+            """
+            SELECT e.rank, p.name, e.rating FROM lb_entries e
+            JOIN lb_players p ON p.id = e.player_id
+            WHERE e.snapshot_id = ? ORDER BY e.rank
+            """,
+            (snapshot_id,),
+        ).fetchall()
+        conn.execute(
+            "UPDATE lb_snapshots SET rows_hash = ? WHERE id = ?",
+            (rows_hash([tuple(row) for row in rows]), snapshot_id),
+        )
+
+
+def _migrate_as_of_days(conn: sqlite3.Connection) -> None:
+    """Version 2: date final reads by the season's end; ``day`` is kept as read."""
+
+    _add_columns(conn, "lb_snapshots", (("as_of_day", "TEXT"),))
+    _add_columns(conn, "lb_boards", (("season_end", "TEXT"),))
+    conn.execute(
+        "UPDATE lb_snapshots SET as_of_day = day WHERE final = 0 AND as_of_day IS NULL"
+    )
+    for row in conn.execute(
+        "SELECT id, board_id, day FROM lb_snapshots WHERE final = 1"
+    ).fetchall():
+        season_end, as_of = final_dates(conn, int(row["board_id"]), str(row["day"]))
+        conn.execute(
+            "UPDATE lb_snapshots SET as_of_day = ? WHERE id = ?", (as_of, row["id"])
+        )
+        conn.execute(
+            "UPDATE lb_boards SET season_end = ? WHERE id = ? AND final = 1",
+            (season_end, row["board_id"]),
+        )
+
+
+def final_dates(
+    conn: sqlite3.Connection, board_id: int, read_day: str
+) -> tuple[str | None, str]:
+    """``(season_end, as_of_day)`` of a final read of a board made on ``read_day``.
+
+    The standings belong to the later of the dated season end and the last day
+    the season was read live, never after the read itself. A season with
+    neither (an undated mode the backfill reads for the first time) keeps the
+    read day.
+    """
+
+    dated = conn.execute(
+        """
+        SELECT n.season_start FROM lb_boards b
+        JOIN lb_boards n
+          ON n.region = b.region AND n.mode = b.mode AND n.season_id > b.season_id
+        WHERE b.id = ? AND n.season_start IS NOT NULL
+        ORDER BY n.season_id LIMIT 1
+        """,
+        (board_id,),
+    ).fetchone()
+    dated_end = (
+        (date.fromisoformat(dated[0]) - timedelta(days=1)).isoformat()
+        if dated
+        else None
+    )
+    last_live = conn.execute(
+        "SELECT MAX(day) FROM lb_snapshots WHERE board_id = ? AND final = 0",
+        (board_id,),
+    ).fetchone()[0]
+    known = [value for value in (dated_end, last_live) if value]
+    as_of = min(read_day, max(known)) if known else read_day
+    return dated_end or last_live, as_of
 
 
 def name_key(name: str) -> str:
@@ -196,6 +277,10 @@ def sync_boards(
 
     with conn:
         conn.execute("UPDATE lb_snapshots SET entries_id = id WHERE entries_id IS NULL")
+        conn.execute(
+            "UPDATE lb_snapshots SET as_of_day = day "
+            "WHERE as_of_day IS NULL AND final = 0"
+        )
         for (region, mode), season_ids in seasons.items():
             if not season_ids:
                 continue
@@ -345,6 +430,7 @@ def write_snapshot(
     thresholds = _thresholds(rows)
     digest = rows_hash(rows)
     with conn:
+        season_end, as_of = final_dates(conn, board_id, day) if final else (None, day)
         existing = conn.execute(
             "SELECT id, entries_id, rows_hash FROM lb_snapshots "
             "WHERE board_id = ? AND day = ?",
@@ -417,13 +503,25 @@ def write_snapshot(
                 (entries_id, digest, snapshot_id),
             )
         conn.execute(
+            "UPDATE lb_snapshots SET as_of_day = ? WHERE id = ?", (as_of, snapshot_id)
+        )
+        conn.execute(
             """
             UPDATE lb_boards
             SET latest_snapshot_id = ?, total_size = ?, total_pages = ?,
-                last_fetched_at = ?, final = ?, last_error = NULL, failures = 0
+                last_fetched_at = ?, final = ?, season_end = ?, last_error = NULL,
+                failures = 0
             WHERE id = ?
             """,
-            (snapshot_id, total_size, total_pages, captured_at, int(final), board_id),
+            (
+                snapshot_id,
+                total_size,
+                total_pages,
+                captured_at,
+                int(final),
+                season_end,
+                board_id,
+            ),
         )
     return snapshot_id
 
@@ -499,8 +597,9 @@ def latest_revision(conn: sqlite3.Connection) -> str | None:
 def catalog(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     rows = conn.execute(
         """
-        SELECT b.region, b.mode, b.season_id, b.season_start, b.is_latest, b.final,
-               b.total_size, b.last_fetched_at, s.day, s.stored_rows, s.truncated
+        SELECT b.region, b.mode, b.season_id, b.season_start, b.season_end,
+               b.is_latest, b.final, b.total_size, b.last_fetched_at, s.day,
+               s.stored_rows, s.truncated
         FROM lb_boards b
         LEFT JOIN lb_snapshots s ON s.id = b.latest_snapshot_id
         ORDER BY b.mode, b.region, b.season_id DESC
@@ -764,14 +863,17 @@ def player_entries(
         dict(row)
         for row in conn.execute(
             f"""
-            SELECT b.id AS board_id, b.mode, b.season_id, b.season_start, b.is_latest,
-                   b.final AS board_final, b.latest_snapshot_id, s.id AS snapshot_id,
-                   s.day, s.final, s.total_size, e.rank, e.rating
+            SELECT b.id AS board_id, b.mode, b.season_id, b.season_start,
+                   b.season_end, b.is_latest, b.final AS board_final,
+                   b.latest_snapshot_id, s.id AS snapshot_id,
+                   COALESCE(s.as_of_day, s.day) AS day, s.day AS read_day, s.final,
+                   s.total_size, e.rank, e.rating
             FROM lb_entries e
             JOIN lb_snapshots s ON s.entries_id = e.snapshot_id
             JOIN lb_boards b ON b.id = s.board_id
             WHERE {where}
-            ORDER BY b.mode, b.season_id DESC, s.day, e.rank
+            ORDER BY b.mode, b.season_id DESC, COALESCE(s.as_of_day, s.day), s.final,
+                     e.rank
             """,
             params,
         )

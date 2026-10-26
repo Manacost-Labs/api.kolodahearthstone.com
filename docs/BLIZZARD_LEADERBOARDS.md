@@ -82,7 +82,7 @@ GET https://hearthstone.blizzard.com/en-us/api/community/leaderboardsData
 | Как часто | Текущие сезоны — 4 обхода в сутки (каждые 6 ч), снимок дня заменяется более поздним чтением того же дня, то есть хранится последнее чтение UTC-дня. Прошлые сезоны — одно финальное чтение |
 | Что и насколько глубоко | 7 режимов × EU/US/AP, текущий сезон целиком (до 17 тыс. строк), прошлые сезоны — первые 2000 страниц (50 000 мест); старые сезоны Полей сражений (до 1,5 млн игроков) помечены `truncated` |
 | Сколько хранится | Бессрочно. Ни одна команда не удаляет прошлые дни и сезоны; строки удаляются только при замене снимка того же дня |
-| Смена сезона | Новый сезон в `seasonMetaData` становится `is_latest`; прежний в ближайший час читается запуском истории с флагом `final` (снимок дня этого чтения) и больше не читается |
+| Смена сезона | Новый сезон в `seasonMetaData` становится `is_latest`; прежний в ближайший час читается запуском истории с флагом `final` и больше не читается. Снимок хранится под днём чтения (`day`), а относится к концу сезона (`as_of_day`, см. «Дата финала») |
 | Пробелы в живой БД | Данные с 25.10.2026 (запуск), за 25 и 26.10 есть снимки всех 21 текущей таблицы; финальные чтения: 55 из 469 прошлых сезонов, дочитка идёт |
 | Стабильная личность | Blizzard не отдаёт id аккаунта, только ник без номера. Связать игрока после смены ника нельзя; два аккаунта с одним ником в регионе — один `lb_players` (`shared_name`) |
 
@@ -126,6 +126,31 @@ GET https://hearthstone.blizzard.com/en-us/api/community/leaderboardsData
 которого ссылаются другие снимки, передаёт строки самому раннему из них, так
 что история не теряется. Все чтения идут через `entries_id`.
 
+**Дата финала.** `lb_snapshots.day` — UTC-день чтения: ключ снимка и
+значения `days[]`/`?day=` у `/v1/leaderboards`. Фоновая дочитка читает сезоны,
+закончившиеся месяцы назад, поэтому финал прошлого сезона получает
+`as_of_day` — день, к которому относится таблица:
+
+* `lb_boards.season_end` — день перед стартом следующего сезона, если Blizzard
+  датирует сезоны (`displayMetaData.seasonsWithStartDate`: только Стандарт и
+  Вольный); иначе последний день, когда сезон читался живым обходом;
+* `as_of_day` финала — более поздняя из этих двух дат, но не позже дня чтения;
+  без обеих (недатированный режим, сезон впервые читается дочиткой) — день
+  чтения;
+* у живого снимка `as_of_day = day`.
+
+Точки игрока (`series[]` у `/player`, `points[]` у `/player/history`) берут
+`day = as_of_day` и несут `read_day`. В один день сезона — одна точка: финал
+заменяет живое чтение того же дня и остаётся с `final = true`. `points[]`
+упорядочены по `season_id`, затем по дню: id сезона растёт со временем, так что
+порядок хронологический и там, где конец сезона неизвестен.
+
+Миграция 1 → 2 (26.10.2026) добавила `as_of_day` и `season_end` и заполнила
+их для сохранённых снимков; `day` не меняется. Откат: `UPDATE lb_snapshots SET
+as_of_day = NULL; UPDATE lb_boards SET season_end = NULL; PRAGMA user_version =
+1;` — читатели тогда берут день чтения. Резервная копия:
+`data/backups/blizzard_leaderboards-20261026-v2.db`.
+
 **Миграция** (`PRAGMA user_version` 0 → 1) выполняется при первом
 подключении: добавляет `entries_id`, `rows_hash` и индекс
 `idx_lb_snapshots_entries`, заполняет `entries_id = id` и хеши старых снимков
@@ -159,8 +184,8 @@ Blizzard (по умолчанию самый новый сохранённый).
 | `GET /v1/leaderboards` | `mode`, `region`, `season`, `day` (YYYY-MM-DD), `q` (подстрока ника), `limit` ≤ 100, `offset` | `board`, `snapshot`, `days[]` (дни со снимками), `total`, `rows[]`: `rank`, `name`, `rating`, `previous_rank` (место в предыдущем снимке) |
 | `GET /v1/leaderboards/stats` | `mode`, `region`, `season`, `bucket` | `top_rating`; `thresholds[]` — рейтинг на местах 100/1000/5000 и `reached`; `rating` — min/max/mean/median; `histogram[]` (ширина корзины по умолчанию: Поля сражений 500, Подпольная арена 250, Арена 0,5); `series[]` — по дням `total_size` и `rating_at_*` |
 | `GET /v1/leaderboards/players` | `q` (начало ника, ≥ 2 символа), `region`, `limit` ≤ 50 | Игроки и их места в текущих сезонах |
-| `GET /v1/leaderboards/player` | `name`, `region`, `mode` | `seasons[]`: `best_rank`/`best_day`, `peak_rating`/`peak_rating_day` (лучший рейтинг сезона, `null` без рейтинга), `final_rank`/`final_rating` (место в финальном снимке завершённого сезона, иначе `null`), `first_day`, `last_rank`/`last_rating`/`last_day`, `in_latest_snapshot`, `days`, `series[]` по дням; `shared_name = true`, если под этим ником в одной таблице несколько аккаунтов |
-| `GET /v1/leaderboards/player/history` | `name`, `mode` (обязателен), `region`, `from`, `to` (UTC-дни YYYY-MM-DD) | Один режим через все сезоны: `points[]` — `{season_id, day, rank, rating, total_size, final}` по возрастанию дня (в день смены сезона — финал старого и первый день нового); `seasons[]` — сводка каждого сезона, как в `/player`, без `series`, по возрастанию `season_id`; `rated`, `from`, `to`. `meta.count` — число точек |
+| `GET /v1/leaderboards/player` | `name`, `region`, `mode` | `seasons[]`: `best_rank`/`best_day`, `peak_rating`/`peak_rating_day` (лучший рейтинг сезона, `null` без рейтинга), `final_rank`/`final_rating` (место в финальном снимке завершённого сезона, иначе `null`), `first_day`, `last_rank`/`last_rating`/`last_day`, `season_end`, `in_latest_snapshot`, `days`, `series[]` по дням (`day` — день, к которому относится место, `read_day` — день чтения); `shared_name = true`, если под этим ником в одной таблице несколько аккаунтов |
+| `GET /v1/leaderboards/player/history` | `name`, `mode` (обязателен), `region`, `from`, `to` (UTC-дни YYYY-MM-DD) | Один режим через все сезоны: `points[]` — `{season_id, day, rank, rating, total_size, final, read_day}` по сезону, затем по дню; финал прошлого сезона датирован концом сезона; `seasons[]` — сводка каждого сезона, как в `/player`, без `series`, по возрастанию `season_id`; `rated`, `from`, `to`. `meta.count` — число точек |
 | `GET /v1/leaderboards/seasons` | — | Все режимы, регионы и сезоны, `has_data`, `final`, `is_latest`, `total_size` |
 | `GET /v1/leaderboards/coverage` | `runs` | Прогресс по режимам и регионам; `live_days[]` — для каждого текущего сезона `first_day`, `last_day`, `days` и `missing_days` (UTC-дни без снимка от первого снимка по вчерашний день); `shared_snapshots`; последние запуски (без кэша) |
 
