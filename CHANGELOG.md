@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Blizzard leaderboards: a final read of a past season is dated by the
+  season's end instead of the day the backfill read it, so
+  `/v1/leaderboards/player/history` points are chronological across seasons
+  (Norwis EU Standard: season 145 was shown on 26.10.2026 next to season 156,
+  now on 30.11.2025). The end is the day before the next season's start where
+  Blizzard dates seasons (Standard, Wild), else the last day the season was
+  read live. Additive SQLite migration `user_version` 2: `lb_snapshots.as_of_day`
+  and `lb_boards.season_end` filled for stored rows; `day` (the read day, key of
+  `/v1/leaderboards?day=`) is unchanged, rollback SQL in docs. Player points
+  gain `read_day`; one point per season day, a final replacing the live read
+  of its day and keeping `final: true`; `points` ordered by season, then day.
+  Seasons gain `season_end`; the snapshot gains `as_of_day`.
+
 - Blizzard leaderboards keep player history durably: a live run waits up to
   20 minutes for a history run holding the lock instead of skipping its
   six-hour slot, and boards without a snapshot for the current UTC day are

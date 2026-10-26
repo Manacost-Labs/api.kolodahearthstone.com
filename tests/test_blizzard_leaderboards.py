@@ -620,11 +620,14 @@ def test_rollover_keeps_final_and_player_history_spans_seasons() -> None:
     assert (ended["peak_rating"], ended["peak_rating_day"]) == (12500.0, "2026-10-26")
     assert (ended["final_rank"], ended["final_rating"]) == (1, 12300.0)
     assert ended["first_day"] == "2026-10-25"
-    assert [p["day"] for p in ended["series"]] == [
-        "2026-10-25",
-        "2026-10-26",
-        "2026-10-27",
+    # Battlegrounds seasons are undated: the final read on day 3 belongs to the
+    # last day the season was live and replaces that day's live point.
+    assert ended["season_end"] == "2026-10-26"
+    assert [(p["day"], p["final"], p["read_day"]) for p in ended["series"]] == [
+        ("2026-10-25", False, "2026-10-25"),
+        ("2026-10-26", True, "2026-10-27"),
     ]
+    assert (ended["last_rank"], ended["last_day"]) == (1, "2026-10-26")
     assert by_season[20]["final_rank"] is None and by_season[20]["is_latest"]
 
     history = lb.get_player_history(region="EU", name="bg1", mode="battlegrounds")
@@ -633,8 +636,7 @@ def test_rollover_keeps_final_and_player_history_spans_seasons() -> None:
     assert "series" not in history["seasons"][0]
     assert [(p["day"], p["season_id"], p["final"]) for p in history["points"]] == [
         ("2026-10-25", 19, False),
-        ("2026-10-26", 19, False),
-        ("2026-10-27", 19, True),
+        ("2026-10-26", 19, True),
         ("2026-10-27", 20, False),
     ]
     window = lb.get_player_history(
@@ -645,8 +647,8 @@ def test_rollover_keeps_final_and_player_history_spans_seasons() -> None:
         day_to="2026-10-26",
     )
     assert window is not None
-    assert [(p["day"], p["rating"]) for p in window["points"]] == [
-        ("2026-10-26", 12500.0)
+    assert [(p["day"], p["rating"], p["final"]) for p in window["points"]] == [
+        ("2026-10-26", 12300.0, True)
     ]
     assert lb.get_player_history(region="EU", name="nobody", mode="standard") is None
 
@@ -762,6 +764,7 @@ def test_rest_and_graphql_player_history() -> None:
             "rating": 11980.0,
             "total_size": 40,
             "final": False,
+            "read_day": "2026-10-25",
         }
     ]
     assert body["data"]["seasons"][0]["peak_rating"] == 11980.0
@@ -795,3 +798,106 @@ def test_rest_and_graphql_player_history() -> None:
         },
     )
     assert graphql.json()["data"]["leaderboardPlayerHistory"]["points"] == []
+
+
+def _dated_fake() -> FakeBlizzard:
+    # Standard seasons 154-156 of one player; the fake dates 155 (2025-09-01)
+    # and 156 (2025-10-01), so 154 ends 2025-08-31 and 155 ends 2025-09-30.
+    return FakeBlizzard(
+        {
+            ("EU", "standard", 154): [("Norwis", None), ("a", None)],
+            ("EU", "standard", 155): [("b", None), ("Norwis", None)],
+            ("EU", "standard", 156): [("c", None), ("d", None), ("Norwis", None)],
+        }
+    )
+
+
+def test_backfilled_finals_are_dated_by_season_end_and_points_are_chronological() -> (
+    None
+):
+    fake = _dated_fake()
+    settings = lb.Settings(**{**FAST.__dict__, "modes": ("standard",)})
+    _run(fake, "live", settings=settings)
+    _run(fake, "history", settings=settings)  # backfill on 2026-10-25
+    _run(fake, "live", when=DAY2, settings=settings)
+
+    history = lb.get_player_history(region="EU", name="Norwis", mode="standard")
+    assert history is not None
+    assert [
+        (p["season_id"], p["day"], p["rank"], p["final"], p["read_day"])
+        for p in history["points"]
+    ] == [
+        (154, "2025-08-31", 1, True, "2026-10-25"),
+        (155, "2025-09-30", 2, True, "2026-10-25"),
+        (156, "2026-10-25", 3, False, "2026-10-25"),
+        (156, "2026-10-26", 3, False, "2026-10-26"),
+    ]
+    days = [p["day"] for p in history["points"]]
+    assert days == sorted(days)
+    ended = {s["season_id"]: s for s in history["seasons"]}
+    assert (ended[155]["season_end"], ended[155]["last_day"]) == (
+        "2025-09-30",
+        "2025-09-30",
+    )
+    assert ended[156]["season_end"] is None
+    # The table keeps the read day as its key and says what day it shows.
+    table = lb.get_table(
+        region="EU",
+        mode="standard",
+        season_id=155,
+        day=None,
+        query=None,
+        limit=1,
+        offset=0,
+    )
+    assert table is not None and table["days"] == ["2026-10-25"]
+    assert table["snapshot"]["as_of_day"] == "2025-09-30"
+    catalog = lb.get_catalog()
+    seasons = catalog["modes"][0]["regions"]["EU"]["seasons"]
+    assert {s["season_id"]: s["season_end"] for s in seasons} == {
+        156: None,
+        155: "2025-09-30",
+        154: "2025-08-31",
+    }
+
+
+def test_final_read_of_a_season_seen_live_is_dated_by_season_end() -> None:
+    fake = _dated_fake()
+    del fake.boards[("EU", "standard", 156)]
+    settings = lb.Settings(**{**FAST.__dict__, "modes": ("standard",)})
+    _run(fake, "live", settings=settings)  # 155 live on 2026-10-25
+    fake.boards[("EU", "standard", 156)] = [("Norwis", None)]
+    _run(fake, "live", when=DAY2, settings=settings)
+    _run(fake, "history", when=DAY2, settings=settings)
+    profile = lb.get_player(region="EU", name="Norwis", mode="standard")
+    assert profile is not None
+    season = next(s for s in profile["seasons"] if s["season_id"] == 155)
+    # The season was seen live after its dated end, so the final belongs to
+    # that last live day, never before a live point.
+    assert [(p["day"], p["final"]) for p in season["series"]] == [("2026-10-25", True)]
+    assert season["final_rank"] == 2
+
+
+def test_migration_v2_redates_stored_finals_and_keeps_read_days() -> None:
+    fake = _dated_fake()
+    settings = lb.Settings(**{**FAST.__dict__, "modes": ("standard",)})
+    _run(fake, "live", settings=settings)
+    _run(fake, "history", settings=settings)
+    conn = store.connect()
+    before = dict(conn.execute("SELECT id, day FROM lb_snapshots").fetchall())
+    conn.execute("UPDATE lb_snapshots SET as_of_day = NULL")
+    conn.execute("UPDATE lb_boards SET season_end = NULL")
+    conn.execute("PRAGMA user_version = 1")
+    conn.commit()
+    conn.close()
+    conn = store.connect()
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+    assert dict(conn.execute("SELECT id, day FROM lb_snapshots").fetchall()) == before
+    conn.close()
+    fixed = lb.get_player_history(region="EU", name="Norwis", mode="standard")
+    assert fixed is not None
+    assert [p["day"] for p in fixed["points"]] == [
+        "2025-08-31",
+        "2025-09-30",
+        "2026-10-25",
+    ]

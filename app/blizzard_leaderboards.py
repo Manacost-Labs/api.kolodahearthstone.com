@@ -688,6 +688,7 @@ def _public_snapshot(
 ) -> dict[str, Any]:
     return {
         "day": snapshot["day"],
+        "as_of_day": snapshot["as_of_day"] or snapshot["day"],
         "captured_at": snapshot["captured_at"],
         "total_size": snapshot["total_size"],
         "stored_rows": snapshot["stored_rows"],
@@ -714,6 +715,7 @@ def get_catalog() -> dict[str, Any]:
             {
                 "season_id": row["season_id"],
                 "season_start": row["season_start"],
+                "season_end": row["season_end"],
                 "is_latest": bool(row["is_latest"]),
                 "final": bool(row["final"]),
                 "has_data": row["day"] is not None,
@@ -827,6 +829,7 @@ def get_player(*, region: str, name: str, mode: str | None) -> dict[str, Any] | 
                     "mode": entry["mode"],
                     "season_id": entry["season_id"],
                     "season_start": entry["season_start"],
+                    "season_end": entry["season_end"],
                     "is_latest": bool(entry["is_latest"]),
                     "final": bool(entry["board_final"]),
                     "rated": entry["mode"] in RATED_MODES,
@@ -854,17 +857,25 @@ def get_player(*, region: str, name: str, mode: str | None) -> dict[str, Any] | 
                 item["peak_rating"], item["peak_rating_day"] = rating, entry["day"]
             if entry["final"] and item["final_rank"] is None:
                 item["final_rank"], item["final_rating"] = entry["rank"], rating
-            if not item["series"] or item["series"][-1]["day"] != entry["day"]:
+            # One point per day; the final read of a season replaces the live
+            # read of the day it is dated to, and keeps final = True.
+            last = item["series"][-1] if item["series"] else None
+            point = {
+                "day": entry["day"],
+                "rank": entry["rank"],
+                "rating": entry["rating"],
+                "total_size": entry["total_size"],
+                "final": bool(entry["final"]),
+                "read_day": entry["read_day"],
+            }
+            if last is None or last["day"] != entry["day"]:
                 item["days"] += 1
-                item["series"].append(
-                    {
-                        "day": entry["day"],
-                        "rank": entry["rank"],
-                        "rating": entry["rating"],
-                        "total_size": entry["total_size"],
-                        "final": bool(entry["final"]),
-                    }
-                )
+                item["series"].append(point)
+            elif entry["final"] and not last["final"]:
+                item["series"][-1] = point
+            else:
+                point = None
+            if point is not None:
                 item["last_rank"], item["last_rating"] = entry["rank"], entry["rating"]
                 item["last_day"] = entry["day"]
             if snapshot_id == entry["latest_snapshot_id"]:
@@ -913,7 +924,9 @@ def get_player_history(
             if (day_from is None or point["day"] >= day_from)
             and (day_to is None or point["day"] <= day_to)
         )
-    points.sort(key=lambda point: (point["day"], point["season_id"]))
+    # Season ids grow with time within a mode, so (season, day) is chronological
+    # even where a season end is unknown and a final keeps its read day.
+    points.sort(key=lambda point: (point["season_id"], point["day"]))
     return {
         "player": profile["player"],
         "shared_name": profile["shared_name"],
