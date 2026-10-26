@@ -34,7 +34,7 @@ GET https://hearthstone.blizzard.com/en-us/api/community/leaderboardsData
 | `battlegrounds` | Поля сражений | MMR | 7–19 (13; AP ещё сезон 0) | 6 543 / 2 843 / 2 745 |
 | `battlegroundsduo` | Поля сражений: дуо | MMR | 12–19 (8) | 2 028 / 959 / 531 |
 | `arena` | Арена («Legacy Arena» у Blizzard) | среднее число побед | 36–56 (21) | 17 768 / 9 760 / 11 360 |
-| `undergroundarena` | Подземная арена | очки | 1–10 (10) | 952 / 556 / 714 |
+| `undergroundarena` | Подпольная арена | очки | 1–10 (10) | 952 / 556 / 714 |
 | `twist` | Twist | — | 116–136 (13) | 177 / 92 / 59 |
 
 Есть ещё `classic` и `mercenaries`; они не собираются (включаются через
@@ -53,7 +53,7 @@ GET https://hearthstone.blizzard.com/en-us/api/community/leaderboardsData
 
 | Таймер | Когда | Что делает |
 | --- | --- | --- |
-| `hs-data-api-docker-refresh-blizzard-leaderboards.timer` | каждые 6 часов в :10 (Europe/Warsaw) | `refresh-blizzard-leaderboards --scope live`: последний сезон каждой пары регион × режим целиком (~36 минут) |
+| `hs-data-api-docker-refresh-blizzard-leaderboards.timer` | каждые 6 часов в :10 (Europe/Warsaw) | `refresh-blizzard-leaderboards --scope live`: последний сезон каждой пары регион × режим целиком (~40 минут). Сначала таблицы, у которых ещё нет снимка за текущий UTC-день. Если lock держит запуск истории, живой обход ждёт его до 20 минут (`HS_LEADERBOARDS_LOCK_WAIT_SECONDS`), а не пропускает слот |
 | `hs-data-api-docker-refresh-blizzard-leaderboards-history.timer` | каждый час в :40, кроме 00, 06, 12 и 18 часов (там идёт живой обход) | `--scope history`: прошлые сезоны, до 2000 страниц и 25 минут за запуск; сначала сезоны, которые только что перестали быть текущими (их финальное чтение), затем от новых к старым. Когда история дочитана, запуск делает один запрос метаданных |
 
 Вежливость: глобальный темп 2 запроса в секунду (`HS_LEADERBOARDS_RPS`), не
@@ -74,6 +74,33 @@ GET https://hearthstone.blizzard.com/en-us/api/community/leaderboardsData
 Когда появляется новый, прежний перечитывается один последний раз с флагом
 `final` и больше не читается.
 
+## Аудит истории игроков (26.10.2026)
+
+| Вопрос | Ответ |
+| --- | --- |
+| Что в снимке | На игрока: `rank`, ник (`accountid` — BattleTag без номера), `rating` у режимов с рейтингом (Поля сражений и дуо — MMR, Арена — среднее число побед, Подпольная арена — очки). На снимок: `total_size`, `truncated`, `final`, рейтинг на местах 1/100/1000/5000 |
+| Как часто | Текущие сезоны — 4 обхода в сутки (каждые 6 ч), снимок дня заменяется более поздним чтением того же дня, то есть хранится последнее чтение UTC-дня. Прошлые сезоны — одно финальное чтение |
+| Что и насколько глубоко | 7 режимов × EU/US/AP, текущий сезон целиком (до 17 тыс. строк), прошлые сезоны — первые 2000 страниц (50 000 мест); старые сезоны Полей сражений (до 1,5 млн игроков) помечены `truncated` |
+| Сколько хранится | Бессрочно. Ни одна команда не удаляет прошлые дни и сезоны; строки удаляются только при замене снимка того же дня |
+| Смена сезона | Новый сезон в `seasonMetaData` становится `is_latest`; прежний в ближайший час читается запуском истории с флагом `final` (снимок дня этого чтения) и больше не читается |
+| Пробелы в живой БД | Данные с 25.10.2026 (запуск), за 25 и 26.10 есть снимки всех 21 текущей таблицы; финальные чтения: 55 из 469 прошлых сезонов, дочитка идёт |
+| Стабильная личность | Blizzard не отдаёт id аккаунта, только ник без номера. Связать игрока после смены ника нельзя; два аккаунта с одним ником в регионе — один `lb_players` (`shared_name`) |
+
+Найденные риски и что сделано:
+
+* Запуск истории в :40 мог держать lock дольше 30 минут (бюджет проверяется
+  между таблицами, одна таблица — до 17 минут), и живой обход в :10 тогда
+  пропускался целиком. Теперь живой обход ждёт lock до 20 минут.
+* Обход идёт в порядке режимов, и при исчерпании часового бюджета (например,
+  после 403 темп падает вдвое) всегда страдал хвост — Арена, Подпольная арена,
+  Twist. Теперь первыми идут таблицы без снимка за текущий день.
+* Арена и Twist по дню не меняются, а копировались целиком (36% строк обхода).
+  Теперь такой снимок ссылается на строки прошлого дня (`entries_id`).
+* Поиск игроков по началу ника не использовал индекс (LIKE в SQLite
+  регистронезависим, а индекс `name_key` — BINARY): полный проход по
+  280 тыс. ников. Теперь — диапазон по индексу.
+* Пробелы видны в `/v1/leaderboards/coverage`: `live_days[].missing_days`.
+
 ## Хранение
 
 Файл `$HS_API_DATA_DIR/blizzard_leaderboards.db` (WAL). Он отделён от
@@ -85,13 +112,40 @@ GET https://hearthstone.blizzard.com/en-us/api/community/leaderboardsData
 | Таблица | Что хранит |
 | --- | --- |
 | `lb_boards` | Таблица (регион, режим, сезон): `is_latest`, `final`, размер, последний снимок, ошибки |
-| `lb_snapshots` | Не больше одного снимка на таблицу и UTC-день (повторное чтение в тот же день заменяет его); `total_size`, `stored_rows`, `truncated`, `final`, рейтинг на местах 1/100/1000/5000 |
-| `lb_entries` | Строки снимка: `rank` (ключ), игрок, `rating` |
+| `lb_snapshots` | Не больше одного снимка на таблицу и UTC-день (повторное чтение в тот же день заменяет его); `total_size`, `stored_rows`, `truncated`, `final`, рейтинг на местах 1/100/1000/5000; `entries_id` — снимок, чьи строки `lb_entries` он использует (свой `id`, если строки свои); `rows_hash` — SHA-256 строк |
+| `lb_entries` | Строки снимка: `rank` (ключ), игрок, `rating`. Индекс `(player_id, snapshot_id)` для истории игрока |
 | `lb_players` | Ник в регионе; `name_key` — casefold для поиска |
 | `lb_runs` | Запуски и их сводка |
 
-Объём: ~35 байт на строку с индексами, ~4 МБ в день на живые сезоны,
-~250 МБ на всю историю.
+Объём: ~30 байт на строку с индексами, ~3 МБ в день на живые сезоны
+(~1 ГБ в год), ~250 МБ на всю историю прошлых сезонов.
+
+**Дедупликация.** Если строки чтения (`rank`, ник, `rating`) совпадают со
+снимком предыдущего дня той же таблицы, снимок дня получает `entries_id`
+предыдущего и своих строк не пишет. Замена снимка того же дня, на строки
+которого ссылаются другие снимки, передаёт строки самому раннему из них, так
+что история не теряется. Все чтения идут через `entries_id`.
+
+**Миграция** (`PRAGMA user_version` 0 → 1) выполняется при первом
+подключении: добавляет `entries_id`, `rows_hash` и индекс
+`idx_lb_snapshots_entries`, заполняет `entries_id = id` и хеши старых снимков
+(0,7 с на 900 тыс. строк). Она только добавляет данные.
+
+**Откат.** Старый код не знает `entries_id` и показал бы общие снимки пустыми.
+Перед откатом кода материализуйте их:
+
+```sql
+INSERT INTO lb_entries (snapshot_id, rank, player_id, rating)
+SELECT s.id, e.rank, e.player_id, e.rating
+FROM lb_snapshots s JOIN lb_entries e ON e.snapshot_id = s.entries_id
+WHERE s.entries_id != s.id;
+UPDATE lb_snapshots SET entries_id = id;
+```
+
+Столбцы можно оставить (старый код их не читает) или удалить
+(`ALTER TABLE lb_snapshots DROP COLUMN ...`, `DROP INDEX
+idx_lb_snapshots_entries`, `PRAGMA user_version = 0`). Резервная копия перед
+выкладкой 26.10.2026: `data/backups/blizzard_leaderboards-20261026.db`.
 
 ## REST
 
@@ -103,11 +157,12 @@ Blizzard (по умолчанию самый новый сохранённый).
 | Endpoint | Параметры | Что возвращает |
 | --- | --- | --- |
 | `GET /v1/leaderboards` | `mode`, `region`, `season`, `day` (YYYY-MM-DD), `q` (подстрока ника), `limit` ≤ 100, `offset` | `board`, `snapshot`, `days[]` (дни со снимками), `total`, `rows[]`: `rank`, `name`, `rating`, `previous_rank` (место в предыдущем снимке) |
-| `GET /v1/leaderboards/stats` | `mode`, `region`, `season`, `bucket` | `top_rating`; `thresholds[]` — рейтинг на местах 100/1000/5000 и `reached`; `rating` — min/max/mean/median; `histogram[]` (ширина корзины по умолчанию: Поля сражений 500, Подземная арена 250, Арена 0,5); `series[]` — по дням `total_size` и `rating_at_*` |
+| `GET /v1/leaderboards/stats` | `mode`, `region`, `season`, `bucket` | `top_rating`; `thresholds[]` — рейтинг на местах 100/1000/5000 и `reached`; `rating` — min/max/mean/median; `histogram[]` (ширина корзины по умолчанию: Поля сражений 500, Подпольная арена 250, Арена 0,5); `series[]` — по дням `total_size` и `rating_at_*` |
 | `GET /v1/leaderboards/players` | `q` (начало ника, ≥ 2 символа), `region`, `limit` ≤ 50 | Игроки и их места в текущих сезонах |
-| `GET /v1/leaderboards/player` | `name`, `region`, `mode` | `seasons[]`: `best_rank`/`best_day`, `last_rank`/`last_rating`/`last_day`, `in_latest_snapshot`, `days`, `series[]` по дням; `shared_name = true`, если под этим ником в одной таблице несколько аккаунтов |
+| `GET /v1/leaderboards/player` | `name`, `region`, `mode` | `seasons[]`: `best_rank`/`best_day`, `peak_rating`/`peak_rating_day` (лучший рейтинг сезона, `null` без рейтинга), `final_rank`/`final_rating` (место в финальном снимке завершённого сезона, иначе `null`), `first_day`, `last_rank`/`last_rating`/`last_day`, `in_latest_snapshot`, `days`, `series[]` по дням; `shared_name = true`, если под этим ником в одной таблице несколько аккаунтов |
+| `GET /v1/leaderboards/player/history` | `name`, `mode` (обязателен), `region`, `from`, `to` (UTC-дни YYYY-MM-DD) | Один режим через все сезоны: `points[]` — `{season_id, day, rank, rating, total_size, final}` по возрастанию дня (в день смены сезона — финал старого и первый день нового); `seasons[]` — сводка каждого сезона, как в `/player`, без `series`, по возрастанию `season_id`; `rated`, `from`, `to`. `meta.count` — число точек |
 | `GET /v1/leaderboards/seasons` | — | Все режимы, регионы и сезоны, `has_data`, `final`, `is_latest`, `total_size` |
-| `GET /v1/leaderboards/coverage` | `runs` | Прогресс по режимам и регионам и последние запуски (без кэша) |
+| `GET /v1/leaderboards/coverage` | `runs` | Прогресс по режимам и регионам; `live_days[]` — для каждого текущего сезона `first_day`, `last_day`, `days` и `missing_days` (UTC-дни без снимка между первым и последним); `shared_snapshots`; последние запуски (без кэша) |
 
 Режимы без рейтинга (Стандарт, Вольный, Twist) отдают `rating = null`, пороги
 без рейтинга и `histogram = null`; число игроков есть всегда.
@@ -115,6 +170,7 @@ Blizzard (по умолчанию самый новый сохранённый).
 ## GraphQL
 
 `leaderboard`, `leaderboardStats`, `leaderboardPlayers`, `leaderboardPlayer`,
+`leaderboardPlayerHistory` (`name`, `mode`, `region`, `from`, `to`),
 `leaderboardSeasons` — JSON той же формы, что `data` соответствующего REST.
 
 ## Настройки
@@ -128,6 +184,7 @@ Blizzard (по умолчанию самый новый сохранённый).
 | `HS_LEADERBOARDS_MAX_PAGES` | 2000 | Страниц на таблицу |
 | `HS_LEADERBOARDS_HISTORY_PAGES` | 2000 | Страниц истории за запуск |
 | `HS_LEADERBOARDS_LIVE_SECONDS` / `_HISTORY_SECONDS` | 3600 / 1500 | Бюджет времени запуска |
+| `HS_LEADERBOARDS_LOCK_WAIT_SECONDS` | 1200 | Сколько живой обход ждёт lock, занятый историей (история не ждёт) |
 
 Ручной запуск: `python -m app.cli refresh-blizzard-leaderboards --scope live`
 (`--max-boards N` для диагностики).

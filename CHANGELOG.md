@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- Blizzard leaderboards keep player history durably: a live run waits up to
+  20 minutes for a history run holding the lock instead of skipping its
+  six-hour slot, and boards without a snapshot for the current UTC day are
+  read first, so a run cut by its time budget no longer always drops Arena,
+  Underground Arena and Twist. A day whose rows equal the previous day
+  (Arena and Twist often) shares that day's rows (`lb_snapshots.entries_id`,
+  `rows_hash`; additive SQLite migration `user_version` 1, rollback SQL in
+  docs) instead of copying them; nothing deletes past days or seasons. The
+  player name search now uses its index. New REST
+  `/v1/leaderboards/player/history?name&mode&region&from&to` and GraphQL
+  `leaderboardPlayerHistory`: one mode of a player by day across seasons
+  with per-season summaries. `/v1/leaderboards/player` seasons gain
+  `peak_rating`, `peak_rating_day`, `final_rank`, `final_rating` and
+  `first_day`; `/v1/leaderboards/coverage` gains `live_days[].missing_days`
+  and `shared_snapshots`. Existing fields are unchanged. See
+  docs/BLIZZARD_LEADERBOARDS.md.
+
 - HSGuru deck catalogs: the `/replays` render now waits for
   `#replays_table` instead of the LiveView root, which is already in the dead
   render; about 15% of replay renders came back without the table, were

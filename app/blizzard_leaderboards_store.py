@@ -4,7 +4,13 @@ One *board* is one leaderboard: region (EU, US, AP), mode (standard,
 battlegrounds, ...) and season. A board gets at most one *snapshot* per UTC
 day: a later read on the same day replaces that day's rows, so the history is
 "rank and rating of a player by day". A season that is no longer the latest one
-gets one last read flagged ``final`` and is never read again.
+gets one last read flagged ``final`` and is never read again. Nothing deletes
+an older day.
+
+A read whose rows equal the board's previous day (Arena and Twist often do not
+move for a day) stores no rows of its own: ``entries_id`` names the snapshot
+whose ``lb_entries`` it shares, ``rows_hash`` detects the match. Readers always
+go through ``entries_id``.
 
 The tables live in their own database file (``blizzard_leaderboards.db``)
 instead of ``hs_parses.db``: a live sweep stores about 100,000 rows a day and the
@@ -18,9 +24,11 @@ of their lines stay in the snapshot (the primary key is the rank).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from collections.abc import Iterable, Mapping, Sequence
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -28,7 +36,10 @@ from .config import data_dir
 
 DB_FILENAME = "blizzard_leaderboards.db"
 THRESHOLD_RANKS = (1, 100, 1000, 5000)
+SCHEMA_VERSION = 1
 _SQL_CHUNK = 500
+# Above every character a name can hold: the upper bound of a prefix range.
+_PREFIX_END = "\U0010ffff"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS lb_boards (
@@ -71,6 +82,8 @@ CREATE TABLE IF NOT EXISTS lb_snapshots (
     rating_at_100 REAL,
     rating_at_1000 REAL,
     rating_at_5000 REAL,
+    entries_id INTEGER,
+    rows_hash TEXT,
     UNIQUE (board_id, day)
 );
 CREATE TABLE IF NOT EXISTS lb_entries (
@@ -104,16 +117,61 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.executescript(SCHEMA)
+    if conn.execute("PRAGMA user_version").fetchone()[0] < SCHEMA_VERSION:
+        _migrate(conn)
     return conn
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Version 1: shared entries and row hashes. Additive; old rows keep their own."""
+
+    with conn:
+        conn.execute("BEGIN IMMEDIATE")
+        if conn.execute("PRAGMA user_version").fetchone()[0] >= SCHEMA_VERSION:
+            return
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(lb_snapshots)")}
+        for column, kind in (("entries_id", "INTEGER"), ("rows_hash", "TEXT")):
+            if column not in columns:
+                conn.execute(f"ALTER TABLE lb_snapshots ADD COLUMN {column} {kind}")
+        conn.execute("UPDATE lb_snapshots SET entries_id = id WHERE entries_id IS NULL")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_lb_snapshots_entries "
+            "ON lb_snapshots(entries_id)"
+        )
+        for (snapshot_id,) in conn.execute(
+            "SELECT id FROM lb_snapshots WHERE rows_hash IS NULL"
+        ).fetchall():
+            rows = conn.execute(
+                """
+                SELECT e.rank, p.name, e.rating FROM lb_entries e
+                JOIN lb_players p ON p.id = e.player_id
+                WHERE e.snapshot_id = ? ORDER BY e.rank
+                """,
+                (snapshot_id,),
+            ).fetchall()
+            conn.execute(
+                "UPDATE lb_snapshots SET rows_hash = ? WHERE id = ?",
+                (rows_hash([tuple(row) for row in rows]), snapshot_id),
+            )
+        conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
 
 def name_key(name: str) -> str:
     return name.casefold()
 
 
-def _like_pattern(text: str, *, prefix_only: bool = False) -> str:
+def rows_hash(rows: Sequence[tuple[int, str, float | None]]) -> str:
+    digest = hashlib.sha256()
+    for rank, name, rating in rows:
+        digest.update(
+            f"{rank}\t{name}\t{'' if rating is None else repr(rating)}\n".encode()
+        )
+    return digest.hexdigest()
+
+
+def _like_pattern(text: str) -> str:
     escaped = text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-    return f"{escaped}%" if prefix_only else f"%{escaped}%"
+    return f"%{escaped}%"
 
 
 def _chunks(values: Sequence[Any], size: int = _SQL_CHUNK) -> Iterable[Sequence[Any]]:
@@ -159,12 +217,24 @@ def sync_boards(
 
 
 def live_boards(
-    conn: sqlite3.Connection, regions: Sequence[str], modes: Sequence[str]
+    conn: sqlite3.Connection,
+    regions: Sequence[str],
+    modes: Sequence[str],
+    today: str | None = None,
 ) -> list[dict[str, Any]]:
+    """Latest seasons; boards still without a snapshot on ``today`` go first.
+
+    A run stopped by its time budget then leaves a different board without
+    that day next time, never the same tail of the mode order every run.
+    """
+
     rows = conn.execute(
         "SELECT * FROM lb_boards WHERE is_latest = 1 ORDER BY region, mode"
     ).fetchall()
-    return _ordered(rows, regions, modes)
+    boards = _ordered(rows, regions, modes)
+    if today:
+        boards.sort(key=lambda board: (board["last_fetched_at"] or "")[:10] >= today)
+    return boards
 
 
 def history_boards(
@@ -261,16 +331,25 @@ def write_snapshot(
     truncated: bool,
     final: bool,
 ) -> int:
-    """Store one complete read of a board as that day's snapshot, atomically."""
+    """Store one complete read of a board as that day's snapshot, atomically.
+
+    Rows equal to the previous day's share its entries instead of a copy.
+    """
 
     board_id = int(board["id"])
     thresholds = _thresholds(rows)
+    digest = rows_hash(rows)
     with conn:
-        ids = _player_ids(
-            conn, str(board["region"]), [name for _rank, name, _r in rows]
-        )
         existing = conn.execute(
-            "SELECT id FROM lb_snapshots WHERE board_id = ? AND day = ?",
+            "SELECT id, entries_id, rows_hash FROM lb_snapshots "
+            "WHERE board_id = ? AND day = ?",
+            (board_id, day),
+        ).fetchone()
+        previous = conn.execute(
+            """
+            SELECT entries_id, rows_hash FROM lb_snapshots
+            WHERE board_id = ? AND day < ? ORDER BY day DESC LIMIT 1
+            """,
             (board_id, day),
         ).fetchone()
         values = (
@@ -285,9 +364,11 @@ def write_snapshot(
             thresholds["rating_at_1000"],
             thresholds["rating_at_5000"],
         )
+        keep_entries = bool(existing) and existing["rows_hash"] == digest
         if existing:
             snapshot_id = int(existing["id"])
-            conn.execute("DELETE FROM lb_entries WHERE snapshot_id = ?", (snapshot_id,))
+            if not keep_entries:
+                _release_entries(conn, snapshot_id, existing["entries_id"])
             conn.execute(
                 """
                 UPDATE lb_snapshots
@@ -310,11 +391,26 @@ def write_snapshot(
                 (board_id, day, *values),
             )
             snapshot_id = int(cursor.lastrowid or 0)
-        conn.executemany(
-            "INSERT OR REPLACE INTO lb_entries (snapshot_id, rank, player_id, rating) "
-            "VALUES (?, ?, ?, ?)",
-            [(snapshot_id, rank, ids[name], rating) for rank, name, rating in rows],
-        )
+        if not keep_entries:
+            if previous and previous["rows_hash"] == digest:
+                entries_id = int(previous["entries_id"])
+            else:
+                entries_id = snapshot_id
+                ids = _player_ids(
+                    conn, str(board["region"]), [name for _rank, name, _r in rows]
+                )
+                conn.executemany(
+                    "INSERT OR REPLACE INTO lb_entries "
+                    "(snapshot_id, rank, player_id, rating) VALUES (?, ?, ?, ?)",
+                    [
+                        (snapshot_id, rank, ids[name], rating)
+                        for rank, name, rating in rows
+                    ],
+                )
+            conn.execute(
+                "UPDATE lb_snapshots SET entries_id = ?, rows_hash = ? WHERE id = ?",
+                (entries_id, digest, snapshot_id),
+            )
         conn.execute(
             """
             UPDATE lb_boards
@@ -325,6 +421,36 @@ def write_snapshot(
             (snapshot_id, total_size, total_pages, captured_at, int(final), board_id),
         )
     return snapshot_id
+
+
+def _release_entries(
+    conn: sqlite3.Connection, snapshot_id: int, entries_id: int | None
+) -> None:
+    """Drop the rows a replaced snapshot owns, or hand them to a snapshot sharing them."""
+
+    if entries_id is not None and int(entries_id) != snapshot_id:
+        return
+    heir = conn.execute(
+        "SELECT MIN(id) FROM lb_snapshots WHERE entries_id = ? AND id != ?",
+        (snapshot_id, snapshot_id),
+    ).fetchone()[0]
+    if heir is None:
+        conn.execute("DELETE FROM lb_entries WHERE snapshot_id = ?", (snapshot_id,))
+        return
+    conn.execute(
+        "UPDATE lb_entries SET snapshot_id = ? WHERE snapshot_id = ?",
+        (heir, snapshot_id),
+    )
+    conn.execute(
+        "UPDATE lb_snapshots SET entries_id = ? WHERE entries_id = ?",
+        (heir, snapshot_id),
+    )
+
+
+def entries_of(snapshot: Mapping[str, Any] | sqlite3.Row) -> int:
+    """The snapshot id whose ``lb_entries`` rows hold this snapshot's table."""
+
+    return int(snapshot["entries_id"] or snapshot["id"])
 
 
 # --- runs ---------------------------------------------------------------------
@@ -437,9 +563,8 @@ def table_rows(
 ) -> tuple[list[dict[str, Any]], int]:
     """One page of a snapshot, optionally filtered by a name substring."""
 
-    snapshot_id = int(snapshot["id"])
     where = "e.snapshot_id = ?"
-    params: list[Any] = [snapshot_id]
+    params: list[Any] = [entries_of(snapshot)]
     if query:
         where += " AND p.name_key LIKE ? ESCAPE '\\'"
         params.append(_like_pattern(name_key(query)))
@@ -466,7 +591,7 @@ def table_rows(
     ]
     previous = conn.execute(
         """
-        SELECT id FROM lb_snapshots
+        SELECT id, entries_id FROM lb_snapshots
         WHERE board_id = ? AND day < ? ORDER BY day DESC LIMIT 1
         """,
         (snapshot["board_id"], snapshot["day"]),
@@ -481,7 +606,7 @@ def table_rows(
             WHERE snapshot_id = ? AND player_id IN ({placeholders})
             GROUP BY player_id
             """,
-            (previous["id"], *player_ids),
+            (entries_of(previous), *player_ids),
         ):
             previous_ranks[int(row["player_id"])] = int(row["rank"])
     for row in rows:
@@ -558,8 +683,9 @@ def search_players(
     """Players whose name starts with ``query`` (case-insensitive), exact first."""
 
     key = name_key(query)
-    params: list[Any] = [_like_pattern(key, prefix_only=True)]
-    where = "name_key LIKE ? ESCAPE '\\'"
+    # A range, not LIKE: LIKE is case-folding and cannot use the BINARY index.
+    params: list[Any] = [key, key + _PREFIX_END]
+    where = "name_key >= ? AND name_key < ?"
     if region:
         where += " AND region = ?"
         params.append(region)
@@ -581,7 +707,8 @@ def search_players(
         f"""
         SELECT e.player_id, b.mode, b.season_id, MIN(e.rank) AS rank, e.rating
         FROM lb_entries e
-        JOIN lb_boards b ON b.latest_snapshot_id = e.snapshot_id
+        JOIN lb_snapshots s ON s.entries_id = e.snapshot_id
+        JOIN lb_boards b ON b.latest_snapshot_id = s.id
         WHERE e.player_id IN ({placeholders}) AND b.is_latest = 1
         GROUP BY e.player_id, b.id ORDER BY b.mode
         """,
@@ -636,7 +763,7 @@ def player_entries(
                    b.final AS board_final, b.latest_snapshot_id, s.id AS snapshot_id,
                    s.day, s.final, s.total_size, e.rank, e.rating
             FROM lb_entries e
-            JOIN lb_snapshots s ON s.id = e.snapshot_id
+            JOIN lb_snapshots s ON s.entries_id = e.snapshot_id
             JOIN lb_boards b ON b.id = s.board_id
             WHERE {where}
             ORDER BY b.mode, b.season_id DESC, s.day, e.rank
@@ -664,7 +791,11 @@ def coverage(conn: sqlite3.Connection, runs: int) -> dict[str, Any]:
         )
     ]
     totals = conn.execute(
-        "SELECT COUNT(*) AS snapshots, COALESCE(SUM(stored_rows), 0) AS rows FROM lb_snapshots"
+        """
+        SELECT COUNT(*) AS snapshots, COALESCE(SUM(stored_rows), 0) AS rows,
+               COALESCE(SUM(entries_id != id), 0) AS shared
+        FROM lb_snapshots
+        """
     ).fetchone()
     last_runs = []
     for row in conn.execute("SELECT * FROM lb_runs ORDER BY id DESC LIMIT ?", (runs,)):
@@ -675,5 +806,46 @@ def coverage(conn: sqlite3.Connection, runs: int) -> dict[str, Any]:
         "boards": boards,
         "snapshots": int(totals["snapshots"]),
         "stored_rows": int(totals["rows"]),
+        "shared_snapshots": int(totals["shared"]),
+        "live_days": live_days(conn),
         "runs": last_runs,
     }
+
+
+def live_days(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    """Daily coverage of every latest season: UTC days without a snapshot."""
+
+    out = []
+    for board in conn.execute(
+        "SELECT id, region, mode, season_id FROM lb_boards WHERE is_latest = 1 "
+        "ORDER BY mode, region"
+    ).fetchall():
+        days = [
+            date.fromisoformat(day)
+            for (day,) in conn.execute(
+                "SELECT day FROM lb_snapshots WHERE board_id = ? ORDER BY day",
+                (board["id"],),
+            )
+        ]
+        have = set(days)
+        missing = (
+            [
+                (days[0] + timedelta(days=offset)).isoformat()
+                for offset in range((days[-1] - days[0]).days + 1)
+                if days[0] + timedelta(days=offset) not in have
+            ]
+            if days
+            else []
+        )
+        out.append(
+            {
+                "region": board["region"],
+                "mode": board["mode"],
+                "season_id": board["season_id"],
+                "first_day": days[0].isoformat() if days else None,
+                "last_day": days[-1].isoformat() if days else None,
+                "days": len(days),
+                "missing_days": missing,
+            }
+        )
+    return out

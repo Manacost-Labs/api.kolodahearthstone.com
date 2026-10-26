@@ -955,9 +955,10 @@ curl -s "https://api.kolodahearthstone.com/v1/hsreplay/card-choices?card=CORE_YO
 | `GET /v1/leaderboards` | `board`, `snapshot` (`day`, `captured_at`, `total_size`, `stored_rows`, `truncated`, `stale`), `days[]`, `total`, `rows[]` с `rank`, `name`, `rating`, `previous_rank` |
 | `GET /v1/leaderboards/stats` | `top_rating`, `thresholds[]` (`rank` 100/1000/5000, `reached`, `rating`), `rating` (min/max/mean/median), `histogram[]` (`from`, `to`, `players`), `series[]` по дням |
 | `GET /v1/leaderboards/players` | `[{region, name, current: [{mode, season_id, rank, rating}]}]` |
-| `GET /v1/leaderboards/player` | `player`, `shared_name`, `seasons[]` с `best_rank`, `last_rank`, `last_rating`, `days`, `series[]` (`day`, `rank`, `rating`, `total_size`, `final`) |
+| `GET /v1/leaderboards/player` | `player`, `shared_name`, `seasons[]` с `best_rank`, `peak_rating`/`peak_rating_day`, `final_rank`/`final_rating`, `first_day`, `last_rank`, `last_rating`, `days`, `series[]` (`day`, `rank`, `rating`, `total_size`, `final`) |
+| `GET /v1/leaderboards/player/history` | `mode` обязателен, `from`/`to` (UTC-дни): `points[]` (`season_id`, `day`, `rank`, `rating`, `total_size`, `final`) по возрастанию дня через все сезоны режима и `seasons[]` — сводка сезона как в `/player`, без `series` |
 | `GET /v1/leaderboards/seasons` | `modes[].regions.{EU,US,AP}.seasons[]` с `has_data`, `final`, `is_latest`, `total_size` |
-| `GET /v1/leaderboards/coverage` | Прогресс по режимам и регионам и последние запуски (без кэша) |
+| `GET /v1/leaderboards/coverage` | Прогресс по режимам и регионам, `live_days[]` (дни текущих сезонов и `missing_days`), `shared_snapshots` и последние запуски (без кэша) |
 
 `mode`: `standard`, `wild`, `battlegrounds`, `battlegroundsduo`, `arena`,
 `undergroundarena`, `twist`; `region`: `EU`, `US`, `AP`. Несобранная таблица —

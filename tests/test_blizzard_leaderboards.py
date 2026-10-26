@@ -448,7 +448,7 @@ def test_rest_and_graphql_read_the_store() -> None:
     assert client.get("/v1/leaderboards?mode=standard&region=EU").status_code == 404
     assert client.get("/v1/leaderboards?mode=unknown").status_code == 422
     paths = app.openapi()["paths"]
-    for path in ("", "/stats", "/players", "/player", "/seasons"):
+    for path in ("", "/stats", "/players", "/player", "/player/history", "/seasons"):
         content = paths[f"/v1/leaderboards{path}"]["get"]["responses"]["200"]["content"]
         assert content["application/json"]["example"]["data"], path
 
@@ -497,3 +497,270 @@ def test_rest_and_graphql_read_the_store() -> None:
         "/v1/graphql", json={"query": 'query { leaderboard(region: "XX") }'}
     )
     assert invalid.json()["errors"][0]["message"].startswith("region must be one of")
+
+
+def _entry_rows(conn: Any) -> int:
+    return int(conn.execute("SELECT COUNT(*) FROM lb_entries").fetchone()[0])
+
+
+def test_unchanged_day_shares_rows_and_replacing_it_keeps_history() -> None:
+    fake = _fake()
+    _run(fake, "live")
+    conn = store.connect()
+    assert _entry_rows(conn) == 100
+    conn.close()
+
+    _run(fake, "live", when=DAY2)  # nothing moved: no new rows
+    conn = store.connect()
+    assert _entry_rows(conn) == 100
+    shared = conn.execute(
+        "SELECT COUNT(*) FROM lb_snapshots WHERE entries_id != id"
+    ).fetchone()[0]
+    assert shared == 2
+    conn.close()
+    table = lb.get_table(
+        region="EU",
+        mode="standard",
+        season_id=None,
+        day="2026-10-26",
+        query=None,
+        limit=2,
+        offset=0,
+    )
+    assert table is not None and table["days"] == ["2026-10-25", "2026-10-26"]
+    assert [(row["name"], row["previous_rank"]) for row in table["rows"]] == [
+        ("p1", 1),
+        ("p2", 2),
+    ]
+
+    # A later same-day read of day 1 that differs takes its own rows; day 2
+    # keeps the old day-1 table it shared.
+    rows = fake.boards[("EU", "standard", 156)]
+    rows.insert(0, rows.pop(4))
+    _run(fake, "live")
+    conn = store.connect()
+    assert _entry_rows(conn) == 160
+    conn.close()
+    day1 = lb.get_table(
+        region="EU",
+        mode="standard",
+        season_id=156,
+        day="2026-10-25",
+        query=None,
+        limit=1,
+        offset=0,
+    )
+    day2 = lb.get_table(
+        region="EU",
+        mode="standard",
+        season_id=156,
+        day="2026-10-26",
+        query=None,
+        limit=1,
+        offset=0,
+    )
+    assert day1 is not None and day1["rows"][0]["name"] == "p5"
+    assert day2 is not None and day2["rows"][0]["name"] == "p1"
+
+    profile = lb.get_player(region="EU", name="p5", mode="standard")
+    assert profile is not None
+    assert [(p["day"], p["rank"]) for p in profile["seasons"][0]["series"]] == [
+        ("2026-10-25", 1),
+        ("2026-10-26", 5),
+    ]
+    stats = lb.get_stats(region="EU", mode="battlegrounds", season_id=None, bucket=None)
+    assert stats is not None and stats["rating"]["rated_players"] == 40
+    hits = lb.search_players(query="bg1", region="EU", limit=1)
+    assert hits[0]["current"][0]["rank"] == 1
+
+
+def test_migration_adds_shared_entries_to_a_version_0_database() -> None:
+    fake = _fake()
+    _run(fake, "live")
+    conn = store.connect()
+    hashes = dict(conn.execute("SELECT id, rows_hash FROM lb_snapshots").fetchall())
+    conn.execute("DROP INDEX idx_lb_snapshots_entries")
+    conn.execute("ALTER TABLE lb_snapshots DROP COLUMN entries_id")
+    conn.execute("ALTER TABLE lb_snapshots DROP COLUMN rows_hash")
+    conn.execute("PRAGMA user_version = 0")
+    conn.commit()
+    conn.close()
+
+    conn = store.connect()
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == store.SCHEMA_VERSION
+    migrated = conn.execute(
+        "SELECT id, entries_id, rows_hash FROM lb_snapshots"
+    ).fetchall()
+    assert all(row["entries_id"] == row["id"] for row in migrated)
+    assert {row["id"]: row["rows_hash"] for row in migrated} == hashes
+    conn.close()
+    _run(fake, "live", when=DAY2)
+    conn = store.connect()
+    assert _entry_rows(conn) == 100
+    conn.close()
+
+
+def test_rollover_keeps_final_and_player_history_spans_seasons() -> None:
+    fake = _fake()
+    _run(fake, "live")
+    bg = fake.boards[("EU", "battlegrounds", 19)]
+    bg[0] = ("bg1", 12500.0)  # day 2: bg1 peaks
+    _run(fake, "live", when=DAY2)
+    bg[0] = ("bg1", 12300.0)
+    fake.boards[("EU", "battlegrounds", 20)] = [("bg1", 8000.0), ("bg2", 7990.0)]
+    day3 = datetime(2026, 10, 27, 12, 0, tzinfo=UTC)
+    _run(fake, "live", when=day3)
+    _run(fake, "history", when=day3)
+
+    profile = lb.get_player(region="EU", name="bg1", mode="battlegrounds")
+    assert profile is not None
+    by_season = {season["season_id"]: season for season in profile["seasons"]}
+    ended = by_season[19]
+    assert ended["final"] and not ended["is_latest"]
+    assert (ended["peak_rating"], ended["peak_rating_day"]) == (12500.0, "2026-10-26")
+    assert (ended["final_rank"], ended["final_rating"]) == (1, 12300.0)
+    assert ended["first_day"] == "2026-10-25"
+    assert [p["day"] for p in ended["series"]] == [
+        "2026-10-25",
+        "2026-10-26",
+        "2026-10-27",
+    ]
+    assert by_season[20]["final_rank"] is None and by_season[20]["is_latest"]
+
+    history = lb.get_player_history(region="EU", name="bg1", mode="battlegrounds")
+    assert history is not None and history["rated"]
+    assert [s["season_id"] for s in history["seasons"]] == [19, 20]
+    assert "series" not in history["seasons"][0]
+    assert [(p["day"], p["season_id"], p["final"]) for p in history["points"]] == [
+        ("2026-10-25", 19, False),
+        ("2026-10-26", 19, False),
+        ("2026-10-27", 19, True),
+        ("2026-10-27", 20, False),
+    ]
+    window = lb.get_player_history(
+        region="EU",
+        name="bg1",
+        mode="battlegrounds",
+        day_from="2026-10-26",
+        day_to="2026-10-26",
+    )
+    assert window is not None
+    assert [(p["day"], p["rating"]) for p in window["points"]] == [
+        ("2026-10-26", 12500.0)
+    ]
+    assert lb.get_player_history(region="EU", name="nobody", mode="standard") is None
+
+
+def test_live_run_puts_boards_missing_today_first() -> None:
+    fake = _fake()
+    _run(
+        fake, "live", settings=lb.Settings(**{**FAST.__dict__, "modes": ("standard",)})
+    )
+    conn = store.connect()
+    store.sync_boards(conn, {("EU", "battlegrounds"): [19]}, {}, "now")
+    boards = store.live_boards(
+        conn, ("EU",), ("standard", "battlegrounds"), today="2026-10-25"
+    )
+    assert [board["mode"] for board in boards] == ["battlegrounds", "standard"]
+    boards = store.live_boards(conn, ("EU",), ("standard", "battlegrounds"))
+    assert [board["mode"] for board in boards] == ["standard", "battlegrounds"]
+    conn.close()
+
+
+def test_live_run_waits_for_a_history_run_holding_the_lock() -> None:
+    from app.resource_locks import ResourceLockSet
+
+    fake = _fake()
+    held = ResourceLockSet([lb.SOURCE_ID]).acquire()
+
+    async def scenario(wait: float) -> dict[str, Any]:
+        async def release_soon() -> None:
+            await asyncio.sleep(0.05)
+            held.release()
+
+        releaser = asyncio.create_task(release_soon())
+        result = await lb.refresh_blizzard_leaderboards(
+            scope="live",
+            settings=lb.Settings(**{**FAST.__dict__, "lock_wait_seconds": wait}),
+            transport=fake.transport(),
+            clock=lambda: DAY1,
+        )
+        await releaser
+        return result
+
+    original = lb.LOCK_POLL_SECONDS
+    lb.LOCK_POLL_SECONDS = 0.01
+    try:
+        assert asyncio.run(scenario(5.0))["live_ok"] == 2
+        held.acquire()
+        history = _run(fake, "history")
+        assert history["state"] == "locked" and not history["published"]
+        held.release()
+    finally:
+        lb.LOCK_POLL_SECONDS = original
+        held.release()
+
+
+def test_coverage_reports_missing_live_days() -> None:
+    fake = _fake()
+    _run(fake, "live")
+    _run(fake, "live", when=datetime(2026, 10, 28, 12, 0, tzinfo=UTC))
+    coverage = lb.get_coverage(runs=0)
+    standard = next(
+        item for item in coverage["live_days"] if item["mode"] == "standard"
+    )
+    assert standard["missing_days"] == ["2026-10-26", "2026-10-27"]
+    assert (standard["first_day"], standard["last_day"], standard["days"]) == (
+        "2026-10-25",
+        "2026-10-28",
+        2,
+    )
+    assert coverage["shared_snapshots"] == 2
+
+
+def test_rest_and_graphql_player_history() -> None:
+    from app.main import app
+
+    client = TestClient(app)
+    _run(_fake(), "live")
+    response = client.get(
+        "/v1/leaderboards/player/history",
+        params={"name": "bg2", "mode": "battlegrounds", "from": "2026-10-25"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["meta"]["count"] == 1
+    assert body["data"]["points"] == [
+        {
+            "season_id": 19,
+            "day": "2026-10-25",
+            "rank": 2,
+            "rating": 11980.0,
+            "total_size": 40,
+            "final": False,
+        }
+    ]
+    assert body["data"]["seasons"][0]["peak_rating"] == 11980.0
+    assert (
+        client.get(
+            "/v1/leaderboards/player/history", params={"name": "bg2"}
+        ).status_code
+        == 422
+    )
+    assert (
+        client.get(
+            "/v1/leaderboards/player/history",
+            params={"name": "bg2", "mode": "standard", "from": "25.10.2026"},
+        ).status_code
+        == 422
+    )
+    graphql = client.post(
+        "/v1/graphql",
+        json={
+            "query": (
+                'query { leaderboardPlayerHistory(name: "bg2", mode: "battlegrounds", '
+                'to: "2026-10-24") }'
+            )
+        },
+    )
+    assert graphql.json()["data"]["leaderboardPlayerHistory"]["points"] == []

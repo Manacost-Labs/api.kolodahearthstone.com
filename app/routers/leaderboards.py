@@ -10,6 +10,7 @@ from ..blizzard_leaderboards import (
     get_catalog,
     get_coverage,
     get_player,
+    get_player_history,
     get_stats,
     get_table,
     search_players,
@@ -41,6 +42,8 @@ DAY_QUERY = Query(
     pattern=r"^\d{4}-\d{2}-\d{2}$",
     description="UTC day of a stored snapshot (YYYY-MM-DD); the latest when omitted.",
 )
+
+HISTORY_MODE_QUERY = Query(..., description="One mode: the series spans its seasons.")
 
 
 def _example(data: Any, count: int = 1, **meta: Any) -> dict[int | str, dict[str, Any]]:
@@ -170,6 +173,11 @@ PLAYER_EXAMPLE = _example(
                 "rated": True,
                 "best_rank": 1,
                 "best_day": "2026-10-25",
+                "peak_rating": 20104.0,
+                "peak_rating_day": "2026-10-25",
+                "final_rank": None,
+                "final_rating": None,
+                "first_day": "2026-10-25",
                 "last_rank": 1,
                 "last_rating": 20104.0,
                 "last_day": "2026-10-25",
@@ -187,6 +195,86 @@ PLAYER_EXAMPLE = _example(
             }
         ],
     }
+)
+# EU Battlegrounds of one player: season 18 ended with its final read, 19 is live.
+PLAYER_HISTORY_EXAMPLE = _example(
+    {
+        "player": {"region": "EU", "name": "XQN"},
+        "shared_name": False,
+        "mode": "battlegrounds",
+        "rated": True,
+        "from": None,
+        "to": None,
+        "seasons": [
+            {
+                "mode": "battlegrounds",
+                "season_id": 18,
+                "season_start": None,
+                "is_latest": False,
+                "final": True,
+                "rated": True,
+                "best_rank": 2,
+                "best_day": "2026-10-26",
+                "peak_rating": 19650.0,
+                "peak_rating_day": "2026-10-26",
+                "final_rank": 2,
+                "final_rating": 19650.0,
+                "first_day": "2026-10-26",
+                "last_rank": 2,
+                "last_rating": 19650.0,
+                "last_day": "2026-10-26",
+                "in_latest_snapshot": True,
+                "days": 1,
+            },
+            {
+                "mode": "battlegrounds",
+                "season_id": 19,
+                "season_start": None,
+                "is_latest": True,
+                "final": False,
+                "rated": True,
+                "best_rank": 1,
+                "best_day": "2026-10-25",
+                "peak_rating": 20104.0,
+                "peak_rating_day": "2026-10-26",
+                "final_rank": None,
+                "final_rating": None,
+                "first_day": "2026-10-25",
+                "last_rank": 1,
+                "last_rating": 20104.0,
+                "last_day": "2026-10-26",
+                "in_latest_snapshot": True,
+                "days": 2,
+            },
+        ],
+        "points": [
+            {
+                "season_id": 19,
+                "day": "2026-10-25",
+                "rank": 1,
+                "rating": 20090.0,
+                "total_size": 6613,
+                "final": False,
+            },
+            {
+                "season_id": 18,
+                "day": "2026-10-26",
+                "rank": 2,
+                "rating": 19650.0,
+                "total_size": 50000,
+                "final": True,
+            },
+            {
+                "season_id": 19,
+                "day": "2026-10-26",
+                "rank": 1,
+                "rating": 20104.0,
+                "total_size": 6631,
+                "final": False,
+            },
+        ],
+    },
+    count=3,
 )
 SEASONS_EXAMPLE = _example(
     {
@@ -361,6 +449,38 @@ async def leaderboard_player(
     return {
         "data": data,
         "meta": _meta(fetched_at=None, stale=False, count=len(data["seasons"])),
+    }
+
+
+@router.get("/player/history", responses=PLAYER_HISTORY_EXAMPLE)
+async def leaderboard_player_history(
+    name: str = Query(..., min_length=1, max_length=64),
+    mode: Mode = HISTORY_MODE_QUERY,
+    region: Region = "EU",
+    day_from: str | None = Query(
+        None, alias="from", pattern=r"^\d{4}-\d{2}-\d{2}$", description="First UTC day."
+    ),
+    day_to: str | None = Query(
+        None, alias="to", pattern=r"^\d{4}-\d{2}-\d{2}$", description="Last UTC day."
+    ),
+) -> dict[str, Any]:
+    """Rank and rating of a player by day across seasons, with season peaks and finals."""
+
+    data = await asyncio.to_thread(
+        get_player_history,
+        region=region,
+        name=name.strip(),
+        mode=mode,
+        day_from=day_from,
+        day_to=day_to,
+    )
+    if data is None:
+        raise HTTPException(
+            status_code=404, detail="This player is not in a stored leaderboard"
+        )
+    return {
+        "data": data,
+        "meta": _meta(fetched_at=None, stale=False, count=len(data["points"])),
     }
 
 

@@ -9,7 +9,9 @@ are *history*.
 Two scopes share one lock so Blizzard never sees two runs at once:
 
 * ``live`` re-reads every live board in full (about 4,300 pages, 36 minutes at
-  two requests a second) and replaces that UTC day's snapshot;
+  two requests a second) and replaces that UTC day's snapshot. Boards still
+  without a snapshot that day go first, and a live run waits for a history run
+  that holds the lock (``lock_wait_seconds``) instead of skipping its slot;
 * ``history`` reads past seasons once, newest first, within a page budget per
   run. A season that stopped being live gets its final read before the
   backfill continues.
@@ -76,6 +78,7 @@ _THROTTLE_STATUS = frozenset({403, 429})
 MAX_THROTTLE_PAUSE = 300.0
 MAX_THROTTLES_PER_PAGE = 8
 MAX_REQUEST_INTERVAL = 2.0
+LOCK_POLL_SECONDS = 15.0
 
 
 class LeaderboardError(RuntimeError):
@@ -122,6 +125,7 @@ class Settings:
     throttle_pause_seconds: float = 30.0
     throttle_budget_seconds: float = 15 * 60
     stop_after_failures: int = 12
+    lock_wait_seconds: float = 20 * 60
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -137,6 +141,9 @@ class Settings:
             ),
             history_seconds=_env_int(
                 "HS_LEADERBOARDS_HISTORY_SECONDS", 25 * 60, 60, 6 * 3600
+            ),
+            lock_wait_seconds=_env_int(
+                "HS_LEADERBOARDS_LOCK_WAIT_SECONDS", 20 * 60, 0, 3600
             ),
         )
 
@@ -417,26 +424,38 @@ async def refresh_blizzard_leaderboards(
     clock: Any = None,
     max_boards: int | None = None,
 ) -> dict[str, Any]:
-    """Read live boards or the history backfill unless another run owns the lock."""
+    """Read live boards or the history backfill unless another run owns the lock.
+
+    A live run waits up to ``lock_wait_seconds`` for a history run to finish;
+    history never waits (the next hour retries it).
+    """
 
     if scope not in SCOPES:
         raise ValueError(f"scope must be one of {', '.join(SCOPES)}")
+    settings = settings or Settings.from_env()
     locks = ResourceLockSet(
         [SOURCE_ID], metadata={"operation": f"refresh_{SOURCE_ID}_{scope}"}
     )
-    try:
-        locks.acquire()
-    except ResourceLocked as exc:
-        return {
-            "ok": True,
-            "published": False,
-            "source_id": SOURCE_ID,
-            **exc.as_outcome(),
-        }
+    wait = 0.0 if scope == "history" else settings.lock_wait_seconds
+    deadline = time.monotonic() + wait
+    while True:
+        try:
+            locks.acquire()
+            break
+        except ResourceLocked as exc:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return {
+                    "ok": True,
+                    "published": False,
+                    "source_id": SOURCE_ID,
+                    **exc.as_outcome(),
+                }
+            await asyncio.sleep(min(LOCK_POLL_SECONDS, remaining))
     try:
         return await _refresh_unlocked(
             scope=scope,
-            settings=settings or Settings.from_env(),
+            settings=settings,
             transport=transport,
             clock=clock or (lambda: datetime.now(UTC)),
             max_boards=max_boards,
@@ -471,7 +490,12 @@ async def _refresh_unlocked(
         if scope in ("live", "all"):
             plan += [
                 ("live", board)
-                for board in store.live_boards(conn, settings.regions, settings.modes)
+                for board in store.live_boards(
+                    conn,
+                    settings.regions,
+                    settings.modes,
+                    today=clock().astimezone(UTC).date().isoformat(),
+                )
             ]
         if scope in ("history", "all"):
             plan += [
@@ -758,10 +782,10 @@ def get_stats(
             "snapshot": _public_snapshot(snapshot, board),
             "top_rating": snapshot["rating_at_1"],
             "thresholds": thresholds,
-            "rating": store.rating_summary(conn, int(snapshot["id"]))
+            "rating": store.rating_summary(conn, store.entries_of(snapshot))
             if rated
             else None,
-            "histogram": store.rating_histogram(conn, int(snapshot["id"]), width)
+            "histogram": store.rating_histogram(conn, store.entries_of(snapshot), width)
             if rated and width
             else None,
             "histogram_bucket": width if rated else None,
@@ -806,6 +830,11 @@ def get_player(*, region: str, name: str, mode: str | None) -> dict[str, Any] | 
                     "rated": entry["mode"] in RATED_MODES,
                     "best_rank": None,
                     "best_day": None,
+                    "peak_rating": None,
+                    "peak_rating_day": None,
+                    "final_rank": None,
+                    "final_rating": None,
+                    "first_day": entry["day"],
                     "last_rank": None,
                     "last_rating": None,
                     "last_day": None,
@@ -816,6 +845,13 @@ def get_player(*, region: str, name: str, mode: str | None) -> dict[str, Any] | 
             )
             if item["best_rank"] is None or entry["rank"] < item["best_rank"]:
                 item["best_rank"], item["best_day"] = entry["rank"], entry["day"]
+            rating = entry["rating"]
+            if rating is not None and (
+                item["peak_rating"] is None or rating > item["peak_rating"]
+            ):
+                item["peak_rating"], item["peak_rating_day"] = rating, entry["day"]
+            if entry["final"] and item["final_rank"] is None:
+                item["final_rank"], item["final_rating"] = entry["rank"], rating
             if not item["series"] or item["series"][-1]["day"] != entry["day"]:
                 item["days"] += 1
                 item["series"].append(
@@ -847,10 +883,53 @@ def get_player(*, region: str, name: str, mode: str | None) -> dict[str, Any] | 
     return _read(read)
 
 
+def get_player_history(
+    *,
+    region: str,
+    name: str,
+    mode: str,
+    day_from: str | None = None,
+    day_to: str | None = None,
+) -> dict[str, Any] | None:
+    """One mode of a player as one rank/rating series across seasons, oldest first.
+
+    ``seasons`` keeps the per-season summary (best and last rank, peak rating,
+    final standing) without the per-season series ``/player`` repeats.
+    """
+
+    profile = get_player(region=region, name=name, mode=mode)
+    if profile is None:
+        return None
+    points: list[dict[str, Any]] = []
+    seasons: list[dict[str, Any]] = []
+    for season in profile["seasons"]:
+        series = season.pop("series")
+        seasons.append(season)
+        points.extend(
+            {"season_id": season["season_id"], **point}
+            for point in series
+            if (day_from is None or point["day"] >= day_from)
+            and (day_to is None or point["day"] <= day_to)
+        )
+    points.sort(key=lambda point: (point["day"], point["season_id"]))
+    return {
+        "player": profile["player"],
+        "shared_name": profile["shared_name"],
+        "mode": mode,
+        "rated": mode in RATED_MODES,
+        "from": day_from,
+        "to": day_to,
+        "seasons": sorted(seasons, key=lambda item: item["season_id"]),
+        "points": points,
+    }
+
+
 def get_coverage(runs: int) -> dict[str, Any]:
     return _read(lambda conn: store.coverage(conn, runs)) or {
         "boards": [],
         "snapshots": 0,
         "stored_rows": 0,
+        "shared_snapshots": 0,
+        "live_days": [],
         "runs": [],
     }
