@@ -13,6 +13,11 @@
   and page data, card history) no longer queue behind each other or behind a
   slow request. Measurements and remaining causes: `docs/PERFORMANCE.md`.
 
+- CI: two PHP tests no longer fail on main. The Battlegrounds override test
+  loads `resolve_bg_base_card_id()` from `scan_cards.php` with the import
+  upsert that now calls it, and the media-index limit check no longer depends
+  on the directory order of the runner's filesystem (the same commit passed on
+  2026-10-26 and failed on its rerun). Tests only; no runtime change.
 - Blizzard leaderboards: a final read of a past season is dated by the
   season's end instead of the day the backfill read it, so
   `/v1/leaderboards/player/history` points are chronological across seasons

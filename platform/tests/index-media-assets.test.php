@@ -56,11 +56,14 @@ foreach (array_keys($rows) as $path) {
     check(!str_starts_with($path, OFFLOAD_MOUNT), 'the S3 mount must never be walked');
 }
 
+// gone.png is indexed here, so the two unknown links both exist behind the
+// mount: whichever one the directory order yields first is stat()ed, the other
+// waits, and the counts do not depend on readdir order.
 $limited = ['remote_stats' => 0, 'unresolved' => 0];
 $remoteCalls = [];
-iterator_to_array(collectMediaRows($root, [], $remoteStat, $limited, 1), false);
+iterator_to_array(collectMediaRows($root, ['golden/gone.png' => true], $remoteStat, $limited, 1), false);
 check(count($remoteCalls) === 1, 'remote stats must respect the per-run limit');
-check($limited['unresolved'] === 2, 'links beyond the limit wait for a later run');
+check($limited === ['remote_stats' => 1, 'unresolved' => 1], 'links beyond the limit wait for a later run: ' . json_encode($limited));
 
 exec('rm -rf ' . escapeshellarg($base));
 echo 'OK: media index skips the S3 mount' . PHP_EOL;
