@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import logging
 import secrets
 import threading
-import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -64,6 +64,7 @@ from .routers.system import router as system_v1_router
 from .source_contracts import HSREPLAY_META_FRESHNESS_GATED_SOURCE_IDS
 from .source_state import SourceState
 from .sources import SOURCE_BY_ID, SOURCES, STATUS_ONLY_SOURCE_IDS
+from .stale_while_revalidate import StaleWhileRevalidate
 from .storage import load_dataset, load_status, root_dir, save_dataset, save_status
 from .trinket_slices import (
     DEFAULT_TRINKET_MMR,
@@ -73,15 +74,15 @@ from .trinket_slices import (
 )
 from .routers.meta_intelligence import router as meta_intelligence_router
 
+logger = logging.getLogger(__name__)
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 ACTIVE_TRINKET_SOURCE_IDS = {
     "hsreplay_battlegrounds_trinkets_lesser",
     "hsreplay_battlegrounds_trinkets_greater",
 } | TRINKET_SLICE_SOURCE_IDS
 _HEALTH_CACHE_SECONDS = 15.0
-_health_cache_lock = threading.Lock()
-_health_cache_at = 0.0
-_health_cache_payload: dict[str, Any] | None = None
+# A snapshot older than this is rebuilt in the request instead of served stale.
+_HEALTH_MAX_STALE_SECONDS = 600.0
 _STANDARD_PUBLICATION_REVISION_HEADER = "X-HS-Publication-Representation"
 _PUBLICATION_UNAVAILABLE_HEADERS = {
     "Retry-After": "60",
@@ -238,6 +239,28 @@ def start_parser_control_worker() -> None:
     from .parser_control import parser_run_worker
 
     parser_run_worker().start()
+
+
+@app.on_event("startup")
+def warm_health_snapshots() -> None:
+    """Build the health and overview snapshots off the request path.
+
+    One daemon thread builds them in turn, so the first probe after a deploy
+    does not pay the multi-second build and the builds do not contend.
+    """
+    if python_environment() == "test":
+        return
+
+    def warm() -> None:
+        from .routers.system import _cached_public_freshest_timestamp
+
+        for build in (cached_health_diagnostics, _cached_public_freshest_timestamp, cached_overview):
+            try:
+                build()
+            except Exception:
+                logger.exception("health snapshot warm-up failed")
+
+    threading.Thread(target=warm, name="health-snapshot-warm", daemon=True).start()
 
 
 @app.on_event("startup")
@@ -630,7 +653,7 @@ def ops_provider_usage(
 
 @app.get("/demo/overview")
 def demo_overview() -> dict:
-    return build_overview()
+    return cached_overview()
 
 
 @app.get("/demo/view/{source_id}")
@@ -1096,19 +1119,40 @@ def build_health_diagnostics() -> dict:
     }
 
 
-def cached_health_diagnostics() -> dict:
-    """Bound repeated health polling while keeping tests and CLI checks exact."""
-    global _health_cache_at, _health_cache_payload
+# Building the diagnostics parses and validates every dataset (~4 s of CPU).
+_health_snapshot: StaleWhileRevalidate[dict] = StaleWhileRevalidate(
+    "health-diagnostics",
+    lambda: build_health_diagnostics(),
+    ttl_seconds=_HEALTH_CACHE_SECONDS,
+    max_stale_seconds=_HEALTH_MAX_STALE_SECONDS,
+)
+_overview_snapshot: StaleWhileRevalidate[dict] = StaleWhileRevalidate(
+    "demo-overview",
+    lambda: build_overview(),
+    ttl_seconds=_HEALTH_CACHE_SECONDS,
+    max_stale_seconds=_HEALTH_MAX_STALE_SECONDS,
+)
+
+
+def cached_health_diagnostics_with_age() -> tuple[dict, float]:
+    """Bound repeated health polling while keeping tests and CLI checks exact.
+
+    A stale snapshot is served at once while one background refresh rebuilds
+    it, so polling never waits on the multi-second build.
+    """
     if python_environment() == "test":
-        return build_health_diagnostics()
-    now = time.monotonic()
-    with _health_cache_lock:
-        if _health_cache_payload is not None and now - _health_cache_at < _HEALTH_CACHE_SECONDS:
-            return _health_cache_payload
-        payload = build_health_diagnostics()
-        _health_cache_payload = payload
-        _health_cache_at = now
-        return payload
+        return build_health_diagnostics(), 0.0
+    return _health_snapshot.get_with_age()
+
+
+def cached_health_diagnostics() -> dict:
+    return cached_health_diagnostics_with_age()[0]
+
+
+def cached_overview() -> dict:
+    if python_environment() == "test":
+        return build_overview()
+    return _overview_snapshot.get()
 
 
 @app.get("/health/premium", dependencies=[Depends(require_admin)])

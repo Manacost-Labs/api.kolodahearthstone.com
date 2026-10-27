@@ -5,7 +5,7 @@ require dirname(__DIR__) . '/scripts/lib/battleground_card_overrides.php';
 
 // Load the real import upsert without its entrypoint, which opens production connections.
 $scanSource = file_get_contents(dirname(__DIR__) . '/scripts/scan_cards.php');
-foreach (['should_replace_image', 'record_change', 'upsert_card'] as $function) {
+foreach (['should_replace_image', 'record_change', 'resolve_bg_base_card_id', 'upsert_card'] as $function) {
     if (!preg_match('/^function ' . $function . '\\([^\n]*\n\\{.*?^\\}/ms', $scanSource, $match)) {
         throw new RuntimeException('Cannot load ' . $function);
     }

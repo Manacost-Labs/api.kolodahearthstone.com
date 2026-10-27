@@ -17,6 +17,11 @@ if (!in_array($action, $allowed, true)) {
     header('Allow: GET, POST');
     panel_next_json(['ok' => false, 'message' => 'Действие не поддерживается.']);
 }
+// api_tokens issues a one-time form nonce into the session, so it keeps the lock.
+if ($method === 'GET' && $action !== 'api_tokens') {
+    panel_next_release_session_lock();
+}
+$panelUser = $user;
 if ($action === 'card_history') {
     require_once __DIR__ . '/lib/card_history.php';
     $config = require __DIR__ . '/config.php';
@@ -44,7 +49,7 @@ if ($action === 'card_history') {
 }
 if ($action === 'session') {
     require __DIR__ . '/lib/parser_control.php';
-    panel_next_json(['ok' => true, 'user' => ['id' => (int)$user['id'], 'login' => (string)$user['login']], 'logoutCsrf' => panel_logout_csrf_token(), 'parserCsrf' => panel_parser_control_csrf_token()]);
+    panel_next_json(['ok' => true, 'user' => ['id' => (int)$user['id'], 'login' => (string)$user['login']], 'logoutCsrf' => panel_next_logout_csrf(), 'parserCsrf' => panel_parser_control_csrf_token()]);
 }
 if ($action === 'analytics_registry') {
     require __DIR__ . '/lib/analytics.php';
