@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Speed: `/v1/health`, `/v1/system/health` and `/demo/overview` (the panel's
+  analytics overview) no longer rebuild their diagnostics in the request
+  (1.6–6.6 s and 3.4 s on production). A process snapshot is reused for 15 s,
+  then served at once while one background build refreshes it; only a snapshot
+  older than 10 minutes is rebuilt in the request. Snapshots are built at
+  startup off the request path. New header `X-Health-Snapshot-Age`; response
+  bodies are unchanged. The Next panel's PHP adapter releases the session file
+  lock for read-only requests, so parallel reads of one admin (layout session
+  and page data, card history) no longer queue behind each other or behind a
+  slow request. Measurements and remaining causes: `docs/PERFORMANCE.md`.
+
 - Blizzard leaderboards: a final read of a past season is dated by the
   season's end instead of the day the backfill read it, so
   `/v1/leaderboards/player/history` points are chronological across seasons
