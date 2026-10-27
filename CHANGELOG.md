@@ -12,7 +12,10 @@
   separated as an outlined danger button. Wiki translations gain a count,
   a search icon, an empty state, a sticky save row and error-styled failures.
   The error page shows the log digest. Table row actions align with the first
-  line of text. Details in `panel/docs/ADMIN_UI.md`.
+  line of text. Tests: fast-check properties and literal boundaries for
+  `formatSchedule` (dev dependency `fast-check` 4.10.2) and the browser
+  scenario `panel-next/tests/ux-browser.mjs`. Details in
+  `panel/docs/ADMIN_UI.md`.
 
 - Blizzard leaderboards: a final read of a past season is dated by the
   season's end instead of the day the backfill read it, so

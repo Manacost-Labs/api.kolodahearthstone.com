@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fc from 'fast-check';
 import {
   classLabel,
   countLabel,
@@ -62,6 +63,61 @@ test('a scheduled moment in the past reads as overdue, not as history', () => {
     overdue: true,
   });
   assert.deepEqual(formatSchedule(null, now), { label: '—', overdue: false });
+});
+
+test('overdue wording switches units at fixed boundaries', () => {
+  assert.deepEqual(formatSchedule('2026-10-08T11:55:01Z', now), { label: 'сейчас', overdue: false });
+  assert.deepEqual(formatSchedule('2026-10-08T11:55:00Z', now), {
+    label: 'просрочен на 5 минут',
+    overdue: true,
+  });
+  assert.deepEqual(formatSchedule('2026-10-08T10:31:00Z', now), {
+    label: 'просрочен на 89 минут',
+    overdue: true,
+  });
+  assert.deepEqual(formatSchedule('2026-10-08T10:30:00Z', now), {
+    label: 'просрочен на 2 часа',
+    overdue: true,
+  });
+  assert.deepEqual(formatSchedule('2026-10-07T01:00:00Z', now), {
+    label: 'просрочен на 35 часов',
+    overdue: true,
+  });
+  assert.deepEqual(formatSchedule('2026-10-07T00:00:00Z', now), {
+    label: 'просрочен на 2 дня',
+    overdue: true,
+  });
+  assert.deepEqual(formatSchedule('2026-10-08T12:00:00Z', now), { label: 'только что', overdue: false });
+});
+
+// Invariants over any moment: a future plan is never "overdue", a plan more than five minutes late always is.
+const minute = 60_000;
+const year = 365 * 24 * 60 * minute;
+const overdueLabel = /^просрочен на \d[\d\s]* (минуту|минуты|минут|час|часа|часов|день|дня|дней)$/u;
+test('a future plan never reads as overdue', () => {
+  fc.assert(
+    fc.property(fc.integer({ min: 1, max: 3 * year }), ahead => {
+      const result = formatSchedule(new Date(now + ahead), now);
+      assert.equal(result.overdue, false);
+      assert.doesNotMatch(result.label, /просрочен|назад/u);
+    }),
+  );
+});
+test('a plan less than five minutes late reads as now', () => {
+  fc.assert(
+    fc.property(fc.integer({ min: 1, max: 5 * minute - 1 }), late => {
+      assert.deepEqual(formatSchedule(new Date(now - late), now), { label: 'сейчас', overdue: false });
+    }),
+  );
+});
+test('a plan five minutes or more late is always overdue, never history', () => {
+  fc.assert(
+    fc.property(fc.integer({ min: 5 * minute, max: 3 * year }), late => {
+      const result = formatSchedule(new Date(now - late), now);
+      assert.equal(result.overdue, true);
+      assert.match(result.label, overdueLabel);
+    }),
+  );
 });
 
 test('numbers, percents and counts use Russian grouping', () => {

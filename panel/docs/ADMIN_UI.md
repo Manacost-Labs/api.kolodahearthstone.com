@@ -107,6 +107,10 @@ These three PHP adapters are reachable only through the private
   provides one and offers a link back to the catalogue next to «Повторить».
 - In data tables the action buttons and «Подробнее»/«Детали» links sit on the
   first text line of a top-aligned row.
+- `formatSchedule` has literal boundary tests and fast-check properties
+  (a future plan is never overdue, under five minutes late is «сейчас», five
+  minutes or more is always «просрочен на …»). The page behaviour above is
+  covered by `panel-next/tests/ux-browser.mjs` on fixtures.
 
 ## Adding a statistics module
 
