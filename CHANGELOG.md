@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Panel UX pass 1 (`panel-next`, interface only, no contract changes): the
+  sidebar is grouped into Каталог / Мониторинг / Управление and the fifteen
+  catalogue categories unfold only on catalogue pages; breadcrumbs follow the
+  same groups. An overdue next parser run reads «просрочен на 24 дня» in the
+  warning colour instead of «24 дня назад». Catalogue empty results say what
+  did not match and offer a reset. The card editor groups its fields, marks
+  required ones, names the card and keeps a sticky action row with delete
+  separated as an outlined danger button. Wiki translations gain a count,
+  a search icon, an empty state, a sticky save row and error-styled failures.
+  The error page shows the log digest. Table row actions align with the first
+  line of text. Details in `panel/docs/ADMIN_UI.md`.
+
 - Blizzard leaderboards: a final read of a past season is dated by the
   season's end instead of the day the backfill read it, so
   `/v1/leaderboards/player/history` points are chronological across seasons

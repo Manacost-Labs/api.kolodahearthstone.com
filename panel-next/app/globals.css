@@ -328,6 +328,14 @@ legend {
 .topbar-crumbs svg {
   flex: none;
 }
+.topbar-crumbs a {
+  color: inherit;
+  text-decoration: none;
+}
+.topbar-crumbs a:hover,
+.topbar-crumbs a:focus-visible {
+  color: var(--text);
+}
 .quick-trigger {
   display: inline-flex;
   align-items: center;
@@ -3097,4 +3105,91 @@ html[data-mode='dark'] .provider-usage {
   max-width: 100%;
   overflow-x: auto;
   scrollbar-width: none;
+}
+
+/* Operator UX pass: rows read on one line, the editor keeps Save in reach, risky actions stay apart. */
+/* Table cells stay top-aligned for long text; actions shift onto the first text line instead of floating below it. */
+td .link-button {
+  padding-block: 0;
+}
+td .row-actions {
+  margin-block: -4px;
+}
+time.schedule-overdue {
+  color: var(--warn);
+  font-weight: 500;
+  white-space: normal;
+}
+.kpi strong .schedule-overdue {
+  font-size: var(--text-xl);
+  font-weight: 600;
+}
+.button.danger-outline {
+  color: var(--bad);
+  background: transparent;
+  border-color: color-mix(in srgb, var(--bad) 55%, transparent);
+}
+.button.danger-outline:hover:not(:disabled) {
+  background: var(--bad-soft);
+}
+.form-section {
+  display: block;
+  min-width: 0;
+  margin: 0 0 20px;
+  padding: 0;
+  border: 0;
+}
+.form-section > legend {
+  /* Floated, a legend leaves the fieldset border and flows like a heading. */
+  float: left;
+  width: 100%;
+  margin-bottom: 12px;
+  padding: 0;
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--text);
+}
+.form-section + .form-section {
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+.form-section .form-grid {
+  clear: both;
+  margin-bottom: 0;
+}
+.required-mark {
+  margin-left: 2px;
+  color: var(--bad);
+  text-decoration: none;
+}
+/* Long forms: the action row sticks to the bottom of the viewport while the form is on screen. */
+.sticky-actions,
+.editor-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 20px -20px -20px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter: blur(6px);
+}
+.sticky-actions {
+  margin: 20px 0 0;
+  padding-inline: 0;
+  border-radius: 0;
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+}
+.editor-actions .danger-outline {
+  margin-left: auto;
+}
+.form-actions-note {
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+.terms-grid > [hidden] {
+  display: none;
 }

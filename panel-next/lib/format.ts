@@ -81,6 +81,29 @@ export function formatRelative(value: unknown, now: number = Date.now()): string
   return formatDay(date);
 }
 
+// A planned run that is already behind must not read like a past event ("24 дня назад").
+// Schedulers start a few minutes late, so a short delay still reads as "сейчас".
+export function formatSchedule(
+  value: unknown,
+  now: number = Date.now(),
+): { label: string; overdue: boolean } {
+  const date = parseDate(value);
+  if (!date) return { label: '—', overdue: false };
+  const late = (now - date.getTime()) / 1000;
+  if (late <= 0) return { label: formatRelative(date, now), overdue: false };
+  if (late < 5 * 60) return { label: 'сейчас', overdue: false };
+  const minutes = Math.round(late / 60);
+  const hours = Math.round(late / 3600);
+  const days = Math.round(late / 86400);
+  const delay =
+    minutes < 90
+      ? countLabel(minutes, { one: 'минуту', few: 'минуты', many: 'минут' })
+      : hours < 36
+        ? countLabel(hours, { one: 'час', few: 'часа', many: 'часов' })
+        : countLabel(days, { one: 'день', few: 'дня', many: 'дней' });
+  return { label: `просрочен на ${delay}`, overdue: true };
+}
+
 function toNumber(value: unknown): number | null {
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
   if (typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value)))

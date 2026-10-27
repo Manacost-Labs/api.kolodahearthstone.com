@@ -109,9 +109,14 @@ function ShellContent({ user, logoutCsrf, categories, children }: ShellProps) {
     window.addEventListener('keydown', key);
     return () => window.removeEventListener('keydown', key);
   }, []);
-  const catalogue = ['list', 'edit', 'new', 'wiki_terms'].includes(action);
+  // Breadcrumbs name the same group as the sidebar, so both always agree on where the page lives.
+  const group = ['list', 'edit', 'new'].includes(action)
+    ? 'Каталог'
+    : ['analytics', 'parsers'].includes(action)
+      ? 'Мониторинг'
+      : 'Управление';
   const categoryName = categories[type] || 'Поля сражений';
-  const active = action === 'list' ? 'cat:' + type : action === 'wiki_terms' ? 'wiki_terms' : action;
+  const active = action === 'list' ? 'cat:' + type : action;
   const sections: SidebarSection[] = [
     {
       items: [
@@ -119,24 +124,30 @@ function ShellContent({ user, logoutCsrf, categories, children }: ShellProps) {
           id: 'catalog',
           label: 'Каталог',
           icon: <DatabaseIcon size={16} />,
-          defaultOpen: true,
+          // Fifteen categories would push every other section below the fold; they unfold on catalogue pages.
+          defaultOpen: group === 'Каталог',
           items: [['', 'Поля сражений'] as const, ...Object.entries(categories)].map(([key, name]) => ({
             id: 'cat:' + key,
             label: name,
             href: categoryUrl(key),
           })),
         },
-        {
-          id: 'analytics',
-          label: 'Статистика',
-          icon: <ChartBarIcon size={16} />,
-          href: '/?action=analytics',
-        },
+      ],
+    },
+    {
+      label: 'Мониторинг',
+      items: [
         {
           id: 'parsers',
           label: 'Источники',
           icon: <PlugsConnectedIcon size={16} />,
           href: '/?action=parsers',
+        },
+        {
+          id: 'analytics',
+          label: 'Статистика',
+          icon: <ChartBarIcon size={16} />,
+          href: '/?action=analytics',
         },
       ],
     },
@@ -209,7 +220,13 @@ function ShellContent({ user, logoutCsrf, categories, children }: ShellProps) {
             </div>
             <AppShellSidebarToggle variant="ghost" size="sm" />
             <nav className="topbar-crumbs" aria-label="Расположение">
-              <span>{catalogue ? 'Каталог' : 'Панель'}</span>
+              {['edit', 'new'].includes(action) ? (
+                <PanelLink prefetch={false} href={catalogUrl} restoreCatalog>
+                  {group}
+                </PanelLink>
+              ) : (
+                <span>{group}</span>
+              )}
               <CaretRightIcon size={12} aria-hidden="true" />
               <strong aria-current="page">
                 {action === 'list' ? categoryName : sectionNames[action] || 'Панель'}

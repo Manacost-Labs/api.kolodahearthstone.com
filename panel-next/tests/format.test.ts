@@ -8,6 +8,7 @@ import {
   formatNumber,
   formatPercent,
   formatRelative,
+  formatSchedule,
   formatValue,
   inferKind,
   optionLabel,
@@ -39,6 +40,28 @@ test('relative times read naturally in Russian', () => {
   assert.equal(formatRelative('2026-10-08T09:00:00Z', now), '3 часа назад');
   assert.equal(formatRelative('2026-10-07T12:00:00Z', now), 'вчера');
   assert.match(formatRelative('2026-08-01T12:00:00Z', now), /^01 авг\.? 2026 г\.$/u);
+});
+
+test('a scheduled moment in the past reads as overdue, not as history', () => {
+  assert.deepEqual(formatSchedule('2026-10-08T12:42:00Z', now), { label: 'через 42 минуты', overdue: false });
+  assert.deepEqual(formatSchedule('2026-10-08T11:58:00Z', now), { label: 'сейчас', overdue: false });
+  assert.deepEqual(formatSchedule('2026-10-08T11:20:00Z', now), {
+    label: 'просрочен на 40 минут',
+    overdue: true,
+  });
+  assert.deepEqual(formatSchedule('2026-10-08T09:00:00Z', now), {
+    label: 'просрочен на 3 часа',
+    overdue: true,
+  });
+  assert.deepEqual(formatSchedule('2026-09-14T12:00:00Z', now), {
+    label: 'просрочен на 24 дня',
+    overdue: true,
+  });
+  assert.deepEqual(formatSchedule('2026-10-07T11:00:00Z', now), {
+    label: 'просрочен на 25 часов',
+    overdue: true,
+  });
+  assert.deepEqual(formatSchedule(null, now), { label: '—', overdue: false });
 });
 
 test('numbers, percents and counts use Russian grouping', () => {

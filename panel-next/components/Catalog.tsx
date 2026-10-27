@@ -89,6 +89,9 @@ export function Catalog({
   );
   const filterKeys = ['tier', 'creature_type', 'pool', 'duos', 'constructed_format', 'rarity', 'media'];
   const activeCount = Math.max(data.activeFilters.length, filterKeys.filter(key => params.get(key)).length);
+  // The rendered result answers the submitted query, not the text still being typed.
+  const resultQuery = new URLSearchParams(query).get('q') || '';
+  const narrowed = activeCount > 0 || resultQuery !== '';
   const cards = data.records.map(row => normalizedCard(row, type, data.tribes));
   const columns = catalogColumns(type, data.tribes);
   const selectedIndex = cardParam ? cards.findIndex(card => matchesCard(card.row, cardParam)) : -1;
@@ -101,8 +104,10 @@ export function Catalog({
           <h1>{data.title}</h1>
           <p>
             {data.total
-              ? `${countLabel(data.total, { one: 'запись', few: 'записи', many: 'записей' })} в разделе`
-              : 'Записей пока нет'}
+              ? `${countLabel(data.total, { one: 'запись', few: 'записи', many: 'записей' })}${narrowed ? ' по запросу' : ' в разделе'}`
+              : narrowed
+                ? 'Нет записей по запросу'
+                : 'Записей пока нет'}
           </p>
         </div>
         {['', 'minion', 'spell'].includes(type) && (
@@ -271,20 +276,26 @@ export function Catalog({
       <div className="catalog-results" aria-busy={pending}>
         {!cards.length ? (
           <EmptyState
-            title="Ничего не найдено"
+            title={narrowed ? 'Ничего не найдено' : 'В разделе пока нет записей'}
             action={
-              <PanelLink
-                className="button secondary"
-                prefetch={false}
-                replace
-                scroll={false}
-                href={resetHref}
-              >
-                Сбросить фильтры
-              </PanelLink>
+              narrowed ? (
+                <PanelLink
+                  className="button secondary"
+                  prefetch={false}
+                  replace
+                  scroll={false}
+                  href={resetHref}
+                >
+                  {resultQuery ? 'Сбросить поиск и фильтры' : 'Сбросить фильтры'}
+                </PanelLink>
+              ) : undefined
             }
           >
-            Измените запрос или сбросьте фильтры.
+            {narrowed
+              ? resultQuery
+                ? `По запросу «${resultQuery}»${activeCount ? ' с выбранными фильтрами' : ''} записей нет. Проверьте написание или ищите по ID и DBF.`
+                : 'С выбранными фильтрами записей нет.'
+              : 'Записи появятся здесь после импорта или ручного добавления.'}
           </EmptyState>
         ) : resultView === 'tiles' ? (
           <DeckTiles cards={cards.slice(0, 15)} cardType={type} onSelect={setSelected} />
