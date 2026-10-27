@@ -7,6 +7,7 @@ import {
   fieldLabel,
   formatDateTime,
   formatRelative,
+  formatSchedule,
   formatValue,
   inferKind,
   parseDate,
@@ -53,6 +54,23 @@ export function Time({ value, relative = false }: { value: unknown; relative?: b
   return (
     <time dateTime={date.toISOString()} title={exact} suppressHydrationWarning>
       {relative ? formatRelative(date) : exact}
+    </time>
+  );
+}
+
+/** A planned moment (next run): overdue plans are flagged instead of reading like history. */
+export function ScheduleTime({ value }: { value: unknown }) {
+  const date = parseDate(value);
+  if (!date) return <span className="value-empty">—</span>;
+  const { label, overdue } = formatSchedule(date);
+  return (
+    <time
+      dateTime={date.toISOString()}
+      title={formatDateTime(date)}
+      className={overdue ? 'schedule-overdue' : undefined}
+      suppressHydrationWarning
+    >
+      {label}
     </time>
   );
 }

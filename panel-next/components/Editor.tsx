@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
+import { PanelLink, useWorkspaceNavigation } from './WorkspaceNavigation';
 import { mutate } from '@/lib/client';
 import { ArrowLeftIcon } from '@phosphor-icons/react/dist/ssr/ArrowLeft';
 import { text } from '@/lib/model';
@@ -12,6 +12,7 @@ export function Editor({ data }: { data: PageData }) {
   const [error, setError] = useState('');
   const [confirm, setConfirm] = useState(false);
   const router = useRouter();
+  const { catalogUrl } = useWorkspaceNavigation();
   const submit = async (form: FormData) => {
     setBusy(true);
     setError('');
@@ -25,24 +26,44 @@ export function Editor({ data }: { data: PageData }) {
       setBusy(false);
     }
   };
-  const inputs = [
-    ['name', 'Название RU', false],
-    ['name_en', 'Название EN', false],
-    ['card_id', 'Card ID', false],
-    ['dbf', 'DBF', true],
-    ['tavern_tier', 'Уровень таверны', true],
-    ['attack', 'Атака', true],
-    ['health', 'Здоровье', true],
-  ] as const;
+  const field = (key: string, name: string, numeric = false) => {
+    const required = key === 'name' || key === 'card_id';
+    return (
+      <label key={key}>
+        <span>
+          {name}
+          {required && (
+            <abbr className="required-mark" title="Обязательное поле">
+              *
+            </abbr>
+          )}
+        </span>
+        <input
+          name={key}
+          defaultValue={text(data.form[key], '')}
+          type={numeric ? 'number' : 'text'}
+          required={required}
+          min={numeric ? 0 : undefined}
+          max={key === 'tavern_tier' ? 7 : undefined}
+        />
+      </label>
+    );
+  };
+  const editing = Boolean(data.form.id);
   return (
     <section>
       <header className="page-head">
         <div>
           <h1>{data.title}</h1>
+          <p>
+            {editing
+              ? `«${text(data.form.name)}» · ${text(data.form.card_id)}`
+              : 'Обязательны только название RU и Card ID, остальное можно дополнить позже.'}
+          </p>
         </div>
-        <Link href="/" className="button secondary" prefetch={false}>
+        <PanelLink href={catalogUrl} className="button secondary" prefetch={false} restoreCatalog>
           <ArrowLeftIcon size={16} aria-hidden="true" /> К каталогу
-        </Link>
+        </PanelLink>
       </header>
       {error && (
         <p className="notice bad" role="alert">
@@ -59,47 +80,50 @@ export function Editor({ data }: { data: PageData }) {
         <input type="hidden" name="action" value="save" />
         <input type="hidden" name="csrf" value={data.csrf} />
         <input type="hidden" name="id" value={text(data.form.id, '')} />
-        <div className="form-grid">
-          {inputs.map(([key, name, numeric]) => (
-            <label key={key}>
-              <span>{name}</span>
-              <input
-                name={key}
-                defaultValue={text(data.form[key], '')}
-                type={numeric ? 'number' : 'text'}
-                required={key === 'name' || key === 'card_id'}
-                min={numeric ? 0 : undefined}
-                max={key === 'tavern_tier' ? 7 : undefined}
-              />
+        <fieldset className="form-section">
+          <legend>Карта</legend>
+          <div className="form-grid">
+            {field('name', 'Название RU')}
+            {field('name_en', 'Название EN')}
+            {field('card_id', 'Card ID')}
+            {field('dbf', 'DBF', true)}
+            <label>
+              <span>Категория</span>
+              <select name="card_type" defaultValue={text(data.form.card_type, 'minion')}>
+                <option value="minion">Существо</option>
+                <option value="spell">Заклинание</option>
+              </select>
             </label>
-          ))}
-          <label>
-            <span>Категория</span>
-            <select name="card_type" defaultValue={text(data.form.card_type, 'minion')}>
-              <option value="minion">Существо</option>
-              <option value="spell">Заклинание</option>
-            </select>
-          </label>
-          <label>
-            <span>Тип существа</span>
-            <select name="creature_type" defaultValue={text(data.form.creature_type, '')}>
-              <option value="">Не указан</option>
-              {Object.entries(data.tribes).map(([key, name]) => (
-                <option key={key} value={key}>
-                  {name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="check-label">
-            <input type="checkbox" name="in_pool" defaultChecked={Number(data.form.in_pool) === 1} /> В пуле
-          </label>
-          <label className="check-label">
-            <input type="checkbox" name="duos_only" defaultChecked={Number(data.form.duos_only) === 1} />{' '}
-            Только дуо
-          </label>
-        </div>
-        <label>
+            <label>
+              <span>Тип существа</span>
+              <select name="creature_type" defaultValue={text(data.form.creature_type, '')}>
+                <option value="">Не указан</option>
+                {Object.entries(data.tribes).map(([key, name]) => (
+                  <option key={key} value={key}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        </fieldset>
+        <fieldset className="form-section">
+          <legend>Характеристики и пул</legend>
+          <div className="form-grid">
+            {field('tavern_tier', 'Уровень таверны', true)}
+            {field('attack', 'Атака', true)}
+            {field('health', 'Здоровье', true)}
+            <label className="check-label">
+              <input type="checkbox" name="in_pool" defaultChecked={Number(data.form.in_pool) === 1} /> В пуле
+              таверны
+            </label>
+            <label className="check-label">
+              <input type="checkbox" name="duos_only" defaultChecked={Number(data.form.duos_only) === 1} />{' '}
+              Только дуо
+            </label>
+          </div>
+        </fieldset>
+        <label className="form-section">
           <span>Описание и механики</span>
           <textarea name="notes" rows={5} defaultValue={text(data.form.notes, '')} />
         </label>
@@ -119,12 +143,21 @@ export function Editor({ data }: { data: PageData }) {
             ))}
           </div>
         </details>
-        <div className="form-actions">
+        {/* Save stays in reach on long forms; the destructive action sits apart from it. */}
+        <div className="form-actions editor-actions">
           <button className="button" disabled={busy} type="submit">
-            {busy ? 'Сохраняем…' : 'Сохранить'}
+            {busy ? 'Сохраняем…' : editing ? 'Сохранить изменения' : 'Создать карту'}
           </button>
-          {Boolean(data.form.id) && (
-            <button className="button danger" type="button" disabled={busy} onClick={() => setConfirm(true)}>
+          <PanelLink href={catalogUrl} className="button secondary" prefetch={false} restoreCatalog>
+            Отмена
+          </PanelLink>
+          {editing && (
+            <button
+              className="button danger-outline"
+              type="button"
+              disabled={busy}
+              onClick={() => setConfirm(true)}
+            >
               Удалить карту
             </button>
           )}

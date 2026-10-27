@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- Panel UX pass 1 (`panel-next`, interface only, no contract changes): the
+  sidebar is grouped into Каталог / Мониторинг / Управление and the fifteen
+  catalogue categories unfold only on catalogue pages; breadcrumbs follow the
+  same groups. An overdue next parser run reads «просрочен на 24 дня» in the
+  warning colour instead of «24 дня назад». Catalogue empty results say what
+  did not match and offer a reset. The card editor groups its fields, marks
+  required ones, names the card and keeps a sticky action row with delete
+  separated as an outlined danger button. Wiki translations gain a count,
+  a search icon, an empty state, a sticky save row and error-styled failures.
+  The error page shows the log digest. Table row actions align with the first
+  line of text. Tests: fast-check properties and literal boundaries for
+  `formatSchedule` (dev dependency `fast-check` 4.10.2) and the browser
+  scenario `panel-next/tests/ux-browser.mjs`. Details in
+  `panel/docs/ADMIN_UI.md`.
+
 - Speed: `/v1/health`, `/v1/system/health` and `/demo/overview` (the panel's
   analytics overview) no longer rebuild their diagnostics in the request
   (1.6–6.6 s and 3.4 s on production). A process snapshot is reused for 15 s,

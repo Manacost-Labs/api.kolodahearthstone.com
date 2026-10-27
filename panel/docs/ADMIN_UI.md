@@ -80,6 +80,38 @@ These three PHP adapters are reachable only through the private
   minions use the verified local card renders. Failed images keep a stable
   placeholder and are counted in the result metadata.
 
+## Navigation and page states
+
+- The sidebar has three groups: **Каталог** (fifteen categories), **Мониторинг**
+  (Источники, Статистика) and **Управление** (API-токены, Переводы Wiki). The
+  catalogue group unfolds on catalogue pages only (or when opened by hand), so
+  the monitoring sections stay above the fold elsewhere. The breadcrumb names
+  the same group as the sidebar; in the card editor it links back to the
+  catalogue address the editor was opened from.
+- The parser page heading matches its menu item, «Источники». A planned run
+  whose time has passed renders through `formatSchedule` / `ScheduleTime` as
+  «просрочен на …» in the warning colour (the summary card turns warning too),
+  never as «N дней назад». A delay under five minutes reads «сейчас».
+- Catalogue empty results distinguish «nothing matches the query/filters»
+  (with the submitted query and a reset action) from an empty category.
+- The card editor groups fields into «Карта» and «Характеристики и пул», marks
+  the two required fields, names the edited card under the heading and keeps
+  its action row sticky: save and cancel on the left, delete on the right as an
+  outlined danger button. Field names, the confirmation dialog and mutations
+  are unchanged.
+- «Переводы Wiki» shows the term count and missing translations, uses the same
+  search field as other pages, shows an empty state when the search matches
+  nothing and keeps the save row sticky. Search only hides rows; every term is
+  still submitted. Save errors render as an error notice.
+- The route error page shows the server `digest` («Код для логов») when Next
+  provides one and offers a link back to the catalogue next to «Повторить».
+- In data tables the action buttons and «Подробнее»/«Детали» links sit on the
+  first text line of a top-aligned row.
+- `formatSchedule` has literal boundary tests and fast-check properties
+  (a future plan is never overdue, under five minutes late is «сейчас», five
+  minutes or more is always «просрочен на …»). The page behaviour above is
+  covered by `panel-next/tests/ux-browser.mjs` on fixtures.
+
 ## Adding a statistics module
 
 1. Add an allowlisted path and typed query parameters to

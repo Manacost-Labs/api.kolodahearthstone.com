@@ -1,14 +1,14 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiPath } from '@/lib/client';
-import { countLabel, formatDateTime, toneOf } from '@/lib/format';
+import { countLabel, formatDateTime, formatSchedule, toneOf } from '@/lib/format';
 import { formatDuration } from '@/lib/provider-usage';
 import { record, text } from '@/lib/model';
 import type { Row } from '@/lib/types';
 import parserView from '@/lib/vendor/parser-control-view.cjs';
 import { Modal } from './Modal';
 import { RecordDetails } from './Details';
-import { EmptyState, KpiCard, StatusBadge, Time } from './ui';
+import { EmptyState, KpiCard, ScheduleTime, StatusBadge, Time } from './ui';
 import { useUrlState } from './useUrlState';
 import { MagnifyingGlassIcon } from '@phosphor-icons/react/dist/ssr/MagnifyingGlass';
 import { ArrowClockwiseIcon } from '@phosphor-icons/react/dist/ssr/ArrowClockwise';
@@ -89,8 +89,8 @@ export function Parsers({ initial, csrf }: { initial: Row; csrf: string }) {
     <section>
       <header className="page-head">
         <div>
-          <h1>Парсеры и источники</h1>
-          <p>Свежесть, расписания и история запусков.</p>
+          <h1>Источники</h1>
+          <p>Парсеры: свежесть данных, расписания и история запусков.</p>
         </div>
         <button className="button secondary" type="button" onClick={() => void refresh()}>
           <ArrowClockwiseIcon size={16} aria-hidden="true" /> Обновить
@@ -126,7 +126,8 @@ export function Parsers({ initial, csrf }: { initial: Row; csrf: string }) {
         />
         <KpiCard
           label="Следующий запуск"
-          value={<Time value={summary.nextRunAt} relative />}
+          value={<ScheduleTime value={summary.nextRunAt} />}
+          tone={formatSchedule(summary.nextRunAt).overdue ? 'warning' : undefined}
           hint={summary.nextRunAt ? formatDateTime(summary.nextRunAt) : undefined}
         />
       </div>
@@ -268,7 +269,7 @@ export function Parsers({ initial, csrf }: { initial: Row; csrf: string }) {
                     <Time value={source.lastSuccessAt} relative />
                   </td>
                   <td data-label="Следующий запуск">
-                    <Time value={source.nextRunAt} relative />
+                    <ScheduleTime value={source.nextRunAt} />
                   </td>
                   <td>
                     <div className="row-actions">
