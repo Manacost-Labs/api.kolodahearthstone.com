@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Speed: `/v1/health`, `/v1/system/health` and `/demo/overview` (the panel's
+  analytics overview) no longer rebuild their diagnostics in the request
+  (1.6–6.6 s and 3.4 s on production). A process snapshot is reused for 15 s,
+  then served at once while one background build refreshes it; only a snapshot
+  older than 10 minutes is rebuilt in the request. Snapshots are built at
+  startup off the request path. New header `X-Health-Snapshot-Age`; response
+  bodies are unchanged. The Next panel's PHP adapter releases the session file
+  lock for read-only requests, so parallel reads of one admin (layout session
+  and page data, card history) no longer queue behind each other or behind a
+  slow request. Measurements and remaining causes: `docs/PERFORMANCE.md`.
+
 - CI: two PHP tests no longer fail on main. The Battlegrounds override test
   loads `resolve_bg_base_card_id()` from `scan_cards.php` with the import
   upsert that now calls it, and the media-index limit check no longer depends

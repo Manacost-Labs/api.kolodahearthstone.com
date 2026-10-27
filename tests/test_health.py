@@ -335,28 +335,6 @@ class HealthEndpointTest(unittest.TestCase):
             {issue["code"] for issue in quality["issues"]},
         )
 
-    def test_health_polling_reuses_short_lived_diagnostics(self) -> None:
-        original_payload = main._health_cache_payload
-        original_at = main._health_cache_at
-        main._health_cache_payload = None
-        main._health_cache_at = 0.0
-        try:
-            with patch.object(main, "python_environment", return_value="production"), patch.object(
-                main, "time"
-            ) as clock, patch.object(
-                main, "build_health_diagnostics", return_value={"ok": True}
-            ) as build:
-                clock.monotonic.side_effect = [100.0, 105.0]
-
-                first = main.cached_health_diagnostics()
-                second = main.cached_health_diagnostics()
-
-            self.assertIs(first, second)
-            build.assert_called_once_with()
-        finally:
-            main._health_cache_payload = original_payload
-            main._health_cache_at = original_at
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -6,7 +6,9 @@ require __DIR__ . '/api_tokens.php';
 require __DIR__ . '/parser_control.php';
 require_once __DIR__ . '/../scripts/lib/battleground_card_overrides.php';
 
-$panelUser = panel_require_auth(true);
+// next-data.php authenticates first and may have released the session lock;
+// authenticating again would reopen the session and hold the lock to the end.
+$panelUser = $panelUser ?? panel_require_auth(true);
 
 $config = require __DIR__ . '/../config.php';
 
@@ -1431,7 +1433,7 @@ if ($showApiTokens) {
 }
 panel_next_json(panel_next_page([
     'action' => $action, 'title' => $workspaceTitle, 'user' => $panelUser,
-    'csrf' => csrf(), 'logoutCsrf' => panel_logout_csrf_token(),
+    'csrf' => csrf(), 'logoutCsrf' => panel_next_logout_csrf(),
     'parserCsrf' => panel_parser_control_csrf_token(),
     'message' => $message, 'error' => $error, 'cardType' => $cardType,
     'records' => $records, 'form' => $form,

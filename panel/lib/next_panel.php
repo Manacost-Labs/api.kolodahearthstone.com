@@ -1,6 +1,33 @@
 <?php
 declare(strict_types=1);
 
+/**
+ * PHP file sessions hold an exclusive lock until the script ends, so parallel
+ * panel reads (layout session, page data, card history, Ctrl+K) queued behind
+ * each other and behind any slow request of the same admin. A read-only GET
+ * writes the refreshed idle timestamp and releases the lock before its SQL.
+ * It releases only when every token the response reads already exists, so no
+ * token is generated after the session closed; the first request of a new
+ * session keeps the lock and creates them as before.
+ */
+function panel_next_release_session_lock(): bool
+{
+    if (session_status() !== PHP_SESSION_ACTIVE) return false;
+    $logout = $_SESSION['panel_logout_csrf'] ?? null;
+    $parser = $_SESSION['parser_control_csrf'] ?? null;
+    if (empty($_SESSION['csrf']) || !is_string($logout) || $logout === ''
+        || !is_string($parser) || strlen($parser) !== 64) return false;
+    return session_write_close();
+}
+
+/** The logout token without reopening (and relocking) a released session. */
+function panel_next_logout_csrf(): string
+{
+    $token = $_SESSION['panel_logout_csrf'] ?? null;
+    if (session_status() !== PHP_SESSION_ACTIVE && is_string($token) && $token !== '') return $token;
+    return panel_logout_csrf_token();
+}
+
 /** The existing source history retains spell prices from each card scan. */
 function panel_next_attach_purchase_costs(PDO $pdo, array $records, string $cardType): array
 {

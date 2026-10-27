@@ -17,6 +17,7 @@ from ..source_contracts import (
 )
 from ..source_catalog import next_source_runs, public_catalog_metadata, source_summary
 from ..sources import SOURCES
+from ..stale_while_revalidate import StaleWhileRevalidate
 from ..storage import load_status
 from .models import ApiMeta, Envelope, freshest_timestamp, timestamp_is_stale
 
@@ -656,10 +657,6 @@ def datasets() -> Envelope[list[DatasetSummary]]:
     )
 
 
-_public_freshest_lock = threading.Lock()
-_public_freshest: tuple[float, str | None] | None = None
-
-
 def _public_freshest_timestamp() -> str | None:
     return freshest_timestamp(
         [
@@ -674,38 +671,58 @@ def _public_freshest_timestamp() -> str | None:
     )
 
 
+def _build_public_freshest_snapshot() -> StaleWhileRevalidate[str | None]:
+    from ..main import _HEALTH_CACHE_SECONDS, _HEALTH_MAX_STALE_SECONDS
+
+    return StaleWhileRevalidate(
+        "health-public-freshest",
+        lambda: _public_freshest_timestamp(),
+        ttl_seconds=_HEALTH_CACHE_SECONDS,
+        max_stale_seconds=_HEALTH_MAX_STALE_SECONDS,
+    )
+
+
+_public_freshest: StaleWhileRevalidate[str | None] | None = None
+
+
 def _cached_public_freshest_timestamp() -> str | None:
     """Bound health polling like ``cached_health_diagnostics``.
 
     Resolving every public dataset parses ~260 MB of JSON, about six seconds
-    of CPU per probe; monitors poll several times a minute. Concurrent probes
-    wait for one computation. Tests keep the exact value.
+    of CPU per probe; monitors poll several times a minute. A stale value is
+    served while one background refresh recomputes it. Tests keep the exact
+    value.
     """
     global _public_freshest
     from ..config import python_environment
-    from ..main import _HEALTH_CACHE_SECONDS
 
     if python_environment() == "test":
         return _public_freshest_timestamp()
-    now = time.monotonic()
-    with _public_freshest_lock:
-        if _public_freshest is not None and now - _public_freshest[0] < _HEALTH_CACHE_SECONDS:
-            return _public_freshest[1]
-        value = _public_freshest_timestamp()
-        _public_freshest = (now, value)
-        return value
+    if _public_freshest is None:
+        _public_freshest = _build_public_freshest_snapshot()
+    return _public_freshest.get()
+
+
+HEALTH_DESCRIPTION = (
+    "Serving and freshness diagnostics for every source. The diagnostics are "
+    "a process-local snapshot refreshed in the background every 15 seconds "
+    "while polled; `X-Health-Snapshot-Age` gives its age in seconds. A "
+    "snapshot older than 10 minutes is rebuilt before responding."
+)
 
 
 @router.get(
     "/health",
     response_model=Envelope[dict[str, Any]],
     deprecated=True,
+    description=HEALTH_DESCRIPTION,
 )
-def health() -> Envelope[dict[str, Any]]:
-    from ..main import cached_health_diagnostics
+def health(response: Response) -> Envelope[dict[str, Any]]:
+    from ..main import cached_health_diagnostics_with_age
 
-    diagnostics = cached_health_diagnostics()
+    diagnostics, age = cached_health_diagnostics_with_age()
     fetched_at = _cached_public_freshest_timestamp()
+    response.headers["X-Health-Snapshot-Age"] = str(int(age))
     return Envelope(
         data=diagnostics,
         meta=ApiMeta(
@@ -758,4 +775,5 @@ canonical_router.add_api_route(
     health,
     methods=["GET"],
     response_model=Envelope[dict[str, Any]],
+    description=HEALTH_DESCRIPTION,
 )
