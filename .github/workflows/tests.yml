@@ -8,6 +8,12 @@ on:
 permissions:
   contents: read
 
+# A new push to a pull request cancels that PR's previous run; runs on main
+# get a unique group and are never cancelled.
+concurrency:
+  group: tests-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   host-exporter-python311:
     runs-on: ubuntu-latest
@@ -23,7 +29,9 @@ jobs:
       - run: python -c "from app.systemd_timer_export import build_host_timer_snapshot, write_host_timer_snapshot"
       - run: python -m pytest -q tests/test_parser_control_systemd_runtime.py tests/test_parser_control_schedule_inventory.py
 
-  pytest:
+  # `make check` split in two parallel jobs: together they run exactly the
+  # commands of `make check` (see Makefile).
+  check-python:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -33,24 +41,69 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+            panel/requirements.txt
+      - name: Install dependencies
+        # pytest runs php (tests/test_shadow_radar_transaction.py); nothing
+        # else from the tool chain is used by tests/.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends php-cli
+          pip install -r requirements-dev.txt -r panel/requirements.txt
+          command -v php
+      - name: pytest (make check-python)
+        run: make check-python PYTHON="$(command -v python)"
+
+  check-tools:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+            panel/requirements.txt
       - uses: actions/setup-node@v6
         with:
           node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            panel-next/package-lock.json
+            sdks/typescript/package-lock.json
       - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: "8.0.x"
-      - uses: actions/setup-go@v6
-        with:
-          go-version: "1.26.x"
-      - name: Install canonical verification dependencies
+      - name: Install dependencies
+        # imagemagick: panel image scripts; php-cli: panel and platform tests;
+        # ripgrep: panel/tests/runtime_layout_test.sh.
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends imagemagick php-cli ripgrep
           pip install -r requirements-dev.txt -r panel/requirements.txt
-          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
           command -v php
-      - name: Canonical project gate
-        run: make check PYTHON="$(command -v python)"
+      - name: Install actionlint 1.7.12
+        # Release binary with a pinned checksum (actionlint_1.7.12_checksums.txt
+        # of https://github.com/rhysd/actionlint/releases/tag/v1.7.12).
+        env:
+          ACTIONLINT_VERSION: "1.7.12"
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          archive="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL --retry 3 -o "${RUNNER_TEMP}/${archive}" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${archive}"
+          echo "${ACTIONLINT_SHA256}  ${RUNNER_TEMP}/${archive}" | sha256sum --check --strict
+          tar -xzf "${RUNNER_TEMP}/${archive}" -C "${RUNNER_TEMP}" actionlint
+          sudo install -m 0755 "${RUNNER_TEMP}/actionlint" /usr/local/bin/actionlint
+          actionlint -version
+      - name: Tools gate (make check-tools)
+        run: make check-tools PYTHON="$(command -v python)"
 
   platform-migrations:
     runs-on: ubuntu-latest
