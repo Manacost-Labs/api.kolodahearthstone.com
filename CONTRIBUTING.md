@@ -34,9 +34,17 @@ Node.js и shell; GitHub workflow syntax проверяется `actionlint`.
 | `make panel-check` | PHP/JS/Shell contracts веб‑панели |
 | `make platform-check` | Миграции, normalizer и platform contracts |
 | `make provider-check` | Быстрые regression tests provider cascade |
-| `make check` | Полный обязательный gate |
+| `make check` | Полный обязательный gate: `check-python`, затем `check-tools` |
+| `make check-python` | Только `pytest -q` (половина gate) |
+| `make check-tools` | Только панели, platform, docs, SDK и `actionlint` (половина gate) |
 | `make lint-report` | Текущий Ruff baseline |
 | `make security` | Security baseline |
+
+В CI (`.github/workflows/tests.yml`) `make check` идёт двумя параллельными
+джобами `check-python` и `check-tools`; вместе они выполняют ровно команды
+`make check`. Новая проверка в gate добавляется в одну из двух целей `Makefile`,
+а нужные ей инструменты — в установку соответствующей джобы. Новый push в PR
+отменяет предыдущий прогон `tests` этого PR; прогоны на `main` не отменяются.
 
 Не отключайте failing test или lint rule ради зелёного результата. Если ошибка
 относится к существующему baseline и не связана с diff, зафиксируйте это в PR.

@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- CI: the `pytest` job of `tests.yml` is split into two parallel jobs,
+  `check-python` (`make check-python`, pytest only) and `check-tools`
+  (`make check-tools`: panel, panel-next, platform, docs, SDK, actionlint).
+  `make check` runs both targets in the same order and with the same
+  commands as before; each job installs only the tool chain it uses
+  (`check-python`: php; `check-tools`: node, dotnet, imagemagick, php,
+  ripgrep, actionlint). actionlint 1.7.12 comes from the official release
+  binary with a pinned SHA-256 instead of `setup-go` + `go install`; npm and
+  pip caches cover the lock files. `tests` gets `concurrency`: a new push to a
+  pull request cancels that PR's previous run, runs on `main` are never
+  cancelled. The required status check named `pytest` no longer exists; the
+  branch has no required checks configured today. Details in
+  `CONTRIBUTING.md`.
+
 - Panel UX pass 1 (`panel-next`, interface only, no contract changes): the
   sidebar is grouped into Каталог / Мониторинг / Управление and the fifteen
   catalogue categories unfold only on catalogue pages; breadcrumbs follow the

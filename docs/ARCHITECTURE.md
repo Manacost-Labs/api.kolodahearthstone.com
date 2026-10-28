@@ -196,7 +196,7 @@ scan_cards.php                    sync_*.py по областям
 ```bash
 make setup             # один раз
 make provider-check    # быстрый gate provider-слоя
-make check             # обязательный полный gate
+make check             # обязательный полный gate (check-python + check-tools)
 make security          # отдельный анализ security-рисков
 ```
 
