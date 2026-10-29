@@ -15,20 +15,32 @@ Detection recipe:
 1. Build META CORES = high-games catalog decks (format-aware).
 2. Score candidates by (1 - Jaccard to best same-class meta core).
 3. Boost: concept titles, rare archetype names, HL/XL shape, cheese WR bands.
-4. Hard-reject: known high-volume ladder archetype variants.
-5. Publish with Standard/Wild balance (not Wild-dominated).
+4. Hard-reject: known high-volume ladder archetype variants and generic
+   "<Aggro|Dragon|...> <class>" ladder titles that sit close to a meta core.
+5. Quality gate: a deck needs a real sample (games, win rate), at least
+   ``HS_FUN_DECK_MIN_GAMES`` games, and a 95% Wilson interval that is not
+   entirely below ``HS_FUN_DECK_MIN_CI_HIGH`` percent (a losing list is not "fun").
+6. Collapse near-identical lists (same format + class, Jaccard >= 0.6) into the
+   better sampled one and publish with Standard/Wild balance, one deck per class
+   first, then by fun score.
 """
 
 from __future__ import annotations
 
 import re
 from collections import Counter, defaultdict
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from math import sqrt
 from typing import Any
 
 from .config import (
+    fun_deck_dedupe_jaccard,
+    fun_deck_generic_name_max_similarity,
     fun_deck_max_meta_similarity,
+    fun_deck_min_ci_high,
+    fun_deck_min_games,
     fun_deck_min_score,
     fun_deck_retention_hours,
 )
@@ -40,7 +52,7 @@ from .sources import SOURCE_BY_ID, Source
 from .storage import load_dataset, save_dataset, save_status
 
 SOURCE_ID = "hsguru_fun_decks"
-DETECTOR_VERSION = "concept-v6"
+DETECTOR_VERSION = "concept-v7"
 CANDIDATE_SOURCE_IDS = ("hsguru_streamer_decks_legend_1000",)
 CATALOG_CANDIDATE_SOURCE_IDS = (
     "hsguru_deck_catalog_standard_all",
@@ -88,6 +100,34 @@ _LADDER_ARCHETYPE_RE = re.compile(
     r")\b",
     re.IGNORECASE,
 )
+
+# Generic ladder titles: "<style word(s)> <class>" and nothing else, e.g. "Aggro
+# Paladin", "Secret Mage", "Dragon Mage", "Elemental Shaman", "Dude Paladin",
+# "Big Spell Mage". HSGuru gives such a name to any list of that style, so it says
+# nothing about a concept. "Secret" is a concept cue in other titles, but inside a
+# bare "<word> <class>" title it is only a style label.
+_GENERIC_DECK_WORDS = (
+    r"aggro|midrange|control|tempo|face|burn|ramp|tokens?|zoo|secrets?|dragons?|"
+    r"elementals?|dude|big\s+spell|spell|mech|beast|pirate|undead"
+)
+_CLASS_NAME_WORDS = (
+    r"death\s*knight|dk|demon\s*hunter|dh|druid|hunter|mage|paladin|priest|rogue|"
+    r"shaman|warlock|lock|warrior"
+)
+_GENERIC_LADDER_TITLE_RE = re.compile(
+    rf"^(?:(?:{_GENERIC_DECK_WORDS})\s+){{1,2}}(?:{_CLASS_NAME_WORDS})$",
+    re.IGNORECASE,
+)
+
+# Service prefixes HSGuru puts before the deck name ("STD BFU Handbuff DK").
+_FORMAT_PREFIX_RE = re.compile(r"^(?:std|wld|wild)\b[\s:|/_\-\u2013\u2014]*", re.IGNORECASE)
+# "Wild" is also the first word of real cards; those titles keep it.
+_WILD_CARD_NAME_RE = re.compile(
+    r"^wild\s+(?:growth|pyromancer|magic|gods|spirits|bloodstinger)\b", re.IGNORECASE
+)
+
+# 95% two-sided Wilson score interval.
+_WILSON_Z = 1.96
 
 # Packages that prove a brew; quest alone is too common on ladder.
 _SPICY_PACKAGES = frozenset(
@@ -553,6 +593,83 @@ def _concept_hit(title: str) -> bool:
     return bool(_EGG_TITLE_RE.search(title or "")) and not _ladder_archetype_name(title)
 
 
+def strip_format_prefix(title: str) -> str:
+    """Drop service format prefixes ("STD", "WLD", "Wild") from the start of a title."""
+    text = (title or "").strip()
+    while not _WILD_CARD_NAME_RE.match(text):
+        stripped = _FORMAT_PREFIX_RE.sub("", text, count=1).strip()
+        if not stripped or stripped == text:
+            break
+        text = stripped
+    return text
+
+
+def _generic_ladder_title(title: str) -> bool:
+    """True for a bare "<Aggro|Dragon|Dude|...> <class>" name (format prefix ignored)."""
+    return bool(_GENERIC_LADDER_TITLE_RE.match(strip_format_prefix(title)))
+
+
+def wilson_interval(win_rate_pct: float, games: int) -> tuple[float, float]:
+    """95% Wilson score interval for a win rate, in percent (unrounded).
+
+    ``win_rate_pct`` is a percent in 0..100 and ``games`` the sample size. The
+    interval always contains the win rate and narrows as ``games`` grows.
+    """
+    if games <= 0:
+        raise ValueError("games must be positive")
+    p = min(1.0, max(0.0, win_rate_pct / 100.0))
+    z2 = _WILSON_Z * _WILSON_Z
+    denominator = 1.0 + z2 / games
+    center = (p + z2 / (2.0 * games)) / denominator
+    margin = (
+        _WILSON_Z * sqrt(p * (1.0 - p) / games + z2 / (4.0 * games * games)) / denominator
+    )
+    return (
+        max(0.0, min(center - margin, p)) * 100.0,
+        min(1.0, max(center + margin, p)) * 100.0,
+    )
+
+
+@dataclass(frozen=True)
+class SampleVerdict:
+    """Outcome of the sample / win-rate quality gate for one deck."""
+
+    ok: bool
+    # None when ok; else "missing_stats", "too_few_games" or "losing_win_rate".
+    reject: str | None = None
+    ci_low: float | None = None
+    ci_high: float | None = None
+
+
+def evaluate_sample(
+    games: Any,
+    win_rate: Any,
+    *,
+    min_games: int | None = None,
+    min_ci_high: float | None = None,
+) -> SampleVerdict:
+    """Quality gate: real sample, enough games, win rate not provably losing.
+
+    ``ci_low``/``ci_high`` are percents rounded to one decimal and always satisfy
+    ``ci_low <= win_rate <= ci_high``. The ``min_ci_high`` cut is applied to the
+    unrounded upper bound.
+    """
+    games_n = _parse_games(games)
+    rate = _parse_win_rate(win_rate)
+    if games_n is None or games_n <= 0 or rate is None or not 0.0 <= rate <= 100.0:
+        return SampleVerdict(ok=False, reject="missing_stats")
+    low, high = wilson_interval(rate, games_n)
+    ci_low = min(round(low, 1), rate)
+    ci_high = max(round(high, 1), rate)
+    floor_games = fun_deck_min_games() if min_games is None else min_games
+    floor_high = fun_deck_min_ci_high() if min_ci_high is None else min_ci_high
+    if games_n < floor_games:
+        return SampleVerdict(False, "too_few_games", ci_low, ci_high)
+    if high < floor_high:
+        return SampleVerdict(False, "losing_win_rate", ci_low, ci_high)
+    return SampleVerdict(True, None, ci_low, ci_high)
+
+
 def score_fun_deck(
     *,
     deck_code: str,
@@ -568,12 +685,18 @@ def score_fun_deck(
     known_ladder: set[str],
     min_score: float | None = None,
     max_meta_similarity: float | None = None,
+    generic_name_max_similarity: float | None = None,
 ) -> FunDeckScore:
     threshold = fun_deck_min_score() if min_score is None else min_score
     similarity_cap = (
         fun_deck_max_meta_similarity()
         if max_meta_similarity is None
         else max_meta_similarity
+    )
+    generic_name_cap = (
+        fun_deck_generic_name_max_similarity()
+        if generic_name_max_similarity is None
+        else generic_name_max_similarity
     )
     bag = cards or deck_card_multiset(deck_code)
     if not bag:
@@ -741,6 +864,11 @@ def score_fun_deck(
     if ladder_named and not spicy:
         hard_fail = True
         reasons.append("ladder_name_gate")
+    # "Aggro Paladin", "Dragon Mage": a bare style + class name that still looks like
+    # a meta core and brings no card package is just an ordinary ladder list.
+    if _generic_ladder_title(title_name) and similarity > generic_name_cap and not spicy:
+        hard_fail = True
+        reasons.append("generic_ladder_gate")
     if title_known and title_matches_nearest and similarity > 0.30 and not spicy:
         hard_fail = True
         reasons.append("named_ladder_gate")
@@ -861,12 +989,19 @@ def _deck_title(row: dict[str, Any]) -> str:
 
 
 def _normalize_fun_row(
-    row: dict[str, Any], scored: FunDeckScore, *, seen_at: str
+    row: dict[str, Any],
+    scored: FunDeckScore,
+    *,
+    seen_at: str,
+    sample: SampleVerdict | None = None,
 ) -> dict[str, Any]:
     code = str(row.get("deck_code") or "").strip()
+    source_title = _deck_title(row)
+    verdict = sample or evaluate_sample(row.get("games"), row.get("win_rate"))
     return {
         "deck_code": code,
-        "title": _deck_title(row),
+        "title": strip_format_prefix(source_title) or source_title,
+        "source_title": source_title,
         "streamer": row.get("Streamer") or row.get("streamer"),
         "format": row.get("Format") or row.get("format"),
         "class": row.get("class"),
@@ -878,6 +1013,9 @@ def _normalize_fun_row(
         "links": row.get("Links") or row.get("links"),
         "games": row.get("games"),
         "win_rate": row.get("win_rate"),
+        "win_rate_ci_low": verdict.ci_low,
+        "win_rate_ci_high": verdict.ci_high,
+        "variants": 0,
         "url": row.get("url"),
         "candidate_source_id": row.get("_candidate_source_id"),
         "fun_score": scored.fun_score,
@@ -970,6 +1108,65 @@ def _is_xl_hl_title(title: str) -> bool:
     return "xl" in text or "highlander" in text or bool(re.search(r"\bhl\b", text))
 
 
+def _group_key(row: dict[str, Any]) -> tuple[str, str]:
+    return (
+        _format_bucket(row.get("format")),
+        str(row.get("class") or "unknown").casefold(),
+    )
+
+
+def dedupe_near_duplicates(
+    rows: list[dict[str, Any]],
+    cards_by_code: Mapping[str, Counter[int]],
+    *,
+    threshold: float | None = None,
+) -> tuple[list[dict[str, Any]], int]:
+    """Keep one deck out of every set of near-identical lists.
+
+    Two decks of the same format and class whose card multisets have a Jaccard
+    similarity >= ``threshold`` are one list. The deck with more ``games`` stays
+    (ties: higher ``fun_score``, then ``deck_code``); an absorbed deck adds one
+    plus its own ``variants`` to the survivor's ``variants``. A deck absorbed by
+    several survivors goes to the most similar one. Rows without cards in
+    ``cards_by_code`` are never merged. Returns the survivors in input order and
+    the number of absorbed decks; applying it again changes nothing.
+    """
+    cutoff = fun_deck_dedupe_jaccard() if threshold is None else threshold
+    ranked = sorted(
+        range(len(rows)),
+        key=lambda i: (
+            -(_parse_games(rows[i].get("games")) or 0),
+            -float(rows[i].get("fun_score") or 0),
+            str(rows[i].get("deck_code") or ""),
+        ),
+    )
+    survivors: dict[tuple[str, str], list[int]] = defaultdict(list)
+    variants = {i: int(rows[i].get("variants") or 0) for i in range(len(rows))}
+    absorbed: set[int] = set()
+    for index in ranked:
+        cards = cards_by_code.get(str(rows[index].get("deck_code") or ""))
+        if not cards:
+            continue
+        best_survivor: int | None = None
+        best_similarity = -1.0
+        for other in survivors[_group_key(rows[index])]:
+            other_cards = cards_by_code[str(rows[other].get("deck_code") or "")]
+            similarity = jaccard_similarity(cards, other_cards)
+            if similarity >= cutoff and similarity > best_similarity:
+                best_survivor, best_similarity = other, similarity
+        if best_survivor is None:
+            survivors[_group_key(rows[index])].append(index)
+            continue
+        variants[best_survivor] += 1 + variants[index]
+        absorbed.add(index)
+    kept: list[dict[str, Any]] = []
+    for index, row in enumerate(rows):
+        if index in absorbed:
+            continue
+        kept.append({**row, "variants": variants[index]})
+    return kept, len(absorbed)
+
+
 def _pick_diverse(
     rows: list[dict[str, Any]],
     *,
@@ -977,11 +1174,35 @@ def _pick_diverse(
     max_per_class: int = 3,
     max_xl_hl: int = 5,
 ) -> list[dict[str, Any]]:
-    """Greedy pick by score with class + XL/HL caps for variety."""
+    """Pick by score: one deck per class first, then fill with class + XL/HL caps."""
+    rows = sorted(rows, key=lambda row: -float(row.get("fun_score") or 0))
     picked: list[dict[str, Any]] = []
     class_counts: dict[str, int] = defaultdict(int)
     xl_hl = 0
+    # Seed: the best deck of every class, so no class with a candidate is lost.
+    # The XL/HL cap is skipped only when a class has nothing else to show.
+    by_class: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
+        by_class[str(row.get("class") or "unknown").casefold()].append(row)
+    for cls, class_rows in by_class.items():
+        if len(picked) >= limit:
+            break
+        choice = next(
+            (
+                row
+                for row in class_rows
+                if xl_hl < max_xl_hl or not _is_xl_hl_title(str(row.get("title") or ""))
+            ),
+            class_rows[0],
+        )
+        if _is_xl_hl_title(str(choice.get("title") or "")):
+            xl_hl += 1
+        class_counts[cls] += 1
+        picked.append(choice)
+    seeded = {id(row) for row in picked}
+    for row in rows:
+        if id(row) in seeded:
+            continue
         if len(picked) >= limit:
             break
         cls = str(row.get("class") or "unknown").casefold()
@@ -1018,7 +1239,7 @@ def _pick_diverse(
 def _balance_and_dedupe(
     rows: list[dict[str, Any]], *, per_format_keep: int = 22
 ) -> list[dict[str, Any]]:
-    """Dedupe by title+format, then keep a diverse Standard/Wild top list."""
+    """Dedupe by format+class+title, then keep a diverse Standard/Wild top list."""
     rows = sorted(
         rows,
         key=lambda row: (
@@ -1028,15 +1249,12 @@ def _balance_and_dedupe(
         ),
     )
     deduped: list[dict[str, Any]] = []
-    seen: set[tuple[str, str]] = set()
+    seen: set[tuple[str, str, str]] = set()
     for row in rows:
-        key = (
-            str(row.get("title") or "").casefold().strip(),
-            str(row.get("format") or "").casefold().strip(),
-        )
-        if key[0] and key in seen:
+        key = _title_key(row)
+        if key[2] and key in seen:
             continue
-        if key[0]:
+        if key[2]:
             seen.add(key)
         deduped.append(row)
 
@@ -1090,6 +1308,56 @@ def _balance_and_dedupe(
     return balanced
 
 
+def _title_key(row: dict[str, Any]) -> tuple[str, str, str]:
+    """Format, class and title: a name shared by decks of different classes (or
+    formats) is not a duplicate, so it must not cost a class its deck."""
+    return (*_group_key(row), str(row.get("title") or "").casefold().strip())
+
+
+def _dedupe_titles(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Best fun_score first; one deck per format, class and title."""
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for row in sorted(rows, key=lambda r: -float(r.get("fun_score") or 0)):
+        key = _title_key(row)
+        if key[2] and key in seen:
+            continue
+        if key[2]:
+            seen.add(key)
+        out.append(row)
+    return out
+
+
+def _select_published(
+    merged: list[dict[str, Any]], *, focus: str | None
+) -> list[dict[str, Any]]:
+    """Pick the published rows: titles deduped, one deck per class first, then by score."""
+    # Standard-focused runs keep a larger Standard slice to fix Wild dominance.
+    if focus == "standard":
+        std_rows = _dedupe_titles(
+            [r for r in merged if _format_bucket(r.get("format")) == "standard"]
+        )
+        wild_rows = _dedupe_titles(
+            [r for r in merged if _format_bucket(r.get("format")) == "wild"]
+        )
+        other_rows = _dedupe_titles(
+            [r for r in merged if _format_bucket(r.get("format")) == "other"]
+        )
+        published = (
+            _pick_diverse(std_rows, limit=28, max_per_class=4, max_xl_hl=6)
+            + _pick_diverse(wild_rows, limit=18, max_per_class=3, max_xl_hl=4)
+            + other_rows[:2]
+        )
+        published.sort(
+            key=lambda row: (
+                -float(row.get("fun_score") or 0),
+                0 if _format_bucket(row.get("format")) == "standard" else 1,
+            )
+        )
+        return published
+    return _balance_and_dedupe(merged, per_format_keep=22)
+
+
 def _refresh_fun_decks_unlocked(
     *,
     scheduled: bool = False,
@@ -1111,6 +1379,13 @@ def _refresh_fun_decks_unlocked(
 
     scored_fun: list[dict[str, Any]] = []
     rejected = 0
+    rejected_by_gate: Counter[str] = Counter()
+    # Fun-looking decks the sample / win-rate gate turned away, by reason.
+    quality_rejected: Counter[str] = Counter()
+    # (format, code) pairs whose fresh sample failed the gate, fun or not: evicted from
+    # the history. The format matters: a --format standard run looks at Standard
+    # listings only and must not touch a Wild row that happens to share the code.
+    quality_blocked: set[tuple[str, str]] = set()
     undecodable = 0
     format_counts = {"wild": 0, "standard": 0, "other": 0}
     for row in candidates:
@@ -1123,6 +1398,12 @@ def _refresh_fun_decks_unlocked(
             undecodable += 1
             continue
         format_name = str(row.get("Format") or row.get("format") or "")
+        # The sample gate is judged on every decodable candidate, fun or not: fresh
+        # numbers that disqualify a deck must also evict it from the history, even
+        # when the same candidate stopped looking fun in this run.
+        sample = evaluate_sample(row.get("games"), row.get("win_rate"))
+        if not sample.ok:
+            quality_blocked.add((_format_bucket(format_name), code))
         scored = score_fun_deck(
             deck_code=code,
             title=_deck_title(row),
@@ -1137,9 +1418,14 @@ def _refresh_fun_decks_unlocked(
             known_ladder=known,
         )
         if not scored.is_fun:
+            # counted here only; a not-fun deck is never also a quality rejection
             rejected += 1
+            rejected_by_gate.update(r for r in scored.reasons if r.endswith("_gate"))
             continue
-        scored_fun.append(_normalize_fun_row(row, scored, seen_at=seen_at))
+        if not sample.ok:
+            quality_rejected[str(sample.reject)] += 1
+            continue
+        scored_fun.append(_normalize_fun_row(row, scored, seen_at=seen_at, sample=sample))
         format_counts[_format_bucket(format_name)] += 1
 
     previous = load_dataset(SOURCE_ID) or {}
@@ -1162,49 +1448,43 @@ def _refresh_fun_decks_unlocked(
             row for row in previous_rows if _format_bucket(row.get("format")) != focus
         ] + [row for row in previous_rows if _format_bucket(row.get("format")) == focus]
 
+    # History must not keep a deck the fresh numbers now disqualify, nor one that
+    # no longer meets the thresholds (they are configurable).
+    history_before = len(previous_rows)
+    previous_rows = [
+        row
+        for row in previous_rows
+        if (_format_bucket(row.get("format")), str(row.get("deck_code") or "").strip())
+        not in quality_blocked
+        and evaluate_sample(row.get("games"), row.get("win_rate")).ok
+    ]
+    history_dropped = history_before - len(previous_rows)
+
     merged = _merge_history(
         previous_rows,
         scored_fun,
         retention_hours=fun_deck_retention_hours(),
         now=now,
     )
-    # Standard-focused runs keep a larger Standard slice to fix Wild dominance.
-    if focus == "standard":
-        # Dedupe titles first, then asymmetric Standard/Wild caps.
-        def _dedupe_titles(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-            out: list[dict[str, Any]] = []
-            seen: set[str] = set()
-            for row in sorted(rows, key=lambda r: -float(r.get("fun_score") or 0)):
-                key = str(row.get("title") or "").casefold().strip()
-                if key and key in seen:
-                    continue
-                if key:
-                    seen.add(key)
-                out.append(row)
-            return out
-
-        std_rows = _dedupe_titles(
-            [r for r in merged if _format_bucket(r.get("format")) == "standard"]
-        )
-        wild_rows = _dedupe_titles(
-            [r for r in merged if _format_bucket(r.get("format")) == "wild"]
-        )
-        other_rows = _dedupe_titles(
-            [r for r in merged if _format_bucket(r.get("format")) == "other"]
-        )
-        published = (
-            _pick_diverse(std_rows, limit=28, max_per_class=4, max_xl_hl=6)
-            + _pick_diverse(wild_rows, limit=18, max_per_class=3, max_xl_hl=4)
-            + other_rows[:2]
-        )
-        published.sort(
-            key=lambda row: (
-                -float(row.get("fun_score") or 0),
-                0 if _format_bucket(row.get("format")) == "standard" else 1,
-            )
-        )
-    else:
-        published = _balance_and_dedupe(merged, per_format_keep=22)
+    cards_by_code: dict[str, Counter[int]] = {}
+    for row in merged:
+        code = str(row.get("deck_code") or "").strip()
+        cards = deck_card_multiset(code) if code else None
+        if cards:
+            cards_by_code[code] = cards
+    # `variants` counts the near-identical lists absorbed in this run. A focused run
+    # only sees candidates of its own format, so for the other format it keeps what
+    # the last run that saw them counted instead of resetting it to 0.
+    merged, near_duplicates = dedupe_near_duplicates(
+        [
+            {**row, "variants": 0}
+            if focus is None or _format_bucket(row.get("format")) == focus
+            else row
+            for row in merged
+        ],
+        cards_by_code,
+    )
+    published = _select_published(merged, focus=focus)
     published_fmt = Counter(_format_bucket(row.get("format")) for row in published)
 
     dataset = {
@@ -1224,7 +1504,11 @@ def _refresh_fun_decks_unlocked(
                 "detector_version": DETECTOR_VERSION,
                 "theory": (
                     "Fun decks are meta-core outliers with card-package + concept/rare signals; quest/steal cards are allowed, but named ladder archetypes (Thief Priest, Quest X, Soothsayer) are gated; "
-                    "weak named ladder archetypes are excluded."
+                    "weak named ladder archetypes are excluded. A published deck has a real sample "
+                    "(games and win rate, at least min_games) and a 95% Wilson win-rate interval whose "
+                    "upper bound is not below min_ci_high; near-identical lists of one format and class "
+                    "(Jaccard >= dedupe_jaccard) collapse into the best sampled one (variants = absorbed "
+                    "lists); every class with a candidate gets one deck before the rest is filled by fun_score."
                 ),
                 "rows": published,
                 "fresh_detected": scored_fun,
@@ -1237,17 +1521,28 @@ def _refresh_fun_decks_unlocked(
                     "meta_core_sources": list(META_CATALOG_SOURCE_IDS),
                     "per_format_keep": 26 if focus == "standard" else 22,
                     "format_focus": focus,
+                    "min_games": fun_deck_min_games(),
+                    "min_ci_high": fun_deck_min_ci_high(),
+                    "dedupe_jaccard": fun_deck_dedupe_jaccard(),
+                    "generic_name_max_similarity": fun_deck_generic_name_max_similarity(),
                 },
                 "stats": {
                     "candidates": len(candidates),
                     "fun_fresh": len(scored_fun),
                     "fun_retained": len(published),
                     "rejected": rejected,
+                    "rejected_by_gate": dict(rejected_by_gate),
+                    "quality_rejected": dict(quality_rejected),
+                    "history_dropped": history_dropped,
+                    "near_duplicates_absorbed": near_duplicates,
                     "undecodable": undecodable,
                     "meta_references": len(references),
                     "known_ladder_archetypes": len(known),
                     "fresh_by_format": format_counts,
                     "published_by_format": dict(published_fmt),
+                    "published_by_class": dict(
+                        Counter(str(row.get("class") or "unknown") for row in published)
+                    ),
                 },
             },
         },
@@ -1281,6 +1576,8 @@ def _refresh_fun_decks_unlocked(
         "meta_references": len(references),
         "fresh_by_format": format_counts,
         "published_by_format": dict(published_fmt),
+        "quality_rejected": dict(quality_rejected),
+        "near_duplicates_absorbed": near_duplicates,
         "fetched_at": seen_at,
     }
 

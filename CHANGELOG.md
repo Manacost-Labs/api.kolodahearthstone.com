@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+- Fun decks (`hsguru_fun_decks`, `DETECTOR_VERSION` `concept-v7`): a stricter,
+  explainable selection. A published deck now needs `games` and `win_rate`, at
+  least 30 games (`HS_FUN_DECK_MIN_GAMES`), and a 95% Wilson win-rate interval
+  whose upper bound is not below 45% (`HS_FUN_DECK_MIN_CI_HIGH`): lists that
+  are certainly losing are dropped (9 of the 46 published decks on
+  2026-10-29), and `meme_low_winrate` now only marks decks that passed. Lists
+  of one format and class with a card Jaccard of 0.6 or more
+  (`HS_FUN_DECK_DEDUPE_JACCARD`) collapse into the better sampled one.
+  Publication takes one deck per class first (per format), then fills by
+  `fun_score` under the same class and XL/HL limits. Bare
+  "<Aggro|Dragon|Dude|Secret|…> <class>" titles without a card package that
+  sit close to a meta core are gated by `generic_ladder_gate`
+  (`HS_FUN_DECK_GENERIC_NAME_MAX_SIMILARITY`, 0.3). Service prefixes ("STD",
+  "WLD", "Wild") are removed from `title`. Rows gain `win_rate_ci_low`,
+  `win_rate_ci_high`, `variants` and `source_title`; existing fields keep
+  their meaning; a remembered deck is evicted from the history as soon as its
+  fresh candidate of the same format and code fails the sample/win-rate gate,
+  even if that candidate stopped being fun in the same run (it is counted
+  once, in `rejected`; a `--format standard` run never evicts a Wild row);
+  `variants` of the other format is kept (not reset) by a `--format
+  standard`/`wild` run, and decks sharing a title across classes or formats
+  are never merged by the title dedupe. `structured.stats` adds
+  `rejected_by_gate`, `quality_rejected`, `near_duplicates_absorbed`,
+  `history_dropped` and `published_by_class`. The previous version's history
+  is not carried over, so run `refresh-fun-decks` without `--format` after
+  deploy. `docs/DATA_CATALOG.md` documents the new fields and every `reasons`
+  code; `docs/SOURCES.md` has the new source description.
+
 - Deploy: `scripts/deploy-server.sh` times each phase (fetch/pull,
   platform + migrations, image build, restart, health wait, units +
   exporter), prints `==> фаза …: N с` lines and a final total, and writes one
