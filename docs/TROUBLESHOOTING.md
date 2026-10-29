@@ -10,6 +10,7 @@
 | Сайт не открывается | HTTP status панели, Nginx и PHP‑FPM |
 | Белый экран после входа | PHP error log, auth session, `config.php`, browser console |
 | API недоступен | `/health`, контейнер/service, reverse proxy |
+| Деплой откатился или упал | `journalctl -t hs-data-api-deploy -n 5` (`result`, `failed_at`, тайминги фаз), затем вывод `deploy-server.sh` |
 | `/health` зелёный, но данных нет | `/sources`, freshness и quality checks |
 | Один источник старый | Его status, effective state и последняя ошибка |
 | GraphQL вернул ошибку | HTTP status + `errors[].extensions.code` |

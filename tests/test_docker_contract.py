@@ -20,10 +20,3 @@ def test_runtime_image_has_healthcheck_and_server_command() -> None:
     assert "http://127.0.0.1:8000/health" in dockerfile
     assert 'CMD ["python", "-m", "app.server"]' in dockerfile
 
-
-def test_runtime_image_installs_fingerprint_node_dependencies() -> None:
-    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
-
-    assert "nodejs npm" in dockerfile
-    assert "scripts/fingerprint-node/package-lock.json" in dockerfile
-    assert "npm ci --omit=dev --ignore-scripts" in dockerfile

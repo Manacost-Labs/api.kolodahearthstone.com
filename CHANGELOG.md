@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+- Deploy: `scripts/deploy-server.sh` times each phase (fetch/pull,
+  platform + migrations, image build, restart, health wait, units +
+  exporter), prints `==> фаза …: N с` lines and a final total, and writes one
+  summary line to journald under the tag `hs-data-api-deploy`
+  (`commit`, `old`, `result=ok|rollback|fail`, `exit`, `failed_at`, every
+  phase) on success, rollback and failure alike
+  (`journalctl -t hs-data-api-deploy`). `--dry-run` is unchanged and writes
+  no journal line. The health wait polls every 2 s within a 150 s *time* budget
+  (`HEALTH_TIMEOUT`, default `HEALTH_RETRIES x HEALTH_DELAY` = 75 x 2; was
+  5 s x 30): the same budget and the same criterion (HTTP 200 from
+  `/v1/health`), a started API is noticed up to 3 s sooner, and a hanging
+  endpoint cannot stretch the wait beyond the budget (each request timeout
+  and pause is capped by the remaining time). `rollback_api` and exit codes are
+  unchanged. New `tests/test_deploy_server_timings.py` runs the whole script
+  against stubbed docker/curl/systemctl/logger and covers the health-failure
+  and exporter-failure rollbacks.
+
+- Docker: the image no longer installs the Debian `npm` package (about 350
+  `node-*` dependencies, 452 -> 102 apt packages). `npm ci` for
+  `scripts/fingerprint-node` runs in a separate `node:18-bookworm-slim` build
+  stage and only `node_modules` is copied into the final image; the runtime
+  still uses the Debian `nodejs` 18.x and `node` alone (`npm` is not in the
+  image). A cold image build drops from 4 min 22 s to about 2 min. The
+  `docker-build` CI job now runs the built image: `node generate.mjs` and
+  `fingerprint_profile._load_fingerprint_from_node()` must return a profile,
+  and `npm` must be absent.
+
 - CI: in `check-python` the `php-cli` apt install now runs in the
   background while pip installs the Python packages (the two no longer run
   one after another), and an image that already ships `php` skips apt. No
