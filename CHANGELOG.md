@@ -9,10 +9,12 @@
   (`commit`, `old`, `result=ok|rollback|fail`, `exit`, `failed_at`, every
   phase) on success, rollback and failure alike
   (`journalctl -t hs-data-api-deploy`). `--dry-run` is unchanged and writes
-  no journal line. The health wait polls every 2 s up to 75 times
-  (`HEALTH_DELAY=2`, `HEALTH_RETRIES=75`; was 5 s x 30): the same 150 s
-  budget and the same criterion (HTTP 200 from `/v1/health`), but a started
-  API is noticed up to 3 s sooner. `rollback_api` and exit codes are
+  no journal line. The health wait polls every 2 s within a 150 s *time* budget
+  (`HEALTH_TIMEOUT`, default `HEALTH_RETRIES x HEALTH_DELAY` = 75 x 2; was
+  5 s x 30): the same budget and the same criterion (HTTP 200 from
+  `/v1/health`), a started API is noticed up to 3 s sooner, and a hanging
+  endpoint cannot stretch the wait beyond the budget (each request timeout
+  and pause is capped by the remaining time). `rollback_api` and exit codes are
   unchanged. New `tests/test_deploy_server_timings.py` runs the whole script
   against stubbed docker/curl/systemctl/logger and covers the health-failure
   and exporter-failure rollbacks.

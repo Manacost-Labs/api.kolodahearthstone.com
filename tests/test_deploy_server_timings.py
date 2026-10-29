@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -33,6 +34,13 @@ exit 0
 """,
     "curl": r"""#!/usr/bin/env bash
 echo "curl $*" >> "$STUB_LOG"
+if [[ "${STUB_CURL_HANGS:-0}" == 1 ]]; then
+  # Зависший сервис: ждём ровно до --max-time и отвечаем «нет ответа» (000).
+  while [[ $# -gt 0 ]]; do
+    [[ "$1" == --max-time ]] && { sleep "$2"; printf '000'; exit 28; }
+    shift
+  done
+fi
 printf '%s' "${STUB_HEALTH_CODE:-200}"
 """,
     "systemctl": r"""#!/usr/bin/env bash
@@ -52,7 +60,6 @@ exit 0
     "logger": r"""#!/usr/bin/env bash
 echo "$*" >> "$STUB_JOURNAL"
 """,
-    "sleep": "#!/usr/bin/env bash\nexit 0\n",
 }
 
 
@@ -80,8 +87,8 @@ class Sandbox:
             "INSTALL_DIR": str(self.prod),
             "DEPLOY_LOCK_FILE": str(self.root / "deploy.lock"),
             "SYSTEMD_DIR": str(self.root / "systemd"),
-            "HEALTH_RETRIES": "3",
-            "HEALTH_DELAY": "0",
+            "HEALTH_RETRIES": "2",
+            "HEALTH_DELAY": "1",
             "STUB_LOG": str(self.stub_log),
             "STUB_JOURNAL": str(self.journal),
             "STUB_BUILT_REVISION": self.new_revision,
@@ -210,8 +217,8 @@ def test_unhealthy_api_rolls_back_exits_1_and_journals_rollback(
     assert calls.index(tag) > max(
         i for i, c in enumerate(calls) if c.startswith("curl ")
     )
-    # Все попытки здоровья сделаны, и до юнитов дело не дошло.
-    assert sum(c.startswith("curl ") for c in calls) == 3
+    # Попытки шли до исчерпания бюджета (2 × 1 с), до юнитов дело не дошло.
+    assert sum(c.startswith("curl ") for c in calls) >= 2
     assert "install-units" not in calls
     assert not (sandbox.prod / ".deployed-commit").exists()
 
@@ -285,6 +292,50 @@ def test_dry_run_changes_nothing_and_writes_no_journal(sandbox: Sandbox) -> None
         c.startswith("docker compose") or " build" in c for c in sandbox.stub_calls()
     )
     assert _git(sandbox.prod, "rev-parse", "--short", "HEAD") == sandbox.old_commit
+
+
+def test_hanging_health_endpoint_rolls_back_within_the_time_budget(
+    sandbox: Sandbox,
+) -> None:
+    # Бюджет 2 × 1 с = 2 с. Цикл «по числу попыток» ждал бы
+    # 2 × (max-time 10 с + пауза 1 с) = 22 с.
+    started = time.monotonic()
+    result = sandbox.run("--skip-platform", STUB_CURL_HANGS="1")
+    elapsed = time.monotonic() - started
+
+    assert result.returncode == 1
+    assert elapsed < 8, f"откат через {elapsed:.1f} с вместо ≈2 с бюджета"
+    assert "не ответил за 2 с" in result.stderr
+    curls = [c for c in sandbox.stub_calls() if c.startswith("curl ")]
+    assert curls
+    for call in curls:
+        max_time = float(call.split("--max-time ")[1].split()[0])
+        assert 0 < max_time <= 2.0
+    assert (
+        f"docker image tag hs-data-api:rollback-{sandbox.old_commit} hs-data-api:local"
+        in sandbox.stub_calls()
+    )
+    summary = _summary(sandbox)
+    assert summary["result"] == "rollback"
+    assert summary["failed_at"] == "health"
+    assert 1.5 <= float(summary["health"].rstrip("s")) < 6
+
+
+def test_explicit_health_timeout_overrides_retries_times_delay(
+    sandbox: Sandbox,
+) -> None:
+    started = time.monotonic()
+    result = sandbox.run(
+        "--skip-platform",
+        STUB_CURL_HANGS="1",
+        HEALTH_TIMEOUT="1",
+        HEALTH_RETRIES="75",
+        HEALTH_DELAY="2",
+    )
+
+    assert result.returncode == 1
+    assert time.monotonic() - started < 6
+    assert "не ответил за 1 с" in result.stderr
 
 
 def test_health_timeout_default_is_still_150_seconds() -> None:

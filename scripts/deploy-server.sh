@@ -28,10 +28,12 @@ INSTALL_DIR="${INSTALL_DIR:-/srv/hs-data-api}"
 BRANCH="${BRANCH:-main}"
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:18081/v1/health}"
-# Общий таймаут здоровья = RETRIES * DELAY = 150 с; шаг 2 с, чтобы не терять
-# до 5 с на ожидании уже поднявшегося API.
+# Бюджет ожидания здоровья по времени: HEALTH_TIMEOUT = RETRIES * DELAY = 150 с
+# по умолчанию (HEALTH_RETRIES/HEALTH_DELAY оставлены для совместимости).
+# Опрос раз в 2 с, чтобы не терять до 5 с на уже поднявшемся API.
 HEALTH_RETRIES="${HEALTH_RETRIES:-75}"
 HEALTH_DELAY="${HEALTH_DELAY:-2}"
+HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-$((HEALTH_RETRIES * HEALTH_DELAY))}"
 HOST_SERVICE_USER="${HOST_SERVICE_USER:-debian}"
 HOST_TIMER_EXPORT_UNIT="${HOST_TIMER_EXPORT_UNIT:-hs-data-api-docker-export-timer-state.service}"
 HOST_TIMER_SNAPSHOT="$INSTALL_DIR/data/parser-control-systemd.json"
@@ -92,6 +94,7 @@ rollback_api() {
 # Ключ идёт в строку journald, название — в консоль. При --dry-run ничего
 # не печатается: вывод плана остаётся прежним.
 now_ms() { date +%s%3N; }
+fmt_secs_ms() { printf '%d.%03d' "$(($1 / 1000))" "$(($1 % 1000))"; }
 fmt_ms() { printf '%d.%d' "$(($1 / 1000))" "$((($1 % 1000) / 100))"; }
 
 PHASE_KEYS=()
@@ -325,18 +328,34 @@ docker compose -f "$COMPOSE_FILE" up -d --no-build api
 phase health "ожидание здоровья"
 say "проверяю здоровье: $HEALTH_URL"
 API_HEALTHY=0
-for attempt in $(seq 1 "$HEALTH_RETRIES"); do
-  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$HEALTH_URL" || true)"
+# Бюджет ограничен временем, а не числом попыток: зависший /v1/health не должен
+# растягивать ожидание до RETRIES * (max-time + DELAY). Каждая попытка и пауза
+# обрезаются по остатку бюджета, первая попытка делается всегда, после
+# последней не спим.
+health_deadline_ms=$(($(now_ms) + HEALTH_TIMEOUT * 1000))
+attempt=0
+while :; do
+  remaining_ms=$((health_deadline_ms - $(now_ms)))
+  [[ "$attempt" -eq 0 || "$remaining_ms" -gt 0 ]] || break
+  attempt=$((attempt + 1))
+  max_time_ms=$((remaining_ms < 10000 ? remaining_ms : 10000))
+  [[ "$max_time_ms" -ge 100 ]] || max_time_ms=100
+  code="$(curl -s -o /dev/null -w '%{http_code}' \
+    --max-time "$(fmt_secs_ms "$max_time_ms")" "$HEALTH_URL" || true)"
   if [[ "$code" == "200" ]]; then
     say "здоров с попытки $attempt"
     API_HEALTHY=1
     break
   fi
-  sleep "$HEALTH_DELAY"
+  remaining_ms=$((health_deadline_ms - $(now_ms)))
+  [[ "$remaining_ms" -gt 0 ]] || break
+  sleep_ms=$((HEALTH_DELAY * 1000))
+  [[ "$sleep_ms" -le "$remaining_ms" ]] || sleep_ms="$remaining_ms"
+  sleep "$(fmt_secs_ms "$sleep_ms")"
 done
 
 if [[ "$API_HEALTHY" -ne 1 ]]; then
-  echo "ОШИБКА: сервис не ответил за $((HEALTH_RETRIES * HEALTH_DELAY)) с, откатываюсь" >&2
+  echo "ОШИБКА: сервис не ответил за $HEALTH_TIMEOUT с, откатываюсь" >&2
   FAILED_AT="$PHASE_KEY"
   rollback_api
   mark_rolled_back
