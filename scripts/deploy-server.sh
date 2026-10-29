@@ -15,6 +15,12 @@
 # .git оставался нетронутым и показывал давно устаревший коммит. Здесь версия
 # в проде — это то, что показывает git, и то же значение попадает в тег образа
 # и в файл-отметку.
+#
+# Тайминги: каждая фаза (получение изменений, платформа и миграции, сборка
+# образа, перезапуск, ожидание здоровья, юниты и exporter) печатается как
+# «==> фаза …: N с», а итог одной строкой пишется в journald с тегом
+# hs-data-api-deploy (результат ok / rollback / fail) — в том числе при
+# неудаче:  journalctl -t hs-data-api-deploy
 set -euo pipefail
 umask 0022
 
@@ -22,8 +28,10 @@ INSTALL_DIR="${INSTALL_DIR:-/srv/hs-data-api}"
 BRANCH="${BRANCH:-main}"
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:18081/v1/health}"
-HEALTH_RETRIES="${HEALTH_RETRIES:-30}"
-HEALTH_DELAY="${HEALTH_DELAY:-5}"
+# Общий таймаут здоровья = RETRIES * DELAY = 150 с; шаг 2 с, чтобы не терять
+# до 5 с на ожидании уже поднявшегося API.
+HEALTH_RETRIES="${HEALTH_RETRIES:-75}"
+HEALTH_DELAY="${HEALTH_DELAY:-2}"
 HOST_SERVICE_USER="${HOST_SERVICE_USER:-debian}"
 HOST_TIMER_EXPORT_UNIT="${HOST_TIMER_EXPORT_UNIT:-hs-data-api-docker-export-timer-state.service}"
 HOST_TIMER_SNAPSHOT="$INSTALL_DIR/data/parser-control-systemd.json"
@@ -46,7 +54,7 @@ for arg in "$@"; do
     --skip-platform) SKIP_PLATFORM=1 ;;
     --skip-units) SKIP_UNITS=1 ;;
     -h|--help)
-      sed -n '2,21p' "$0"; exit 0 ;;
+      sed -n '2,/^set -/{/^set -/!p}' "$0"; exit 0 ;;
     *) echo "Неизвестный аргумент: $arg" >&2; exit 2 ;;
   esac
 done
@@ -76,6 +84,68 @@ rollback_api() {
     docker image tag "hs-data-api:rollback-$OLD_COMMIT" hs-data-api:local
     docker compose -f "$COMPOSE_FILE" up -d --no-deps --no-build api
     echo "Откат на $OLD_COMMIT выполнен. Код в рабочем каталоге остался новым: $COMMIT" >&2
+  fi
+}
+
+# Тайминги фаз. phase <ключ> <название> закрывает текущую фазу (печатает её
+# длительность) и открывает следующую; phase без аргументов только закрывает.
+# Ключ идёт в строку journald, название — в консоль. При --dry-run ничего
+# не печатается: вывод плана остаётся прежним.
+now_ms() { date +%s%3N; }
+fmt_ms() { printf '%d.%d' "$(($1 / 1000))" "$((($1 % 1000) / 100))"; }
+
+PHASE_KEYS=()
+PHASE_TIMES=()
+PHASE_KEY=""
+PHASE_LABEL=""
+PHASE_STARTED=0
+DEPLOY_STARTED=0
+DEPLOY_RESULT=fail   # ok | rollback | fail
+FAILED_AT=""
+
+phase() {
+  local now ms
+  now="$(now_ms)"
+  if [[ -n "$PHASE_KEY" ]]; then
+    ms=$((now - PHASE_STARTED))
+    PHASE_KEYS+=("$PHASE_KEY")
+    PHASE_TIMES+=("$ms")
+    [[ "$DRY_RUN" -eq 1 ]] || say "фаза $PHASE_LABEL: $(fmt_ms "$ms") с"
+  fi
+  PHASE_KEY="${1:-}"
+  PHASE_LABEL="${2:-}"
+  PHASE_STARTED="$now"
+}
+
+# EXIT-trap: итог пишется при любом выходе (успех, откат, ошибка, сигнал) и
+# не меняет код выхода скрипта.
+report_deploy_summary() {
+  local rc=$? i total line
+  trap - EXIT
+  set +e
+  if [[ "$DRY_RUN" -eq 1 || "$DEPLOY_STARTED" -eq 0 ]]; then
+    exit "$rc"
+  fi
+  [[ -z "$PHASE_KEY" || -n "$FAILED_AT" || "$rc" -eq 0 ]] || FAILED_AT="$PHASE_KEY"
+  phase
+  total=$(($(now_ms) - DEPLOY_STARTED))
+  line="commit=${COMMIT:-${NEW_COMMIT:-unknown}} old=${OLD_COMMIT:-unknown} result=$DEPLOY_RESULT exit=$rc total=$(fmt_ms "$total")s"
+  [[ -z "$FAILED_AT" ]] || line+=" failed_at=$FAILED_AT"
+  for i in "${!PHASE_KEYS[@]}"; do
+    line+=" ${PHASE_KEYS[$i]}=$(fmt_ms "${PHASE_TIMES[$i]}")s"
+  done
+  say "итого: $(fmt_ms "$total") с, результат: $DEPLOY_RESULT"
+  if command -v logger >/dev/null 2>&1; then
+    logger -t hs-data-api-deploy -- "$line" || true
+  fi
+  exit "$rc"
+}
+
+# Деплой, откатившийся на прежний образ, — не просто fail: помечаем отдельно.
+# rollback_api сама ничего не откатывает без образа rollback-<коммит>.
+mark_rolled_back() {
+  if docker image inspect "hs-data-api:rollback-$OLD_COMMIT" >/dev/null 2>&1; then
+    DEPLOY_RESULT=rollback
   fi
 }
 
@@ -166,6 +236,10 @@ require_clean_tree
 OLD_COMMIT="$(git rev-parse --short HEAD)"
 say "текущий коммит: $OLD_COMMIT"
 
+DEPLOY_STARTED="$(now_ms)"
+trap report_deploy_summary EXIT
+phase fetch "получение изменений"
+
 say "получаю изменения из origin/$BRANCH"
 git fetch --quiet origin "$BRANCH"
 NEW_COMMIT="$(git rev-parse --short "origin/$BRANCH")"
@@ -210,6 +284,7 @@ REVISION="$(git rev-parse HEAD)"
 require_clean_tree
 ensure_host_services_can_read_source
 
+phase platform "платформа и миграции"
 # Миграции идут до рестарта: новый код API может ждать новые таблицы. При
 # сбое прежний контейнер продолжает работать, код на диске уже новый.
 if [[ "$SKIP_PLATFORM" -eq 1 ]]; then
@@ -223,6 +298,7 @@ else
     || die "миграции не применились; API не перезапущен (старый контейнер работает)"
 fi
 
+phase build "сборка образа"
 # Тег на прежний образ, чтобы откат не зависел от повторной сборки.
 if docker image inspect hs-data-api:local >/dev/null 2>&1; then
   say "прежний образ помечаю как rollback-$OLD_COMMIT"
@@ -242,9 +318,11 @@ if [[ "$built_revision" != "$REVISION" ]]; then
   die "у собранного образа revision=$built_revision вместо $REVISION; контейнер не перезапущен"
 fi
 
+phase up "перезапуск"
 say "перезапускаю"
 docker compose -f "$COMPOSE_FILE" up -d --no-build api
 
+phase health "ожидание здоровья"
 say "проверяю здоровье: $HEALTH_URL"
 API_HEALTHY=0
 for attempt in $(seq 1 "$HEALTH_RETRIES"); do
@@ -259,12 +337,15 @@ done
 
 if [[ "$API_HEALTHY" -ne 1 ]]; then
   echo "ОШИБКА: сервис не ответил за $((HEALTH_RETRIES * HEALTH_DELAY)) с, откатываюсь" >&2
+  FAILED_AT="$PHASE_KEY"
   rollback_api
+  mark_rolled_back
   exit 1
 fi
 
 # Юниты ставятся после здорового API: новые задачи вызывают команды нового
 # образа. Exporter ниже проверяется уже с новыми юнитами.
+phase units "юниты и exporter"
 if [[ "$SKIP_UNITS" -eq 1 ]]; then
   say "юниты Docker-задач пропущены (--skip-units)"
 else
@@ -278,10 +359,14 @@ fi
 say "проверяю host-side exporter расписаний"
 if ! verify_host_timer_export; then
   echo "ОШИБКА: exporter расписаний не прошёл post-deploy проверку, откатываюсь" >&2
+  FAILED_AT="$PHASE_KEY"
   rollback_api
+  mark_rolled_back
   exit 1
 fi
 
+phase
 report_old_job_containers "$REVISION"
 printf '%s\n' "$COMMIT" > "$STAMP_FILE"
+DEPLOY_RESULT=ok
 say "готово: в проде $COMMIT"
