@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- CI: in `check-python` the `php-cli` apt install now runs in the
+  background while pip installs the Python packages (the two no longer run
+  one after another), and an image that already ships `php` skips apt. No
+  change to the tool chain, tests or `make check`.
+
 - CI: the `pytest` job of `tests.yml` is split into two parallel jobs,
   `check-python` (`make check-python`, pytest only) and `check-tools`
   (`make check-tools`: panel, panel-next, platform, docs, SDK, actionlint).
