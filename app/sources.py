@@ -454,6 +454,9 @@ SOURCES: tuple[Source, ...] = (
         description=(
             "Off-meta / fun decks derived from streamer-deck candidates by low overlap "
             "with HSGuru meta catalogs and niche archetype popularity. "
+            "A published deck has a real sample (games, win rate, at least 30 games) and a "
+            "95% Wilson win-rate interval not entirely below 45%; near-identical lists of one "
+            "format and class collapse into one, and every class with a candidate is represented. "
             "Refreshed after streamer Firecrawl runs, plus a dedicated Standard-focused refresh every 2 hours (refresh-fun-decks --format standard)."
         ),
         stale_hours=36,

@@ -1039,6 +1039,31 @@ def fun_deck_retention_hours() -> int:
     return max(1, int(os.environ.get("HS_FUN_DECK_RETENTION_HOURS", "168")))
 
 
+def fun_deck_min_games() -> int:
+    """Smallest sample (games) a fun deck needs to be published."""
+    return max(1, int(os.environ.get("HS_FUN_DECK_MIN_GAMES", "30")))
+
+
+def fun_deck_min_ci_high() -> float:
+    """A deck is dropped when the upper bound of its 95% Wilson win-rate interval
+    (percent) is below this value: it is losing for sure, not just "fun"."""
+    return min(100.0, max(0.0, float(os.environ.get("HS_FUN_DECK_MIN_CI_HIGH", "45"))))
+
+
+def fun_deck_dedupe_jaccard() -> float:
+    """Two decks of the same format and class with a Jaccard similarity at or
+    above this value count as one list; only the better sampled one is published."""
+    return min(1.0, max(0.0, float(os.environ.get("HS_FUN_DECK_DEDUPE_JACCARD", "0.6"))))
+
+
+def fun_deck_generic_name_max_similarity() -> float:
+    """A generic ladder title ("Aggro Paladin") with no package or concept signal is
+    gated when its similarity to the nearest meta core is above this value."""
+    return min(
+        1.0, max(0.0, float(os.environ.get("HS_FUN_DECK_GENERIC_NAME_MAX_SIMILARITY", "0.3")))
+    )
+
+
 def firecrawl_max_age_ms() -> int:
     return max(0, int(os.environ.get("HS_FIRECRAWL_MAX_AGE_MS", "172800000")))
 
