@@ -18,8 +18,9 @@
   "WLD", "Wild") are removed from `title`. Rows gain `win_rate_ci_low`,
   `win_rate_ci_high`, `variants` and `source_title`; existing fields keep
   their meaning; a remembered deck is evicted from the history as soon as its
-  fresh candidate fails the sample/win-rate gate, even if that candidate
-  stopped being fun in the same run (it is counted once, in `rejected`);
+  fresh candidate of the same format and code fails the sample/win-rate gate,
+  even if that candidate stopped being fun in the same run (it is counted
+  once, in `rejected`; a `--format standard` run never evicts a Wild row);
   `variants` of the other format is kept (not reset) by a `--format
   standard`/`wild` run, and decks sharing a title across classes or formats
   are never merged by the title dedupe. `structured.stats` adds

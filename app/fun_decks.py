@@ -1382,8 +1382,10 @@ def _refresh_fun_decks_unlocked(
     rejected_by_gate: Counter[str] = Counter()
     # Fun-looking decks the sample / win-rate gate turned away, by reason.
     quality_rejected: Counter[str] = Counter()
-    # Codes whose fresh sample failed the gate, fun or not: evicted from the history.
-    quality_blocked_codes: set[str] = set()
+    # (format, code) pairs whose fresh sample failed the gate, fun or not: evicted from
+    # the history. The format matters: a --format standard run looks at Standard
+    # listings only and must not touch a Wild row that happens to share the code.
+    quality_blocked: set[tuple[str, str]] = set()
     undecodable = 0
     format_counts = {"wild": 0, "standard": 0, "other": 0}
     for row in candidates:
@@ -1401,7 +1403,7 @@ def _refresh_fun_decks_unlocked(
         # when the same candidate stopped looking fun in this run.
         sample = evaluate_sample(row.get("games"), row.get("win_rate"))
         if not sample.ok:
-            quality_blocked_codes.add(code)
+            quality_blocked.add((_format_bucket(format_name), code))
         scored = score_fun_deck(
             deck_code=code,
             title=_deck_title(row),
@@ -1452,7 +1454,8 @@ def _refresh_fun_decks_unlocked(
     previous_rows = [
         row
         for row in previous_rows
-        if str(row.get("deck_code") or "").strip() not in quality_blocked_codes
+        if (_format_bucket(row.get("format")), str(row.get("deck_code") or "").strip())
+        not in quality_blocked
         and evaluate_sample(row.get("games"), row.get("win_rate")).ok
     ]
     history_dropped = history_before - len(previous_rows)

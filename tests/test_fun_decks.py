@@ -1091,6 +1091,36 @@ def test_refresh_keeps_a_remembered_deck_that_is_no_longer_fun_but_has_good_numb
     assert _structured()["stats"]["history_dropped"] == 0
 
 
+def test_a_standard_run_does_not_evict_the_wild_row_of_the_same_deck_code(
+    fun_deck_world: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HS_FUN_DECK_RETENTION_HOURS", "100000")
+    losing = _catalog_row("Casino Mill Mage", "Mage", range(401, 416), games=58, win_rate=10.0)
+    _save_world(
+        standard=[
+            _catalog_row("Dragon Warrior", "Warrior", range(1, 16), games=5000, win_rate=52.0),
+            losing,
+        ]
+    )
+    remembered = {
+        **_row("Casino Mill Mage", code=losing["deck_code"], cls="Mage", games=100),
+        "win_rate": 55.0,
+        "win_rate_ci_low": 45.2,
+        "win_rate_ci_high": 64.4,
+        "variants": 0,
+        "last_seen_at": "2026-10-28T00:00:00+00:00",
+    }
+    _save_history([{**remembered, "format": "Standard"}, {**remembered, "format": "Wild"}])
+
+    # The fresh Standard listing of the code is provably losing (10.0% over 58 games).
+    _refresh_fun_decks_unlocked(format_focus="standard")
+
+    structured = _structured()
+    assert [(r["title"], r["format"]) for r in structured["rows"]] == [("Casino Mill Mage", "Wild")]
+    assert structured["stats"]["quality_rejected"] == {"losing_win_rate": 1}
+    assert structured["stats"]["history_dropped"] == 1
+
+
 def test_refresh_forgets_remembered_decks_that_no_longer_meet_the_thresholds(
     fun_deck_world: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
