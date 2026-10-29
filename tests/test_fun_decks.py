@@ -403,6 +403,19 @@ def test_deck_whose_win_rate_is_certainly_losing_is_rejected() -> None:
     assert (even.ci_low, even.ci_high) == (37.7, 62.3)
 
 
+def test_losing_cut_uses_the_unrounded_upper_bound() -> None:
+    # 28.0% over 33 games: the interval is 15.6-44.97, which rounds to 45.0 for display
+    # but is still below the 45 cut, so the deck is dropped.
+    just_below = evaluate_sample(33, 28.0)
+    assert (just_below.ok, just_below.reject) == (False, "losing_win_rate")
+    assert (just_below.ci_low, just_below.ci_high) == (15.6, 45.0)
+
+    # 28.1% over 33 games reaches 45.08 and stays.
+    just_above = evaluate_sample(33, 28.1)
+    assert just_above.ok is True
+    assert (just_above.ci_low, just_above.ci_high) == (15.7, 45.1)
+
+
 def test_win_rate_gate_thresholds_come_from_the_environment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -488,10 +501,11 @@ def test_the_jaccard_threshold_is_inclusive_at_060() -> None:
 
 
 def test_equal_games_keep_the_higher_fun_score() -> None:
-    cards = {"low": _two_ofs(range(1, 16)), "high": _two_ofs([*range(1, 15), 101])}
+    # The better scoring deck has the later deck code, so only fun_score can pick it.
+    cards = {"a-low": _two_ofs(range(1, 16)), "b-high": _two_ofs([*range(1, 15), 101])}
     rows = [
-        _row("Low score", code="low", games=70, score=0.5),
-        _row("High score", code="high", games=70, score=0.9),
+        _row("Low score", code="a-low", games=70, score=0.5),
+        _row("High score", code="b-high", games=70, score=0.9),
     ]
 
     kept, _ = dedupe_near_duplicates(rows, cards)
@@ -621,32 +635,84 @@ def test_published_set_keeps_a_low_scoring_class_when_stronger_classes_fill_the_
         assert "Warrior Brew" in [r["title"] for r in published], focus
 
 
+def test_same_title_in_different_classes_keeps_every_format_and_class() -> None:
+    rows = [
+        _row("Reno", code="a", cls="Mage", fmt="Standard", score=0.9),
+        _row("Reno", code="b", cls="Priest", fmt="Standard", score=0.8),
+        _row("Reno", code="c", cls="Rogue", fmt="Wild", score=0.7),
+        _row("Reno", code="d", cls="Druid", fmt="Wild", score=0.6),
+    ]
+
+    for focus in (None, "standard"):
+        published = _select_published(rows, focus=focus)
+
+        assert sorted((r["format"], r["class"]) for r in published) == [
+            ("Standard", "Mage"),
+            ("Standard", "Priest"),
+            ("Wild", "Druid"),
+            ("Wild", "Rogue"),
+        ], focus
+
+
+def test_same_title_in_the_same_format_and_class_keeps_the_higher_fun_score() -> None:
+    rows = [
+        _row("Reno", code="weak", cls="Mage", fmt="Standard", score=0.7),
+        _row("Reno", code="strong", cls="Mage", fmt="Standard", score=0.9),
+        _row("Reno", code="wild", cls="Mage", fmt="Wild", score=0.5),
+    ]
+
+    for focus in (None, "standard"):
+        published = _select_published(rows, focus=focus)
+
+        assert sorted(r["deck_code"] for r in published) == ["strong", "wild"], focus
+
+
 _classes = st.sampled_from(
     ["Druid", "Hunter", "Mage", "Paladin", "Priest", "Rogue", "Shaman", "Warlock", "Warrior", "DeathKnight", "DemonHunter"]
 )
 
 
-@settings(max_examples=150, deadline=None)
+@settings(max_examples=200, deadline=None)
 @given(
     spec=st.lists(
-        st.tuples(st.sampled_from(["Standard", "Wild"]), _classes, st.integers(0, 100), st.booleans()),
+        st.tuples(
+            st.sampled_from(["Standard", "Wild"]),
+            _classes,
+            st.integers(0, 100),
+            # a few shared names (decks of different classes often share one) and some unique ones
+            st.sampled_from(["Reno", "Odd Mill", "XL Yogg", "", ""]),
+        ),
         min_size=1,
         max_size=90,
     ),
     focus=st.sampled_from([None, "standard"]),
 )
 def test_every_format_and_class_with_a_candidate_is_published(
-    spec: list[tuple[str, str, int, bool]], focus: str | None
+    spec: list[tuple[str, str, int, str]], focus: str | None
 ) -> None:
     rows = [
-        _row(f"{'XL ' if xl else ''}Deck {i}", code=f"D{i}", fmt=fmt, cls=cls, score=score / 100)
-        for i, (fmt, cls, score, xl) in enumerate(spec)
+        _row(shared or f"Deck {i}", code=f"D{i}", fmt=fmt, cls=cls, score=score / 100)
+        for i, (fmt, cls, score, shared) in enumerate(spec)
     ]
 
     published = _select_published(rows, focus=focus)
 
     assert {(r["format"], r["class"]) for r in published} == {(r["format"], r["class"]) for r in rows}
     assert len({r["deck_code"] for r in published}) == len(published)
+
+
+def test_class_seed_prefers_a_deck_that_fits_the_xl_cap_over_a_stronger_xl_deck() -> None:
+    rows = [
+        _row("XL HL Rogue", cls="Rogue", score=0.99),
+        _row("XL HL Priest", cls="Priest", score=0.98),
+        _row("Plain Priest", cls="Priest", score=0.60),
+        _row("Mill Mage", cls="Mage", score=0.50),
+    ]
+
+    picked = _pick_diverse(rows, limit=10, max_per_class=3, max_xl_hl=1)
+
+    # the cap is used up by the Rogue, so the Priest is represented by the plain deck
+    assert sorted(r["title"] for r in picked) == ["Mill Mage", "Plain Priest", "XL HL Rogue"]
 
 
 # --- 4. generic ladder names ------------------------------------------------
@@ -980,6 +1046,79 @@ def test_refresh_forgets_remembered_decks_that_no_longer_meet_the_thresholds(
 
     assert _structured()["rows"] == []
     assert _structured()["stats"]["history_dropped"] == 1
+
+
+def _variants_by_title() -> dict[str, int]:
+    return {row["title"]: row["variants"] for row in _structured()["rows"]}
+
+
+def test_refresh_recounts_variants_only_for_the_format_it_looked_at(
+    fun_deck_world: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HS_FUN_DECK_RETENTION_HOURS", "100000")
+    _save_world(standard=[])
+    remembered = [
+        {
+            **_row("Casino Mill Mage", code=_deckstring(range(401, 416)), cls="Mage", games=100),
+            "win_rate": 55.0,
+            "variants": 5,  # stale: no near-duplicate is in this run's pool
+            "last_seen_at": "2026-10-28T00:00:00+00:00",
+        },
+        {
+            **_row("Yogg Mill Priest", code=_deckstring(range(901, 916)), cls="Priest", fmt="Wild", games=90),
+            "win_rate": 50.0,
+            "variants": 3,  # counted by an earlier full run; a Standard run cannot see Wild lists
+            "last_seen_at": "2026-10-28T00:00:00+00:00",
+        },
+    ]
+    save_dataset(
+        "hsguru_fun_decks",
+        {
+            "source_id": "hsguru_fun_decks",
+            "data": {"structured": {"detector_version": "concept-v7", "rows": remembered}},
+        },
+    )
+
+    _refresh_fun_decks_unlocked(format_focus="standard")
+
+    assert _variants_by_title() == {"Casino Mill Mage": 0, "Yogg Mill Priest": 3}
+
+    _refresh_fun_decks_unlocked()
+
+    assert _variants_by_title() == {"Casino Mill Mage": 0, "Yogg Mill Priest": 0}
+
+
+def test_variants_of_a_wild_deck_survive_a_standard_run_between_two_full_runs(
+    fun_deck_world: None,
+) -> None:
+    _save_world(
+        standard=[
+            _catalog_row("Dragon Warrior", "Warrior", range(1, 16), games=5000, win_rate=52.0),
+            _catalog_row("Casino Mill Mage", "Mage", range(401, 416), games=100, win_rate=55.0),
+        ],
+        wild=[
+            _catalog_row("WLD Yogg Mill Priest", "Priest", range(901, 916), games=90, win_rate=50.0, fmt="Wild"),
+            _catalog_row(
+                "WLD Yogg Mill Priest Alt",
+                "Priest",
+                [*range(901, 913), 951, 952, 953],
+                games=60,
+                win_rate=48.0,
+                fmt="Wild",
+            ),
+        ],
+    )
+
+    _refresh_fun_decks_unlocked()
+    after_full = _variants_by_title()
+    _refresh_fun_decks_unlocked(format_focus="standard")
+    after_standard = _variants_by_title()
+    _refresh_fun_decks_unlocked()
+    after_second_full = _variants_by_title()
+
+    assert after_full == {"Casino Mill Mage": 0, "Yogg Mill Priest": 1}
+    assert after_standard == after_full
+    assert after_second_full == after_full
 
 
 # --- replay of the published concept-v6 dataset --------------------------------

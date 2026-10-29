@@ -16,7 +16,9 @@
   (`HS_FUN_DECK_GENERIC_NAME_MAX_SIMILARITY`, 0.3). Service prefixes ("STD",
   "WLD", "Wild") are removed from `title`. Rows gain `win_rate_ci_low`,
   `win_rate_ci_high`, `variants` and `source_title`; existing fields keep their
-  meaning. `structured.stats` adds `rejected_by_gate`, `quality_rejected`,
+  meaning; `variants` of the other format is kept (not reset) by a
+  `--format standard`/`wild` run, and decks sharing a title across classes or
+  formats are never merged by the title dedupe. `structured.stats` adds `rejected_by_gate`, `quality_rejected`,
   `near_duplicates_absorbed`, `history_dropped` and `published_by_class`. The
   previous version's history is not carried over, so run `refresh-fun-decks`
   without `--format` after deploy. `docs/DATA_CATALOG.md` documents the new

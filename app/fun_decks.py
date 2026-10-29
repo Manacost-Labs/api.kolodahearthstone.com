@@ -1239,7 +1239,7 @@ def _pick_diverse(
 def _balance_and_dedupe(
     rows: list[dict[str, Any]], *, per_format_keep: int = 22
 ) -> list[dict[str, Any]]:
-    """Dedupe by title+format, then keep a diverse Standard/Wild top list."""
+    """Dedupe by format+class+title, then keep a diverse Standard/Wild top list."""
     rows = sorted(
         rows,
         key=lambda row: (
@@ -1249,15 +1249,12 @@ def _balance_and_dedupe(
         ),
     )
     deduped: list[dict[str, Any]] = []
-    seen: set[tuple[str, str]] = set()
+    seen: set[tuple[str, str, str]] = set()
     for row in rows:
-        key = (
-            str(row.get("title") or "").casefold().strip(),
-            str(row.get("format") or "").casefold().strip(),
-        )
-        if key[0] and key in seen:
+        key = _title_key(row)
+        if key[2] and key in seen:
             continue
-        if key[0]:
+        if key[2]:
             seen.add(key)
         deduped.append(row)
 
@@ -1311,15 +1308,21 @@ def _balance_and_dedupe(
     return balanced
 
 
+def _title_key(row: dict[str, Any]) -> tuple[str, str, str]:
+    """Format, class and title: a name shared by decks of different classes (or
+    formats) is not a duplicate, so it must not cost a class its deck."""
+    return (*_group_key(row), str(row.get("title") or "").casefold().strip())
+
+
 def _dedupe_titles(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Best fun_score first; one deck per title."""
+    """Best fun_score first; one deck per format, class and title."""
     out: list[dict[str, Any]] = []
-    seen: set[str] = set()
+    seen: set[tuple[str, str, str]] = set()
     for row in sorted(rows, key=lambda r: -float(r.get("fun_score") or 0)):
-        key = str(row.get("title") or "").casefold().strip()
-        if key and key in seen:
+        key = _title_key(row)
+        if key[2] and key in seen:
             continue
-        if key:
+        if key[2]:
             seen.add(key)
         out.append(row)
     return out
@@ -1460,9 +1463,17 @@ def _refresh_fun_decks_unlocked(
         cards = deck_card_multiset(code) if code else None
         if cards:
             cards_by_code[code] = cards
-    # `variants` counts the lists absorbed in this run, not in earlier ones.
+    # `variants` counts the near-identical lists absorbed in this run. A focused run
+    # only sees candidates of its own format, so for the other format it keeps what
+    # the last run that saw them counted instead of resetting it to 0.
     merged, near_duplicates = dedupe_near_duplicates(
-        [{**row, "variants": 0} for row in merged], cards_by_code
+        [
+            {**row, "variants": 0}
+            if focus is None or _format_bucket(row.get("format")) == focus
+            else row
+            for row in merged
+        ],
+        cards_by_code,
     )
     published = _select_published(merged, focus=focus)
     published_fmt = Counter(_format_bucket(row.get("format")) for row in published)
