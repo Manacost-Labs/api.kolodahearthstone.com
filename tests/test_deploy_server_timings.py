@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import re
 import subprocess
-import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -17,6 +16,8 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "deploy-server.sh"
+
+CLOCK_START_MS = 1_800_000_000_000
 
 GIT = ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid"]
 
@@ -57,6 +58,17 @@ exec "$@"
 if [[ "$1" == -u ]]; then echo 0; fi
 exit 0
 """,
+    # Фиктивные часы (мокается только время, §8 п.1): общий файл $STUB_CLOCK
+    # хранит «текущие» мс. sleep и зависший curl сдвигают его, не ждя на самом
+    # деле; date отдаёт его в формате `+%s%3N`, который использует скрипт.
+    "date": r"""#!/usr/bin/env bash
+if [[ "$*" == "+%s%3N" ]]; then cat "$STUB_CLOCK"; exit 0; fi
+exec /usr/bin/date "$@"
+""",
+    "sleep": r"""#!/usr/bin/env bash
+awk -v now="$(cat "$STUB_CLOCK")" -v s="$1" 'BEGIN { printf "%d", now + s * 1000 }' \
+  > "$STUB_CLOCK.tmp" && mv "$STUB_CLOCK.tmp" "$STUB_CLOCK"
+""",
     "logger": r"""#!/usr/bin/env bash
 echo "$*" >> "$STUB_JOURNAL"
 """,
@@ -80,15 +92,23 @@ class Sandbox:
     def journal(self) -> Path:
         return self.root / "journal.log"
 
+    @property
+    def clock(self) -> Path:
+        return self.root / "clock_ms"
+
+    def elapsed_seconds(self) -> float:
+        """Фиктивное время, прошедшее с начала запуска."""
+        return (int(self.clock.read_text()) - CLOCK_START_MS) / 1000
+
     def run(self, *args: str, **env: str) -> subprocess.CompletedProcess[str]:
+        self.clock.write_text(str(CLOCK_START_MS))
         full_env = {
             "PATH": f"{self.root / 'bin'}:/usr/bin:/bin",
             "HOME": str(self.root),
             "INSTALL_DIR": str(self.prod),
             "DEPLOY_LOCK_FILE": str(self.root / "deploy.lock"),
             "SYSTEMD_DIR": str(self.root / "systemd"),
-            "HEALTH_RETRIES": "2",
-            "HEALTH_DELAY": "1",
+            "STUB_CLOCK": str(self.clock),
             "STUB_LOG": str(self.stub_log),
             "STUB_JOURNAL": str(self.journal),
             "STUB_BUILT_REVISION": self.new_revision,
@@ -217,8 +237,8 @@ def test_unhealthy_api_rolls_back_exits_1_and_journals_rollback(
     assert calls.index(tag) > max(
         i for i, c in enumerate(calls) if c.startswith("curl ")
     )
-    # Попытки шли до исчерпания бюджета (2 × 1 с), до юнитов дело не дошло.
-    assert sum(c.startswith("curl ") for c in calls) >= 2
+    # Попытки шли весь бюджет (75 × 2 с), до юнитов дело не дошло.
+    assert sum(c.startswith("curl ") for c in calls) >= 70
     assert "install-units" not in calls
     assert not (sandbox.prod / ".deployed-commit").exists()
 
@@ -294,23 +314,20 @@ def test_dry_run_changes_nothing_and_writes_no_journal(sandbox: Sandbox) -> None
     assert _git(sandbox.prod, "rev-parse", "--short", "HEAD") == sandbox.old_commit
 
 
-def test_hanging_health_endpoint_rolls_back_within_the_time_budget(
-    sandbox: Sandbox,
+@pytest.mark.parametrize("curl_hangs", ["0", "1"], ids=["http-503", "hangs"])
+def test_default_health_budget_is_150_seconds_whatever_the_endpoint_does(
+    sandbox: Sandbox, curl_hangs: str
 ) -> None:
-    # Бюджет 2 × 1 с = 2 с. Цикл «по числу попыток» ждал бы
-    # 2 × (max-time 10 с + пауза 1 с) = 22 с.
-    started = time.monotonic()
-    result = sandbox.run("--skip-platform", STUB_CURL_HANGS="1")
-    elapsed = time.monotonic() - started
+    # Ни одной HEALTH_*: проверяем дефолты. Часы фиктивные, поэтому тест
+    # мгновенный. Бюджет по времени: ≥150 с и не растягивается зависшими
+    # запросами (по числу попыток 75 × (10 + 2) с = 900 с).
+    result = sandbox.run(
+        "--skip-platform", STUB_HEALTH_CODE="503", STUB_CURL_HANGS=curl_hangs
+    )
 
     assert result.returncode == 1
-    assert elapsed < 8, f"откат через {elapsed:.1f} с вместо ≈2 с бюджета"
-    assert "не ответил за 2 с" in result.stderr
-    curls = [c for c in sandbox.stub_calls() if c.startswith("curl ")]
-    assert curls
-    for call in curls:
-        max_time = float(call.split("--max-time ")[1].split()[0])
-        assert 0 < max_time <= 2.0
+    assert "не ответил за 150 с" in result.stderr
+    assert 150 <= sandbox.elapsed_seconds() < 160
     assert (
         f"docker image tag hs-data-api:rollback-{sandbox.old_commit} hs-data-api:local"
         in sandbox.stub_calls()
@@ -318,13 +335,34 @@ def test_hanging_health_endpoint_rolls_back_within_the_time_budget(
     summary = _summary(sandbox)
     assert summary["result"] == "rollback"
     assert summary["failed_at"] == "health"
-    assert 1.5 <= float(summary["health"].rstrip("s")) < 6
+    assert 150 <= float(summary["health"].rstrip("s")) < 160
+
+
+def test_hanging_health_endpoint_rolls_back_within_the_time_budget(
+    sandbox: Sandbox,
+) -> None:
+    # Бюджет 2 × 1 с = 2 с. Цикл «по числу попыток» ждал бы
+    # 2 × (max-time 10 с + пауза 1 с) = 22 с.
+    result = sandbox.run(
+        "--skip-platform", STUB_CURL_HANGS="1", HEALTH_RETRIES="2", HEALTH_DELAY="1"
+    )
+
+    assert result.returncode == 1
+    assert 2 <= sandbox.elapsed_seconds() < 3
+    assert "не ответил за 2 с" in result.stderr
+    curls = [c for c in sandbox.stub_calls() if c.startswith("curl ")]
+    assert curls
+    for call in curls:
+        max_time = float(call.split("--max-time ")[1].split()[0])
+        assert 0 < max_time <= 2.0
+    summary = _summary(sandbox)
+    assert summary["result"] == "rollback"
+    assert summary["failed_at"] == "health"
 
 
 def test_explicit_health_timeout_overrides_retries_times_delay(
     sandbox: Sandbox,
 ) -> None:
-    started = time.monotonic()
     result = sandbox.run(
         "--skip-platform",
         STUB_CURL_HANGS="1",
@@ -334,15 +372,5 @@ def test_explicit_health_timeout_overrides_retries_times_delay(
     )
 
     assert result.returncode == 1
-    assert time.monotonic() - started < 6
+    assert 1 <= sandbox.elapsed_seconds() < 2
     assert "не ответил за 1 с" in result.stderr
-
-
-def test_health_timeout_default_is_still_150_seconds() -> None:
-    script = SCRIPT.read_text(encoding="utf-8")
-    retries = int(re.search(r'HEALTH_RETRIES="\$\{HEALTH_RETRIES:-(\d+)\}"', script)[1])  # type: ignore[index]
-    delay = int(re.search(r'HEALTH_DELAY="\$\{HEALTH_DELAY:-(\d+)\}"', script)[1])  # type: ignore[index]
-
-    assert retries * delay == 150
-    assert delay <= 2
-

@@ -127,6 +127,25 @@ jobs:
         with:
           persist-credentials: false
       - run: docker build --no-cache --tag hs-data-api:ci .
+      # Поведение собранного образа, а не текст Dockerfile: fingerprint-node
+      # работает так, как его читает app/scrapers/fingerprint_profile.py, а
+      # npm (нужен только на этапе сборки) в рантайм-образ не попал.
+      - name: Runtime image generates a fingerprint profile with node
+        run: |
+          docker run --rm hs-data-api:ci node /app/scripts/fingerprint-node/generate.mjs \
+            | python3 -c 'import json, sys; p = json.load(sys.stdin); assert p["user_agent"] and p["viewport"] and p["extra_http_headers"], p'
+          docker run --rm -i hs-data-api:ci python - <<'PY'
+          from app.scrapers.fingerprint_profile import _load_fingerprint_from_node
+
+          profile = _load_fingerprint_from_node()
+          assert profile and profile["user_agent"], profile
+          PY
+      - name: Runtime image has no npm
+        run: |
+          if docker run --rm hs-data-api:ci sh -c 'command -v npm'; then
+            echo "npm must not be installed in the runtime image" >&2
+            exit 1
+          fi
 
   sdk:
     runs-on: ubuntu-latest

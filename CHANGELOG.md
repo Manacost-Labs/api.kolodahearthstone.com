@@ -24,7 +24,10 @@
   `scripts/fingerprint-node` runs in a separate `node:18-bookworm-slim` build
   stage and only `node_modules` is copied into the final image; the runtime
   still uses the Debian `nodejs` 18.x and `node` alone (`npm` is not in the
-  image). A cold image build drops from 4 min 22 s to about 2 min.
+  image). A cold image build drops from 4 min 22 s to about 2 min. The
+  `docker-build` CI job now runs the built image: `node generate.mjs` and
+  `fingerprint_profile._load_fingerprint_from_node()` must return a profile,
+  and `npm` must be absent.
 
 - CI: in `check-python` the `php-cli` apt install now runs in the
   background while pip installs the Python packages (the two no longer run
