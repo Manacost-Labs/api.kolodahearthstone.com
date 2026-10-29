@@ -46,13 +46,20 @@ jobs:
             requirements-dev.txt
             panel/requirements.txt
       - name: Install dependencies
-        # pytest runs php (tests/test_shadow_radar_transaction.py); nothing
-        # else from the tool chain is used by tests/.
+        # pytest runs php (tests/test_shadow_radar_transaction.py, it fails
+        # without php, never skips); nothing else from the tool chain is used
+        # by tests/. The ubuntu-latest image (26.04) has no php, so it is
+        # installed by apt in the background while pip resolves and installs
+        # the Python packages; an image that already ships php skips apt.
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends php-cli
+          apt_pid=
+          if ! command -v php >/dev/null; then
+            { sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends php-cli; } &
+            apt_pid=$!
+          fi
           pip install -r requirements-dev.txt -r panel/requirements.txt
-          command -v php
+          if [ -n "$apt_pid" ]; then wait "$apt_pid"; fi
+          php --version
       - name: pytest (make check-python)
         run: make check-python PYTHON="$(command -v python)"
 
