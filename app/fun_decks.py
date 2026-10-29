@@ -1382,6 +1382,7 @@ def _refresh_fun_decks_unlocked(
     rejected_by_gate: Counter[str] = Counter()
     # Fun-looking decks the sample / win-rate gate turned away, by reason.
     quality_rejected: Counter[str] = Counter()
+    # Codes whose fresh sample failed the gate, fun or not: evicted from the history.
     quality_blocked_codes: set[str] = set()
     undecodable = 0
     format_counts = {"wild": 0, "standard": 0, "other": 0}
@@ -1395,6 +1396,12 @@ def _refresh_fun_decks_unlocked(
             undecodable += 1
             continue
         format_name = str(row.get("Format") or row.get("format") or "")
+        # The sample gate is judged on every decodable candidate, fun or not: fresh
+        # numbers that disqualify a deck must also evict it from the history, even
+        # when the same candidate stopped looking fun in this run.
+        sample = evaluate_sample(row.get("games"), row.get("win_rate"))
+        if not sample.ok:
+            quality_blocked_codes.add(code)
         scored = score_fun_deck(
             deck_code=code,
             title=_deck_title(row),
@@ -1409,13 +1416,12 @@ def _refresh_fun_decks_unlocked(
             known_ladder=known,
         )
         if not scored.is_fun:
+            # counted here only; a not-fun deck is never also a quality rejection
             rejected += 1
             rejected_by_gate.update(r for r in scored.reasons if r.endswith("_gate"))
             continue
-        sample = evaluate_sample(row.get("games"), row.get("win_rate"))
         if not sample.ok:
             quality_rejected[str(sample.reject)] += 1
-            quality_blocked_codes.add(code)
             continue
         scored_fun.append(_normalize_fun_row(row, scored, seen_at=seen_at, sample=sample))
         format_counts[_format_bucket(format_name)] += 1

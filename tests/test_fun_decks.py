@@ -1023,6 +1023,74 @@ def test_refresh_drops_a_remembered_deck_once_fresh_numbers_disqualify_it(
     assert _structured()["stats"]["quality_rejected"] == {"losing_win_rate": 1}
 
 
+def _remembered_warrior(deck_code: str) -> dict[str, Any]:
+    return {
+        **_row("Casino Mill Warrior", code=deck_code, cls="Warrior", games=100),
+        "win_rate": 55.0,
+        "win_rate_ci_low": 45.2,
+        "win_rate_ci_high": 64.4,
+        "variants": 0,
+        "last_seen_at": "2026-10-28T00:00:00+00:00",
+    }
+
+
+def _save_history(rows: list[dict[str, Any]]) -> None:
+    save_dataset(
+        "hsguru_fun_decks",
+        {
+            "source_id": "hsguru_fun_decks",
+            "data": {"structured": {"detector_version": "concept-v7", "rows": rows}},
+        },
+    )
+
+
+def test_refresh_drops_a_remembered_deck_whose_fresh_candidate_is_no_longer_fun_and_losing(
+    fun_deck_world: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HS_FUN_DECK_RETENTION_HOURS", "100000")
+    # The candidate shares 14 of 15 two-ofs with the Warrior core: too close to the
+    # meta, so it is rejected as not fun. Its fresh numbers (19 wins of 60) are also
+    # provably losing, while the remembered row still carries 55.0% over 100 games.
+    candidate = _catalog_row("Casino Mill Warrior", "Warrior", [*range(1, 15), 101], games=60, win_rate=31.7)
+    _save_world(
+        standard=[
+            _catalog_row("Dragon Warrior", "Warrior", range(1, 16), games=5000, win_rate=52.0),
+            candidate,
+        ]
+    )
+    _save_history([_remembered_warrior(candidate["deck_code"])])
+
+    _refresh_fun_decks_unlocked()
+
+    structured = _structured()
+    assert structured["rows"] == []
+    stats = structured["stats"]
+    # counted once: as a deck that is not fun, not again as a quality rejection
+    assert (stats["candidates"], stats["rejected"], stats["quality_rejected"]) == (1, 1, {})
+    assert stats["rejected_by_gate"] == {"similarity_gate": 1}
+    assert stats["history_dropped"] == 1
+
+
+def test_refresh_keeps_a_remembered_deck_that_is_no_longer_fun_but_has_good_numbers(
+    fun_deck_world: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HS_FUN_DECK_RETENTION_HOURS", "100000")
+    candidate = _catalog_row("Casino Mill Warrior", "Warrior", [*range(1, 15), 101], games=60, win_rate=50.0)
+    _save_world(
+        standard=[
+            _catalog_row("Dragon Warrior", "Warrior", range(1, 16), games=5000, win_rate=52.0),
+            candidate,
+        ]
+    )
+    _save_history([_remembered_warrior(candidate["deck_code"])])
+
+    _refresh_fun_decks_unlocked()
+
+    # v6 behaviour: a deck stays for the retention window until its numbers fail
+    assert [r["title"] for r in _structured()["rows"]] == ["Casino Mill Warrior"]
+    assert _structured()["stats"]["history_dropped"] == 0
+
+
 def test_refresh_forgets_remembered_decks_that_no_longer_meet_the_thresholds(
     fun_deck_world: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
