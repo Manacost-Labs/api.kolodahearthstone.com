@@ -17,7 +17,7 @@ from bs4 import BeautifulSoup
 from .config import hsguru_current_patch_period
 from .firecrawl_backend import FirecrawlScrape, scrape_source_with_options
 from .hsguru_auth import hsguru_firecrawl_headers
-from .hsguru_decks import CATALOG_PERIODS, cached_hsguru_catalog_decks
+from .hsguru_decks import CATALOG_PERIODS, cached_hsguru_catalog_decks, is_patch_period
 from .meta_intelligence.budget import validate_attempt
 from .job_run import (
     AtomicJobRunSnapshotWriter,
@@ -73,8 +73,9 @@ NAMED_PERIODS = ("black_empire", "black_empire_ban")
 # exposed as ``black_empire`` next to the newest patch link 36.6.3). Retired
 # windows (violet_hold, most_wanted) are no longer advertised and not scraped.
 CURRENT_NAMED_PERIODS = ("black_empire",)
-# ``CATALOG_PERIODS`` (the Bans window, shown by HearthPulse by default) get an
-# archetype catalog of their own next to the current one. It is built from the
+# ``CATALOG_PERIODS`` (the Bans window) and the run's patch window (while a
+# named release is current) get an archetype catalog of their own next to the
+# current one. It is built from the
 # matrix Any Player/all-rank slice, so it costs no request beyond the matrix.
 PERIODS = (*ROLLING_PERIODS, DEFAULT_PATCH_PERIOD, *NAMED_PERIODS)
 COINS = ("any_player", "on_coin", "going_first")
@@ -1039,8 +1040,9 @@ def _cached_catalog(
 ) -> dict[str, Any]:
     """Return the published catalog for ``period`` (the current one by default)."""
     structured = ((cached_dataset or {}).get("data") or {}).get("structured") or {}
-    if period in CATALOG_PERIODS:
-        catalog = (structured.get("period_catalogs") or {}).get(period)
+    published = structured.get("period_catalogs") or {}
+    if period in CATALOG_PERIODS or (is_patch_period(period) and period in published):
+        catalog = published.get(period)
     else:
         catalog = structured.get("current_catalog")
     return catalog if isinstance(catalog, dict) else {}
@@ -1139,8 +1141,10 @@ def enrich_current_rows_with_cached_decks(
         )
 
 
-def _deck_catalog_join(period: str, joined_at: str) -> dict[str, Any]:
-    suffix = f"_{period}" if period in CATALOG_PERIODS else ""
+def _deck_catalog_join(
+    period: str, joined_at: str, *, secondary: bool = False
+) -> dict[str, Any]:
+    suffix = f"_{period}" if secondary else ""
     return {
         "joined_at": joined_at,
         "source_ids": [
@@ -1198,7 +1202,7 @@ def build_period_catalog(
         "total_archetypes": len(rows),
         "archetypes": rows,
         "acquisition": acquisition,
-        "deck_catalog": _deck_catalog_join(period, joined_at),
+        "deck_catalog": _deck_catalog_join(period, joined_at, secondary=True),
     }
 
 
@@ -1259,7 +1263,9 @@ def _refresh_current_catalog_deck_join_unlocked() -> dict[str, Any]:
             sample_period=period,
         )
         period_catalog["coverage"] = _current_catalog_coverage(period_rows)
-        period_catalog["deck_catalog"] = _deck_catalog_join(period, joined_at)
+        period_catalog["deck_catalog"] = _deck_catalog_join(
+            period, joined_at, secondary=True
+        )
         period_coverage[period] = period_catalog["coverage"]
     structured["schema_version"] = max(int(structured.get("schema_version") or 0), 7)
     save_dataset(SOURCE_ID, dataset)
@@ -1743,6 +1749,9 @@ async def _refresh_hsguru_meta_matrix_unlocked(
         sample_period=current_period,
     )
     current_coverage = _current_catalog_coverage(current_rows)
+    # Bans, and the patch the run selected while a named release is current.
+    # The patch number comes from the run, so a new patch replaces the old
+    # catalog without a code change.
     period_catalogs = {
         period: build_period_catalog(
             period,
@@ -1750,8 +1759,14 @@ async def _refresh_hsguru_meta_matrix_unlocked(
             cached_dataset,
             joined_at=fetched_at,
         )
-        for period in CATALOG_PERIODS
+        for period in (*CATALOG_PERIODS, matrix_patch_period)
         if period in periods and period != current_period
+    }
+    # A patch window without any all-rank slice rows is not published.
+    period_catalogs = {
+        period: catalog
+        for period, catalog in period_catalogs.items()
+        if period in CATALOG_PERIODS or catalog.get("archetypes")
     }
     current_complete = current_period is not None and all(
         current_coverage[name]["archetypes"] > 0 for name in FORMATS

@@ -25,6 +25,7 @@ admin/ops endpoints и правила авторизации находятся 
 | Получить фильтрованный срез меты HSGuru | `GET /v1/hsguru/meta` |
 | Получить актуальные HSGuru-архетипы со сборками | `GET /v1/hsguru/archetypes?min_games=50&has_decks=true` |
 | Получить каталог архетипов окна Bans | `GET /v1/hsguru/archetypes?period=black_empire_ban` |
+| Получить каталог архетипов текущего патча HSGuru | `GET /v1/hsguru/archetypes?period=patch_<версия>` (версию даёт `meta.current_patch_period`) |
 | Получить матрицу матчапов архетипов HSGuru любого среза | `GET /v1/hsguru/matchups?format=standard&rank=legend&period=black_empire_ban&min_games=25` (срезы — `/v1/hsguru/matchups/slices`) |
 | Получить муллиган архетипа или колоды HSGuru | `GET /v1/hsguru/mulligan` (срезы — `/v1/hsguru/mulligan/slices`) |
 | Узнать, что берут из Раскопки/Адаптации конкретной карты (HSReplay + полный пул) | `GET /v1/hsreplay/card-choices?card=CORE_YOP_001` (список карт — `/v1/hsreplay/card-choices/cards`) |
@@ -383,6 +384,21 @@ HSGuru meta-строки находятся в `data.structured.strategies[]`, m
 берутся из `hsguru_deck_catalog_{format}_all_black_empire_ban` и, для
 архетипов без сборок в окне Bans, из `..._fallback_black_empire_ban` (см. ниже).
 `meta.available_periods` перечисляет опубликованные окна.
+
+Каталог текущего патча (`patch_<версия>`, сейчас `patch_37.0.2`) лежит в
+`data.structured.period_catalogs.patch_<версия>` рядом с Bans, пока текущее окно
+матрицы — именованный релиз (`black_empire`); если текущее окно само `patch_*`,
+отдельного каталога нет. Номер патча в коде не записан: это патч, который выбрал
+последний прогон матрицы (`meta.current_patch_period`), поэтому с новым патчем
+каталог меняется сам, а прошлый патч отвечает 422. Строится из среза
+ALL/Any Player без отдельного запроса. Его сборки лежат в
+`hsguru_deck_catalog_{format}_all_patch_<версия>` и
+`..._fallback_patch_<версия>`; формат без среза патча в матрице (нет строк в
+каталоге) не собирается. Чтобы не тратить платные страницы Scrape.do, архетипы
+без своей сборки за патч берут сборки, которые уже собраны для окна
+`black_empire` (его all-rank и fallback каталоги, а также итоги проверки реплеев),
+и платные страницы тратятся только на то, чего там нет: сначала `past_30_days`,
+затем реплеи. Каждая заимствованная сборка хранит свой `sample_period`.
 
 Откуда взяты сборки архетипа, показывают поля строки:
 
