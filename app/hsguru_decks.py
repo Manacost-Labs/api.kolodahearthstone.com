@@ -74,6 +74,10 @@ _CATALOG_COLLECTION_VERSION = 2
 # Windows published as their own archetype catalog next to the current one
 # (HSGuru's Bans window). Their builds live in period-suffixed catalogs.
 CATALOG_PERIODS = ("black_empire_ban",)
+# The matrix's current patch (``patch_37.0.2``) also gets a catalog of its own
+# while the current window is a named release. Its number is never written in
+# code: any patch window other than the current one is such a secondary window.
+PATCH_PERIOD_PATTERN = re.compile(r"patch_\d+(?:\.\d+){1,3}")
 # Quiet archetypes can have aggregate stats but no single build with a sample
 # in the current window. Their builds come from these wider windows, tried in
 # order, and every row keeps the window it was sampled from.
@@ -743,12 +747,27 @@ def _validate_parsed_catalog_rows(
         raise RuntimeError("HSGuru empty deck catalog could not be verified")
 
 
+def is_patch_period(period: object) -> bool:
+    return (
+        isinstance(period, str) and PATCH_PERIOD_PATTERN.fullmatch(period) is not None
+    )
+
+
+def is_secondary_catalog_period(period: str | None) -> bool:
+    """Whether ``period`` is a window with a catalog next to the current one."""
+    if not period:
+        return False
+    if period in CATALOG_PERIODS:
+        return True
+    return is_patch_period(period) and period != _current_deck_period()
+
+
 def _catalog_source_id(
     format_name: str,
     rank: str = "legend",
     period: str | None = None,
 ) -> str:
-    suffix = f"_{period}" if period in CATALOG_PERIODS else ""
+    suffix = f"_{period}" if is_secondary_catalog_period(period) else ""
     return f"hsguru_deck_catalog_{format_name}_{rank}{suffix}"
 
 
@@ -854,17 +873,39 @@ def _snapshot_needs_full_refresh(snapshot: _CatalogSnapshot) -> bool:
     return age_seconds >= _ALL_CATALOG_REFRESH_SECONDS
 
 
-def hsguru_catalog_periods() -> tuple[str, ...]:
-    """Secondary windows whose archetype catalogs the matrix has published."""
+def _published_period_catalogs() -> dict[str, Any]:
     try:
         matrix = load_resolved_public_dataset("hsguru_meta_matrix") or {}
     except (OSError, RuntimeError, TypeError, ValueError):
         matrix = {}
     structured = (matrix.get("data") or {}).get("structured") or {}
     published = structured.get("period_catalogs") or {}
-    if not isinstance(published, dict):
-        return ()
-    return tuple(period for period in CATALOG_PERIODS if period in published)
+    return published if isinstance(published, dict) else {}
+
+
+def hsguru_catalog_periods() -> tuple[str, ...]:
+    """Secondary windows whose archetype catalogs the matrix has published.
+
+    Bans first, then the matrix's current patch, whatever its number is.
+    """
+    published = _published_period_catalogs()
+    named = [period for period in CATALOG_PERIODS if period in published]
+    patches = sorted(period for period in published if is_patch_period(period))
+    return tuple(dict.fromkeys((*named, *patches)))
+
+
+def hsguru_catalog_period_formats(period: str) -> tuple[str, ...]:
+    """Formats whose rows the published ``period`` catalog actually has.
+
+    A window the matrix has no slice for in one format (Wild) is not collected
+    for it. Without published information both formats are kept.
+    """
+    catalog = _published_period_catalogs().get(period)
+    rows = catalog.get("archetypes") if isinstance(catalog, dict) else None
+    if not isinstance(rows, list) or not rows:
+        return ("standard", "wild")
+    present = {str(row.get("format") or "") for row in rows if isinstance(row, dict)}
+    return tuple(name for name in ("standard", "wild") if name in present)
 
 
 def _catalog_rows(
@@ -947,9 +988,12 @@ def _meta_archetypes(
     except (OSError, RuntimeError, TypeError, ValueError):
         matrix = {}
     structured = (matrix.get("data") or {}).get("structured") or {}
+    published = structured.get("period_catalogs") or {}
+    # A window the matrix published a catalog for (Bans, the current patch) is
+    # read from that catalog, anything else from the current one.
     current_catalog = (
-        (structured.get("period_catalogs") or {}).get(target_period)
-        if target_period in CATALOG_PERIODS
+        published.get(target_period)
+        if target_period in CATALOG_PERIODS or target_period in published
         else structured.get("current_catalog")
     ) or {}
     criteria = current_catalog.get("criteria") or {}
@@ -1432,7 +1476,7 @@ def _fallback_windows(period: str) -> tuple[tuple[str, int], ...]:
     A secondary window (Bans) first borrows from the whole current release,
     then from the rolling month; the current window only from the month.
     """
-    release = _current_deck_period() if period in CATALOG_PERIODS else ""
+    release = _current_deck_period() if is_secondary_catalog_period(period) else ""
     windows = [(release, DECK_MIN_GAMES)] if release else []
     windows.extend(_FALLBACK_DECK_WINDOWS)
     return tuple(
@@ -1442,7 +1486,7 @@ def _fallback_windows(period: str) -> tuple[tuple[str, int], ...]:
 
 def _replay_windows(period: str) -> tuple[str, ...]:
     """Replay windows for ``period``: itself, then the release for Bans."""
-    release = _current_deck_period() if period in CATALOG_PERIODS else ""
+    release = _current_deck_period() if is_secondary_catalog_period(period) else ""
     return tuple(dict.fromkeys(window for window in (period, release) if window))
 
 
@@ -1639,6 +1683,49 @@ async def _fetch_fallback_decks(
     return [], credits, backends, attempts, None
 
 
+def _release_builds(
+    format_name: str,
+    release: str,
+    period: str,
+    archetype_keys: set[str],
+) -> tuple[list[dict[str, Any]], dict[str, str], bool]:
+    """Builds the release window already collected, as stand-ins for ``period``.
+
+    The patch window is nested in the release, so the release's own all-rank
+    and fallback catalogs (read in full earlier in the same job) answer first
+    and cost nothing. Each row keeps the window it was sampled from. Returns
+    the rows, the archetypes whose replays the release asked about recently
+    (name key -> checked_at) and whether the release all-rank catalog exists.
+    """
+    release_all = _catalog_rows(format_name, "all", expected_period=release)
+    release_fallback = _catalog_rows(format_name, "fallback", expected_period=release)
+    rows = [
+        {
+            **row,
+            "sample_period": str(row.get("sample_period") or release),
+            "sample_rank": "all",
+            "sample_min_games": row.get("sample_min_games") or DECK_MIN_GAMES,
+            "sample_fallback_for": period,
+        }
+        for row in (*release_all, *release_fallback)
+        if isinstance(row, dict)
+        and row.get("deck_code")
+        and _key(str(row.get("archetype") or "")) in archetype_keys
+    ]
+    payload = (
+        read_json(dataset_path(_catalog_source_id(format_name, "fallback", release)))
+        or {}
+    )
+    checks = payload.get("replay_checks")
+    checked = {
+        _key(str(name)): str(checked_at)
+        for name, checked_at in (checks.items() if isinstance(checks, dict) else [])
+        if (age := _seconds_since(checked_at)) is not None
+        and 0 <= age <= _REPLAY_REUSE_SECONDS
+    }
+    return rows, checked, bool(release_all)
+
+
 async def refresh_hsguru_fallback_deck_catalog(
     format_name: str,
     *,
@@ -1715,10 +1802,37 @@ async def refresh_hsguru_fallback_deck_catalog(
         if (age := _seconds_since(checked_at)) is not None
         and 0 <= age <= _REPLAY_REUSE_SECONDS
     }
+    borrowed_rows: list[dict[str, Any]] = []
+    release_checks: dict[str, str] = {}
+    release = _current_deck_period()
+    if is_patch_period(period) and is_secondary_catalog_period(period):
+        borrowed_rows, release_checks, release_read = _release_builds(
+            format_name, release, period, target_keys
+        )
+        if release_read:
+            # The release was read in full: an archetype it has no build for
+            # has none in the window nested in it, so asking again is waste.
+            windows = tuple(item for item in windows if item[0] != release)
+    borrowed_keys = {_key(str(row.get("archetype") or "")) for row in borrowed_rows}
+    reused_rows = [
+        row
+        for row in reused_rows
+        if _key(str(row.get("archetype") or "")) not in borrowed_keys
+    ]
     reused_keys = {_key(str(row.get("archetype") or "")) for row in reused_rows}
+    reused_keys |= borrowed_keys
+    # The release asks for replays only after every wider window came up
+    # empty, so a recent check also settles the month for the patch.
     pending = (
-        [name for name in targets if _key(name) not in reused_keys] if windows else []
+        [
+            name
+            for name in targets
+            if _key(name) not in reused_keys and _key(name) not in release_checks
+        ]
+        if windows
+        else []
     )
+    recent_replay_checks = {**release_checks, **recent_replay_checks}
 
     rows: list[dict[str, Any]] = []
     credits = 0
@@ -1777,7 +1891,7 @@ async def refresh_hsguru_fallback_deck_catalog(
         ),
     )
 
-    merged = _merge_catalog_rows(reused_rows, rows)
+    merged = _merge_catalog_rows(reused_rows, borrowed_rows, rows)
     covered_keys = {_key(str(row.get("archetype") or "")) for row in merged}
     failed_keys = {_key(name) for name in failed}
     zero_sample = [

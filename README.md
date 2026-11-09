@@ -143,7 +143,7 @@ GraphQL pagination возвращает `items` и `pageInfo`. Максимал�
 | GET | `/v1/meta-intelligence/signals/{signal_id}` | X-API-Key; scope filters | Signal evidence |
 | GET | `/v1/meta-intelligence/snapshots/{snapshot_id}` | X-API-Key; scope filters | Immutable research snapshot |
 | GET | `/v1/hsguru/meta` | `format`, `rank`, `period`, `coin`, `min_games` | Meta Standard/Wild; `meta.current_period` указывает активное patch/named-окно |
-| GET | `/v1/hsguru/archetypes` | `format`, `period`, `q`, `min_games`, `has_decks`, `sort`, `order`, `limit`, `offset` | Каталог архетипов: текущий или `period=black_empire_ban` (Bans) |
+| GET | `/v1/hsguru/archetypes` | `format`, `period`, `q`, `min_games`, `has_decks`, `sort`, `order`, `limit`, `offset` | Каталог архетипов: текущий, `period=black_empire_ban` (Bans) или `period=patch_<версия>` (текущий патч, `meta.current_patch_period`) |
 | GET | `/v1/hsguru/archetypes/history` | `archetype` (required), `format` (required), `limit` | История архетипа |
 | GET | `/v1/hsguru/archetypes/analysis` | `archetype` (required), `format` (required) | Полный анализ архетипа |
 | GET | `/v1/hsguru/matchups` | `format`, `rank`, `period`, `coin`, `min_games`, `min_archetype_games`, `limit` | Матрица матчапов архетипов HSGuru любого среза (по умолчанию окно банов) |

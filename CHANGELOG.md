@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- `GET /v1/hsguru/archetypes`: каталог текущего патча HSGuru
+  (`period=patch_37.0.2`, номер берётся из последнего прогона матрицы, без
+  правки кода) рядом с текущим окном и Bans. Новое поле
+  `meta.current_patch_period` (аддитивно; `null`, если отдельного каталога
+  патча нет), патч входит в `meta.available_periods`, прошлый патч отвечает 422.
+  Ответы без `period` и с `black_empire_ban` не меняются. Джоба сборок
+  дополнительно собирает all-rank сборки патча и добирает недостающие, сначала
+  беря уже собранные сборки окна `black_empire` (без платных страниц), затем
+  `past_30_days` и реплеи; формат без среза патча не собирается.
 - Fun decks (`hsguru_fun_decks`, `DETECTOR_VERSION` `concept-v7`): a stricter,
   explainable selection. A published deck now needs `games` and `win_rate`, at
   least 30 games (`HS_FUN_DECK_MIN_GAMES`), and a 95% Wilson win-rate interval

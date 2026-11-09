@@ -4,6 +4,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query
 
+from ..hsguru_decks import is_patch_period
 from ..hsguru_meta_matrix import (
     CATALOG_PERIODS,
     CURRENT_MIN_GAMES,
@@ -173,7 +174,7 @@ def hsguru_current_archetypes(
         max_length=64,
         description=(
             "Catalog window: the current one by default, or a window listed in "
-            "meta.available_periods such as the Bans window"
+            "meta.available_periods such as the Bans window or the current patch"
         ),
     ),
     q: str | None = Query(None, min_length=1, max_length=120),
@@ -196,8 +197,15 @@ def hsguru_current_archetypes(
     period_catalogs = {
         name: value
         for name, value in (structured.get("period_catalogs") or {}).items()
-        if name in CATALOG_PERIODS and isinstance(value, dict)
+        if (name in CATALOG_PERIODS or is_patch_period(name))
+        and name != current_period
+        and isinstance(value, dict)
     }
+    # The patch window has a catalog of its own only while a named release is
+    # current; its number is whatever the last matrix run selected.
+    current_patch_period = next(
+        (name for name in period_catalogs if is_patch_period(name)), None
+    )
     available_periods = [name for name in (current_period, *period_catalogs) if name]
     if period is None or period == current_period:
         catalog = current_catalog
@@ -248,6 +256,7 @@ def hsguru_current_archetypes(
         {
             "available_periods": available_periods,
             "current_period": current_period or None,
+            "current_patch_period": current_patch_period,
         }
     )
     return {

@@ -6,6 +6,7 @@ from typing import Any
 from .hsguru_decks import (
     HSGuruCatalogPartial,
     current_hsguru_deck_period,
+    hsguru_catalog_period_formats,
     hsguru_catalog_periods,
     refresh_hsguru_deck_catalog,
     refresh_hsguru_fallback_deck_catalog,
@@ -24,6 +25,7 @@ CatalogFallbackRefresh = Callable[..., Awaitable[dict[str, Any]]]
 CatalogJoin = Callable[[], dict[str, Any]]
 CatalogDatasetLoader = Callable[[str], dict[str, Any] | None]
 CatalogPeriods = Callable[[], tuple[str, ...]]
+CatalogPeriodFormats = Callable[[str], tuple[str, ...]]
 
 
 def _error_summary(exc: Exception) -> str:
@@ -95,6 +97,7 @@ async def refresh_all_deck_catalogs(
     join: CatalogJoin = refresh_current_catalog_deck_join,
     load_persisted: CatalogDatasetLoader = load_dataset,
     catalog_periods: CatalogPeriods = hsguru_catalog_periods,
+    period_formats: CatalogPeriodFormats = hsguru_catalog_period_formats,
 ) -> dict[str, Any]:
     """Refresh every catalog unless another run already owns them."""
     locks = ResourceLockSet(
@@ -112,6 +115,7 @@ async def refresh_all_deck_catalogs(
             join=join,
             load_persisted=load_persisted,
             catalog_periods=catalog_periods,
+            period_formats=period_formats,
         )
     finally:
         locks.release()
@@ -124,6 +128,7 @@ async def _refresh_all_deck_catalogs_unlocked(
     join: CatalogJoin,
     load_persisted: CatalogDatasetLoader,
     catalog_periods: CatalogPeriods,
+    period_formats: CatalogPeriodFormats,
 ) -> dict[str, Any]:
     """Refresh every HSGuru catalog even when an independent slice fails.
 
@@ -133,7 +138,8 @@ async def _refresh_all_deck_catalogs_unlocked(
     Other failures are reported without preventing independent combinations
     from becoming fresh. Archetypes that the all-rank catalog leaves without
     a build then get one from a wider HSGuru window or from their replays
-    before the join. Secondary windows (the Bans catalog) get all-rank builds
+    before the join. Secondary windows (the Bans catalog and the matrix's current
+    patch) get all-rank builds
     of their own afterwards and the same fallback, starting with the whole
     current release; every borrowed build is labelled with its window.
     """
@@ -230,7 +236,13 @@ async def _refresh_all_deck_catalogs_unlocked(
     for period in secondary_periods:
         if period == run_period:
             continue
-        for format_name in ("standard", "wild"):
+        try:
+            formats = period_formats(period)
+        except Exception:  # noqa: BLE001 - fall back to both formats
+            formats = ("standard", "wild")
+        # A format the matrix has no slice of for this window (Wild for a
+        # patch) is not collected: no archetypes means no paid page.
+        for format_name in formats:
             key = f"{format_name}_all_{period}"
             rows = await refresh_one(key, format_name, "all", period)
             if rows is None:

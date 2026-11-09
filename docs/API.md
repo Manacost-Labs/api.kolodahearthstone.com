@@ -427,7 +427,7 @@ curl -s "https://api.kolodahearthstone.com/datasets/hsreplay_battlegrounds_comps
 
 | Endpoint | Что возвращает |
 | --- | --- |
-| `GET /v1/hsguru/archetypes` | Каталог архетипов текущего окна; с `period=black_empire_ban` — окна Bans (`meta.available_periods`). Фильтры: `format`, `q`, `min_games` (по умолчанию 10), `has_decks`, `sort`, `order`, `limit`, `offset` |
+| `GET /v1/hsguru/archetypes` | Каталог архетипов текущего окна; с `period=black_empire_ban` — окна Bans, с `period=patch_<версия>` — текущего патча HSGuru (номер не зашит: это патч последнего прогона матрицы, он же `meta.current_patch_period`; `null`, если отдельного каталога патча нет; предыдущий патч отвечает 422 с `allowed_periods`). Опубликованные окна — `meta.available_periods`. Фильтры: `format`, `q`, `min_games` (по умолчанию 10), `has_decks`, `sort`, `order`, `limit`, `offset` |
 
 Строка архетипа: `format`, `archetype`, `games`, `winrate`, `popularity_pct`,
 `avg_turns`, `avg_duration_minutes`, `climbing_speed_stars_per_hour`,
