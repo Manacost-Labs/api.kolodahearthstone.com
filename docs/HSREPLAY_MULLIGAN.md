@@ -217,7 +217,7 @@ HearthstoneJSON), `keep_percentage`, `opening_hand_winrate`,
 
 | Endpoint | Параметры | Что возвращает |
 | --- | --- | --- |
-| `GET /v1/hsreplay/mulligan/decks` | `format`, `rank`, `limit` | Набор колод: формат, ранг, позиция, `pick_reason` (`popular`/`winrate`), архетип, класс, игры, винрейт, `slices_planned`, `slices_with_data`, `checked_at` |
+| `GET /v1/hsreplay/mulligan/decks` | `format`, `rank`, `limit` | Набор колод: формат, ранг, позиция, `pick_reason` (`popular`/`winrate`), архетип, класс, игры, винрейт, `deck_list` (карты парами `[dbfId, count]`; `null`, если HSReplay не вернул список), `slices_planned`, `slices_with_data`, `checked_at` |
 | `GET /v1/hsreplay/mulligan/slices` | `deck`, `format` | Все срезы колоды: `rank`, `initiative`, `period`, `premium`, `state`, `last_success_at`, `last_changed_at`, `scope`, `groups_total` |
 | `GET /v1/hsreplay/mulligan/history` | срез + `card`, `limit` | Снимки среза (games, base_winrate, scope, as_of); с `card` (dbf id, card id или имя) — строка карты в каждом снимке |
 | `GET /v1/hsreplay/mulligan/coverage` | `runs` | `premium_session`, покрытие по формату × рангу × монетке × периоду, последние запуски (`requests`, `scrape_do_credits`, `stop_reason`, `detail`), настройки. Без кэша |

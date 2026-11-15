@@ -228,6 +228,61 @@ class HealthEndpointTest(unittest.TestCase):
         self.assertEqual(payload["cached_sources"], [source.id])
         quality_log.assert_not_called()
 
+    def test_ops_health_does_not_gate_on_confirmed_upstream_pending_source(self) -> None:
+        source = SOURCE_BY_ID["vicious_syndicate_radars"]
+        status = {
+            "source_id": source.id,
+            "state": "ok",
+            "serving_cached_dataset": True,
+            "cached_after_failure": True,
+            "last_refresh_state": "quality_error",
+            "cached_content_temporally_grandfathered": True,
+            "upstream_state": "upstream_publication_pending",
+            "last_refresh_upstream_state": "upstream_publication_pending",
+            "fetched_at": "2026-08-12T00:00:00Z",
+        }
+        stale = [{"source_id": source.id, "reason": "live_failed_cached"}]
+
+        def diagnostics(current: dict) -> dict:
+            with (
+                tempfile.TemporaryDirectory() as tmp,
+                patch.object(main, "SOURCES", [source]),
+                patch.object(main, "load_status", return_value=current),
+                patch.object(
+                    main, "load_dataset", return_value=_vicious_temporal_lkg_dataset()
+                ),
+                patch.object(main, "root_dir", return_value=Path(tmp)),
+                patch("app.source_catalog.load_status", return_value=current),
+                patch("app.stale_monitor.find_stale_sources", return_value=stale),
+                patch("app.scrapers.quality._log_quality_action"),
+            ):
+                return main.build_health_diagnostics()
+
+        payload = diagnostics(status)
+
+        self.assertTrue(payload["serving_ok"], payload)
+        self.assertTrue(payload["freshness_ok"], payload)
+        self.assertFalse(payload["degraded"])
+        self.assertEqual(payload["upstream_pending_sources"], [source.id])
+        self.assertEqual(payload["stale_sources"], [])
+        self.assertEqual(payload["stale_count"], 0)
+        self.assertEqual(payload["cached_sources"], [])
+        self.assertEqual(payload["cached_after_failure_sources"], [])
+
+        # The same source failing for any other reason still degrades health.
+        failing = {
+            **status,
+            "upstream_state": "blocked",
+            "last_refresh_upstream_state": "blocked",
+        }
+        payload = diagnostics(failing)
+
+        self.assertFalse(payload["freshness_ok"])
+        self.assertTrue(payload["degraded"])
+        self.assertEqual(payload["upstream_pending_sources"], [])
+        self.assertEqual(payload["stale_sources"], [source.id])
+        self.assertEqual(payload["cached_sources"], [source.id])
+
     def test_ops_health_rejects_corrupt_dataset_despite_temporal_lkg_status(self) -> None:
         source = SOURCE_BY_ID["vicious_syndicate_radars"]
         status = {

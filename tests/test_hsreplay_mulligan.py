@@ -559,6 +559,15 @@ def test_decks_slices_history_and_coverage(client) -> None:
     ).json()
     assert decks["meta"]["count"] == 4
     assert {row["rank"] for row in decks["data"]} == set(mulligan.RANKS)
+    # Each row carries the deck as [dbf id, count] pairs, the same cards the
+    # slice answer stores as a JSON string in data.deck.deck_list.
+    slice_deck = client.get(
+        "/v1/hsreplay/mulligan", params={"deck": DECK, "rank": "bronze_gold"}
+    ).json()["data"]["deck"]
+    expected = json.loads(slice_deck["deck_list"])
+    assert expected and all(len(pair) == 2 for pair in expected)
+    for row in decks["data"]:
+        assert row["deck_list"] == expected
     # Legend has one slice HSReplay is still computing.
     assert {row["rank"]: row["slices_with_data"] for row in decks["data"]} == {
         "legend": 8,

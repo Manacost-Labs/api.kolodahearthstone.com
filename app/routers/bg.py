@@ -7,6 +7,9 @@ from fastapi import APIRouter, HTTPException, Path, Query, Response
 
 from .models import (
     ApiMeta,
+    BgHeroCompositionsMeta,
+    BgHeroCompositionsRow,
+    BgHeroListMeta,
     BgHeroRow,
     BgMinionRow,
     BgMinionStatsDetail,
@@ -14,6 +17,7 @@ from .models import (
     BgMinionStatsRow,
     BgMinionStatsSlice,
     Envelope,
+    MetaEnvelope,
     freshest_timestamp,
     timestamp_is_stale,
 )
@@ -40,9 +44,15 @@ canonical_router = APIRouter(
 )
 
 
+HeroListEnvelope = MetaEnvelope[list[BgHeroRow], BgHeroListMeta]
+HeroCompositionsEnvelope = MetaEnvelope[
+    list[BgHeroCompositionsRow], BgHeroCompositionsMeta
+]
+
+
 @router.get(
     "/heroes",
-    response_model=Envelope[list[BgHeroRow]],
+    response_model=HeroListEnvelope,
     response_model_exclude_none=True,
 )
 def heroes(
@@ -50,22 +60,88 @@ def heroes(
     q: str | None = Query(None, min_length=1, max_length=120),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0, le=10_000),
-) -> Envelope[list[BgHeroRow]]:
+) -> HeroListEnvelope:
     from ..hsreplay_bg_hero_details import list_bg_heroes
 
     payload = list_bg_heroes(mode=mode, q=q)
     all_rows = list(payload.get("heroes") or [])
     rows = all_rows[offset : offset + limit]
     fetched_at = payload.get("fetched_at") or freshest_timestamp(rows, "fetched_at")
-    return Envelope(
+    return HeroListEnvelope(
         data=[BgHeroRow.model_validate(row) for row in rows],
-        meta=ApiMeta(
+        meta=BgHeroListMeta(
             source_id="hsreplay_battlegrounds_hero_details",
             fetched_at=fetched_at,
             stale=timestamp_is_stale(fetched_at),
             count=int(payload.get("count") or len(all_rows)),
             limit=limit,
             offset=offset,
+            list_fetched_at=payload.get("list_fetched_at"),
+            details_fetched_at=payload.get("details_fetched_at"),
+            list_source_id=payload.get("list_source_id"),
+        ),
+    )
+
+
+@canonical_router.get(
+    "/heroes/compositions",
+    response_model=HeroCompositionsEnvelope,
+    summary="Composition statistics of every Battlegrounds hero in one response",
+    responses={
+        404: {"description": "The hero detail bundle is not cached."},
+        422: {"description": "The requested MMR slice is not stored."},
+    },
+)
+async def hero_compositions(
+    mmr: str = Query(
+        "TOP_50_PERCENT",
+        pattern="^[A-Z0-9_]{1,40}$",
+        description="HSReplay MMR slice. Only the stored slice (TOP_50_PERCENT) is served.",
+    ),
+) -> HeroCompositionsEnvelope:
+    """Per hero: the games, average placement and placement distribution of each
+    composition played with it, from the stored `hsreplay_battlegrounds_hero_details`
+    bundle (the `compositions[]` of `/api/bg/heroes/{dbf_id}` without lineups,
+    tavern-up and hero-power sections).
+
+    `tribes` holds HearthstoneJSON race keys (`BEAST`, `MECHANICAL`, ...) resolved
+    from the composition type of `hsreplay_battlegrounds_compositions`; it is empty
+    for a composition that is not a single-tribe build.
+    """
+
+    from ..config import stale_dataset_hours
+    from ..hsreplay_bg_hero_details import SOURCE_ID, list_bg_hero_compositions
+    from ..sources import SOURCE_BY_ID
+
+    payload = await asyncio.to_thread(list_bg_hero_compositions)
+    filters = payload.get("filters") or {}
+    stored_mmr = str(filters.get("mmr_percentile") or "")
+    rows = payload.get("heroes") or []
+    if not rows:
+        raise HTTPException(
+            status_code=404, detail="Battlegrounds hero detail bundle is not cached"
+        )
+    if mmr != stored_mmr:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Only the stored MMR slice is available: {stored_mmr or 'unknown'}",
+        )
+    fetched_at = payload.get("fetched_at")
+    return HeroCompositionsEnvelope(
+        data=[BgHeroCompositionsRow.model_validate(row) for row in rows],
+        meta=BgHeroCompositionsMeta(
+            source_id=SOURCE_ID,
+            fetched_at=fetched_at,
+            stale=timestamp_is_stale(
+                fetched_at,
+                max_age_hours=SOURCE_BY_ID[SOURCE_ID].stale_hours
+                or stale_dataset_hours(),
+            ),
+            count=len(rows),
+            mmr=stored_mmr,
+            time_range=filters.get("time_range"),
+            tribes_source_id=payload.get("tribes_source_id"),
+            tribes_fetched_at=payload.get("tribes_fetched_at"),
         ),
     )
 
@@ -108,7 +184,7 @@ canonical_router.add_api_route(
     "/heroes",
     heroes,
     methods=["GET"],
-    response_model=Envelope[list[BgHeroRow]],
+    response_model=HeroListEnvelope,
     response_model_exclude_none=True,
 )
 canonical_router.add_api_route(

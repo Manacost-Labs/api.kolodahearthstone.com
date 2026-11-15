@@ -16,7 +16,8 @@ from .post_patch_policy import (
     POST_PATCH_BASELINE_LABEL,
     STABLE_PUBLICATION_BASELINE_LABEL,
 )
-from .sources import Source
+from .source_state import SourceState
+from .sources import STATUS_ONLY_SOURCE_IDS, Source
 from .storage import dataset_path, load_status
 
 
@@ -94,6 +95,11 @@ def source_summary(
     status = load_status(source.id) or {}
     enabled = source_operationally_enabled(source.id)
     fetched_at = projection.get("fetched_at") if projection else None
+    # A status-only source publishes no datasets/*.json: its last success is
+    # the timestamp of an ``ok`` status, not a missing dataset.
+    status_only = source.id in STATUS_ONLY_SOURCE_IDS
+    if status_only and status.get("state") == SourceState.OK:
+        fetched_at = status.get("fetched_at")
     age = _age(fetched_at, now)
     ttl = source.stale_hours or stale_dataset_hours()
     pending = upstream_pending_status(source.id, status)
@@ -104,11 +110,11 @@ def source_summary(
         else "upstream_pending"
         if pending
         else "missing"
-        if projection is None
+        if (fetched_at is None if status_only else projection is None)
         else "stale"
         if stale
         else "provisional"
-        if _is_provisional_dataset(projection)
+        if projection is not None and _is_provisional_dataset(projection)
         else "fresh"
     )
     from .source_diagnostics import failure_diagnostics

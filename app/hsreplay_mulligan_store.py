@@ -771,8 +771,8 @@ def deck_catalog(
         for row in conn.execute(
             f"""
             SELECT d.format, d.rank, d.deck_id, d.archetype_id, d.archetype_name,
-                   d.player_class, d.total_games, d.win_rate, d.pick_reason, d.position,
-                   d.listed_at,
+                   d.player_class, d.total_games, d.win_rate, d.deck_list,
+                   d.pick_reason, d.position, d.listed_at,
                    (SELECT count(*) FROM {TARGETS} AS t
                     WHERE t.deck_id = d.deck_id AND t.format = d.format
                       AND t.rank = d.rank AND t.active = 1) AS slices_planned,

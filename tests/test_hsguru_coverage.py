@@ -11,6 +11,7 @@ from starlette.testclient import TestClient
 from app import hsguru_brawl as brawl
 from app import hsguru_esports as esports
 from app.hsguru_pages import Page, PageReader, find_table, player_cell
+from app.source_diagnostics import failure_diagnostics
 from app.storage import load_dataset, load_status, save_dataset
 
 TOURNAMENT_ID = "6a6c88f821e3c30013db3d46"
@@ -309,6 +310,55 @@ def test_brawl_missing_secondary_slice_publishes_partial(isolated) -> None:
 
     assert result["published"] is True and result["state"] == "partial"
     assert result["missing_slices"] == ["legend|on_coin|any"]
+    # A fresh published snapshot that lacks a secondary page is served as ok:
+    # the gap is listed and classified instead of failing the whole source.
+    status = load_status(brawl.SOURCE_ID)
+    assert status["state"] == "ok" and status["serving_cached_dataset"] is False
+    assert status["last_refresh_state"] == "partial"
+    assert status["missing_slices"] == ["legend|on_coin|any"]
+    assert status["failure_reason_code"] == "unavailable"
+    assert "1 of 35" in status["last_refresh_error"]
+    assert failure_diagnostics(brawl.SOURCE_ID, status) == {
+        "reason": "none",
+        "issue": None,
+    }
+
+
+def test_brawl_with_too_many_missing_pages_is_a_classified_partial(isolated) -> None:
+    failed = {
+        brawl.meta_url("legend", "on_coin", brawl.ANY_OPPONENT),
+        brawl.meta_url("all", "any_player", "WARLOCK"),
+        brawl.deck_url("legend"),
+    }
+    assert len(failed) > brawl.MAX_TOLERATED_MISSING_PAGES
+
+    result = asyncio.run(
+        brawl.refresh_hsguru_brawl(fetcher=RoutedFetcher(_brawl_route, fail=failed))
+    )
+
+    assert result["published"] is True and result["state"] == "partial"
+    status = load_status(brawl.SOURCE_ID)
+    assert status["state"] == "partial"
+    assert sorted(status["missing_slices"]) == [
+        "all|any_player|WARLOCK",
+        "decks|legend",
+        "legend|on_coin|any",
+    ]
+    diagnostics = failure_diagnostics(brawl.SOURCE_ID, status)
+    assert diagnostics["reason"] == "unavailable" and diagnostics["issue"] is None
+
+
+@pytest.mark.parametrize(
+    ("error", "reason"),
+    [
+        ("RuntimeError: scrape_do: ScrapeDoTransientError: Scrape.do HTTP 502: {}", "upstream_5xx"),
+        ("RuntimeError: Scrape.do response failed content validation", "contract"),
+        ("content_validation", "contract"),
+        ("RuntimeError: provider failed", "unavailable"),
+    ],
+)
+def test_brawl_missing_reason_is_bounded(error: str, reason: str) -> None:
+    assert brawl._missing_reason([{"url": "https://x", "error": error}]) == reason
 
 
 def test_brawl_without_the_all_ranks_table_keeps_the_last_snapshot(isolated) -> None:
@@ -326,6 +376,8 @@ def test_brawl_without_the_all_ranks_table_keeps_the_last_snapshot(isolated) -> 
     status = load_status(brawl.SOURCE_ID)
     assert status["serving_cached_dataset"] is True
     assert status["fetched_at"] == "2026-10-24T00:00:00+00:00"
+    assert status["state"] == "fetch_error"
+    assert status["failure_reason_code"] == "unavailable"
 
 
 def test_paywalled_brawl_page_is_rejected() -> None:

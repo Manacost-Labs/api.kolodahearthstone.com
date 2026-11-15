@@ -119,6 +119,7 @@ GraphQL pagination возвращает `items` и `pageInfo`. Максимал�
 | GET | `/v1/constructed/balance-radar/confidence-history` | `format`, `ref`, `side`, `runs` | История уверенности кандидатов по прогонам для графика |
 | GET | `/v1/constructed/archetypes` | `class_name`, `q`, `rank_range`, `game_type`, `limit`, `offset` | HSReplay archetypes |
 | GET | `/v1/battlegrounds/heroes` | `mode`, `q`, `limit`, `offset` | BG‑герои Solo/Duos |
+| GET | `/v1/battlegrounds/heroes/compositions` | `mmr` | Композиции всех BG‑героев одним ответом: игры, среднее место, распределение мест, трайбы |
 | GET | `/v1/battlegrounds/minions` | `q`, `tavern_tier`, `limit`, `offset` | BG‑существа |
 | GET | `/v1/battlegrounds/minions/stats` | `mmr`, `period`, `tavern_tier`, `sort`, `limit`, `offset` | Полная статистика всех BG‑существ: итоги обычной и золотой версии |
 | GET | `/v1/battlegrounds/minions/stats/slices` | — | Сохранённые срезы MMR/периода и их последний снимок |
@@ -127,6 +128,7 @@ GraphQL pagination возвращает `items` и `pageInfo`. Максимал�
 | GET | `/v1/bg/heroes` | `mode`, `q`, `limit`, `offset` | Deprecated alias BG‑героев |
 | GET | `/v1/bg/minions` | `q`, `tavern_tier`, `limit`, `offset` | Deprecated alias BG‑существ |
 | GET | `/v1/arena/classes` | `source_id`, `limit`, `offset` | Статистика классов Arena |
+| GET | `/v1/arena/cards` | `fields`, `class`, `limit`, `offset` | Компактная статистика карт Arena: только выбранные поля |
 
 ## REST v1 — HSGuru
 

@@ -38,8 +38,10 @@ admin/ops endpoints и правила авторизации находятся 
 | Получить официальную таблицу лидеров Blizzard | `GET /v1/leaderboards?mode=standard&region=EU` (пороги — `/v1/leaderboards/stats`) |
 | Получить историю игрока в таблицах лидеров | `GET /v1/leaderboards/player?region=EU&name=…` |
 | Получить BG-героев solo/duos | `GET /v1/battlegrounds/heroes` |
+| Получить композиции всех BG-героев одним запросом | `GET /v1/battlegrounds/heroes/compositions` |
 | Получить BG-существ и их историю | `GET /v1/battlegrounds/minions` и `/api/db/bg/minions/*` |
 | Получить классы Арены | `GET /v1/arena/classes` |
+| Получить оценки карт Арены без полного набора | `GET /v1/arena/cards?fields=id,score,tier,cardClass,win_rate` |
 | Получить малые/большие BG-аксессуары | `GET /api/bg/trinkets` |
 | Получить Vicious Syndicate radars | `GET /datasets/vicious_syndicate_radars` |
 | Получить Vicious Data Reaper Live | `GET /datasets/vicious_syndicate_live_beta` |
@@ -577,6 +579,7 @@ GraphQL: `hsguruBrawlMeta`, `hsguruBrawlDecks`, `hsguruEsportsTournaments`,
 | `/v1/battlegrounds/heroes?mode=solo` | Пагинированный актуальный список solo-героев. |
 | `/v1/battlegrounds/heroes?mode=duos` | Duos tier list. |
 | `/api/bg/heroes/{dbfId}` | Подробности одного героя. |
+| `/v1/battlegrounds/heroes/compositions` | Композиции всех героев: игры, среднее место, распределение мест, трайбы. |
 | `hsreplay_battlegrounds_heroes` | Premium tier list snapshot (`bg_heroes`). |
 | `hsreplay_battlegrounds_hero_details` | Детальный pipeline snapshot (`bg_hero_details`). |
 
@@ -689,6 +692,25 @@ GET /v1/arena/classes?source_id=hsreplay_arena_class_pages_firecrawl
 ```
 
 Поля строки: `class`, `win_rate`, `pick_rate`, `pct_7_plus`, `num_drafts`.
+
+Компактные строки карт из `hsreplay_arena_cards_advanced` (другой источник
+выбрать нельзя):
+
+```http
+GET /v1/arena/cards?fields=id,score,tier,cardClass,win_rate
+```
+
+`fields` — список через запятую из `id`, `dbfId`, `name`, `cost`, `type`,
+`rarity`, `cardClass`, `arena_class`, `tier`, `score`, `win_rate`,
+`deck_winrate`, `winrate_when_drawn`, `winrate_when_played`, `popularity`,
+`in_runs`, `avg_copies`, `times_played`, `pick_rate`, `offer_rate`; неизвестное
+поле — `422`. `class` фильтрует по классу карты (`cardClass`), `limit`/`offset`
+— пагинация (по умолчанию весь набор). `meta.game_type` — режим сохранённого
+среза (`underground` или `normal`), `meta.time_range` — фильтр времени HSReplay;
+оба `null`, если набор их не называет. Сейчас источник собирает только срез
+Underground. `score` и винрейты равны `null`, когда HSReplay не публикует
+значение для карты. Строки набора относятся ко всем классам сразу
+(`arena_class: "ALL"`): отдельной оценки по классу игрока источник не хранит.
 
 ## Vicious Syndicate
 

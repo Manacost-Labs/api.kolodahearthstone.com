@@ -80,12 +80,14 @@ Authorization: Bearer khs_v1_<token-id>_<secret>
 | `GET` | `/v1/constructed/balance-radar` | Радар нерфов и баффов (Стандарт/Вольный): статистика + Reddit/X + анализ Claude, последний успешный прогон; `format=standard|wild`. История: `/runs`, `/runs/{run_id}`. Прошлые патчи Blizzard и закономерности: `/history`, `/patterns`. Контракт: [BALANCE_RADAR.md](BALANCE_RADAR.md). |
 | `GET` | `/v1/constructed/archetypes` | Последние успешные snapshots архетипов. |
 | `GET` | `/v1/battlegrounds/heroes` | Solo/duos герои с пагинацией. |
+| `GET` | `/v1/battlegrounds/heroes/compositions` | Композиции каждого героя одним ответом (игры, среднее место, распределение мест, трайбы). |
 | `GET` | `/v1/battlegrounds/minions` | Последний успешный snapshot существ. |
 | `GET` | `/v1/battlegrounds/minions/stats` | Полная статистика HSReplay по всем существам среза: итоги обычной и золотой версии. |
 | `GET` | `/v1/battlegrounds/minions/stats/slices` | Какие срезы MMR/периода сохранены и когда обновлены. |
 | `GET` | `/v1/battlegrounds/minions/{minion}/stats` | Страница существа как на HSReplay: по ходам, позиции, покупки, медианы. |
 | `GET` | `/v1/battlegrounds/minions/{minion}/stats/history` | История итогов существа по снимкам («как изменилось»). |
 | `GET` | `/v1/arena/classes` | Классы арены из выбранного кешированного источника. |
+| `GET` | `/v1/arena/cards` | Компактные строки карт Арены: только запрошенные поля, признак среза в `meta`. |
 | `GET` | `/v1/sources` | Типизированный каталог источников. |
 | `GET` | `/v1/datasets` | Состояние кешей всех источников. |
 | `GET` | `/v1/health` | Диагностика в v1-конверте; HTTP-кеш выключен. Сама диагностика — снимок процесса: до 15 с отдаётся как есть, до 10 мин отдаётся сразу и обновляется в фоне; возраст в `X-Health-Snapshot-Age`. |
@@ -809,7 +811,7 @@ curl -s "https://api.kolodahearthstone.com/v1/hsguru/streamers?days=0&limit=1&de
 | Endpoint | Что возвращает |
 | --- | --- |
 | `GET /v1/hsreplay/mulligan` | Муллиган одного среза колоды: `source: "hsreplay"`, `games`, `base_winrate`, `scope` (`deck`/`archetype`/`class`), `deck` (архетип, класс, список), `opponent_classes`, `premium_session`, `rows[]` с `dbf_id`, `card_id`, `card_name`, `keep_percentage`, `opening_hand_winrate`, `winrate_when_drawn`, `winrate_when_played`, `avg_turns_in_hand`, `avg_turn_played_on` и `opening_hand_impact`/`drawn_impact`/`played_impact` |
-| `GET /v1/hsreplay/mulligan/decks` | Набор колод по формату и рангу: архетип, класс, игры, винрейт, причина выбора (`popular`/`winrate`), сколько срезов собрано |
+| `GET /v1/hsreplay/mulligan/decks` | Набор колод по формату и рангу: архетип, класс, игры, винрейт, причина выбора (`popular`/`winrate`), сколько срезов собрано, `deck_list` — карты колоды парами `[dbfId, count]` |
 | `GET /v1/hsreplay/mulligan/slices` | Все срезы одной колоды: состояние, последняя проверка, премиум или нет |
 | `GET /v1/hsreplay/mulligan/history` | Снимки среза; с `card` — строка карты в каждом снимке |
 | `GET /v1/hsreplay/mulligan/coverage` | Покрытие, статус премиум-сессии, последние запуски с расходом Scrape.do (без кэша) |
@@ -1306,6 +1308,77 @@ curl -s "https://api.kolodahearthstone.com/api/bg/heroes?mode=solo" | jq .
 curl -s "https://api.kolodahearthstone.com/api/bg/heroes?mode=duos" | jq .
 ```
 
+Пакет деталей пересобирается дважды в неделю, а список героев
+`hsreplay_battlegrounds_heroes` — ежедневно. Поэтому в solo-списке числа
+списка (`tier`, `pick_rate`, `pick_rate_value`, `avg_placement`,
+`placement_distribution`, `best_composition_id`) берутся из списка, если он
+новее пакета, относится к тому же срезу (`filters`) и содержит не меньше 30
+героев. Остальные поля строки (`adjusted_avg_placement`, `key_minions_top3`,
+`best_composition`) остаются из пакета; герой, появившийся после сборки
+пакета, отдаётся только с числами списка. Даты:
+
+| Поле | Значение |
+| --- | --- |
+| `fetched_at` | Дата чисел списка (равна `list_fetched_at`). |
+| `list_fetched_at` | Когда получены числа списка. |
+| `details_fetched_at` | Когда собран пакет деталей (`/api/bg/heroes/{dbfId}`). |
+| `list_source_id` | `hsreplay_battlegrounds_heroes`, если числа взяты из списка, иначе `hsreplay_battlegrounds_hero_details`. |
+
+`GET /v1/battlegrounds/heroes` отдаёт те же строки; три последних поля находятся
+в `meta`, `meta.fetched_at` — дата чисел списка. Duos-список и срезы
+`mmr`, отличные от `TOP_50_PERCENT`, не меняются.
+
+### `GET /v1/battlegrounds/heroes/compositions`
+
+Композиции всех героев одним ответом — вместо запроса
+`/api/bg/heroes/{dbfId}` по каждому герою. Данные — `compositions[]` пакета
+`hsreplay_battlegrounds_hero_details` без составов досок, tavern-up и hero-power.
+
+| Parameter | Default | Описание |
+| --- | --- | --- |
+| `mmr` | `TOP_50_PERCENT` | Срез MMR. Хранится только `TOP_50_PERCENT`; другое значение — `422`. |
+
+```json
+{
+  "data": [
+    {
+      "id": "BG27_HERO_801",
+      "dbfId": 103477,
+      "hero": "Thorim, Stormlord",
+      "compositions": [
+        {
+          "composition_id": 8,
+          "name": "Механизмы",
+          "tribes": ["MECHANICAL"],
+          "num_games": 3017,
+          "avg_placement": 3.662,
+          "placement_distribution": ["31.16%", "12.73%", "9.31%", "9.28%", "8.88%", "10.11%", "9.71%", "8.82%"]
+        }
+      ]
+    }
+  ],
+  "meta": {
+    "source_id": "hsreplay_battlegrounds_hero_details",
+    "fetched_at": "2026-11-12T03:35:03.126608+00:00",
+    "stale": false,
+    "count": 116,
+    "mmr": "TOP_50_PERCENT",
+    "time_range": "CURRENT_BATTLEGROUNDS_PATCH",
+    "tribes_source_id": "hsreplay_battlegrounds_compositions",
+    "tribes_fetched_at": "2026-11-15T17:01:20.059680+00:00"
+  }
+}
+```
+
+`tribes` — ключи рас HearthstoneJSON (`BEAST`, `DEMON`, `DRAGON`, `ELEMENTAL`,
+`MECHANICAL`, `MURLOC`, `NAGA`, `PIRATE`, `QUILBOAR`, `UNDEAD`). Они определяются
+по типу композиции из `hsreplay_battlegrounds_compositions` (общий
+`composition_id`), а если композиции там нет — по сохранённому названию. У
+композиции, которая не является сборкой одного трайба (например `Aberrations`),
+список пуст. Набор стратегий `hsreplay_battlegrounds_comps` использует другие
+идентификаторы и к этим строкам не присоединяется. `meta.stale` считается по
+порогу источника (120 ч). Без кешированного пакета — `404`.
+
 ### `GET /api/bg/heroes/{dbfId}`
 
 Возвращает весь detail payload solo-героя:
@@ -1453,10 +1526,19 @@ curl -s -X POST \
   "cached_after_failure_sources": [],
   "stale_sources": [],
   "stale_count": 0,
+  "upstream_pending_sources": [],
   "cached_count": 0,
   "cached_after_failure_count": 0
 }
 ```
+
+`upstream_pending_sources` — источники, у которых upstream ещё не опубликовал
+следующий выпуск (сейчас это возможно только для `vicious_syndicate_radars` в
+состоянии `upstream_publication_pending`). API отдаёт их последний полный
+dataset, парсеру нечего забирать, поэтому такой источник не входит в
+`stale_sources`, `cached_sources`, `cached_after_failure_sources` и не делает
+`freshness_ok=false`. Любое другое состояние того же источника (ошибка парсера
+или транспорта) учитывается как обычно. CLI `freshness-check` остаётся строгим.
 
 `serving_ok=false` выставляется не только при transport/refresh error, но и когда
 уже сохранённый dataset не проходит contract или семантическую проверку (например, все

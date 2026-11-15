@@ -73,6 +73,51 @@ class BgHeroRow(FlexibleRow):
     tier: str | None = None
 
 
+M = TypeVar("M", bound=ApiMeta)
+
+
+class MetaEnvelope(BaseModel, Generic[T, M]):
+    """Envelope whose ``meta`` carries route-specific fields besides ApiMeta."""
+
+    data: T
+    meta: M
+
+
+class BgHeroListMeta(ApiMeta):
+    list_fetched_at: str | None = None
+    details_fetched_at: str | None = None
+    list_source_id: str | None = None
+
+
+class BgHeroCompositionRow(BaseModel):
+    composition_id: int
+    name: str | None = None
+    tribes: list[str] = Field(default_factory=list)
+    num_games: int = Field(ge=0)
+    avg_placement: float | None = None
+    placement_distribution: list[str] = Field(default_factory=list)
+
+
+class BgHeroCompositionsRow(BaseModel):
+    id: str | None = None
+    dbfId: int
+    hero: str | None = None
+    compositions: list[BgHeroCompositionRow]
+
+
+class BgHeroCompositionsMeta(ApiMeta):
+    mmr: str | None = None
+    time_range: str | None = None
+    tribes_source_id: str | None = None
+    tribes_fetched_at: str | None = None
+
+
+class ArenaCardsMeta(ApiMeta):
+    game_type: Literal["underground", "normal"] | None = None
+    time_range: str | None = None
+    fields: list[str]
+
+
 class BgMinionRow(FlexibleRow):
     dbf_id: int
     name: str

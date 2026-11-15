@@ -233,6 +233,17 @@ def cache_revision(path: str, query_string: bytes) -> str:
             query.get("source_id") or ["hsreplay_arena_class_pages_firecrawl"]
         )[0]
         return _dataset_timestamp(source_id) or "not-cached"
+    if path.startswith("/v1/arena/cards"):
+        return _dataset_timestamp("hsreplay_arena_cards_advanced") or "not-cached"
+    if path.startswith("/v1/battlegrounds/heroes/compositions"):
+        # Tribes come from the composition statistics set.
+        return ":".join(
+            _dataset_timestamp(source_id) or "not-cached"
+            for source_id in (
+                "hsreplay_battlegrounds_hero_details",
+                "hsreplay_battlegrounds_compositions",
+            )
+        )
     if path.startswith(
         (
             "/v1/bg/heroes",
@@ -240,7 +251,14 @@ def cache_revision(path: str, query_string: bytes) -> str:
             "/api/bg/heroes",
         )
     ):
-        return _dataset_timestamp("hsreplay_battlegrounds_hero_details") or "not-cached"
+        # The list numbers come from the daily hero list when it is fresher.
+        return ":".join(
+            _dataset_timestamp(source_id) or "not-cached"
+            for source_id in (
+                "hsreplay_battlegrounds_hero_details",
+                "hsreplay_battlegrounds_heroes",
+            )
+        )
     if path.startswith("/v1/constructed/hsguru-deck"):
         from .hsguru_decks import hsguru_matrix_cache_revision
 
