@@ -1079,7 +1079,29 @@ def build_health_diagnostics() -> dict:
         freshness_monitor_errors.append(
             f"{type(exc).__name__}: {exc}"[:1000]
         )
-    stale_ids = [str(item["source_id"]) for item in stale_sources]
+    # A source whose upstream has not published the next issue yet serves its
+    # last complete dataset by design: the parser has nothing to fetch. It is
+    # listed on its own and does not gate freshness. Any other state of the
+    # same source (a parser or transport failure) still does.
+    from .source_catalog import upstream_pending_status
+
+    upstream_pending_sources = [
+        source.id
+        for source, status in zip(SOURCES, statuses, strict=True)
+        if status
+        and source_operationally_enabled(source.id)
+        and upstream_pending_status(source.id, status)
+    ]
+    pending = set(upstream_pending_sources)
+    stale_ids = [
+        str(item["source_id"])
+        for item in stale_sources
+        if str(item["source_id"]) not in pending
+    ]
+    cached_sources = [item for item in cached_sources if item not in pending]
+    cached_after_failure_sources = [
+        item for item in cached_after_failure_sources if item not in pending
+    ]
     serving_ok = (
         not hard_failed_sources
         and not semantic_failed_sources
@@ -1113,6 +1135,7 @@ def build_health_diagnostics() -> dict:
         "cached_after_failure_sources": cached_after_failure_sources,
         "stale_sources": stale_ids,
         "stale_count": len(stale_ids),
+        "upstream_pending_sources": upstream_pending_sources,
         "freshness_monitor_errors": freshness_monitor_errors,
         "cached_count": len(cached_sources),
         "cached_after_failure_count": len(cached_after_failure_sources),

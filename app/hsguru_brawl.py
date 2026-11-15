@@ -54,6 +54,10 @@ DECK_RANKS = ("all", "legend", "diamond_to_legend")
 DECK_MIN_GAMES = 50
 DECK_LIMIT = 200
 BASE_KEY = f"all|any_player|{ANY_OPPONENT}"
+# One run reads 35 pages (32 meta slices, 3 deck lists). A published snapshot
+# that lacks at most this many secondary pages is served as ``ok`` with the gap
+# listed in the status; more than that is a ``partial`` failure.
+MAX_TOLERATED_MISSING_PAGES = 2
 _DECKS_MARKER = "deck_stats_viewport"
 
 
@@ -187,6 +191,23 @@ async def collect(reader: PageReader) -> dict[str, Any]:
     }
 
 
+def _missing_reason(errors: list[dict[str, str]]) -> str:
+    """Bounded failure class of the pages that could not be read."""
+
+    from .reliability_telemetry import classify_failure_reason
+
+    signal = " ".join(str(item.get("error") or "") for item in errors)[:2000]
+    reason = classify_failure_reason(
+        {"state": str(SourceState.PARTIAL), "last_refresh_error": signal}
+    )
+    if reason != "unknown":
+        return reason
+    # The reader rejects a page that is not the expected HSGuru table.
+    if "content validation" in signal.lower() or "content_validation" in signal:
+        return "contract"
+    return "unavailable"
+
+
 def _base_slice(structured: dict[str, Any]) -> dict[str, Any] | None:
     return next(
         (item for item in structured.get("meta") or [] if item.get("key") == BASE_KEY),
@@ -227,8 +248,26 @@ async def refresh_hsguru_brawl(*, fetcher: PageFetcher | None = None) -> dict[st
         if published
         else SourceState.FETCH_ERROR
     )
+    missing = list(structured["missing_slices"])
+    # The served status stays ``ok`` while the snapshot is published and only a
+    # few secondary pages are absent: the dataset is fresh and usable, the gap
+    # is reported in ``missing_slices``. The run itself is still ``partial``.
+    status_state = (
+        SourceState.OK
+        if published and len(missing) <= MAX_TOLERATED_MISSING_PAGES
+        else state
+    )
     archetypes = len(base.get("rows") or []) if base else 0
     decks = sum(len(item["rows"]) for item in structured["decks"])
+    failure: dict[str, Any] = {}
+    if missing or not published:
+        failure = {
+            "failure_reason_code": _missing_reason(acquisition.get("errors") or []),
+            "last_refresh_error": (
+                f"{len(missing)} of {len(meta_slices()) + len(DECK_RANKS)} "
+                f"HSGuru Brawl pages were not read: {', '.join(missing[:10])}"
+            )[:700],
+        }
     save_status(
         SOURCE_ID,
         {
@@ -236,7 +275,7 @@ async def refresh_hsguru_brawl(*, fetcher: PageFetcher | None = None) -> dict[st
             "site": "hsguru",
             "category": "brawl",
             "url": meta_url("all", "any_player", ANY_OPPONENT),
-            "state": str(state),
+            "state": str(status_state),
             "fetched_at": structured["fetched_at"]
             if published
             else previous.get("fetched_at") or finished_at,
@@ -251,6 +290,8 @@ async def refresh_hsguru_brawl(*, fetcher: PageFetcher | None = None) -> dict[st
             "serving_cached_dataset": not published and bool(previous),
             "last_refresh_state": str(state),
             "last_refresh_at": finished_at,
+            "missing_slices": missing,
+            **failure,
         },
     )
     return {
