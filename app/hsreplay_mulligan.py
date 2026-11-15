@@ -1467,14 +1467,38 @@ def get_history(selector: Selector, *, card: str | None, limit: int) -> dict[str
     }
 
 
+def parse_deck_list(value: Any) -> list[list[int]] | None:
+    """HSReplay's stored deck list (a JSON string) as ``[dbf_id, count]`` pairs."""
+
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return None
+    if not isinstance(value, list):
+        return None
+    pairs: list[list[int]] = []
+    for item in value:
+        if not isinstance(item, (list, tuple)) or len(item) != 2:
+            return None
+        try:
+            pairs.append([int(item[0]), int(item[1])])
+        except (TypeError, ValueError):
+            return None
+    return pairs or None
+
+
 def list_decks(
     *, format_name: str | None, rank: str | None, limit: int
 ) -> list[dict[str, Any]]:
-    return _read(
+    rows = _read(
         lambda conn: store.deck_catalog(
             conn, format_name=format_name, rank=rank, limit=limit
         )
     )
+    for row in rows:
+        row["deck_list"] = parse_deck_list(row.get("deck_list"))
+    return rows
 
 
 def list_slices(*, deck_id: str, format_name: str | None) -> list[dict[str, Any]]:

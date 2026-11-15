@@ -51,16 +51,29 @@ def test_canonical_battlegrounds_uses_dataset_specific_cache_revision() -> None:
     with (
         patch(
             "app.public_cache._dataset_timestamp",
-            return_value="hero-details-revision",
+            side_effect=lambda source_id: f"{source_id}-revision",
         ) as dataset_timestamp,
         patch("app.public_cache._latest_dataset_timestamp") as latest_timestamp,
     ):
         revision = cache_revision("/v1/battlegrounds/heroes", b"mode=solo")
+        compositions = cache_revision("/v1/battlegrounds/heroes/compositions", b"")
+        arena_cards = cache_revision("/v1/arena/cards", b"fields=id")
 
-    assert revision == "hero-details-revision"
-    dataset_timestamp.assert_called_once_with(
-        "hsreplay_battlegrounds_hero_details"
+    # The list numbers come from the daily hero list when it is fresher, so
+    # either dataset changes the revision.
+    assert revision == (
+        "hsreplay_battlegrounds_hero_details-revision:"
+        "hsreplay_battlegrounds_heroes-revision"
     )
+    assert compositions == (
+        "hsreplay_battlegrounds_hero_details-revision:"
+        "hsreplay_battlegrounds_compositions-revision"
+    )
+    assert arena_cards == "hsreplay_arena_cards_advanced-revision"
+    assert [call.args[0] for call in dataset_timestamp.call_args_list[:2]] == [
+        "hsreplay_battlegrounds_hero_details",
+        "hsreplay_battlegrounds_heroes",
+    ]
     latest_timestamp.assert_not_called()
 
 

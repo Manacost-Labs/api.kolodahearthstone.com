@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+import threading
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlencode
@@ -12,7 +13,7 @@ from .hsreplay_client import fetch_hsreplay_json, fetch_text_via_flaresolverr
 from .proxy_errors import ProxyPaymentRequiredError
 from .resource_locks import ResourceLocked, ResourceLockSet
 from .source_state import SourceState
-from .storage import load_dataset, save_dataset, save_status
+from .storage import dataset_path, load_dataset, save_dataset, save_status
 
 SOURCE_ID = "hsreplay_battlegrounds_hero_details"
 HEROES_SOURCE_ID = "hsreplay_battlegrounds_heroes"
@@ -846,12 +847,157 @@ def load_bg_hero_details() -> dict[str, Any]:
     }
 
 
+def _parse_timestamp(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else None
+
+
+def _percent_value(value: Any) -> float | None:
+    try:
+        return round(float(str(value).strip().rstrip("%").replace(",", ".")), 2)
+    except (TypeError, ValueError):
+        return None
+
+
+def _fresher_hero_list(
+    payload: dict[str, Any],
+) -> tuple[dict[int, dict[str, Any]], str] | None:
+    """Rows of the daily hero list when it is newer than the detail bundle.
+
+    The detail bundle is rebuilt twice a week, the list source every day. The
+    list is used only for the same MMR/time-range slice: mixing slices would
+    publish numbers of another population under the bundle filters.
+    """
+
+    try:
+        dataset = load_dataset(HEROES_SOURCE_ID) or {}
+    except (OSError, UnicodeError, ValueError):
+        return None
+    structured = (dataset.get("data") or {}).get("structured") or {}
+    if not isinstance(structured, dict) or structured.get("type") != "bg_heroes":
+        return None
+    if structured.get("blocked"):
+        return None
+    filters = payload.get("filters") or {}
+    if not filters or (structured.get("filters") or {}) != filters:
+        return None
+    list_at = _parse_timestamp(dataset.get("fetched_at"))
+    if list_at is None:
+        return None
+    details_at = _parse_timestamp(payload.get("fetched_at"))
+    if details_at is not None and list_at <= details_at:
+        return None
+    rows: dict[int, dict[str, Any]] = {}
+    for row in structured.get("heroes") or []:
+        if not isinstance(row, dict):
+            continue
+        try:
+            rows[int(row["dbfId"])] = row
+        except (KeyError, TypeError, ValueError):
+            continue
+    # Same floor as the publication check of the list source itself.
+    if len(rows) < 30:
+        return None
+    return rows, str(dataset["fetched_at"])
+
+
+def _best_composition_for(
+    payload: dict[str, Any], dbf_id: int, composition_id: int
+) -> dict[str, Any] | None:
+    detail = (payload.get("details") or {}).get(str(dbf_id)) or {}
+    for comp in detail.get("compositions") or []:
+        if isinstance(comp, dict) and comp.get("composition_id") == composition_id:
+            return comp
+    return None
+
+
+def _int_or_none(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _overlay_hero_list(
+    payload: dict[str, Any],
+    rows: list[dict[str, Any]],
+    fresh: dict[int, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Take the list numbers from the fresher list; keep detail-only fields."""
+
+    merged: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    for row in rows:
+        dbf_id = _int_or_none(row.get("dbfId"))
+        source = fresh.get(dbf_id) if dbf_id is not None else None
+        if dbf_id is not None:
+            seen.add(dbf_id)
+        if dbf_id is None or source is None:
+            merged.append(row)
+            continue
+        item = dict(row)
+        if source.get("tier"):
+            item["tier"] = str(source["tier"]).upper()
+        pick_rate = _percent_value(source.get("pick_rate"))
+        if pick_rate is not None:
+            item["pick_rate"] = _pct(pick_rate)
+            item["pick_rate_value"] = pick_rate
+        avg_placement = _round(source.get("avg_placement"), 3)
+        if avg_placement is not None:
+            item["avg_placement"] = avg_placement
+        if source.get("placement_distribution"):
+            item["placement_distribution"] = list(source["placement_distribution"])
+        best_id = _int_or_none(source.get("best_composition_id"))
+        if best_id is not None and best_id != item.get("best_composition_id"):
+            item["best_composition_id"] = best_id
+            item["best_composition"] = _best_composition_for(payload, dbf_id, best_id)
+        merged.append(item)
+    for dbf_id, source in fresh.items():
+        if dbf_id in seen:
+            continue
+        # A hero added after the last detail build: list numbers only.
+        pick_rate = _percent_value(source.get("pick_rate"))
+        merged.append(
+            {
+                "hero": _hero_name(dbf_id),
+                "dbfId": dbf_id,
+                "id": source.get("id") or _card(dbf_id).get("id"),
+                "tier": str(source.get("tier") or "").upper() or None,
+                "pick_rate": _pct(pick_rate),
+                "pick_rate_value": pick_rate,
+                "avg_placement": _round(source.get("avg_placement"), 3),
+                "adjusted_avg_placement": None,
+                "placement_distribution": list(
+                    source.get("placement_distribution") or []
+                ),
+                "best_composition_id": _int_or_none(source.get("best_composition_id")),
+                "best_composition": None,
+                "key_minions_top3": [],
+                "anomaly_adjusted": False,
+            }
+        )
+    return merged
+
+
 def list_bg_heroes(*, mode: str = "solo", q: str | None = None) -> dict[str, Any]:
     payload = load_bg_hero_details()
+    details_fetched_at = payload.get("fetched_at")
+    list_fetched_at = details_fetched_at
+    list_source_id = SOURCE_ID
     if mode == "duos":
         rows = list((payload.get("duos") or {}).get("heroes") or [])
     else:
         rows = list(payload.get("heroes") or [])
+        fresher = _fresher_hero_list(payload)
+        if fresher is not None:
+            fresh_rows, list_fetched_at = fresher
+            rows = _overlay_hero_list(payload, rows, fresh_rows)
+            list_source_id = HEROES_SOURCE_ID
     if q:
         needle = q.lower()
         rows = [row for row in rows if needle in str(row.get("hero") or "").lower()]
@@ -860,11 +1006,152 @@ def list_bg_heroes(*, mode: str = "solo", q: str | None = None) -> dict[str, Any
         "type": "bg_heroes",
         "mode": mode,
         "count": len(rows),
-        "fetched_at": payload.get("fetched_at"),
+        # Date of the list numbers (tier, pick rate, placement); the detail
+        # bundle keeps its own date in details_fetched_at.
+        "fetched_at": list_fetched_at,
+        "list_fetched_at": list_fetched_at,
+        "details_fetched_at": details_fetched_at,
+        "list_source_id": list_source_id,
         "filters": payload.get("filters"),
         "source": payload.get("source"),
         "heroes": rows,
     }
+
+
+# Composition names HSReplay returns (English) and the Russian labels this
+# service stores, mapped to HearthstoneJSON race keys. A composition that is
+# not a single-tribe build ("Aberrations", menagerie) has no entry.
+_COMPOSITION_TRIBES: dict[str, str] = {
+    "beasts": "BEAST",
+    "звери": "BEAST",
+    "demons": "DEMON",
+    "демоны": "DEMON",
+    "dragons": "DRAGON",
+    "драконы": "DRAGON",
+    "elementals": "ELEMENTAL",
+    "элементали": "ELEMENTAL",
+    "mechs": "MECHANICAL",
+    "механизмы": "MECHANICAL",
+    "murlocs": "MURLOC",
+    "мурлоки": "MURLOC",
+    "naga": "NAGA",
+    "нага": "NAGA",
+    "pirates": "PIRATE",
+    "пираты": "PIRATE",
+    "quilboar": "QUILBOAR",
+    "свинобраз": "QUILBOAR",
+    "свинобразы": "QUILBOAR",
+    "undead": "UNDEAD",
+    "нежить": "UNDEAD",
+}
+COMPOSITIONS_SOURCE_ID = "hsreplay_battlegrounds_compositions"
+
+
+def composition_tribes(name: Any) -> list[str]:
+    tribe = _COMPOSITION_TRIBES.get(str(name or "").strip().casefold())
+    return [tribe] if tribe else []
+
+
+def _composition_types() -> tuple[dict[int, str], str | None]:
+    """Composition id -> type label of the composition statistics set."""
+
+    try:
+        dataset = load_dataset(COMPOSITIONS_SOURCE_ID) or {}
+    except (OSError, UnicodeError, ValueError):
+        return {}, None
+    structured = (dataset.get("data") or {}).get("structured") or {}
+    if not isinstance(structured, dict) or structured.get("type") != "bg_compositions":
+        return {}, None
+    types: dict[int, str] = {}
+    for row in structured.get("compositions") or []:
+        if not isinstance(row, dict) or not row.get("type"):
+            continue
+        comp_id = _int_or_none(row.get("composition_id"))
+        if comp_id is not None:
+            types[comp_id] = str(row["type"])
+    fetched_at = dataset.get("fetched_at")
+    return types, str(fetched_at) if types and fetched_at else None
+
+
+_hero_compositions_cache: dict[tuple[Any, ...], dict[str, Any]] = {}
+_hero_compositions_lock = threading.Lock()
+
+
+def _file_revision(source_id: str) -> tuple[str, int, int] | None:
+    path = dataset_path(source_id)
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return str(path), stat.st_mtime_ns, stat.st_size
+
+
+def list_bg_hero_compositions() -> dict[str, Any]:
+    """Compact per-hero composition statistics of the stored detail bundle.
+
+    The bundle is ~18 MB of JSON; the projection is cached per file revision
+    so that only the first request after a publication parses it.
+    """
+
+    key = (_file_revision(SOURCE_ID), _file_revision(COMPOSITIONS_SOURCE_ID))
+    with _hero_compositions_lock:
+        cached = _hero_compositions_cache.get(key)
+    if cached is not None:
+        return cached
+    payload = load_bg_hero_details()
+    types, tribes_fetched_at = _composition_types()
+    rows: list[dict[str, Any]] = []
+    for dbf_key, detail in (payload.get("details") or {}).items():
+        if not isinstance(detail, dict):
+            continue
+        hero = detail.get("hero") if isinstance(detail.get("hero"), dict) else {}
+        dbf_id = _int_or_none(hero.get("dbfId") or dbf_key)
+        if dbf_id is None:
+            continue
+        compositions: list[dict[str, Any]] = []
+        for comp in detail.get("compositions") or []:
+            comp_id = (
+                _int_or_none(comp.get("composition_id"))
+                if isinstance(comp, dict)
+                else None
+            )
+            if comp_id is None:
+                continue
+            compositions.append(
+                {
+                    "composition_id": comp_id,
+                    "name": comp.get("name"),
+                    "tribes": composition_tribes(types.get(comp_id))
+                    or composition_tribes(comp.get("name")),
+                    "num_games": int(comp.get("num_games") or 0),
+                    "avg_placement": comp.get("avg_placement"),
+                    "placement_distribution": list(
+                        comp.get("placement_distribution") or []
+                    ),
+                }
+            )
+        rows.append(
+            {
+                "id": hero.get("id") or _card(dbf_id).get("id"),
+                "dbfId": dbf_id,
+                "hero": hero.get("hero"),
+                "compositions": compositions,
+            }
+        )
+    rows.sort(key=lambda row: row["dbfId"])
+    result = {
+        "type": "bg_hero_compositions",
+        "count": len(rows),
+        "fetched_at": payload.get("fetched_at"),
+        "filters": payload.get("filters") or {},
+        "tribes_source_id": COMPOSITIONS_SOURCE_ID if types else None,
+        "tribes_fetched_at": tribes_fetched_at,
+        "heroes": rows,
+    }
+    with _hero_compositions_lock:
+        _hero_compositions_cache.clear()
+        _hero_compositions_cache[key] = result
+    return result
 
 
 def get_bg_hero(dbf_id: int) -> dict[str, Any] | None:

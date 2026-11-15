@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+- `GET /v1/battlegrounds/heroes/compositions?mmr=TOP_50_PERCENT`: композиции
+  всех героев одним ответом из уже хранимого `hsreplay_battlegrounds_hero_details`
+  (`composition_id`, `name`, `num_games`, `avg_placement`,
+  `placement_distribution`) и `tribes` — ключи рас HearthstoneJSON по типу
+  композиции из `hsreplay_battlegrounds_compositions`. Без составов досок,
+  tavern-up и hero-power; срез, которого нет в хранилище, отвечает 422.
+- `GET /v1/arena/cards?fields=…`: компактные строки
+  `hsreplay_arena_cards_advanced` с выбранными полями (по умолчанию `id`,
+  `score`, `tier`, `cardClass`, `win_rate`), фильтром `class` и пагинацией.
+  `meta.game_type` (`underground`/`normal`) и `meta.time_range` называют срез.
+- `GET /v1/hsreplay/mulligan/decks`: в строке новое поле `deck_list` — карты
+  колоды парами `[dbfId, count]` (аддитивно; `null`, если списка нет).
+- `GET /api/bg/heroes` и `GET /v1/battlegrounds/heroes` (solo, `TOP_50_PERCENT`):
+  числа списка (`tier`, `pick_rate`, `pick_rate_value`, `avg_placement`,
+  `placement_distribution`, `best_composition_id`) берутся из ежедневного
+  `hsreplay_battlegrounds_heroes`, когда он новее пакета деталей и относится к
+  тому же срезу. `fetched_at` теперь дата чисел списка; новые поля
+  `list_fetched_at`, `details_fetched_at`, `list_source_id` (в v1 — в `meta`).
+  Существующие поля строк и их типы не меняются. ETag этих путей учитывает оба
+  набора.
+- `hsguru_brawl`: опубликованный снимок без одной-двух второстепенных страниц
+  из 35 больше не считается сбоем источника — сохранённое состояние `ok`,
+  запуск по-прежнему `partial`, пропуски перечислены в `missing_slices`
+  статуса. Любой неполный или неопубликованный запуск получает
+  `failure_reason_code`, поэтому диагностика больше не показывает
+  `unclassified_failure`.
+- Диагностика здоровья: источник в подтверждённом ожидании публикации upstream
+  (`vicious_syndicate_radars`, `upstream_publication_pending`) вынесен в новый
+  список `upstream_pending_sources` и не влияет на `freshness_ok`/`degraded`.
+  Другие состояния этого источника учитываются как раньше.
+- `GET /v1/sources`: источник без dataset-файла
+  (`hsreplay_battlegrounds_compositions_screenshot`) получает свежесть по своему
+  статусу, а не `freshness_state: missing`.
 - `GET /v1/hsguru/archetypes`: каталог текущего патча HSGuru
   (`period=patch_37.0.2`, номер берётся из последнего прогона матрицы, без
   правки кода) рядом с текущим окном и Bans. Новое поле
