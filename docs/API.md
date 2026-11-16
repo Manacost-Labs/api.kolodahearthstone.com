@@ -1302,6 +1302,7 @@ Query parameters:
 | --- | --- | --- |
 | `mode` | `solo` | `solo` или `duos`. |
 | `q` | empty | Поиск по имени героя. |
+| `mmr` | `TOP_50_PERCENT` | Срез MMR: `TOP_50_PERCENT`, `TOP_20_PERCENT`, `TOP_5_PERCENT`, `TOP_1_PERCENT`. |
 
 ```bash
 curl -s "https://api.kolodahearthstone.com/api/bg/heroes?mode=solo" | jq .
@@ -1327,6 +1328,33 @@ curl -s "https://api.kolodahearthstone.com/api/bg/heroes?mode=duos" | jq .
 `GET /v1/battlegrounds/heroes` отдаёт те же строки; три последних поля находятся
 в `meta`, `meta.fetched_at` — дата чисел списка. Duos-список и срезы
 `mmr`, отличные от `TOP_50_PERCENT`, не меняются.
+
+#### Срезы MMR по запросу
+
+По расписанию собирается только `TOP_50_PERCENT`. Срезы `TOP_20_PERCENT`,
+`TOP_5_PERCENT` и `TOP_1_PERCENT` (solo и duos) читаются с HSReplay при запросе,
+а последний удачный ответ каждого среза хранится на диске:
+
+| Ситуация | Ответ |
+| --- | --- |
+| Копии среза меньше 3 часов | `200`, `stale: false`, запроса к HSReplay нет. |
+| Копия старше, HSReplay ответил | `200`, `stale: false`, копия заменена, `fetched_at` — время чтения. |
+| HSReplay не прочитан, копия есть | `200`, `stale: true`, данные и `fetched_at` прежней копии. |
+| HSReplay не прочитан, копии нет | `503` с `{"detail": "…"}` и заголовком `Retry-After` (секунды). |
+
+Ответ, который не является списком героев (меньше 30 героев в solo или 20 в
+duos, ни одного героя со статистикой мест, тело ошибки), копией не становится
+и клиенту не отдаётся. После неудачного чтения тот же срез 10 минут не
+запрашивается повторно: всё это время отдаётся прежняя копия или `503`.
+Ответы этих срезов идут с `Cache-Control: no-store` и без `ETag`.
+
+В узком срезе у героя с малым числом игр HSReplay отдаёт `null` вместо
+статистики мест: в строке `tier` и `avg_placement` равны `null`,
+`placement_distribution` пуст, `pick_rate` есть. Такие герои стоят в конце
+списка.
+
+Копии срезов не являются источниками с расписанием: их нет в `/v1/sources`, и
+сбой чтения среза не влияет на `/v1/system/health`.
 
 ### `GET /v1/battlegrounds/heroes/compositions`
 

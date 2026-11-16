@@ -122,6 +122,10 @@ async def fetch_hero_index(
     payload = await _fetch_json(url, cache_key=f"bg:heroes:index:{'duos' if duos else 'solo'}:{mmr}:{time_range}")
     rows = payload.get("data") if isinstance(payload.get("data"), list) else []
     heroes = [_hero_row(row) for row in rows if isinstance(row, dict) and row.get("hero_dbf_id") is not None]
+    # A hero with too few games in the slice has no placement statistics; a
+    # list where no hero has them is not a hero tier list at all.
+    if heroes and not any(hero.get("avg_placement") is not None for hero in heroes):
+        raise RuntimeError("HSReplay Battlegrounds hero index has no placement statistics")
     heroes.sort(key=lambda row: (_tier_sort(row.get("tier")), _num(row.get("avg_placement") or 99), row.get("hero") or ""))
     return {
         "mode": "duos" if duos else "solo",

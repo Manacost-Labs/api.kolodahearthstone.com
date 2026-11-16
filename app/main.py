@@ -2369,18 +2369,44 @@ def db_bg_minion_history(
     return payload
 
 
-@app.get("/api/bg/heroes")
+@app.get(
+    "/api/bg/heroes",
+    responses={
+        503: {
+            "description": (
+                "An on-demand MMR slice could not be read from HSReplay and no "
+                "stored copy exists; `Retry-After` says when to ask again."
+            )
+        }
+    },
+)
 async def api_bg_heroes(
+    response: Response,
     mode: str = Query("solo", pattern="^(solo|duos)$"),
     q: str | None = Query(None, min_length=1, max_length=120),
     mmr: str = Query("TOP_50_PERCENT", pattern="^(TOP_50_PERCENT|TOP_20_PERCENT|TOP_5_PERCENT|TOP_1_PERCENT)$"),
 ) -> dict:
-    from .hsreplay_bg_hero_details import BG_MMR, fetch_hero_index, list_bg_heroes
+    from .bg_hero_slices import HeroSliceUnavailable, load_hero_slice
+    from .hsreplay_bg_hero_details import BG_MMR, list_bg_heroes
+    from .public_cache import DEGRADED_RESPONSE_HEADER
 
-    # The stored full detail snapshot is Top 50%. Other MMR ranges are
-    # lightweight live index slices, cached by the protected HSReplay client.
+    # The stored full detail snapshot is Top 50%. Other MMR ranges are read
+    # from HSReplay on demand and kept as a last-known-good copy.
     if mmr != BG_MMR:
-        payload = await fetch_hero_index(duos=mode == "duos", mmr=mmr)
+        try:
+            payload = await load_hero_slice(mode=mode, mmr=mmr)
+        except HeroSliceUnavailable as exc:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    f"Battlegrounds heroes for {mmr} ({mode}) are temporarily "
+                    "unavailable: HSReplay could not be read and no stored copy exists"
+                ),
+                headers={"Retry-After": str(exc.retry_after)},
+            ) from None
+        # The copy is refreshed inside the request, after the revision ETag
+        # was computed: a shared ETag could answer a false 304.
+        response.headers[DEGRADED_RESPONSE_HEADER] = "1"
         rows = payload.get("heroes") or []
         if q:
             needle = q.lower()
@@ -2389,7 +2415,8 @@ async def api_bg_heroes(
             "type": "bg_heroes",
             "mode": mode,
             "count": len(rows),
-            "fetched_at": datetime.now(UTC).isoformat(),
+            "fetched_at": payload.get("fetched_at"),
+            "stale": payload.get("stale"),
             "filters": payload.get("filters"),
             "source": payload.get("source"),
             "heroes": rows,

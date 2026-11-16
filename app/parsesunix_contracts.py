@@ -95,13 +95,16 @@ def hsreplay_json_response_contract(url: str) -> ResponseContract:
         "/api/v1/battlegrounds/heroes/",
         "/api/v1/battlegrounds/duos/heroes/",
     }:
+        # Only the identity of a row is always present. HSReplay answers
+        # ``null`` placement statistics for a hero with too few games in the
+        # slice (16 of 90 heroes in Top 1% on 2026-11-16), and such a hero can
+        # be the first row: requiring the statistics of row 0 rejected a
+        # healthy answer. The parsers check that the list as a whole carries
+        # placement statistics.
         return ResponseContract.json(
             required_json_paths=(
                 "data.0.hero_dbf_id",
                 "data.0.pick_rate",
-                "data.0.avg_final_placement",
-                "data.0.final_placement_distribution",
-                "data.0.tier_v2",
             ),
             min_body_bytes=100,
         )
