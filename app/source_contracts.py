@@ -75,6 +75,15 @@ FIELD_UNAVAILABLE_REASONS: dict[str, dict[str, frozenset[str]]] = {
         ),
     },
 }
+# Preserve upstream rows even when HSReplay explicitly withholds placement metrics.
+for _trinket_source in (*TRINKET_SLICE_SOURCE_IDS,
+                        "hsreplay_battlegrounds_trinkets_lesser",
+                        "hsreplay_battlegrounds_trinkets_greater"):
+    FIELD_UNAVAILABLE_REASONS[_trinket_source] = {
+        field: frozenset({"upstream_explicit_null"})
+        for field in ("avg_placement", "placement_distribution")
+    }
+
 FIELD_UNEXPLAINED_REASONS: dict[str, dict[str, frozenset[str]]] = {
     "firestone_standard": {
         "core_cards": frozenset(
