@@ -24,6 +24,15 @@
   полей, `install_card_history.py --upgrade-triggers --trigger-backup`, правки
   синков картинок и каталога конструкта, BG pool patch. Тесты приведены к
   прод-поведению. Поведение прода не меняется.
+- `GET /api/v1/card-catalog`, `/card-catalog/{card_id}` и
+  `/card-catalog/dbf/{dbf}` принимают `?locale=ruRU|enUS|plPL|esES` (регистр
+  важен). С параметром у карты появляется блок `localized` (`locale`,
+  `requested_locale`, `fallback`, `name`, `text`, `flavor`, `collection_text`,
+  `how_to_earn`, `how_to_earn_golden`, `targeting_arrow_text`) из таблицы
+  `hearthstone_card_localizations`. Нет строки локали или самой таблицы —
+  тексты enUS, `fallback: true`, 200. Неизвестное значение — 400
+  `invalid_parameter`. `q` ищет и по имени выбранной локали, `Last-Modified`
+  учитывает строку локали. Без параметра ответ не меняется.
 - `GET /api/bg/heroes` со срезами `mmr`, отличными от `TOP_50_PERCENT`
   (читаются с HSReplay по запросу): сбой чтения больше не отвечает `500`.
   Последний удачный ответ каждого среза хранится на диске; при сбое он отдаётся

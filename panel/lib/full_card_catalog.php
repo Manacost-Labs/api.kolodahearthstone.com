@@ -29,25 +29,84 @@ function full_catalog_card_to_api(array $row): array
     ];
 }
 
-function full_catalog_find(PDO $pdo, string $key, string $value): ?array
+const FULL_CATALOG_LOCALES = ['ruRU', 'enUS', 'plPL', 'esES'];
+
+/** Validates `?locale`; null when absent. Case-sensitive, no silent fallback. */
+function full_catalog_locale(array $query): ?string
+{
+    if (!array_key_exists('locale', $query)) return null;
+    $locale = $query['locale'];
+    if (!is_string($locale) || !in_array($locale, FULL_CATALOG_LOCALES, true)) {
+        throw new InvalidArgumentException('Unsupported locale; expected one of ' . implode(', ', FULL_CATALOG_LOCALES));
+    }
+    return $locale;
+}
+
+/** Adds the additive `localized` block; a missing or unreadable locale row falls back to enUS. */
+function full_catalog_with_localized(array $card, array $row, string $locale, ?string $payload): array
+{
+    $source = null;
+    if (is_string($payload) && $payload !== '') {
+        try {
+            $decoded = json_decode($payload, true, 512, JSON_THROW_ON_ERROR);
+            if (is_array($decoded)) $source = $decoded;
+        } catch (JsonException) {
+        }
+    }
+    $fallback = $source === null;
+    if ($fallback) $source = $card['hearthstonejson']['enUS'];
+    $card['localized'] = [
+        'locale' => $fallback ? 'enUS' : $locale, 'requested_locale' => $locale, 'fallback' => $fallback,
+        'name' => $source['name'] ?? null, 'text' => $source['text'] ?? null, 'flavor' => $source['flavor'] ?? null,
+        'collection_text' => $source['collectionText'] ?? null, 'how_to_earn' => $source['howToEarn'] ?? null,
+        'how_to_earn_golden' => $source['howToEarnGolden'] ?? null,
+        'targeting_arrow_text' => $source['targetingArrowText'] ?? null,
+    ];
+    return $card;
+}
+
+function full_catalog_is_missing_table(PDOException $error): bool
+{
+    return ($error->errorInfo[0] ?? '') === '42S02';
+}
+
+function full_catalog_find(PDO $pdo, string $key, string $value, ?string $locale = null, ?string &$modified = null): ?array
 {
     if (!in_array($key, ['card_id', 'dbf'], true)) {
         throw new InvalidArgumentException('Invalid catalog key');
     }
-    try {
-        $stmt = $pdo->prepare('SELECT * FROM hearthstone_card_catalog WHERE ' . $key . ' = :value LIMIT 1');
-        $stmt->execute(['value' => $value]);
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        return $row ? full_catalog_card_to_api($row) : null;
-    } catch (PDOException $error) {
-        // Existing card endpoints remain available during schema rollout.
-        if (($error->errorInfo[0] ?? '') === '42S02') return null;
-        throw $error;
+    $withLocale = $locale !== null;
+    while (true) {
+        try {
+            $sql = $withLocale
+                ? 'SELECT c.*, l.payload AS loc_payload, l.updated_at AS loc_updated_at FROM hearthstone_card_catalog c'
+                    . ' LEFT JOIN hearthstone_card_localizations l ON l.card_id = c.card_id AND l.locale = :locale'
+                    . ' WHERE c.' . $key . ' = :value LIMIT 1'
+                : 'SELECT * FROM hearthstone_card_catalog WHERE ' . $key . ' = :value LIMIT 1';
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute($withLocale ? ['value' => $value, 'locale' => $locale] : ['value' => $value]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (!$row) return null;
+            $card = full_catalog_card_to_api($row);
+            $modified = $row['updated_at'];
+            if ($locale !== null) {
+                $card = full_catalog_with_localized($card, $row, $locale, $withLocale ? ($row['loc_payload'] ?? null) : null);
+                if (($row['loc_updated_at'] ?? null) !== null && $row['loc_updated_at'] > $modified) $modified = $row['loc_updated_at'];
+            }
+            return $card;
+        } catch (PDOException $error) {
+            // Existing card endpoints remain available during schema rollout.
+            if (!full_catalog_is_missing_table($error)) throw $error;
+            // Localizations table not deployed yet: serve the card with enUS fallback.
+            if ($withLocale) { $withLocale = false; continue; }
+            return null;
+        }
     }
 }
 
 function full_catalog_listing(PDO $pdo, array $query): array
 {
+    $locale = full_catalog_locale($query);
     $where = ['1=1'];
     $params = [];
     foreach (['card_type', 'set', 'collectible'] as $key) {
@@ -58,14 +117,20 @@ function full_catalog_listing(PDO $pdo, array $query): array
             throw new InvalidArgumentException('collectible must be 0 or 1');
         }
         $column = $key === 'set' ? 'card_set' : $key;
-        $where[] = $column . ' = :' . $key;
+        $where[] = 'c.' . $column . ' = :' . $key;
         $params[$key] = $key === 'collectible' ? $value : strtoupper($value);
     }
     $q = $query['q'] ?? '';
     if (!is_string($q) || strlen($q) > 512) throw new InvalidArgumentException('Invalid search');
     if ($q !== '') {
-        $where[] = '(card_id LIKE :id OR name_ru LIKE :ru OR name_en LIKE :en)';
-        $params += ['id' => '%' . $q . '%', 'ru' => '%' . $q . '%', 'en' => '%' . $q . '%'];
+        $like = '%' . $q . '%';
+        $params += ['id' => $like, 'ru' => $like, 'en' => $like];
+        $search = 'c.card_id LIKE :id OR c.name_ru LIKE :ru OR c.name_en LIKE :en';
+        if ($locale !== null) {
+            $params['loc'] = $like;
+            $search .= ' OR l.name LIKE :loc';
+        }
+        $where[] = '(' . $search . ')';
     }
     $numbers = [];
     foreach (['page' => [1, 1000000, 1], 'per_page' => [1, 200, 50]] as $key => [$min, $max, $default]) {
@@ -77,18 +142,52 @@ function full_catalog_listing(PDO $pdo, array $query): array
     }
     ['page' => $page, 'per_page' => $perPage] = $numbers;
     $filter = ' WHERE ' . implode(' AND ', $where);
-    $stmt = $pdo->prepare('SELECT COUNT(*) AS total, MAX(updated_at) AS updated_at FROM hearthstone_card_catalog' . $filter);
-    $stmt->execute($params);
-    $summary = $stmt->fetch(PDO::FETCH_ASSOC);
-    $stmt = $pdo->prepare('SELECT * FROM hearthstone_card_catalog' . $filter . ' ORDER BY card_id LIMIT :limit OFFSET :offset');
-    foreach ($params as $key => $value) $stmt->bindValue(':' . $key, $value);
-    $stmt->bindValue(':limit', $perPage, PDO::PARAM_INT);
-    $stmt->bindValue(':offset', ($page - 1) * $perPage, PDO::PARAM_INT);
-    $stmt->execute();
+    $withLocale = $locale !== null;
+    while (true) {
+        $from = ' FROM hearthstone_card_catalog c' . ($withLocale
+            ? ' LEFT JOIN hearthstone_card_localizations l ON l.card_id = c.card_id AND l.locale = :locale' : '');
+        $bound = $params;
+        if ($withLocale) {
+            $bound['locale'] = $locale;
+        } else {
+            // Without the table the locale name cannot be searched; keep catalog-wide matching.
+            unset($bound['loc']);
+        }
+        $filterSql = $filter;
+        if (!$withLocale && $locale !== null) {
+            $filterSql = str_replace(' OR l.name LIKE :loc', '', $filter);
+        }
+        try {
+            $stmt = $pdo->prepare('SELECT COUNT(*) AS total, MAX(c.updated_at) AS updated_at'
+                . ($withLocale ? ', MAX(l.updated_at) AS loc_updated_at' : '') . $from . $filterSql);
+            $stmt->execute($bound);
+            $summary = $stmt->fetch(PDO::FETCH_ASSOC);
+            $stmt = $pdo->prepare('SELECT c.*' . ($withLocale ? ', l.payload AS loc_payload, l.updated_at AS loc_updated_at' : '')
+                . $from . $filterSql . ' ORDER BY c.card_id LIMIT :limit OFFSET :offset');
+            foreach ($bound as $key => $value) $stmt->bindValue(':' . $key, $value);
+            $stmt->bindValue(':limit', $perPage, PDO::PARAM_INT);
+            $stmt->bindValue(':offset', ($page - 1) * $perPage, PDO::PARAM_INT);
+            $stmt->execute();
+            break;
+        } catch (PDOException $error) {
+            if (!$withLocale || !full_catalog_is_missing_table($error)) throw $error;
+            $withLocale = false; // Localizations table not deployed yet: enUS fallback for every card.
+        }
+    }
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
     $total = (int)$summary['total'];
     $pages = max(1, (int)ceil($total / $perPage));
-    return ['data' => array_map('full_catalog_card_to_api', $stmt->fetchAll(PDO::FETCH_ASSOC)),
-        'last_updated' => $summary['updated_at'],
+    $lastUpdated = $summary['updated_at'];
+    if ($withLocale && ($summary['loc_updated_at'] ?? null) !== null && $summary['loc_updated_at'] > $lastUpdated) {
+        $lastUpdated = $summary['loc_updated_at'];
+    }
+    $cards = array_map(static function (array $row) use ($locale, $withLocale): array {
+        $card = full_catalog_card_to_api($row);
+        return $locale === null ? $card
+            : full_catalog_with_localized($card, $row, $locale, $withLocale ? ($row['loc_payload'] ?? null) : null);
+    }, $rows);
+    return ['data' => $cards,
+        'last_updated' => $lastUpdated,
         'pagination' => ['page' => $page, 'per_page' => $perPage, 'total' => $total,
             'total_pages' => $pages, 'has_next' => $page < $pages]];
 }
@@ -112,8 +211,14 @@ function api_full_card_catalog(PDO $pdo, string $path): void
         if ($key === 'dbf' && !preg_match('/^[0-9]{1,10}$/D', $value)) {
             respond_error('invalid_parameter', 'Invalid dbf', 400);
         }
-        $card = full_catalog_find($pdo, $key, $value);
+        try {
+            $locale = full_catalog_locale($_GET);
+        } catch (InvalidArgumentException $error) {
+            respond_error('invalid_parameter', $error->getMessage(), 400);
+        }
+        $modified = null;
+        $card = full_catalog_find($pdo, $key, $value, $locale, $modified);
         if (!$card) respond_error('not_found', 'Карта не найдена.', 404);
-        respond_cached(['data' => $card], $card['updated_at']);
+        respond_cached(['data' => $card], $modified ?? $card['updated_at']);
     }
 }
