@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Каталог карт на 4 языках (E24, срез рендеров): при `?locale=` блок
+  `localized` в `/api/v1/card-catalog`, `/{id}` и `/dbf/{dbf}` получает
+  `render_url` и `render_media_verified`. Скачанный рендер — ссылка на наш
+  `uploads/card-renders/{locale}/512x/{id}.webp?v=<хеш>` и `true`; ещё не
+  скачанный — ссылка HSJ той же локали (для MINION, SPELL, WEAPON, HERO,
+  HERO_POWER, LOCATION) и `false`; нет рендера (404 HSJ, ENCHANTMENT, PET) —
+  `null`. Источник — индекс загрузчика `var/card-renders/{locale}.index.json`;
+  нет или битый индекс — как «не скачан». Без `?locale=` ответы, `images.card`
+  и `API_VERSION` не меняются. `Last-Modified` учитывает время индекса.
 - Панель, «Статистика карты»: страница открывается без экрана ошибки
   (подсказка «Введите название карты»), кнопка «Статистика» в карточке
   записи передаёт карту в поле `card_name`. Модуль, который ответил ошибкой
