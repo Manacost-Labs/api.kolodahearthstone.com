@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   archetypeIdentity,
-  autoArchetypeLabel,
   classFromName,
   normalizeClass,
   resolveClass,
@@ -49,15 +48,14 @@ test('russianName and archetypeIdentity use the dictionary', () => {
   assert.equal(archetypeIdentity('').title, '—');
 });
 
-test('a name the dictionary lacks gets the HearthPulse automatic label', () => {
-  // Every word has a term: the card before the class.
-  assert.equal(russianName('Yogg Warrior'), 'Йогг-Сарон Воин');
-  assert.deepEqual(autoArchetypeLabel('Yogg Warrior'), { label: 'Йогг-Сарон Воин', unknown: [] });
-  // A contained translation lends its label, the extra words go into brackets.
-  assert.equal(russianName('Harold Blood DK'), 'Рыцарь смерти Крови на возвещении');
-  // Words without a term stay English, the class is still Russian (as on hearthpulse.net).
-  assert.equal(russianName('Some New Archetype Mage'), 'Some New Archetype Маг');
-  assert.deepEqual(autoArchetypeLabel('Some New Archetype Mage')?.unknown, ['Some', 'New', 'Archetype']);
+test('a name the dictionary lacks stays English, the class still comes from its ending', () => {
+  assert.equal(russianName('Yogg Warrior'), null);
+  assert.equal(russianName('Some New Archetype Mage'), null);
+  assert.deepEqual(archetypeIdentity('Yogg Warrior'), {
+    title: 'Yogg Warrior',
+    subtitle: null,
+    classSlug: 'warrior',
+  });
 });
 
 test('classIconSrc points at an existing file', async () => {

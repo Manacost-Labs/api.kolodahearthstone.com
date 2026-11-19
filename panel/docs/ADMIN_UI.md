@@ -155,10 +155,10 @@ These three PHP adapters are reachable only through the private
   ending of the name (`lib/archetypes.ts`, `normalizeClass` reads `Death Knight`,
   `DEATHKNIGHT`, `DK`). Russian names: `lib/vendor/archetype-labels-ru.json`,
   copied from `app/balance_radar/data/archetype_labels_ru.json` by
-  `scripts/sync-models.mjs`; a name missing there gets HearthPulse's automatic
-  label (`archetypeLabel`/`autoArchetypeLabel` ported to `lib/archetypes.ts`,
-  terms in `lib/vendor/archetype-terms-ru.json` from HearthPulse
-  `archetypeTerms.ts`; words without a term stay English, as on the site). Icons:
+  `scripts/sync-models.mjs`; a name missing there stays English. Every
+  `archetype` field (`Value` in `components/ui.tsx` → `ArchetypeName.tsx`: the
+  table column of meta, HSGuru archetypes and decks, and the details) shows the
+  class icon, the Russian name and the English one below. Icons:
   `public/class-icons/` (HearthPulse class art, see the README there). The
   chart colours per class are `--meta-class-*` in `stats/meta-view.css` (≥ 3:1
   against the card in both themes).

@@ -17,6 +17,7 @@ import {
   type ValueKind,
 } from '@/lib/format';
 import { decode, mediaUrl } from '@/lib/model';
+import { ArchetypeName } from './ArchetypeName';
 import { Thumb } from './Thumb';
 
 const valueKinds: readonly string[] = [
@@ -152,6 +153,8 @@ export function Value({ value, name = '', kind }: { value: unknown; name?: strin
   if (url && audioPattern.test(url))
     // biome-ignore lint/a11y/useMediaCaption: card sound effects have no speech to caption
     return <audio aria-label="Аудиозапись" controls preload="none" src={url} />;
+  // Archetype names (meta, HSGuru, decks): class icon and the Russian name with the English one below (#107).
+  if (name === 'archetype' && typeof decoded === 'string') return <ArchetypeName name={decoded} />;
   const resolved = isValueKind(kind) ? kind : inferKind(name, decoded);
   switch (resolved) {
     case 'status':
