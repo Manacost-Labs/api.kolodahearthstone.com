@@ -1138,7 +1138,8 @@ def _candidate_rows(
     format_focus: str | None = None,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
-    seen_codes: set[str] = set()
+    # (format, code): HSGuru lists one code in both formats' catalogs.
+    seen_codes: set[tuple[str, str]] = set()
     known_names = set(known_ladder)
     focus = _format_bucket(format_focus) if format_focus else None
     if focus == "other":
@@ -1147,12 +1148,12 @@ def _candidate_rows(
     for source_id in CANDIDATE_SOURCE_IDS:
         for row in _streamer_rows(source_id):
             code = str(row.get("deck_code") or "").strip()
-            if not code or code in seen_codes:
-                continue
             row_fmt = _format_bucket(row.get("Format") or row.get("format"))
+            if not code or (row_fmt, code) in seen_codes:
+                continue
             if focus and row_fmt not in {focus, "other"}:
                 continue
-            seen_codes.add(code)
+            seen_codes.add((row_fmt, code))
             enriched = dict(row)
             enriched["_candidate_source_id"] = source_id
             rows.append(enriched)
@@ -1176,13 +1177,13 @@ def _candidate_rows(
         )
         for row in ranked:
             code = str(row.get("deck_code") or "").strip()
-            if not code or code in seen_codes:
+            bucket = _format_bucket(row.get("format"))
+            if not code or (bucket, code) in seen_codes:
                 continue
             games = _parse_games(row.get("games")) or 0
             if games < 45 or games > 220:
                 continue
             title = str(row.get("title") or row.get("archetype") or "").strip()
-            bucket = _format_bucket(row.get("format"))
             if bucket not in catalog_budget:
                 continue
             if catalog_kept[bucket] >= catalog_budget[bucket]:
@@ -1194,7 +1195,7 @@ def _candidate_rows(
                 continue
             if not concept and games > 140:
                 continue
-            seen_codes.add(code)
+            seen_codes.add((bucket, code))
             catalog_kept[bucket] += 1
             rows.append(
                 {
@@ -1279,7 +1280,7 @@ def _merge_history(
     now: datetime,
 ) -> list[dict[str, Any]]:
     cutoff = now - timedelta(hours=max(1, retention_hours))
-    by_code: dict[str, dict[str, Any]] = {}
+    by_code: dict[tuple[str, str], dict[str, Any]] = {}
 
     def _parse_ts(value: Any) -> datetime | None:
         if not value:
@@ -1294,6 +1295,7 @@ def _merge_history(
         code = str(row.get("deck_code") or "").strip()
         if not code:
             continue
+        key = (_format_bucket(row.get("format")), code)
         last_seen = _parse_ts(row.get("last_seen_at") or row.get("first_seen_at"))
         if last_seen is not None and last_seen < cutoff:
             continue
@@ -1309,13 +1311,14 @@ def _merge_history(
             )
             if not (meme_twist and _spicy_packages(pkgs)):
                 continue
-        by_code[code] = dict(row)
+        by_code[key] = dict(row)
 
     for row in fresh_rows:
         code = str(row.get("deck_code") or "").strip()
         if not code:
             continue
-        prev = by_code.get(code)
+        key = (_format_bucket(row.get("format")), code)
+        prev = by_code.get(key)
         if prev:
             merged = dict(prev)
             merged.update(row)
@@ -1341,9 +1344,9 @@ def _merge_history(
                     "content_archetype",
                 ):
                     merged[key] = prev.get(key)
-            by_code[code] = merged
+            by_code[key] = merged
         else:
-            by_code[code] = dict(row)
+            by_code[key] = dict(row)
     return list(by_code.values())
 
 
@@ -1409,6 +1412,11 @@ def dedupe_near_duplicates(
             continue
         kept.append({**row, "variants": variants[index]})
     return kept, len(absorbed)
+
+
+def _row_key(row: dict[str, Any]) -> tuple[str, str]:
+    """A deck is its format and code: HSGuru lists one code in both formats."""
+    return (_format_bucket(row.get("format")), str(row.get("deck_code") or ""))
 
 
 def _is_off_meta(row: dict[str, Any]) -> bool:
@@ -1497,11 +1505,11 @@ def _pick_diverse_brews(
         picked.append(row)
     # If caps left holes, fill by score with a softer class cap; still respect XL/HL.
     if len(picked) < limit:
-        picked_codes = {str(r.get("deck_code") or "") for r in picked}
+        picked_codes = {_row_key(r) for r in picked}
         for row in rows:
             if len(picked) >= limit:
                 break
-            code = str(row.get("deck_code") or "")
+            code = _row_key(row)
             if code in picked_codes:
                 continue
             cls = str(row.get("class") or "unknown").casefold()
@@ -1555,12 +1563,12 @@ def _balance_and_dedupe(
                 max_xl_hl=xl_cap,
             )
         )
-    picked_codes = {str(row.get("deck_code") or "") for row in balanced}
+    picked_codes = {_row_key(row) for row in balanced}
     # Off-meta decks only enter through `_pick_diverse`, which caps them.
     leftovers = [
         row
         for row in deduped
-        if str(row.get("deck_code") or "") not in picked_codes and not _is_off_meta(row)
+        if _row_key(row) not in picked_codes and not _is_off_meta(row)
     ]
     leftovers.sort(key=lambda row: -float(row.get("fun_score") or 0))
     target_total = per_format_keep * 2
