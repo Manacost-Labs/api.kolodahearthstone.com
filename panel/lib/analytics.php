@@ -2107,7 +2107,12 @@ function analytics_arena_cards(array $definition, array $query): array
     foreach ($rows as &$row) {
         $cardId = (string)($row['card_id'] ?? $row['id'] ?? '');
         $row['card_id'] = $cardId;
-        $row['image_url'] = $row['image_url'] ?? ($cardId !== '' ? 'https://art.hearthstonejson.com/v1/render/latest/ruRU/256x/' . rawurlencode($cardId) . '.png' : '');
+        // The source's own image_url (.../v1/256x/<id>.png) is a 404: the render URL is used, as in
+        // constructed_cards; the source value only stands in for a row without card_id.
+        $sourceUrl = is_string($row['image_url'] ?? null) && preg_match('~^https://[^\s]+$~', $row['image_url']) ? $row['image_url'] : '';
+        $row['image_url'] = $cardId !== ''
+            ? 'https://art.hearthstonejson.com/v1/render/latest/ruRU/256x/' . rawurlencode($cardId) . '.png'
+            : $sourceUrl;
         $row['class_slug'] = analytics_class_slug($row, ['cardClass']);
     }
     unset($row);
@@ -2229,12 +2234,14 @@ function analytics_bg_heroes_ratings(array $definition, array $query): array
 {
     $mode = (string)($query['mode'] ?? 'solo');
     if ($mode === 'duos') {
-        $fetch = analytics_fetch_json('/v1/battlegrounds/heroes', [
+        // The API answers 422 to an empty optional parameter (q=), so empty ones are not sent.
+        $params = array_filter([
             'mode' => 'duos',
             'q' => $query['q'] ?? '',
             'limit' => $query['limit'] ?? 200,
             'offset' => $query['offset'] ?? 0,
-        ], (int)$definition['ttl']);
+        ], static fn($value): bool => $value !== '' && $value !== null);
+        $fetch = analytics_fetch_json('/v1/battlegrounds/heroes', $params, (int)$definition['ttl']);
         return analytics_normalize('bg_heroes', $definition, $fetch);
     }
 

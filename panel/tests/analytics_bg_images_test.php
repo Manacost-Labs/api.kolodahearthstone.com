@@ -89,7 +89,7 @@ $solo = analytics_module_response('bg_heroes', []);
 img_same('https://art.hearthstonejson.com/v1/256x/TB_BaconShop_HERO_16.jpg', $solo['rows'][0]['image_url'], 'solo hero portrait');
 img_same('hero_portrait', $solo['rows'][0]['image_kind'], 'solo hero image kind');
 
-img_seed('/v1/battlegrounds/heroes', ['mode' => 'duos', 'q' => '', 'limit' => 200, 'offset' => 0], ['data' => [
+img_seed('/v1/battlegrounds/heroes', ['mode' => 'duos', 'limit' => 200, 'offset' => 0], ['data' => [
     ['id' => 'TB_BaconShop_HERO_56', 'hero' => 'Alexstrasza', 'tier' => 'A'],
     ['hero' => 'No id'],
 ]]);
@@ -117,6 +117,17 @@ img_same('demonhunter', $arena['rows'][1]['class_slug'], 'Demon Hunter from clas
 
 img_seed('/v1/arena/classes', ['limit' => 20, 'offset' => 0], ['data' => [['class' => 'Mystery']]]);
 img_same('', analytics_module_response('arena', [])['rows'][0]['class_slug'], 'unknown class: empty slug');
+
+// Arena cards: a source image_url that 404s (no /render/) is replaced by the render URL.
+img_seed('/datasets/firestone_arena_cards_normal', [], ['data' => ['structured' => ['cards' => [
+    ['card_id' => 'X1', 'name' => 'One', 'cardClass' => 'DEMONHUNTER', 'image_url' => 'https://art.hearthstonejson.com/v1/256x/X1.png'],
+    ['card_id' => '', 'name' => 'NoId', 'image_url' => 'https://art.hearthstonejson.com/v1/render/latest/ruRU/256x/Y.png'],
+    ['card_id' => '', 'name' => 'BadUrl', 'image_url' => 'javascript:alert(1)'],
+]]]]);
+$render = analytics_module_response('arena_cards', [])['rows'];
+img_same('https://art.hearthstonejson.com/v1/render/latest/ruRU/256x/X1.png', $render[0]['image_url'], 'arena card with an id uses the render URL');
+img_same('https://art.hearthstonejson.com/v1/render/latest/ruRU/256x/Y.png', $render[1]['image_url'], 'no id: a valid source URL is kept');
+img_same('', $render[2]['image_url'], 'no id and an invalid URL: empty');
 
 // Arena cards: the card class is mapped the same way; neutral has no class icon.
 img_seed('/datasets/firestone_arena_cards_normal', [], ['data' => ['structured' => ['cards' => [

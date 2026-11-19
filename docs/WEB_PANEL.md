@@ -203,6 +203,9 @@ python -m unittest panel.tests.test_constructed_related_local_images`
   `deathknight`, `demonhunter`, `druid`, `hunter`, `mage`, `paladin`, `priest`, `rogue`,
   `shaman`, `warlock`, `warrior`. Берётся из `slug`, `class`, `class_name`; незнакомый класс — `""`.
   `arena_cards[].class_slug` считается так же из `cardClass`; для нейтральных карт — `""`.
+- `arena_cards[].image_url` при непустом `card_id` — `https://art.hearthstonejson.com/v1/render/latest/ruRU/256x/<card_id>.png`
+  (адрес из источника без `/render/` отдаёт 404); значение источника остаётся только у строки без `card_id`
+  и только если это `https://`-адрес. `bg_heroes` в режиме `duos` не передаёт в API пустые необязательные параметры (пустой `q=` давал 422).
 
 ### Смоук статистики после деплоя
 
