@@ -261,8 +261,8 @@ def _slice(run: Any, golden: dict[str, Any], *, top: int = 5, top_ladder: int = 
             if d.deck_code != entry["deck_code"]
         ]
         group.sort(key=lambda sd: -sd[0])
-        ladder = [sd for sd in group if index.is_ladder_archetype(sd[1].format, sd[1].archetype)]
-        titled = [sd for sd in group if sd[1].archetype and fun_decks._names_align(title_key, sd[1].archetype)]
+        ladder = [sd for sd in group if index.is_ladder_archetype(sd[1].format, sd[1].archetype, sd[1].hero_class)]
+        titled = [sd for sd in group if sd[1].archetype and fun_decks._archetypes_align(title_key, sd[1].archetype)]
         for _, deck in [*group[:top], *ladder[:top_ladder], *titled[:top_title]]:
             chosen[deck.deck_code] = deck
     decks = sorted(chosen.values(), key=lambda d: (d.format, d.hero_class, d.archetype, d.deck_code))
@@ -276,6 +276,12 @@ def _slice(run: Any, golden: dict[str, Any], *, top: int = 5, top_ladder: int = 
         "detector_version": fun_decks.DETECTOR_VERSION,
         "format_games": dict(index.format_games),
         "archetype_games": archetype_games,
+        "meta_popularity": {"|".join(k): v for k, v in index.meta_popularity.items()},
+        "package_shares": {
+            f"{fmt}|{label}": index.package_share_pct(fmt, label)
+            for fmt in ("standard", "wild")
+            for label in sorted(fun_decks._SPICY_PACKAGES)
+        },
         "decks": [
             {
                 "deck_code": d.deck_code,
@@ -309,6 +315,8 @@ def _dump_fixture(args: argparse.Namespace) -> int:
         ],
         archetype_games={tuple(k.split("|", 1)): v for k, v in payload["archetype_games"].items()},  # type: ignore[misc]
         format_games=payload["format_games"],
+        meta_popularity={tuple(k.split("|")): v for k, v in payload["meta_popularity"].items()},  # type: ignore[misc]
+        package_shares={tuple(k.split("|")): v for k, v in payload["package_shares"].items()},  # type: ignore[misc]
     )
     mismatches = []
     for entry in golden["decks"]:

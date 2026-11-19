@@ -418,6 +418,50 @@
    "expected": "reject",
    "note": "топовый ладдерный список каталога",
    "source": "live-catalog-20261119"
+  },
+  {
+   "title": "Beast Druid",
+   "format": "Standard",
+   "class": "Druid",
+   "deck_code": "AAECAZICBsODB6+HB4KYB+XEB5H3B8OLCAyunwShiQfZngeqrwesrwetrwe+sgfXwAeW9gfl9geggQiYnggAAA==",
+   "games": 51,
+   "win_rate": 41.2,
+   "expected": "reject",
+   "note": "общее название; Yogg-пакет — мета (F1)",
+   "source": "live-catalog-20261119-review"
+  },
+  {
+   "title": "BBU Harold DK",
+   "format": "Standard",
+   "class": "DeathKnight",
+   "deck_code": "AAECAfHhBAih1ASp9QahgQe8lAeosQfQvwfqyQeb1AcLh/YE/fwGgf0GloIHl4IH4okHs7EHj74HmsUH0MUHsuMHAAA=",
+   "games": 52,
+   "win_rate": 48.1,
+   "expected": "reject",
+   "note": "мета: HSReplay Harold Blood DK 11.1% (F2)",
+   "source": "live-catalog-20261119-review"
+  },
+  {
+   "title": "Combo Rogue",
+   "format": "Standard",
+   "class": "Rogue",
+   "deck_code": "AAECAaIHCIaoB4eoB4ioB6XYB4jZB5n3B8r4B8OLCAv3nwSQgwfBlwfHrgek2AeN2ge88geY9wfA+AfG+AfH+AcAAA==",
+   "games": 51,
+   "win_rate": 49.0,
+   "expected": "disputed",
+   "note": "Yogg-пакет — мета; без него уникальный список",
+   "source": "live-catalog-20261119-review"
+  },
+  {
+   "title": "Imbue Paladin",
+   "format": "Standard",
+   "class": "Paladin",
+   "deck_code": "AAECAZ8FBLSBB8ODB/KDB8OLCA2cnwTunwTW+gac+wah+wbP/gbI/wb3gQfCjwfDjwe+sgfx8Aev9gcAAA==",
+   "games": 55,
+   "win_rate": 54.5,
+   "expected": "off_meta",
+   "note": "близкий вариант (0.62) именованного архетипа (F3)",
+   "source": "live-catalog-20261119-review"
   }
  ]
 }

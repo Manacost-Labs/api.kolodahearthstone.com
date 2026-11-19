@@ -1642,6 +1642,16 @@ def test_meta_popularity_matches_only_within_format_class_and_threshold(
     assert "ladder_member_gate" not in _harold(cards, index).reasons
 
 
+def test_a_bare_class_archetype_aligns_with_no_title() -> None:
+    align = fun_decks._archetypes_align
+
+    assert align("harold dk", "harold blood dk") is True
+    assert align("BBU Harold DK", "harold dk") is True
+    assert align("tog priest", "priest") is False
+    assert align("xl shaman", "shudderwock shaman") is False
+    assert align("dragon druid", "treant druid") is False
+
+
 def test_meta_popularity_is_read_from_the_meta_sources(monkeypatch: pytest.MonkeyPatch) -> None:
     hsreplay = {
         "data": {
@@ -1904,6 +1914,8 @@ def _golden_verdicts(monkeypatch: pytest.MonkeyPatch) -> list[tuple[dict[str, An
             ],
             archetype_games={tuple(k.split("|", 1)): v for k, v in sliced["archetype_games"].items()},
             format_games=sliced["format_games"],
+            meta_popularity={tuple(k.split("|")): v for k, v in sliced["meta_popularity"].items()},
+            package_shares={tuple(k.split("|")): v for k, v in sliced["package_shares"].items()},
         )
         return [
             (
@@ -1926,7 +1938,7 @@ def test_real_catalog_slice_rejects_every_ladder_list_and_keeps_the_brews(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     verdicts = _golden_verdicts(monkeypatch)
-    assert len(verdicts) == 38
+    assert len(verdicts) == 42
 
     passed = [e["title"] for e, s in verdicts if e["expected"] == "reject" and s.is_fun]
     lost = [e["title"] for e, s in verdicts if e["expected"] == "brew" and not (s.is_fun and s.kind == "brew")]

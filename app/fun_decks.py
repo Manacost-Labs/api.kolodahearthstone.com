@@ -462,8 +462,10 @@ class CatalogIndex:
         archetype_games: Mapping[tuple[str, str], int] | None = None,
         format_games: Mapping[str, int] | None = None,
         meta_popularity: Mapping[tuple[str, str, str], float] | None = None,
+        package_shares: Mapping[tuple[str, str], float] | None = None,
     ) -> None:
         self.decks = list(decks)
+        self.meta_popularity = dict(meta_popularity or {})
         self._by_group: dict[tuple[str, str], list[CatalogDeck]] = defaultdict(list)
         derived_arch: dict[tuple[str, str], int] = defaultdict(int)
         derived_fmt: dict[str, int] = defaultdict(int)
@@ -504,6 +506,8 @@ class CatalogIndex:
                     package_games[(deck.format, label)] += deck.games
         self._package_games = dict(package_games)
         self._compared_games = dict(compared_games)
+        # Shares measured on a whole catalog, when `decks` is only a slice of it.
+        self._package_shares = dict(package_shares) if package_shares is not None else None
 
     def neighbours(self, fmt: str, hero_class: str) -> list[CatalogDeck]:
         """Compared lists of one format and class (every format when ``fmt`` is "other")."""
@@ -533,7 +537,7 @@ class CatalogIndex:
                 or (
                     bool(class_key)
                     and any(
-                        _names_align(name, meta_name)
+                        _archetypes_align(name, meta_name)
                         for meta_name in self._meta_by_group.get((fmt, class_key), ())
                     )
                 )
@@ -543,6 +547,8 @@ class CatalogIndex:
 
     def package_share_pct(self, fmt: str, label: str) -> float:
         """Share (percent) of the compared games of a format played with a package."""
+        if self._package_shares is not None:
+            return self._package_shares.get((fmt, label), 0.0)
         total = self._compared_games.get(fmt, 0)
         if not total:
             return 0.0
@@ -728,7 +734,9 @@ def analyze_neighbourhood(
         if deck.archetype and title_key:
             aligned = aligned_cache.get(deck.archetype)
             if aligned is None:
-                aligned = aligned_cache[deck.archetype] = _names_align(title_key, deck.archetype)
+                aligned = aligned_cache[deck.archetype] = _archetypes_align(
+                    title_key, deck.archetype
+                )
             if aligned:
                 title_sim = max(title_sim, sim)
                 title_aligned_ladder = title_aligned_ladder or is_ladder
@@ -803,6 +811,30 @@ def _names_align(left: str, right: str) -> bool:
     if not ta or not tb:
         return False
     return (len(ta & tb) / max(1, min(len(ta), len(tb)))) >= 0.67
+
+
+_CLASS_TOKENS = frozenset(
+    {
+        "death", "knight", "demon", "hunter", "druid", "mage", "paladin", "priest",
+        "rogue", "shaman", "warlock", "lock", "warrior",
+    }
+)  # fmt: skip
+
+
+def _distinctive_tokens(value: str) -> set[str]:
+    return _name_tokens(value) - _CLASS_TOKENS
+
+
+def _archetypes_align(left: str, right: str) -> bool:
+    """Same archetype by its distinctive words, ignoring the class word and prefixes.
+
+    A bare class name ("Priest", "XL Shaman") has no distinctive word and aligns with
+    nothing, so it cannot make every title of the class a ladder title.
+    """
+    a, b = _distinctive_tokens(left), _distinctive_tokens(right)
+    if not a or not b:
+        return False
+    return len(a & b) / min(len(a), len(b)) >= 0.67
 
 
 def _is_known_name(name: str, known: set[str]) -> bool:
