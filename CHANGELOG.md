@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Новый скрипт `panel/scripts/card_locale_coverage.py`: отчёт покрытия каталога
+  карт «локаль × режим» (ruRU, enUS, plPL, esES) по таблице
+  `hearthstone_card_localizations`, только чтение; Markdown и `--json`,
+  режим «из файла». Описание: `docs/card-locale-coverage.md`.
 - `GET /api/bg/heroes` со срезами `mmr`, отличными от `TOP_50_PERCENT`
   (читаются с HSReplay по запросу): сбой чтения больше не отвечает `500`.
   Последний удачный ответ каждого среза хранится на диске; при сбое он отдаётся
