@@ -1,5 +1,83 @@
 // Local integration fixture only. Never part of the production service.
 import http from 'node:http';
+import { execFile } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { promisify } from 'node:util';
+const run = promisify(execFile);
+// Mirror of analytics_module_registry() as the PHP adapter exposes it; panel/tests/analytics_registry_snapshot_test.php keeps it current.
+const registry = JSON.parse(
+  readFileSync(new URL('./fixtures/analytics-registry.json', import.meta.url), 'utf8'),
+);
+// PANEL_FIXTURE_ANALYTICS=live: GET-only, real data from the internal API through the PHP CLI (127.0.0.1:18081)
+// and the public card-history endpoint. Needs php on PATH; never writes anywhere.
+const live = process.env.PANEL_FIXTURE_ANALYTICS === 'live';
+const phpCli = new URL('../../panel/tests/analytics_cli.php', import.meta.url).pathname;
+const publicApi = 'https://api.kolodahearthstone.com';
+async function liveAnalytics(module, search) {
+  search.delete('module');
+  try {
+    const { stdout } = await run('php', [phpCli, '--module', module, '--query', search.toString()], {
+      maxBuffer: 32 * 1024 * 1024,
+      timeout: 60_000,
+    });
+    return [JSON.parse(stdout), 200];
+  } catch (error) {
+    try {
+      const body = JSON.parse(String(error.stdout));
+      return [{ ok: false, message: body.message }, body.status || 502];
+    } catch {
+      return [{ ok: false, message: 'Не удалось загрузить статистику.' }, 502];
+    }
+  }
+}
+async function liveCardHistory(entity, cardId, page) {
+  const target =
+    publicApi +
+    '/api/v1/card-history/' +
+    encodeURIComponent(entity) +
+    '/' +
+    encodeURIComponent(cardId) +
+    '?page=' +
+    encodeURIComponent(page);
+  const response = await fetch(target, { method: 'GET', signal: AbortSignal.timeout(20_000) });
+  const body = await response.json().catch(() => ({}));
+  return response.ok
+    ? [{ ok: true, data: body.data }, 200]
+    : [{ ok: false, message: 'Некорректный идентификатор истории.' }, response.status];
+}
+// Same contract as panel/analytics.php: an empty required parameter is a 422, a failing upstream a 502.
+function fixtureAnalytics(module, search) {
+  const definition = registry.modules[module];
+  if (!definition) return [{ ok: false, message: 'Неизвестный раздел статистики.' }, 422];
+  for (const [name, rule] of Object.entries(definition.params))
+    if (rule.required && !(search.get(name) || '').trim())
+      return [{ ok: false, message: 'Укажите название карты.' }, 422];
+  if (search.get('fixture_fail') === '1')
+    return [
+      { ok: false, message: 'Не удалось загрузить статистику.', detail: 'Fixture upstream failure' },
+      502,
+    ];
+  const card = (search.get('card_name') || '').trim();
+  return [
+    {
+      ok: true,
+      module,
+      title: card ? definition.title + ': ' + card : definition.title,
+      description: definition.description,
+      summary: [{ label: 'Записей', value: 2 }],
+      columns: [
+        { key: 'name', label: 'Название' },
+        { key: 'rows', label: 'Строк' },
+      ],
+      rows: [
+        { name: 'fixture ' + module + ' 1', rows: 10 },
+        { name: 'fixture ' + module + ' 2', rows: 20 },
+      ],
+      meta: { total: 2, updated_at: '2026-10-02T12:00:00Z', cached: false, stale: false },
+    },
+    200,
+  ];
+}
 export const fixtureSession = 'fixture-session';
 const user = { id: 42, login: 'UI fixture' };
 const categories = {
@@ -178,7 +256,20 @@ export const server = http.createServer(async (req, res) => {
       input.action === 'run' ? 202 : 200,
     );
   }
-  if (url.pathname === '/analytics.php' && url.searchParams.get('module') === 'providers') {
+  if (url.pathname === '/analytics.php' && req.method !== 'GET')
+    return send({ ok: false, message: 'Метод не поддерживается.' }, 405);
+  if (url.pathname === '/analytics.php' && live) {
+    const [body, status] = await liveAnalytics(
+      url.searchParams.get('module') || 'overview',
+      url.searchParams,
+    );
+    return send(body, status);
+  }
+  if (
+    url.pathname === '/analytics.php' &&
+    url.searchParams.get('module') === 'providers' &&
+    url.searchParams.get('fixture_fail') !== '1'
+  ) {
     const days = Array.from({ length: 7 }, (_, i) => `2026-10-${String(15 + i).padStart(2, '0')}`);
     const providers = [
       ['decodo', 420, 401, 0.62, 'request', 0.0015],
@@ -239,6 +330,10 @@ export const server = http.createServer(async (req, res) => {
       },
     });
   }
+  if (url.pathname === '/analytics.php' && (url.searchParams.get('module') || 'overview') !== 'overview') {
+    const [body, status] = fixtureAnalytics(url.searchParams.get('module'), url.searchParams);
+    return send(body, status);
+  }
   if (url.pathname === '/analytics.php')
     return send({
       ok: true,
@@ -288,6 +383,14 @@ export const server = http.createServer(async (req, res) => {
   } else input = url.searchParams;
   const action = input.get('action') || 'list';
   if (action === 'card_history') {
+    if (live) {
+      const [body, status] = await liveCardHistory(
+        input.get('entity') || '',
+        input.get('card_id') || '',
+        input.get('page') || '1',
+      );
+      return send(body, status);
+    }
     const legacy = input.get('legacy') === '1';
     return send({
       ok: true,
@@ -330,28 +433,7 @@ export const server = http.createServer(async (req, res) => {
   }
   if (req.method === 'GET' && action === 'list' && process.env.PANEL_FIXTURE_DELAY_MS)
     await new Promise(resolve => setTimeout(resolve, Number(process.env.PANEL_FIXTURE_DELAY_MS)));
-  if (action === 'analytics_registry')
-    return send({
-      ok: true,
-      modules: {
-        overview: { title: 'Все источники', description: 'Источники', params: {} },
-        card: {
-          title: 'Статистика карты',
-          description: 'Карты',
-          params: { q: { type: 'string', max: 120 } },
-        },
-        providers: {
-          title: 'Провайдеры',
-          description: 'Расход и успешность платных провайдеров',
-          params: { days: { type: 'enum', values: ['7', '30'], default: '7' } },
-        },
-        meta: {
-          title: 'Мета Standard / Wild',
-          description: 'Архетипы',
-          params: { format: { type: 'enum', values: ['standard', 'wild'], default: 'standard' } },
-        },
-      },
-    });
+  if (action === 'analytics_registry') return send({ ok: true, modules: registry.modules });
   const type = input.get('card_type') || '';
   const perPage = Math.max(1, Number(input.get('per_page') || 8));
   const filtered = rows.filter(

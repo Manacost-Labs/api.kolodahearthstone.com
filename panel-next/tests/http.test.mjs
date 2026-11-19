@@ -41,7 +41,7 @@ test('server registry and data remain behind the session boundary', async () => 
   });
   assert.equal(registry.status, 200);
   const payload = await registry.json();
-  assert.equal(payload.modules.overview.title, 'Все источники');
+  assert.equal(payload.modules.overview.title, 'Все источники данных');
   assert.ok(Object.values(payload.modules).every(item => !('path' in item)));
 });
 test('remembered tile view redirects to an explicit URL without bypassing authentication', async () => {

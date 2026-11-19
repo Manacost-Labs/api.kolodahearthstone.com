@@ -30,7 +30,15 @@ node tests/fixture-server.mjs
 PANEL_BACKEND_ORIGIN=http://127.0.0.1:18768 PANEL_PUBLIC_ORIGIN=http://127.0.0.1:4180 npm start
 ```
 
-Для браузерного regression набора запустить отдельный Chromium с CDP на `127.0.0.1:18766`, затем `node tests/browser.mjs`. Он устанавливает только тестовую сессию, блокирует внешние HTTPS-запросы и проверяет поиск, страницы, модальные окна/фокус, мобильные размеры, статистику, подтверждения и тестовые мутации. Скриншоты по умолчанию сохраняются в `/tmp/koloda-next-browser-qa`; путь задаётся `PANEL_QA_OUTPUT`.
+Для браузерного regression набора запустить отдельный Chromium с CDP на `127.0.0.1:18766`, затем `node tests/browser.mjs`. Он устанавливает только тестовую сессию, блокирует внешние HTTPS-запросы и проверяет модуль статистики с ошибкой 502 (сообщение, «Обновить», меню), поиск, страницы, модальные окна/фокус, мобильные размеры, статистику, подтверждения и тестовые мутации. Скриншоты по умолчанию сохраняются в `/tmp/koloda-next-browser-qa`; путь задаётся `PANEL_QA_OUTPUT`.
+
+### Смоук статистики и live-фикстура
+
+`tests/analytics-smoke.test.mjs` (входит в `npm run test:http`) открывает `/?action=analytics&stats=<ключ>` для каждого из 13 модулей: ответ 200, заголовок модуля, нет экрана «Сервер данных панели не ответил». Отдельно проверены `stats=card` без параметров, `stats=card&q=…` (кнопка инспектора) и модуль с ошибкой 502 (`fixture_fail=1`) внутри страницы.
+
+Реестр fixture — снимок `tests/fixtures/analytics-registry.json` из `analytics_module_registry()`. `panel/tests/analytics_registry_snapshot_test.php` (запускается в `make panel-check`) падает, если PHP-реестр ушёл вперёд; обновить: `php panel/tests/analytics_cli.php --registry > panel-next/tests/fixtures/analytics-registry.json && npx prettier --write tests/fixtures`.
+
+`PANEL_FIXTURE_ANALYTICS=live node tests/fixture-server.mjs` отдаёт реальные данные без входа владельца: `/analytics.php` берёт ответ у `php ../panel/tests/analytics_cli.php --module …` (внутренний API `127.0.0.1:18081`, нужен php; модуль `providers` без токена parser-control отвечает пустым списком), а `card_history` — с публичного `https://api.kolodahearthstone.com/api/v1/card-history/…`. Только GET, ничего не пишется. Каталоги остаются вымышленными. Тесты `test:http` в этом режиме не запускать: они рассчитаны на фикстуры.
 
 `/` фокусирует поиск. Ctrl+K / Cmd+K открывают быстрый переход с поиском карт текущего каталога; Escape закрывает диалоги с восстановлением фокуса. Открытая карточка записи хранится в параметре `?card=` (история браузера, ссылка, перезагрузка), колонки таблицы задаёт `lib/catalog-columns.ts` для каждого каталога. `tests/browser.mjs` проверяет ссылку на карточку вне первой страницы, листание стрелками без переоткрытия диалога, колонки таблицы и поиск карты через Ctrl+K.
 

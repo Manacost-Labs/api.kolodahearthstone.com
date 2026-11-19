@@ -1,4 +1,5 @@
-import { getPage, getSession, serverData } from '@/lib/backend';
+import { getPage, getSession, serverData, serverResult } from '@/lib/backend';
+import { analyticsRequest, missingHint } from '@/lib/analytics-query';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { matchesCard } from '@/lib/card-detail';
@@ -39,27 +40,43 @@ export default async function Page({
     );
     const candidate = query.get('stats') || 'overview';
     const moduleKey = registry.modules[candidate] ? candidate : 'overview';
-    const statsQuery = new URLSearchParams(query);
-    statsQuery.delete('action');
-    statsQuery.delete('stats');
-    // Client-side table filters (DataTable) never reach the analytics backend.
-    statsQuery.delete('rows_q');
-    statsQuery.delete('rows');
-    statsQuery.set('module', moduleKey);
-    const statsSearch = statsQuery.get('stats_q');
-    if (statsSearch !== null) {
-      statsQuery.set('q', statsSearch);
-      statsQuery.delete('stats_q');
+    const definition = registry.modules[moduleKey];
+    const { backend, page, missing } = analyticsRequest(query, moduleKey, definition);
+    let data: AnalyticsData = {
+      ok: true,
+      title: definition.title,
+      description: definition.description,
+      columns: [],
+      rows: [],
+      summary: [],
+      meta: {},
+    };
+    let notice: { tone: 'hint' | 'error'; text: string } | null = null;
+    if (missing.length) notice = { tone: 'hint', text: missingHint(missing) };
+    else {
+      // A failing module is shown inside its page: the menu stays and "Обновить" asks again.
+      const result = await serverResult<AnalyticsData>('analytics', backend);
+      if (result.data) data = result.data;
+      else notice = { tone: 'error', text: result.message };
     }
-    const data = await serverData<AnalyticsData>('analytics', statsQuery);
     return (
-      <Analytics
-        key={query.toString()}
-        data={data}
-        modules={registry.modules}
-        module={moduleKey}
-        query={query.toString()}
-      />
+      <>
+        {notice && (
+          <p
+            role={notice.tone === 'error' ? 'alert' : 'status'}
+            className={notice.tone === 'error' ? 'notice bad' : 'notice'}
+          >
+            {notice.text}
+          </p>
+        )}
+        <Analytics
+          key={page.toString()}
+          data={data}
+          modules={registry.modules}
+          module={moduleKey}
+          query={page.toString()}
+        />
+      </>
     );
   }
   if (action === 'parsers') {

@@ -36,7 +36,7 @@ try {
     await new Promise(resolve => setTimeout(resolve, 50));
   }
   if (!ready) throw Error('Standalone server did not start: ' + diagnostics);
-  const test = spawn(process.execPath, ['--test', 'tests/http.test.mjs'], {
+  const test = spawn(process.execPath, ['--test', 'tests/http.test.mjs', 'tests/analytics-smoke.test.mjs'], {
     env: { ...process.env, PANEL_TEST_ORIGIN: origin },
     stdio: 'inherit',
   });
