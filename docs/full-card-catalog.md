@@ -20,6 +20,41 @@ HSJSON render URLs are provider fallbacks, not downloaded or verified media;
 card type have no image URL. Existing curated card/media records take precedence
 on the legacy individual routes.
 
+## Card text language (`locale`)
+
+`GET /api/v1/card-catalog`, `/api/v1/card-catalog/{card_id}` and
+`/api/v1/card-catalog/dbf/{dbf}` accept `?locale=ruRU|enUS|plPL|esES` (exact
+values, case-sensitive). Without it the response is unchanged. With it, every
+card (the detail object and each `data[]` item) gets an additive block:
+
+```json
+"localized": {
+  "locale": "plPL", "requested_locale": "plPL", "fallback": false,
+  "name": "...", "text": "...", "flavor": "...",
+  "collection_text": null, "how_to_earn": null,
+  "how_to_earn_golden": null, "targeting_arrow_text": null
+}
+```
+
+The texts come from the `payload` of the card's row in
+`hearthstone_card_localizations` for that locale (HSJ keys `collectionText`,
+`howToEarn`, `howToEarnGolden`, `targetingArrowText` are returned in snake_case;
+a field missing in HSJ is `null`). Other fields, including `images.card`
+(a ruRU render), do not change.
+
+Fallback: if the card has no row for the locale (or the table is not deployed
+yet), the texts are taken from the enUS catalog record, `locale` is `"enUS"`,
+`requested_locale` keeps the request and `fallback` is `true`; the status stays
+200. An empty, array or unknown value (`esMX`, `pl`, `plpl`) is a 400:
+`{"error": {"code": "invalid_parameter", "message": "Unsupported locale; expected one of ruRU, enUS, plPL, esES"}}`.
+
+`q` together with `locale` also matches the card name in that locale (when the
+table is missing it matches `card_id`, `name_ru` and `name_en` only).
+`Last-Modified` is the later of the catalog row and the locale row `updated_at`,
+so a changed translation is never answered with a stale 304. The listing reads
+one page with one `LEFT JOIN`, no per-card queries. Mode endpoints
+(`/constructed-cards`, BG, ...) do not accept `locale` yet.
+
 ## Publication and rollback
 
 The catalog is stored in two tables written by one loader in one transaction:
