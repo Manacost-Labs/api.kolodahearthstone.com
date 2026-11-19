@@ -7,9 +7,14 @@
 
 ## Что значит «покрыта»
 
-Карта покрыта в локали, если в таблице есть строка `(card_id, locale)` с
-непустым `name`. Если имя пустое в самом HSJ этой локали (например, у
-служебных эффектов), карта пропуском не считается.
+Эталон каждой локали — `cards.json` этой же локали (id берутся из `enUS`).
+Карта покрыта в локали L, если в таблице есть строка `(card_id, L)` с
+непустым `name` и семь полей из `payload` (`name`, `text`, `flavor`,
+`collectionText`, `howToEarn`, `howToEarnGolden`, `targetingArrowText`)
+совпадают с HSJ этой локали. Поле, которого нет (или оно пустое) в HSJ,
+пропуском не считается. Непокрытые карты делятся на «нет строки» (строки нет
+или `name` пуст) и «устарела» (строка есть, но поле отличается от HSJ):
+в JSON это `missing_*` и `stale_*`, в Markdown — отдельные подписи в примерах.
 
 ## Группы
 
@@ -50,9 +55,11 @@ python scripts/card_locale_coverage.py --rows-file rows.json \
   --db-sets-file sets.json --hsj-dir /path/to/hsj --json
 ```
 
-- `--rows-file`: JSON-список `{card_id, locale, name}`. Без `--db` и
+- `--rows-file`: JSON-список `{card_id, locale, name, payload}`. Без `--db` и
   `--rows-file` набор строк пуст (все 0%): проверка классификации.
 - `--db-sets-file`: JSON `{standard, wild, coins, bartenders: [card_id, …]}`.
 - `--examples N`: сколько непокрытых id показывать в ячейке (по умолчанию 5).
 - `--json`: машинный вывод вместо Markdown-таблицы.
-- Без `--hsj-dir` HSJ скачивается (4 файла, бесплатно).
+- `--hsj-ruRU|enUS|plPL|esES FILE`: путь к `cards.json` конкретной локали
+  (приоритетнее `--hsj-dir`).
+- Без `--hsj-dir` и этих опций HSJ скачивается (4 файла, бесплатно).

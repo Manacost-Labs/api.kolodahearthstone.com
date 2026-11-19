@@ -2,8 +2,10 @@
 """Coverage report "locale x mode" for hearthstone_card_localizations.
 
 Read-only. The reference is the HSJ id set (enUS cards.json). A card is covered
-in a locale when the table has a row (card_id, locale) with a non-empty name;
-a name that is empty in HSJ itself is never counted as a gap.
+in a locale when the table has a row (card_id, locale) with a non-empty name and the 7
+localizable payload fields equal HSJ of that locale. A field absent (or empty)
+in HSJ is never a gap. Gaps are "missing" (no row / empty name) or "stale"
+(a field differs).
 """
 from __future__ import annotations
 
@@ -18,6 +20,8 @@ from typing import Any, Callable, Iterable
 LOCALES = ("ruRU", "enUS", "plPL", "esES")
 MAX_BYTES = 32 * 1024 * 1024
 NA = "n/a"
+LOCALIZED_FIELDS = ("name", "text", "flavor", "collectionText", "howToEarn",
+                    "howToEarnGolden", "targetingArrowText")
 
 ADVENTURE_SETS = {"MISSIONS", "TAVERNS_OF_TIME", "TUTORIAL"}
 ADVENTURE_ID = re.compile(
@@ -123,12 +127,49 @@ def classify(card: dict[str, Any], db_sets: dict[str, set[str]] | None = None) -
     return groups or {"other"}
 
 
-def is_covered(row: dict[str, Any] | None, ref_name: str) -> bool:
+def _payload(row: dict[str, Any]) -> dict[str, Any]:
+    payload = row.get("payload")
+    if isinstance(payload, (str, bytes)):
+        try:
+            payload = json.loads(payload)
+        except ValueError:
+            payload = None
+    return payload if isinstance(payload, dict) else {}
+
+
+def cell_status(row: dict[str, Any] | None, ref: dict[str, Any]) -> str:
+    """Return "ok", "missing" (no row / empty name) or "stale" (field differs)."""
     if row is None:
-        return False
-    if str(row.get("name") or "").strip():
-        return True
-    return not ref_name.strip()  # name empty in HSJ itself is not a gap
+        return "missing"
+    if not str(row.get("name") or "").strip() and str(ref.get("name") or "").strip():
+        return "missing"
+    payload = _payload(row)
+    for field in LOCALIZED_FIELDS:
+        expected = ref.get(field)
+        if expected in (None, ""):
+            continue  # absent in HSJ: not a gap
+        if payload.get(field) != expected:
+            return "stale"
+    return "ok"
+
+
+def _cell(ids: list[str], status: Callable[[str], str], examples: int) -> dict[str, Any]:
+    missing, stale = [], []
+    for cid in ids:
+        st = status(cid)
+        if st == "missing":
+            missing.append(cid)
+        elif st == "stale":
+            stale.append(cid)
+    covered = len(ids) - len(missing) - len(stale)
+    return {
+        "covered": covered,
+        "percent": round(100.0 * covered / len(ids), 2) if ids else 100.0,
+        "missing_count": len(missing),
+        "missing_examples": missing[:examples],
+        "stale_count": len(stale),
+        "stale_examples": stale[:examples],
+    }
 
 
 def build_report(
@@ -139,10 +180,14 @@ def build_report(
 ) -> dict[str, Any]:
     reference = cards_by_locale["enUS"]
     ref_ids = [c["id"] for c in reference if isinstance(c.get("id"), str)]
-    ref_names: dict[str, dict[str, str]] = {}
+    refs: dict[str, dict[str, dict[str, Any]]] = {}
+    base = {c["id"]: c for c in reference if isinstance(c.get("id"), str)}
     for locale in LOCALES:
-        src = cards_by_locale.get(locale) or reference
-        ref_names[locale] = {c["id"]: str(c.get("name") or "") for c in src if isinstance(c.get("id"), str)}
+        refs[locale] = {c["id"]: c for c in (cards_by_locale.get(locale) or reference)
+                        if isinstance(c.get("id"), str)}
+
+    def status_for(locale: str, table_: dict) -> Callable[[str], str]:
+        return lambda cid: cell_status(table_.get((cid, locale)), refs[locale].get(cid) or base[cid])
     table: dict[tuple[str, str], dict[str, Any]] = {}
     for row in rows:
         table[(row.get("card_id"), row.get("locale"))] = row
@@ -167,27 +212,11 @@ def build_report(
             report_groups.append(entry)
             continue
         for locale in LOCALES:
-            missing = [
-                cid for cid in ids
-                if not is_covered(table.get((cid, locale)), ref_names[locale].get(cid, ""))
-            ]
-            covered = len(ids) - len(missing)
-            entry["locales"][locale] = {
-                "covered": covered,
-                "percent": round(100.0 * covered / len(ids), 2) if ids else 100.0,
-                "missing_count": len(missing),
-                "missing_examples": missing[:examples],
-            }
+            entry["locales"][locale] = _cell(ids, status_for(locale, table), examples)
         report_groups.append(entry)
     total_cov = {}
     for locale in LOCALES:
-        miss = [c for c in ref_ids if not is_covered(table.get((c, locale)), ref_names[locale].get(c, ""))]
-        total_cov[locale] = {
-            "covered": len(ref_ids) - len(miss),
-            "percent": round(100.0 * (len(ref_ids) - len(miss)) / len(ref_ids), 2) if ref_ids else 100.0,
-            "missing_count": len(miss),
-            "missing_examples": miss[:examples],
-        }
+        total_cov[locale] = _cell(ref_ids, status_for(locale, table), examples)
     union = {cid for ids in members.values() for cid in ids}
     return {
         "locales": list(LOCALES),
@@ -203,10 +232,11 @@ def render_markdown(report: dict[str, Any]) -> str:
     lines = [head, "|" + " --- |" * (3 + len(report["locales"]))]
 
     def examples(locales: dict[str, Any]) -> str:
-        parts = [
-            f"{loc}: " + ", ".join(f"`{i}`" for i in v["missing_examples"])
-            for loc, v in locales.items() if v["missing_examples"]
-        ]
+        parts = []
+        for loc, v in locales.items():
+            for label, key in (("нет строки", "missing_examples"), ("устарела", "stale_examples")):
+                if v[key]:
+                    parts.append(f"{loc} {label}: " + ", ".join(f"`{i}`" for i in v[key]))
         return "; ".join(parts) or "—"
 
     for g in report["groups"]:
@@ -225,8 +255,10 @@ def render_markdown(report: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def load_hsj(locale: str, hsj_dir: str | None) -> list[dict[str, Any]]:
-    if hsj_dir:
+def load_hsj(locale: str, hsj_dir: str | None, hsj_file: str | None = None) -> list[dict[str, Any]]:
+    if hsj_file:
+        content = Path(hsj_file).read_bytes()
+    elif hsj_dir:
         path = Path(hsj_dir) / f"{locale}.json"
         if not path.exists():
             path = Path(hsj_dir) / locale / "cards.json"
@@ -255,7 +287,7 @@ def read_db(config_loader: Callable[[], dict[str, Any]] | None = None):
     try:
         with conn.cursor() as cur:
             cur.execute("SET SESSION TRANSACTION READ ONLY")
-            cur.execute("SELECT card_id, locale, name FROM hearthstone_card_localizations")
+            cur.execute("SELECT card_id, locale, name, payload FROM hearthstone_card_localizations")
             rows = list(cur.fetchall())
             sets = {}
             for key, sql in (
@@ -275,8 +307,10 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--hsj-dir", help="dir with <locale>.json (or <locale>/cards.json); default: download")
     src = ap.add_mutually_exclusive_group()
-    src.add_argument("--rows-file", help="JSON dump of table rows [{card_id, locale, name}]; no DB")
+    src.add_argument("--rows-file", help="JSON dump of table rows [{card_id, locale, name, payload}]; no DB")
     src.add_argument("--db", action="store_true", help="read rows read-only from the production DB")
+    for loc in LOCALES:
+        ap.add_argument(f"--hsj-{loc}", metavar="FILE", help=f"HSJ cards.json for {loc} (overrides --hsj-dir)")
     ap.add_argument("--db-sets-file", help="JSON {standard,wild,coins,bartenders: [card ids]}")
     ap.add_argument("--examples", type=int, default=5, help="max uncovered ids per cell")
     ap.add_argument("--json", action="store_true", help="JSON output instead of Markdown")
@@ -291,7 +325,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.db_sets_file:
         raw = json.loads(Path(args.db_sets_file).read_text("utf-8"))
         db_sets = {k: set(v) for k, v in raw.items()}
-    cards = {loc: load_hsj(loc, args.hsj_dir) for loc in LOCALES}
+    cards = {loc: load_hsj(loc, args.hsj_dir, getattr(args, f"hsj_{loc}")) for loc in LOCALES}
     report = build_report(cards, rows, db_sets, args.examples)
     print(json.dumps(report, ensure_ascii=False, indent=2) if args.json else render_markdown(report))
     return 0

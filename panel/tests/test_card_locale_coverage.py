@@ -13,7 +13,8 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import card_locale_coverage as cov
 
 CARDS = [
-    {"id": "CS2_001", "set": "VANILLA", "type": "SPELL", "collectible": True, "name": "A"},
+    {"id": "CS2_001", "set": "VANILLA", "type": "SPELL", "collectible": True, "name": "A",
+     "text": "Deal 1", "flavor": "Flavor"},
     {"id": "CORE_001", "set": "CORE", "type": "MINION", "collectible": True, "name": "B"},
     {"id": "BG20_100", "set": "BATTLEGROUNDS", "type": "MINION", "name": "C"},
     {"id": "BG20_HERO_100", "set": "BATTLEGROUNDS", "type": "HERO", "name": "D"},
@@ -42,7 +43,8 @@ def by_id(card_id):
 
 
 def rows(locales, skip=()):
-    return [{"card_id": c["id"], "locale": loc, "name": c["name"] or ""}
+    return [{"card_id": c["id"], "locale": loc, "name": c["name"] or "",
+             "payload": {k: c[k] for k in cov.LOCALIZED_FIELDS if c.get(k)}}
             for c in CARDS for loc in locales if (c["id"], loc) not in skip]
 
 
@@ -139,6 +141,57 @@ class CoverageTest(unittest.TestCase):
     def test_examples_limit(self):
         report = cov.build_report(cards_by_locale(), [], DB_SETS, examples=1)
         self.assertEqual(len(self.group(report, "mercenaries")["locales"]["ruRU"]["missing_examples"]), 1)
+
+
+class StaleTest(unittest.TestCase):
+    def cell(self, data, key="classic", locale="esES"):
+        report = cov.build_report(cards_by_locale(), data, DB_SETS)
+        return next(g for g in report["groups"] if g["key"] == key)["locales"][locale]
+
+    def test_differing_text_is_stale_not_covered(self):
+        data = rows(cov.LOCALES)
+        for r in data:
+            if r["card_id"] == "CS2_001" and r["locale"] == "esES":
+                r["payload"]["text"] = "old text"
+        cell = self.cell(data)
+        self.assertEqual(cell["percent"], 0.0)
+        self.assertEqual(cell["stale_examples"], ["CS2_001"])
+        self.assertEqual(cell["missing_examples"], [])
+        self.assertEqual(self.cell(data, locale="plPL")["percent"], 100.0)
+
+    def test_missing_row_is_missing_not_stale(self):
+        cell = self.cell(rows(cov.LOCALES, skip={("CS2_001", "plPL")}), locale="plPL")
+        self.assertLess(cell["percent"], 100.0)
+        self.assertEqual(cell["missing_examples"], ["CS2_001"])
+        self.assertEqual(cell["stale_examples"], [])
+
+    def test_field_absent_in_hsj_is_not_a_gap(self):
+        data = rows(cov.LOCALES)
+        for r in data:
+            r["payload"].pop("flavor", None)  # row lacks a field...
+        cards = {loc: [dict(c) for c in CARDS] for loc in cov.LOCALES}
+        for c in cards["esES"]:
+            c.pop("flavor", None)  # ...that HSJ esES does not have either
+        report = cov.build_report(cards, data, DB_SETS)
+        g = next(g for g in report["groups"] if g["key"] == "classic")
+        self.assertEqual(g["locales"]["esES"]["percent"], 100.0)
+        self.assertEqual(g["locales"]["ruRU"]["stale_examples"], ["CS2_001"])
+
+    def test_reference_is_per_locale(self):
+        cards = {loc: [dict(c) for c in CARDS] for loc in cov.LOCALES}
+        for c in cards["plPL"]:
+            if c["id"] == "CS2_001":
+                c["text"] = "Zadaj 1"
+        cell = next(g for g in cov.build_report(cards, rows(cov.LOCALES), DB_SETS)["groups"]
+                    if g["key"] == "classic")["locales"]
+        self.assertEqual(cell["plPL"]["stale_examples"], ["CS2_001"])
+        self.assertEqual(cell["esES"]["percent"], 100.0)
+
+    def test_payload_as_json_string(self):
+        data = rows(cov.LOCALES)
+        for r in data:
+            r["payload"] = json.dumps(r["payload"])
+        self.assertEqual(self.cell(data)["percent"], 100.0)
 
 
 class CliTest(unittest.TestCase):
