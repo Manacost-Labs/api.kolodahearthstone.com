@@ -393,6 +393,15 @@ def patch_image(card_id: str, value: Any) -> tuple[str | None, dict[str, str] | 
 
 
 def normalize_card(dbf: int, ru: dict[str, Any], en: dict[str, Any] | None, hsj_ru: dict[str, Any] | None, hsj_en: dict[str, Any] | None) -> dict[str, Any]:
+    def game_stat(field: str, blizzard_field: str | None = None):
+        # The collection API may retain pre-patch numbers while the current
+        # game-data snapshot has already advanced. Keep zero-valued statistics.
+        for card in (hsj_ru or {}, hsj_en or {}):
+            value = card.get(field)
+            if type(value) is int:
+                return value
+        return ru.get(blizzard_field or field)
+
     card_id = str((hsj_ru or hsj_en or {}).get("id") or f"blizzard:{dbf}")
     text_ru, patch_ru = patch_text(card_id, "ru", ru.get("text") or (hsj_ru or {}).get("text"))
     text_en, patch_en = patch_text(card_id, "en", (en or {}).get("text") or (hsj_en or {}).get("text"))
@@ -444,11 +453,11 @@ def normalize_card(dbf: int, ru: dict[str, Any], en: dict[str, Any] | None, hsj_
         "minion_type_id": nested_id(minion_type) or ru.get("minionTypeId"),
         "spell_school": nested_slug(spell_school) or (hsj_ru or hsj_en or {}).get("spellSchool"),
         "spell_school_id": nested_id(spell_school) or ru.get("spellSchoolId"),
-        "mana_cost": ru.get("manaCost") if ru.get("manaCost") is not None else (hsj_ru or hsj_en or {}).get("cost"),
-        "attack": ru.get("attack") if ru.get("attack") is not None else (hsj_ru or hsj_en or {}).get("attack"),
-        "health": ru.get("health") if ru.get("health") is not None else (hsj_ru or hsj_en or {}).get("health"),
-        "durability": ru.get("durability") or (hsj_ru or hsj_en or {}).get("durability"),
-        "armor": ru.get("armor") or (hsj_ru or hsj_en or {}).get("armor"),
+        "mana_cost": game_stat("cost", "manaCost"),
+        "attack": game_stat("attack"),
+        "health": game_stat("health"),
+        "durability": game_stat("durability"),
+        "armor": game_stat("armor"),
         "artist": ru.get("artistName") or (hsj_ru or hsj_en or {}).get("artist"),
         "image_url": image_url,
         "image_gold_url": ru.get("imageGold"),
