@@ -66,3 +66,7 @@ table.data-table td .value-link {
 .data-table .row-open :is(.value-code, .value-number, span) {
   color: inherit;
 }
+/* A name that opens the details keeps room for one or two words instead of breaking mid-word. */
+.data-table td:has(> .row-open) {
+  min-width: 150px;
+}
