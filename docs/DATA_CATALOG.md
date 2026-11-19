@@ -238,6 +238,10 @@ GET /v1/constructed/archetypes
 имеет популярность ≥ 1% и совпадает по отличительным словам названия (HSGuru дробит
 архетипы: «Harold DK» совпадает с HSReplay «Harold Blood DK»).
 
+**Концепт-слово и пакет.** Слово названия, которому соответствует пакет (Yogg → `yogg_package`, Reno/Highlander/HL → `reno_highlander`, Odd/Even → `odd_even`, Tog/Mill → `togwaggle_mill`, Mecha'thun → `mechathun`), не даёт `concept_title`, если этот пакет в формате «мета» (доля ≥ порога ниже). Остальные слова (Casino, Rainbow, Questline, XL…) работают как раньше.
+
+**Общие названия** (`generic_ladder_gate`) проверяются без приставок XL / HL / Highlander и рун DK вида `BBU`/`FFU`/`BFU`; в слова стилей добавлены Blood / Frost / Unholy.
+
 **Острый пакет** (`card_package`) — пакет из списка острых, если списки с его маркерами
 дают меньше `HS_FUN_DECK_SPICY_PACKAGE_MAX_SHARE_PCT` игр формата в каталоге. Пакет, который
 играет большая часть формата (Yogg-Saron в Standard), — мета: он не даёт сигнала бру, не
