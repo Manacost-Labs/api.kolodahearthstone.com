@@ -72,6 +72,25 @@
 - вид **«Плитки»** подстраивает число колонок под ширину окна: одна на
   телефоне, пять при ширине 1440 px.
 
+### История карт и локальные копии картинок
+
+Версия в `catalog_card_versions` пишется триггерами `cv1_*`; хэш версии
+включает `local_image_url`, `local_gold_image_url` и `local_crop_image_url`.
+Поэтому у этих полей должен быть один владелец:
+
+- `mirror_constructed_images.py` (через `card_image_versions.py`) — владелец
+  `local_image_url` и `local_gold_image_url`; публикует картинку под
+  `/uploads/card-history-media/<sha256>.png`;
+- `sync_constructed_related_cards.py` только заполняет пустые `local_image_url`
+  и `local_crop_image_url` и никогда не перезаписывает непустое значение
+  (раньше возвращал путь `/uploads/constructed-related/<id>.png`, и каждый
+  такой возврат становился ложной версией).
+
+Метрика «доля переходов, где изменились только `local_*`» — в описании
+issue #100; уже записанные версии не удаляются. Тест: `RUN_CARD_HISTORY_DOCKER_TESTS=1
+python -m unittest panel.tests.test_constructed_related_local_images`
+(одноразовая MariaDB 10.11 в docker).
+
 ### Ручные правки карт Полей сражений
 
 Импорт HearthstoneJSON перезаписывает карты при каждом запуске. Поля, которые
@@ -117,6 +136,59 @@
 модуль ответил ошибкой, текст ошибки показан на его странице, меню статистики
 остаётся, а «Обновить» повторяет запрос; экран «Сервер данных панели не
 ответил» относится только к сбою самой панели.
+
+### Модель ответа модуля статистики
+
+Ответ модуля (`analytics_module_response`) только пополняется: прежние поля
+(`ok`, `module`, `title`, `description`, `summary`, `columns`, `rows`, `meta`) на месте, панель до обновления интерфейса работает как раньше.
+
+**`options`** — `{<параметр>: [<сырое значение>, …]}` на верхнем уровне. Значения —
+строки, которые принимает API, без подписей (подписи делает интерфейс). Для
+каждого параметра типа `enum` список повторяет `values` из реестра, поэтому
+интерфейс читает один источник. Ключа нет, если у модуля нет списков.
+Для `meta.period` (тип `token`, список динамический) значения берутся из
+`available_periods` API и всегда содержат текущий патч; без списка — скользящие
+периоды (`past_3_hours` … `past_30_days`) плюс патч. Подсказка
+`option_hints.period` = `{default, current, current_patch}`: по сырому значению
+нельзя понять, какое окно — текущий патч (`patch_37.0.2`), а какое — текущее
+(`black_empire`). Неизвестный период заменяется на `past_day` с записью в
+`warnings`, без ошибки 422.
+
+Конечные наборы стали `enum`: `meta.min_games` (`10 … 5000`), `meta.rank`
+(добавлен `bronze_plat`), `archetypes.rank_range` (`LEGEND`,
+`DIAMOND_FOUR_THROUGH_DIAMOND_ONE`, `DIAMOND`, `BRONZE_THROUGH_GOLD`),
+`archetypes.game_type` (`RANKED_STANDARD`, `RANKED_WILD`). Данные в базе
+архетипов сейчас собираются только для `LEGEND` / `RANKED_STANDARD`; для других
+значений список честно пуст. Неизвестное значение `enum` заменяется значением по
+умолчанию.
+
+**`summary`** статистических модулей (`meta`, `archetypes`, `hsguru_archetypes`,
+`decks`, `bg_heroes`, `bg_minions`, `arena`, `arena_cards`, `constructed_cards`,
+`card`) — элементы `{key, label, value, type, tone?}`; выбранные фильтры не
+повторяются:
+
+| `key` | `type` | Подпись | Значение |
+| --- | --- | --- | --- |
+| `data_as_of` | `date` | Данные на | ISO 8601 (UTC); элемента нет, если у источника нет даты |
+| `games` | `number` | Игр в выборке | сумма игр по строкам; только `meta`, `archetypes`, `hsguru_archetypes`, `bg_heroes` (соло) |
+| `rows` | `number` | Архетипов / Колод / Героев / Существ / Классов / Карт / Записей | число записей выборки |
+| `with_decks` | `number` | Со сборками | только `hsguru_archetypes` |
+| `sources` | `number` | Источников | только `card` |
+
+`overview`, `providers` и `patches` не менялись.
+
+**Топ режима.** Строки `meta`, `archetypes`, `hsguru_archetypes` и `bg_heroes`
+получают числа `share_pct` (доля меты или выбор героя), `winrate_pct` и `games`
+(`null`, если источника нет) и идут по убыванию доли, затем игр: первые строки —
+топ. У героев Полей сражений винрейта нет: `winrate_pct` всегда `null`, итог
+игры — `avg_placement_value` (число) и `first_place_pct`. Строки `archetypes`
+упорядочиваются только внутри возвращённой страницы (`limit`/`offset` считает API).
+
+**`class_name` в строках `meta`.** Класс из каталога HSGuru
+(`/v1/hsguru/archetypes`) в его собственной форме — английское название, например
+`Warlock`, `DeathKnight`, `DemonHunter` (без пробела); без совпадения или при недоступном каталоге — `null`
+(модуль меты при этом работает). Каталог знает архетипы с ≥ 50 играми, поэтому при
+`min_games` 10 и 25 часть редких архетипов остаётся без класса.
 
 ### Смоук статистики после деплоя
 
