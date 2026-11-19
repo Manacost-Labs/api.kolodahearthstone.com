@@ -144,6 +144,24 @@ These three PHP adapters are reachable only through the private
   `/?action=analytics` without `stats` opens «Мета»; old
   `/?action=analytics&stats=<key>` links keep working. The page heading stays
   the registry title of the module.
+- Meta view (`panel-next/components/stats/MetaView.tsx`, registered in
+  `ModuleView.tsx` for `meta` and `hsguru_archetypes`): between the KPI row and
+  the table, a «Топ-10 по доле» list (class icon, Russian name with the English
+  one below, share bar, share, win rate, games) and a «Доля × винрейт» bubble
+  chart (Valyro `ScatterChart`: one series per class, point size = games, the
+  tooltip names archetype, share, win rate and games; the sr-only
+  `ChartDataTable` is the table alternative). The date of the data comes from
+  the `data_as_of` KPI. Class: `class_name` from the module (#104), fallback the
+  ending of the name (`lib/archetypes.ts`, `normalizeClass` reads `Death Knight`,
+  `DEATHKNIGHT`, `DK`). Russian names: `lib/vendor/archetype-labels-ru.json`,
+  copied from `app/balance_radar/data/archetype_labels_ru.json` by
+  `scripts/sync-models.mjs`; a name missing there stays English. Every
+  `archetype` field (`Value` in `components/ui.tsx` → `ArchetypeName.tsx`: the
+  table column of meta, HSGuru archetypes and decks, and the details) shows the
+  class icon, the Russian name and the English one below. Icons:
+  `public/class-icons/` (HearthPulse class art, see the README there). The
+  chart colours per class are `--meta-class-*` in `stats/meta-view.css` (≥ 3:1
+  against the card in both themes).
 - Statistics filters (`panel-next/components/stats/`): one card above the KPI
   row. Every enum parameter, and a token parameter that the answer carries
   `options` for (the meta period, with the current patch), is a Valyro `Select`

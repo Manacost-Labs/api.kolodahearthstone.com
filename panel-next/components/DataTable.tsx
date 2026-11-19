@@ -190,10 +190,10 @@ export function DataTable({
                     col.type === 'text' && typeof row[col.key] === 'string' ? (
                       // Long descriptions stay readable at three lines; the full text is in the tooltip and details.
                       <span className="cell-clamp" title={String(row[col.key])}>
-                        <Value value={row[col.key]} name={col.key} kind={col.type} />
+                        <Value value={row[col.key]} name={col.key} kind={col.type} row={row} />
                       </span>
                     ) : (
-                      <Value value={row[col.key]} name={col.key} kind={col.type} />
+                      <Value value={row[col.key]} name={col.key} kind={col.type} row={row} />
                     );
                   return (
                     <td key={col.key} className={numeric.has(col.key) ? 'num' : undefined}>

@@ -58,7 +58,8 @@ const column = (key, label, type = 'text') => ({ key, label, type });
 const modules = {
   meta: () => {
     const rows = make(53, 11, (i, r) => ({
-      archetype: archetype(i),
+      // Row 2 has a name without a class word: its icon must come from `class_name` (#107).
+      archetype: i === 1 ? 'Plugh Xyzzy' : archetype(i),
       winrate: i % 4 === 0 ? 54 : round(46 + r() * 11, 1),
       popularity: round(9.9 - i * 0.17 + r() * 0.1, 1),
       games: Math.round(8383 - i * 140 + r() * 90),
@@ -121,9 +122,10 @@ const modules = {
     };
   },
   hsguru_archetypes: () => {
+    // The panel adapter names the field `archetype` (panel/lib/analytics.php); row 1 is a dictionary name.
     const rows = make(242, 13, (i, r) => ({
-      name: archetype(i),
-      class_name: classes[(i * 3) % classes.length],
+      archetype: i === 0 ? 'Zoolock' : archetype(i),
+      class_name: i === 0 ? 'Warlock' : classes[(i * 3) % classes.length],
       winrate: i === 0 ? 61 : round(61.3 - i * 0.12 + r() * 0.2, 1),
       popularity_pct: round(Math.max(0.05, 10.5 - i * 0.07), 2),
       top_deck_win_rate: i % 7 === 3 ? null : round(65 - i * 0.1, 1),
@@ -132,7 +134,7 @@ const modules = {
     }));
     return {
       columns: [
-        column('name', 'Архетип'),
+        column('archetype', 'Архетип'),
         column('class_name', 'Класс'),
         column('winrate', 'Винрейт', 'percent'),
         column('popularity_pct', 'Популярность', 'percent'),

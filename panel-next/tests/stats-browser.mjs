@@ -107,6 +107,30 @@ export default async function verify(page, root) {
   ensure(!legacy.includes('Игр в выборке'), 'A sum over a partial answer: ' + legacy);
   checks.fallbackKpi = true;
 
+  // 4b. The archetype cell takes the class from the row's `class_name`, not only from the name (#107).
+  await open('meta');
+  const cell = page
+    .locator('.analytics-main tbody tr', { hasText: 'Plugh Xyzzy' })
+    .locator('.archetype-name__icon');
+  const alt = await cell.getAttribute('alt');
+  ensure(alt === 'Охотник', 'Archetype icon without a class word in the name: ' + alt);
+  checks.archetypeClassFromRow = true;
+
+  // 4c. HSGuru meta: the top and the table show the Russian name, the English one and the class icon.
+  await open('hsguru_archetypes');
+  const leader = page.locator('.meta-top__row').first();
+  ensure((await leader.locator('b').innerText()) === 'Зоолок', 'HSGuru top: ' + (await leader.innerText()));
+  ensure(
+    (await leader.locator('small').innerText()) === 'Zoolock',
+    'HSGuru top, English: ' + (await leader.innerText()),
+  );
+  ensure((await leader.locator('img').getAttribute('alt')) === 'Чернокнижник', 'HSGuru top icon');
+  const zoolock = page
+    .locator('.data-table tbody tr', { hasText: 'Зоолок' })
+    .locator('.archetype-name__icon');
+  ensure((await zoolock.getAttribute('alt')) === 'Чернокнижник', 'HSGuru table icon');
+  checks.hsguruNamesAndIcons = true;
+
   // 5. Reset only when something differs from the defaults.
   await open('meta');
   const reset = page.getByRole('button', { name: 'Сбросить' });
