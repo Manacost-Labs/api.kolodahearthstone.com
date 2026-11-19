@@ -137,20 +137,24 @@ def _win(value: Any, picks: int) -> float:
     return number
 
 
+def _whole(value: Any, what: str) -> int:
+    """A finite non-negative whole number (an integral float such as 5.0 is fine)."""
+
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise PayloadRejected(f"{what} is not a number")
+    if isinstance(value, float) and not (math.isfinite(value) and value.is_integer()):
+        raise PayloadRejected(f"{what} is not a whole number")
+    if value < 0:
+        raise PayloadRejected(f"{what} is negative")
+    return int(value)
+
+
 def _count(value: Any) -> int:
-    number = _num(value)
-    if number is None or number < 0:
-        raise PayloadRejected("a count is missing or negative")
-    return int(number)
+    return _whole(value, "a count")
 
 
 def _dbf(value: Any) -> int:
-    if value is None or isinstance(value, bool):
-        raise PayloadRejected("a card id is missing")
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        raise PayloadRejected("a card id is not a number") from None
+    return _whole(value, "a card id")
 
 
 # One merged row: [donor dbf, offered, effect picks, trigger picks, effect win, trigger win]

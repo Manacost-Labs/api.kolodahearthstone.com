@@ -242,6 +242,66 @@ def test_a_winrate_that_is_not_a_percent_is_rejected_when_there_are_picks(
         ha.parse_payload({"series": {"data": {"1": [row]}}})
 
 
+_BAD_NUMBERS = [
+    None,
+    float("nan"),
+    float("inf"),
+    float("-inf"),
+    0.5,
+    -1,
+    "5",
+    "x",
+    True,
+    [1],
+]
+
+
+@pytest.mark.parametrize("bad", _BAD_NUMBERS)
+@pytest.mark.parametrize(
+    "field",
+    [
+        "times_middle_offered",
+        "times_offered",
+        "effect_picks",
+        "trigger_picks",
+        "middle_dbf_id",
+        "option_dbf_id",
+    ],
+)
+def test_a_bad_count_or_card_id_is_rejected_as_payload_rejected(
+    field: str, bad: Any
+) -> None:
+    with pytest.raises(ha.PayloadRejected):
+        ha.parse_payload({"series": {"data": {"1": [_row(**{field: bad})]}}})
+
+
+def test_integral_floats_are_accepted() -> None:
+    row = _row(times_offered=50.0, effect_picks=20.0, trigger_picks=5.0)
+    cards, _ = ha.parse_payload({"series": {"data": {"1": [row]}}})
+    assert cards["1"][0][2][0][1:4] == [50, 20, 5]
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), 0.5, "x"])
+def test_a_drifting_counter_keeps_the_last_good_snapshot(isolated, base, bad) -> None:
+    settings = ha.Settings(formats=("standard",))
+    _refresh(base, FakeHsReplay(base), settings=settings)
+    broken = good_payload(base)
+    broken["series"]["data"][str(F3TCH3R)][0]["times_offered"] = bad
+    fake = FakeHsReplay(
+        base, RANKED_STANDARD=FetchResult("ok", payload=broken, credits=1)
+    )
+    result = _refresh(base, fake, now=NOW + timedelta(hours=21), settings=settings)
+    assert result["published"] is False and result["state"] == "fetch_error"
+    assert (
+        load_status("hsreplay_assemble")["formats"]["standard"]["last_outcome"]
+        == "contract"
+    )
+    kept = load_dataset("hsreplay_assemble")["data"]["structured"]["formats"][
+        "standard"
+    ]
+    assert kept["checked_at"] == NOW.isoformat()
+
+
 def test_a_missing_winrate_without_picks_is_fine() -> None:
     row = _row(
         effect_picks=0, effect_win_rate=None, trigger_picks=0, trigger_win_rate="x"
