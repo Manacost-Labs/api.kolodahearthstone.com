@@ -1309,7 +1309,46 @@ def test_refresh_drops_a_remembered_deck_whose_fresh_candidate_is_no_longer_fun_
     assert stats["history_dropped"] == 1
 
 
-def test_refresh_keeps_a_remembered_deck_that_is_no_longer_fun_but_has_good_numbers(
+def test_refresh_drops_a_remembered_deck_that_became_a_ladder_member_despite_good_numbers(
+    fun_deck_world: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HS_FUN_DECK_RETENTION_HOURS", "100000")
+    # 14 of 15 two-ofs shared with the Warrior ladder core: a ladder member now. Its
+    # fresh numbers are fine (50.0% over 60 games) and the remembered row still carries
+    # an old, harmless-looking similarity.
+    candidate = _catalog_row("Casino Mill Warrior", "Warrior", [*range(1, 15), 101], games=60, win_rate=50.0)
+    _save_world(
+        standard=[
+            _catalog_row("Dragon Warrior", "Warrior", range(1, 16), games=500_000, win_rate=52.0),
+            candidate,
+        ]
+    )
+    _save_history([{**_remembered_warrior(candidate["deck_code"]), "ladder_sim": 0.1}])
+
+    _refresh_fun_decks_unlocked()
+
+    structured = _structured()
+    assert structured["rows"] == []
+    assert structured["stats"]["history_dropped"] == 1
+    assert structured["stats"]["rejected_by_gate"] == {"ladder_member_gate": 1}
+
+
+def test_refresh_keeps_a_remembered_deck_that_is_not_among_the_fresh_candidates(
+    fun_deck_world: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HS_FUN_DECK_RETENTION_HOURS", "100000")
+    _save_world(
+        standard=[_catalog_row("Dragon Warrior", "Warrior", range(1, 16), games=500_000, win_rate=52.0)]
+    )
+    _save_history([_remembered_warrior(_deckstring([*range(1, 15), 101]))])
+
+    _refresh_fun_decks_unlocked()
+
+    assert [r["title"] for r in _structured()["rows"]] == ["Casino Mill Warrior"]
+    assert _structured()["stats"]["history_dropped"] == 0
+
+
+def test_a_standard_run_does_not_evict_the_wild_row_of_a_deck_turned_away_in_standard(
     fun_deck_world: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("HS_FUN_DECK_RETENTION_HOURS", "100000")
@@ -1320,13 +1359,13 @@ def test_refresh_keeps_a_remembered_deck_that_is_no_longer_fun_but_has_good_numb
             candidate,
         ]
     )
-    _save_history([_remembered_warrior(candidate["deck_code"])])
+    remembered = _remembered_warrior(candidate["deck_code"])
+    _save_history([{**remembered, "format": "Standard"}, {**remembered, "format": "Wild"}])
 
-    _refresh_fun_decks_unlocked()
+    _refresh_fun_decks_unlocked(format_focus="standard")
 
-    # v6 behaviour: a deck stays for the retention window until its numbers fail
-    assert [r["title"] for r in _structured()["rows"]] == ["Casino Mill Warrior"]
-    assert _structured()["stats"]["history_dropped"] == 0
+    assert [(r["title"], r["format"]) for r in _structured()["rows"]] == [("Casino Mill Warrior", "Wild")]
+    assert _structured()["stats"]["history_dropped"] == 1
 
 
 def test_a_standard_run_does_not_evict_the_wild_row_of_the_same_deck_code(
