@@ -1544,6 +1544,23 @@ def test_a_package_played_in_much_of_the_format_is_not_a_fun_signal(
 
 
 @pytest.mark.parametrize("label", sorted(fun_decks._SPICY_PACKAGES))
+def test_a_neutral_package_is_reported_as_meta_pkg_not_pkg(label: str, yogg_marker: None) -> None:
+    markers = _PACKAGE_MARKER_CARDS[label]
+
+    scored = _classify("Custom Rogue", _sharing(0, extra=markers), _marked_ladder(markers))
+
+    assert f"meta_pkg:{label}" in scored.reasons
+    assert not [r for r in scored.reasons if r.startswith("pkg:")]  # the site shows pkg:* as chips
+
+
+def test_a_sharp_package_is_reported_as_pkg_without_meta_pkg(yogg_marker: None) -> None:
+    scored = _classify("Custom Rogue", _sharing(0, extra=[SPICY_CARD]))
+
+    assert "pkg:mechathun" in scored.reasons
+    assert not [r for r in scored.reasons if r.startswith("meta_pkg:")]
+
+
+@pytest.mark.parametrize("label", sorted(fun_decks._SPICY_PACKAGES))
 def test_a_package_of_few_games_is_still_a_fun_signal(label: str, yogg_marker: None) -> None:
     markers = _PACKAGE_MARKER_CARDS[label]
     twin = _deck("TWIN", [*range(1, 14), 201, 202], "", games=60)
