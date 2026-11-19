@@ -1091,7 +1091,7 @@ def score_fun_deck(
     elif packages:
         # Neutral packages (quest/xl) are logged but do not count.
         reasons.append("neutral_package")
-        reasons.extend(f"pkg:{label}" for label in packages[:3])
+        reasons.extend(f"meta_pkg:{label}" for label in packages[:3])
     score += SCORE_WEIGHTS["uniqueness"] * (1.0 - hood.twin_sim)
     if unique_list:
         reasons.append("unique_list")

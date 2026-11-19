@@ -333,9 +333,10 @@ GET /v1/constructed/archetypes
 | `unique_list` | да | Ни один список каталога не похож сильнее порога: «уникальный список». |
 | `concept_title` | да | В названии есть признак концепции (Mill, Odd/Even, Highlander, Handbuff, Yogg, OTK, Rainbow и т. п.). |
 | `card_package` | да | В списке есть характерный карточный пакет (см. `pkg:*`). |
-| `pkg:reno_highlander`, `pkg:odd_even`, `pkg:mechathun`, `pkg:togwaggle_mill`, `pkg:cthun`, `pkg:whizbang`, `pkg:sathrovarr`, `pkg:yogg_package`, `pkg:steal_package` | да | Какой именно «фановый» пакет найден. |
-| `neutral_package` | да | Есть «нейтральный» пакет (квест, XL и т. п.): на оценку не влияет. |
-| `pkg:quest_package`, `pkg:patches`, `pkg:galakrondish_finley`, `pkg:nzothish_darkness`, `pkg:highlander_curve`, `pkg:xl_package` | да | Нейтральные пакеты, которые сопровождают `neutral_package`. |
+| `pkg:reno_highlander`, `pkg:odd_even`, `pkg:mechathun`, `pkg:togwaggle_mill`, `pkg:cthun`, `pkg:whizbang`, `pkg:sathrovarr`, `pkg:yogg_package`, `pkg:steal_package` | да | Какой именно «фановый» пакет найден. `pkg:*` выдаётся только для пакетов, засчитанных как острые (те, что дают `card_package`). |
+| `neutral_package` | да | Есть «нейтральный» пакет — квест, XL и т. п. или пакет, который в формате играет ≥ 3% игр (Yogg-Saron в Standard): на оценку не влияет. |
+| `meta_pkg:<пакет>` | нет | Какой именно нейтральный пакет найден (диагностика). Сайт такие коды не показывает: чип «Пакет» только у `pkg:*`. |
+| `meta_pkg:quest_package`, `meta_pkg:patches`, `meta_pkg:galakrondish_finley`, `meta_pkg:nzothish_darkness`, `meta_pkg:highlander_curve`, `meta_pkg:xl_package` и `meta_pkg:*` метовых острых пакетов | нет | Нейтральные пакеты, которые сопровождают `neutral_package`. |
 | `meme_low_winrate` | да | Концептная колода с малой выборкой и винрейтом не выше 42% — «мем». |
 | `cheese_high_winrate` | да | Концептная колода с малой выборкой и винрейтом от 68% — «Сыр». |
 | `ladder_member_gate` | нет | Отказ: список — вариант ладдерного архетипа. |
