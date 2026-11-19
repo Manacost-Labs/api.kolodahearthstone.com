@@ -60,18 +60,34 @@ class GoldenAssetSourceTest(unittest.TestCase):
         spell = {**self.row, "card_type": "spell"}
         self.assertEqual(images.golden_assets([spell], {}), [])
 
-    def test_golden_refresh_keeps_old_files_and_uses_immutable_urls(self):
+    def test_golden_refresh_keeps_old_files_and_publishes_content_addressed_file(self):
         with tempfile.TemporaryDirectory() as directory:
-            target=Path(directory)/"old.png"
+            root=Path(directory).resolve()
+            target=root/"uploads"/"golden"/"old.png"
+            target.parent.mkdir(parents=True)
             target.write_bytes(b"old-render")
             metadata={"card_id":"BG_TEST", "target":str(target), "source_url":"https://example.invalid/bg.png"}
             def convert(command,**kwargs):
                 Path(command[-1]).write_bytes(Path(command[1]).read_bytes())
-            with mock.patch.object(images,"download",side_effect=lambda _url,path:path.write_bytes(b"new-validated-render")), mock.patch.object(images.subprocess,"run",side_effect=convert), mock.patch.object(images,"identify_png"):
+            with mock.patch.object(images,"APP_ROOT",root), mock.patch.object(images,"download",side_effect=lambda _url,path:path.write_bytes(b"new-validated-render")), mock.patch.object(images.subprocess,"run",side_effect=convert), mock.patch.object(images,"identify_png"):
                 digest=images.replace_golden_card(metadata)
             self.assertEqual(target.read_bytes(),b"old-render")
             self.assertEqual(Path(metadata["target"]).read_bytes(),b"new-validated-render")
-            self.assertEqual(metadata["public_path"],"/uploads/golden/BG_TEST-"+digest+".png")
+            self.assertEqual(Path(metadata["target"]),root/"uploads"/"card-history-media"/(digest+".png"))
+            self.assertEqual(metadata["public_path"],"/uploads/card-history-media/"+digest+".png")
+
+    def test_unchanged_golden_source_keeps_current_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory).resolve()
+            target=root/"uploads"/"golden"/"same.png"
+            target.parent.mkdir(parents=True)
+            target.write_bytes(b"same-render")
+            metadata={"card_id":"BG_TEST", "target":str(target), "source_url":"https://example.invalid/bg.png"}
+            with mock.patch.object(images,"APP_ROOT",root), mock.patch.object(images,"download",side_effect=lambda _url,path:path.write_bytes(b"same-render")), mock.patch.object(images.subprocess,"run") as convert:
+                digest=images.replace_golden_card(metadata)
+            convert.assert_not_called()
+            self.assertEqual(digest,images.sha256_file(target))
+            self.assertFalse((root/"uploads"/"card-history-media").exists())
 
     def test_unverified_golden_cache_is_refreshed_even_with_newer_mtime(self):
         with tempfile.TemporaryDirectory() as directory:

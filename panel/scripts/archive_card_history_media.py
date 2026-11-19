@@ -156,6 +156,11 @@ def fetch_bytes(url, root, remote=False):
 
 
 def immutable_digest(url):
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.hostname in (None, "api.kolodahearthstone.com"):
+        archive = re.fullmatch(r"/uploads/card-history-media/([a-f0-9]{64})\.(png|jpg|webp|gif)", parsed.path)
+        if archive:
+            return archive[1]
     match = re.search(
         r"-([a-f0-9]{64})\.(png|jpg|webp|gif)$", urllib.parse.urlsplit(url).path
     )
