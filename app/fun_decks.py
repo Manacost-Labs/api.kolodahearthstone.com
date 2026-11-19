@@ -1319,34 +1319,12 @@ def _merge_history(
             continue
         key = (_format_bucket(row.get("format")), code)
         prev = by_code.get(key)
+        # The fresh run is the only truth for a deck it saw: its numbers, kind and reasons
+        # replace the remembered ones; only the first sighting survives.
+        merged = dict(row)
         if prev:
-            merged = dict(prev)
-            merged.update(row)
-            merged["first_seen_at"] = prev.get("first_seen_at") or row.get(
-                "first_seen_at"
-            )
-            merged["last_seen_at"] = row.get("last_seen_at") or prev.get("last_seen_at")
-            if float(prev.get("fun_score") or 0) > float(row.get("fun_score") or 0):
-                for key in (
-                    "fun_score",
-                    "max_meta_similarity",
-                    "nearest_archetype",
-                    "nearest_deck_code",
-                    "catalog_games",
-                    "archetype_popularity_pct",
-                    "reasons",
-                    "concept_hit",
-                    "rare_archetype",
-                    "kind",
-                    "ladder_sim",
-                    "content_sim",
-                    "twin_sim",
-                    "content_archetype",
-                ):
-                    merged[key] = prev.get(key)
-            by_code[key] = merged
-        else:
-            by_code[key] = dict(row)
+            merged["first_seen_at"] = prev.get("first_seen_at") or row.get("first_seen_at")
+        by_code[key] = merged
     return list(by_code.values())
 
 
