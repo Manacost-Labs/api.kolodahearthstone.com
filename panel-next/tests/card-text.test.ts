@@ -64,7 +64,7 @@ test('plural forms |4 follow the number before them (BE_005 and friends)', () =>
 });
 
 test('$ and # before a placeholder are dropped (LT23_031P1_01)', () => {
-  assert.equal(plainCardText('Нанесите ${0} урона. Лечит #{1}.'), 'Нанесите X урона. Лечит X.');
+  assert.equal(plainCardText('Нанесите $' + '{0} урона. Лечит #{1}.'), 'Нанесите X урона. Лечит X.');
 });
 
 test('upper-case and garbage tags, [x] in the middle of the text (EDR_493, DALA_BOSS_19p, AT_009)', () => {
