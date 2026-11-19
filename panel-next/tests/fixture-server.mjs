@@ -3,7 +3,12 @@ import http from 'node:http';
 import { execFile } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { promisify } from 'node:util';
+import { moduleAnswer } from './fixtures/analytics-data.mjs';
 const run = promisify(execFile);
+// A captured `parsing_reliability` answer: shares arrive as `98,19%` strings, as the backend writes them.
+const reliability = JSON.parse(
+  readFileSync(new URL('./fixtures/parsing-reliability.json', import.meta.url), 'utf8'),
+);
 // Mirror of analytics_module_registry() as the PHP adapter exposes it; panel/tests/analytics_registry_snapshot_test.php keeps it current.
 const registry = JSON.parse(
   readFileSync(new URL('./fixtures/analytics-registry.json', import.meta.url), 'utf8'),
@@ -58,22 +63,31 @@ function fixtureAnalytics(module, search) {
       502,
     ];
   const card = (search.get('card_name') || '').trim();
+  const answer = moduleAnswer(module, definition, search);
+  const generic = [
+    { name: 'fixture ' + module + ' 1', rows: 10 },
+    { name: 'fixture ' + module + ' 2', rows: 20 },
+  ];
   return [
     {
       ok: true,
       module,
       title: card ? definition.title + ': ' + card : definition.title,
       description: definition.description,
-      summary: [{ label: 'Записей', value: 2 }],
-      columns: [
+      summary: answer && !answer.legacy ? answer.summary : [{ label: 'Записей', value: 2 }],
+      columns: answer?.columns ?? [
         { key: 'name', label: 'Название' },
         { key: 'rows', label: 'Строк' },
       ],
-      rows: [
-        { name: 'fixture ' + module + ' 1', rows: 10 },
-        { name: 'fixture ' + module + ' 2', rows: 20 },
-      ],
-      meta: { total: 2, updated_at: '2026-10-02T12:00:00Z', cached: false, stale: false },
+      rows: answer?.rows ?? generic,
+      meta: {
+        total: answer?.total ?? 2,
+        updated_at: answer ? '2026-11-19T11:00:02Z' : '2026-10-02T12:00:00Z',
+        cached: false,
+        stale: false,
+      },
+      ...(answer?.options && !answer.legacy ? { options: answer.options } : {}),
+      ...(answer?.hints && !answer.legacy ? { option_hints: answer.hints } : {}),
     },
     200,
   ];
@@ -388,7 +402,7 @@ export const server = http.createServer(async (req, res) => {
         })),
       ],
       meta: { total: 2, updated_at: '2026-10-02T12:00:00Z', cached: false, stale: false },
-      parsing_reliability: { windows: [], message: 'Накапливаем статистику' },
+      parsing_reliability: reliability,
     });
   if (url.pathname !== '/next-data.php') return send({ ok: false, message: 'Unknown endpoint' }, 404);
   let input;
@@ -543,4 +557,6 @@ export const server = http.createServer(async (req, res) => {
   send(data);
 });
 if (process.argv[1] === new URL(import.meta.url).pathname)
-  server.listen(18768, '127.0.0.1', () => console.log('Local panel fixture: 127.0.0.1:18768'));
+  server.listen(Number(process.env.PANEL_FIXTURE_PORT) || 18768, '127.0.0.1', () =>
+    console.log('Local panel fixture: 127.0.0.1:' + server.address().port),
+  );

@@ -1,6 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { analyticsRequest, missingHint, responseMessage } from '../lib/analytics-query.ts';
+import { readFileSync } from 'node:fs';
+import {
+  analyticsRequest,
+  maxPage,
+  pageNumber,
+  responseMessage,
+  serverPagedModules,
+  statsPageSize,
+} from '../lib/analytics-query.ts';
 
 const card = { params: { card_name: { type: 'string', required: true } } };
 const meta = { params: { format: { type: 'enum' } } };
@@ -8,7 +16,6 @@ const meta = { params: { format: { type: 'enum' } } };
 test('card without a name is not sent to the backend', () => {
   const result = analyticsRequest(new URLSearchParams('action=analytics&stats=card'), 'card', card);
   assert.deepEqual(result.missing, ['card_name']);
-  assert.equal(missingHint(result.missing), 'Введите название карты.');
 });
 
 test('the inspector button parameter q becomes card_name for the card module', () => {
@@ -54,4 +61,88 @@ test('response message comes from the adapter or falls back to a neutral text', 
   assert.equal(responseMessage('<html>', 500), 'Не удалось загрузить статистику (код 500).');
   assert.equal(responseMessage(null, 502), 'Не удалось загрузить статистику (код 502).');
   assert.equal(responseMessage({ message: 42 }, 422), 'Не удалось загрузить статистику (код 422).');
+});
+
+test('page becomes limit and offset for a module that pages, and never reaches other modules', () => {
+  const paged = { params: { limit: { type: 'int' }, offset: { type: 'int' } } };
+  const third = analyticsRequest(
+    new URLSearchParams('stats=decks&page=3&offset=9&limit=500'),
+    'decks',
+    paged,
+  );
+  assert.equal(third.backend.get('limit'), '25');
+  assert.equal(third.backend.get('offset'), '50');
+  assert.equal(third.backend.has('page'), false);
+  const first = analyticsRequest(new URLSearchParams('stats=decks&page=abc'), 'decks', paged);
+  assert.equal(first.backend.get('offset'), '0');
+  const flat = analyticsRequest(new URLSearchParams('stats=meta&page=3&offset=5'), 'meta', meta);
+  assert.equal(flat.backend.has('offset'), false);
+  assert.equal(flat.backend.has('page'), false);
+});
+
+test('page stays inside what the backend offset allows (default 10000, or the registry max)', () => {
+  assert.equal(maxPage(), 401);
+  assert.equal(maxPage({ params: { offset: { max: 100 } } }), 5);
+  for (const bad of [null, '', 'abc', '0', '-3', 'NaN', 'Infinity'])
+    assert.equal(pageNumber(bad), 1, String(bad));
+  assert.equal(pageNumber('1.9'), 1);
+  assert.equal(pageNumber('400'), 400);
+  assert.equal(pageNumber('401'), 401);
+  assert.equal(pageNumber('402'), 401);
+  assert.equal(pageNumber('100000'), 401);
+  assert.equal(pageNumber('9', 5), 5);
+});
+
+test('a page past the offset limit asks for the last servable offset and says so in the address', () => {
+  const paged = { params: { limit: { type: 'int' }, offset: { type: 'int', max: 10000 } } };
+  const far = analyticsRequest(new URLSearchParams('stats=decks&page=402'), 'decks', paged);
+  assert.equal(far.backend.get('offset'), '10000');
+  assert.equal(far.page.get('page'), '401');
+  const edge = analyticsRequest(new URLSearchParams('stats=decks&page=401'), 'decks', paged);
+  assert.equal(edge.backend.get('offset'), '10000');
+  assert.equal(edge.page.get('page'), '401');
+  const small = { params: { offset: { type: 'int', max: 100 } } };
+  assert.equal(analyticsRequest(new URLSearchParams('page=50'), 'decks', small).backend.get('offset'), '100');
+});
+
+// Which modules page on the server: the registry snapshot plus what PHP really does with `offset`.
+const registry = JSON.parse(
+  readFileSync(new URL('./fixtures/analytics-registry.json', import.meta.url), 'utf8'),
+).modules as Record<string, { params: Record<string, { max?: number; type?: string }> }>;
+
+test('limit and offset per module: only decks and patches page on the server', () => {
+  assert.deepEqual([...serverPagedModules].sort(), ['decks', 'patches']);
+  for (const [key, definition] of Object.entries(registry)) {
+    const result = analyticsRequest(
+      new URLSearchParams('stats=' + key + '&page=3&offset=7&limit=9'),
+      key,
+      definition,
+    );
+    const { limit, offset } = definition.params;
+    if (serverPagedModules.includes(key)) {
+      assert.equal(result.backend.get('limit'), String(statsPageSize), key);
+      assert.equal(result.backend.get('offset'), String(2 * statsPageSize), key);
+    } else if (offset && limit?.max) {
+      // Asks for everything the registry allows and never for an offset; the table pages on the client.
+      assert.equal(result.backend.get('limit'), String(limit.max), key);
+      assert.equal(result.backend.has('offset'), false, key);
+    } else {
+      assert.equal(result.backend.has('offset'), false, key);
+    }
+    assert.equal(result.backend.has('page'), false, key);
+  }
+  // The modules the lead checked against PHP: the largest limit is what the registry says.
+  const limits = Object.fromEntries(
+    ['archetypes', 'hsguru_archetypes', 'bg_heroes', 'bg_minions', 'arena'].map(key => [
+      key,
+      analyticsRequest(new URLSearchParams(), key, registry[key]).backend.get('limit'),
+    ]),
+  );
+  assert.deepEqual(limits, {
+    archetypes: '200',
+    hsguru_archetypes: '500',
+    bg_heroes: '200',
+    bg_minions: '500',
+    arena: '100',
+  });
 });

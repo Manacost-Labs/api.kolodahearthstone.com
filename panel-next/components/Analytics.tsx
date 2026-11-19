@@ -1,7 +1,10 @@
 'use client';
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { countLabel, fieldLabel, formatNumber, optionLabel, paramLabel, toneOf } from '@/lib/format';
+import { countLabel, fieldLabel, formatNumber, toneOf } from '@/lib/format';
+import { maxPage, pageNumber, statsPageSize } from '@/lib/analytics-query';
+import { isChanged, isPartial, isServerPaged, pageCaption, statsKpis, visibleParams } from '@/lib/stats-view';
+import { statsHref } from '@/lib/stats-sections';
 import { queryHref, text } from '@/lib/model';
 import type { AnalyticsData, AnalyticsModule, Row } from '@/lib/types';
 import { DataTable } from './DataTable';
@@ -11,7 +14,10 @@ import { Reliability } from './Reliability';
 import { EmptyState, KpiCard, StatusBadge, Time, Value } from './ui';
 import { ArrowClockwiseIcon } from '@phosphor-icons/react/dist/ssr/ArrowClockwise';
 import { StatsModuleTabs } from './StatsModuleTabs';
-import { Select } from './varylo-ui/forms/Select';
+import { Button } from './varylo-ui/basic/Button';
+import { ModuleView } from './stats/ModuleView';
+import { StatsFilters } from './stats/StatsFilters';
+import { StatsPager } from './stats/StatsPager';
 export function Analytics({
   data,
   modules,
@@ -30,6 +36,17 @@ export function Analytics({
   const definition = modules[module];
   const go = (changes: Record<string, string | number | null>) =>
     start(() => router.push(queryHref(query, changes)));
+  // A required filter without a value: the module has nothing to show yet, only the field.
+  const missing = visibleParams(definition).some(
+    ([key, param]) => param.required && !(params.get(key) || '').trim(),
+  );
+  const kpis = statsKpis(module, data, definition);
+  const pageNo = pageNumber(params.get('page'), maxPage(definition));
+  const total = Number(data.meta?.total) || data.rows?.length || 0;
+  // The last page the data (and the backend's `offset` limit) reaches; a page past it has no rows.
+  const lastPage = Math.max(1, Math.min(Math.ceil(total / statsPageSize), maxPage(definition)));
+  const paged = isServerPaged(module, definition);
+  const beyond = paged && pageNo > 1 && total > 0 && !data.rows?.length;
   const extras = Object.entries(data).filter(
     ([key]) =>
       ![
@@ -42,6 +59,9 @@ export function Analytics({
         'rows',
         'meta',
         'provider_usage',
+        // The filters already use them (lists and the hints beside the period).
+        'options',
+        'option_hints',
       ].includes(key),
   );
   return (
@@ -62,89 +82,91 @@ export function Analytics({
           onSelect={key => start(() => router.push('/?action=analytics&stats=' + key))}
         />
         <div className="analytics-main" data-module={module}>
-          <form
-            className="filter-row"
-            onSubmit={e => {
-              e.preventDefault();
-              const form = new FormData(e.currentTarget);
-              go(Object.fromEntries([...form.entries()].map(([key, v]) => [key, String(v)])));
-            }}
-          >
-            {Object.entries(definition?.params || {}).map(([key, param]) =>
-              param.type === 'enum' ? (
-                <div className="filter-field" key={key}>
-                  <span aria-hidden="true">{paramLabel(key)}</span>
-                  <Select
-                    name={key}
-                    size="sm"
-                    aria-label={paramLabel(key)}
-                    defaultValue={params.get(key) || String(param.default || '')}
-                    onValueChange={value => go({ [key]: value })}
-                    options={(param.values || []).map(value => ({
-                      value: String(value),
-                      label: optionLabel(key, value),
-                    }))}
-                  />
-                </div>
-              ) : (
-                <label className="filter-field" key={key}>
-                  <span>{paramLabel(key)}</span>
-                  <input
-                    name={key}
-                    type={param.type === 'int' ? 'number' : 'search'}
-                    min={param.min}
-                    max={param.max}
-                    defaultValue={params.get(key) || text(param.default, '')}
-                  />
-                </label>
-              ),
-            )}
-            {/* Lists apply on selection; only typed fields need an explicit submit. */}
-            {Object.values(definition?.params || {}).some(param => param.type !== 'enum') && (
-              <button className="button secondary" type="submit">
-                Применить
-              </button>
-            )}
-          </form>
-          <div className="summary-grid">
-            {(data.summary || []).map(item => (
-              <KpiCard
-                key={item.label}
-                label={item.label}
-                value={typeof item.value === 'number' ? formatNumber(item.value) : text(item.value)}
-                tone={toneOf(item.tone)}
-              />
-            ))}
-          </div>
-          <div className="data-status">
-            {data.meta?.stale || data.meta?.stale_cache ? (
-              <StatusBadge tone="warning" label="Резервные данные" />
-            ) : (
-              <StatusBadge tone="good" label="Актуальный набор" />
-            )}
-            {Boolean(data.meta?.updated_at) && (
-              <span>
-                Обновлено: <Time value={data.meta?.updated_at} />
-              </span>
-            )}
-            {Boolean(data.meta?.cached) && (
-              <span>
-                Из кэша ·{' '}
-                {countLabel(Number(data.meta?.cache_age) || 0, {
-                  one: 'секунда',
-                  few: 'секунды',
-                  many: 'секунд',
-                })}
-              </span>
-            )}
-          </div>
-          {'provider_usage' in data && <ProviderUsage data={data.provider_usage} />}
-          {data.rows?.length ? (
-            <DataTable key={module} rows={data.rows} columns={data.columns} onDetail={setSelected} />
-          ) : 'provider_usage' in data ? null : (
-            <EmptyState title="По этим условиям данных нет">
-              Измените фильтры или выберите другой набор.
+          <StatsFilters
+            definition={definition}
+            data={data}
+            query={params}
+            changed={isChanged(definition, params)}
+            onChange={go}
+            onReset={() => start(() => router.push(statsHref(module)))}
+          />
+          {missing ? (
+            <EmptyState title="Выберите карту">
+              Введите название карты в поле выше и нажмите Enter — покажем её винрейт, колоды и динамику.
             </EmptyState>
+          ) : (
+            <div className="stats-body" data-busy={pending}>
+              <div className="summary-grid stats-kpis">
+                {kpis.map(item => (
+                  <KpiCard
+                    key={item.key}
+                    label={item.label}
+                    value={item.value}
+                    hint={item.hint}
+                    tone={toneOf(item.tone)}
+                  />
+                ))}
+              </div>
+              <div className="data-status">
+                {data.meta?.stale || data.meta?.stale_cache ? (
+                  <StatusBadge tone="warning" label="Резервные данные" />
+                ) : (
+                  <StatusBadge tone="good" label="Актуальный набор" />
+                )}
+                {/* «Данные на» in the KPI row already says when; repeat it only when no KPI does. */}
+                {Boolean(data.meta?.updated_at) && !kpis.some(item => item.key === 'data_as_of') && (
+                  <span>
+                    Обновлено: <Time value={data.meta?.updated_at} />
+                  </span>
+                )}
+                {Boolean(data.meta?.cached) && (
+                  <span>
+                    Из кэша ·{' '}
+                    {countLabel(Number(data.meta?.cache_age) || 0, {
+                      one: 'секунда',
+                      few: 'секунды',
+                      many: 'секунд',
+                    })}
+                  </span>
+                )}
+              </div>
+              <ModuleView module={module} data={data} />
+              {'provider_usage' in data && <ProviderUsage data={data.provider_usage} />}
+              {beyond ? (
+                <EmptyState
+                  title="Такой страницы нет"
+                  action={
+                    <Button
+                      variant="secondary"
+                      onClick={() => go({ page: lastPage === 1 ? null : lastPage })}
+                    >
+                      Перейти на последнюю страницу
+                    </Button>
+                  }
+                >
+                  {`Данные заканчиваются на странице ${formatNumber(lastPage)}: всего ${formatNumber(total)}.`}
+                </EmptyState>
+              ) : data.rows?.length ? (
+                <DataTable key={module} rows={data.rows} columns={data.columns} onDetail={setSelected} />
+              ) : 'provider_usage' in data ? null : (
+                <EmptyState title="По этим условиям данных нет">
+                  Измените фильтры или выберите другой набор.
+                </EmptyState>
+              )}
+              {!paged && data.rows?.length > 0 && isPartial(data) && (
+                <p className="stats-note">
+                  Показаны первые {formatNumber(data.rows.length)} из {formatNumber(total)}.
+                </p>
+              )}
+              {paged && data.rows?.length > 0 && (
+                <StatsPager
+                  caption={pageCaption(pageNo, data.rows.length, total)}
+                  page={pageNo}
+                  pageCount={lastPage}
+                  onPage={next => go({ page: next === 1 ? null : next })}
+                />
+              )}
+            </div>
           )}
           {extras.map(([key, value]) =>
             key === 'parsing_reliability' ? (

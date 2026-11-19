@@ -111,18 +111,44 @@ function toNumber(value: unknown): number | null {
   return null;
 }
 
+// A share as the backends send it: a number, "58.5", "7.98%" or "58,5 %". Always in percent units.
+function toPercentNumber(value: unknown): number | null {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value !== 'string') return null;
+  const clean = value
+    .replace(/[\s\u00a0]/g, '')
+    .replace(/%$/, '')
+    .replace(',', '.');
+  return /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(clean) ? Number(clean) : null;
+}
+
 export function formatNumber(value: unknown): string {
   const number = toNumber(value);
   return number === null ? (isBlank(value) ? '—' : String(value)) : numberFormatter.format(number);
 }
 
-// Statistics already arrive in percent units (52.3 means 52.3%), as in the PHP panel.
+const percentFormatter = new Intl.NumberFormat(locale, {
+  minimumFractionDigits: 1,
+  maximumFractionDigits: 1,
+});
+const smallPercentFormatter = new Intl.NumberFormat(locale, {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+/**
+ * The one reading of a share everywhere: percent units in (52.3, "7.98%", "58,5 %" all mean percent),
+ * `58,5 %` out (comma, U+00A0 before the sign). One decimal; a value between 0 and 1 % keeps two so
+ * it does not collapse to `0,0 %`. Never `style: 'percent'`, which would multiply by 100.
+ */
 export function formatPercent(value: unknown): string {
-  const number = toNumber(value);
-  if (number !== null) return `${numberFormatter.format(number)}%`;
-  if (isBlank(value)) return '—';
-  const raw = String(value);
-  return raw.includes('%') ? raw : `${raw}%`;
+  const number = toPercentNumber(value);
+  if (number === null) return '—';
+  const small = Math.abs(number) > 0 && Math.abs(number) < 1;
+  const text = (small ? smallPercentFormatter : percentFormatter).format(number);
+  // 0,004 would read "0,00 %": show a plain zero instead.
+  const zero = /^[-\u2212]?0,0+$/.test(text);
+  return `${zero ? percentFormatter.format(0) : text}\u00a0%`;
 }
 
 export function plural(value: number, forms: { one: string; few: string; many: string }): string {
@@ -360,18 +386,18 @@ const paramLabels: Record<string, string> = {
   format: 'Формат',
   format_name: 'Формат',
   rank: 'Ранг',
+  rank_range: 'Ранг',
+  game_type: 'Тип игры',
   period: 'Период',
   mode: 'Режим',
-  rating: 'Рейтинг игроков',
+  rating: 'Рейтинг',
   arena_source: 'Режим / источник',
   card_rank: 'Рейтинг карт',
   card_period: 'Период карт',
   card_name: 'Карта',
   class_name: 'Класс',
   q: 'Поиск',
-  limit: 'Записей',
   min_games: 'Минимум игр',
-  offset: 'Смещение',
   order: 'Порядок',
   sort: 'Сортировка',
   tavern_tier: 'Уровень таверны',
@@ -380,27 +406,59 @@ const paramLabels: Record<string, string> = {
   source_id: 'Источник',
 };
 
+// Keys are matched case-insensitively: the backends send both "standard" and "STANDARD".
+const formatLabels = { standard: 'Стандарт', wild: 'Вольный' };
 const optionLabels: Record<string, Record<string, string>> = {
-  format: { standard: 'Standard', wild: 'Wild' },
-  mode: { solo: 'Solo', duos: 'Duos' },
-  rank: {
-    all: 'Все',
-    diamond: 'Diamond',
-    diamond_4to1: 'Diamond 4–1',
-    diamond_to_legend: 'Diamond – Legend',
-    legend: 'Legend',
-    top_5k: 'Top 5K',
-    top_legend: 'Top Legend',
-    top_500: 'Top 500',
-    top_100: 'Top 100',
+  format: formatLabels,
+  format_name: formatLabels,
+  game_type: {
+    ranked_standard: 'Рейтинговый стандарт',
+    ranked_wild: 'Рейтинговый вольный',
+    ranked_twist: 'Рейтинговый Твист',
   },
-  rating: { '100': 'Все игроки', '50': 'Top 50%', '25': 'Top 25%', '10': 'Top 10%', '1': 'Top 1%' },
+  mode: { solo: 'Соло', duos: 'Дуо' },
+  rank: {
+    all: 'Все ранги',
+    bronze_plat: 'Бронза – Платина',
+    diamond: 'Алмаз',
+    diamond_4to1: 'Алмаз 4–1',
+    diamond_to_legend: 'Алмаз – Легенда',
+    legend: 'Легенда',
+    top_5k: 'Топ 5000',
+    top_legend: 'Топ легенды',
+    top_500: 'Топ 500',
+    top_100: 'Топ 100',
+  },
+  rank_range: {
+    legend: 'Легенда',
+    diamond_four_through_diamond_one: 'Алмаз 4–1',
+    diamond: 'Алмаз',
+    bronze_through_gold: 'Бронза – Золото',
+  },
+  period: {
+    past_3_hours: '3 часа',
+    past_6_hours: '6 часов',
+    past_day: '24 часа',
+    past_3_days: '3 дня',
+    past_week: '7 дней',
+    past_2_weeks: '14 дней',
+    past_30_days: '30 дней',
+    black_empire: 'Чёрная империя',
+    black_empire_ban: 'Баны',
+  },
+  rating: {
+    '100': 'Все игроки',
+    '50': 'Лучшие 50 %',
+    '25': 'Лучшие 25 %',
+    '10': 'Лучшие 10 %',
+    '1': 'Лучший 1 %',
+  },
   arena_source: {
     firestone: 'Обычная · Firestone',
     hsreplay: 'Обычная · HSReplay',
     underground: 'Подпольная · Firestone',
   },
-  card_rank: { platinum: 'Platinum', diamond: 'Diamond', diamond_4_1: 'Diamond 4–1', legend: 'Legend' },
+  card_rank: { platinum: 'Платина', diamond: 'Алмаз', diamond_4_1: 'Алмаз 4–1', legend: 'Легенда' },
   card_period: { '1d': '24 часа', '3d': '3 дня', '7d': '7 дней', '14d': '14 дней', patch: 'Текущий патч' },
   order: { asc: 'По возрастанию', desc: 'По убыванию' },
   sort: { games: 'Игры', winrate: 'Винрейт', popularity: 'Популярность', name: 'Название' },
@@ -418,8 +476,50 @@ export function paramLabel(key: string): string {
   return paramLabels[key] ?? fieldLabel(key);
 }
 
+/**
+ * Finite value sets the panel can offer when the answer carries no `options`: rolling periods (patches
+ * come from the data), classes and formats. Class and format filters start with «Все» (empty = no filter).
+ * The class values are the upper-case spelling both backends accept (HSReplay matches it exactly, the
+ * decks table compares case-insensitively).
+ */
+export function knownOptionValues(param: string): string[] {
+  if (param === 'class_name')
+    return [
+      '',
+      ...Object.keys(classLabels)
+        .filter(key => key !== 'neutral')
+        .map(key => key.toUpperCase()),
+    ];
+  if (param === 'format_name') return ['', 'standard', 'wild'];
+  const values = Object.keys(optionLabels[param] ?? {});
+  return param === 'period' ? values.filter(value => value.startsWith('past_')) : values;
+}
+
+/** Text that may hold shares ("98,19%", "цель 99%") written in the one shape of `formatPercent`. */
+export function normalizeShares(text: string): string {
+  return text.replace(/(\d+(?:[.,]\d+)?)\s?%/g, (_, number: string) => formatPercent(number));
+}
+
+/** The Russian wording of a filter value: "past_day" → «24 часа», "patch_37.0.2" → «Патч 37.0.2». */
 export function optionLabel(param: string, value: string): string {
-  return optionLabels[param]?.[value] ?? value;
+  const raw = String(value);
+  if (raw === '' && (param === 'class_name' || param === 'format_name')) return 'Все';
+  if (param === 'class_name') return classLabel(raw);
+  const known = optionLabels[param]?.[raw] ?? optionLabels[param]?.[raw.toLowerCase()];
+  if (known) return known;
+  if (param === 'period' || param === 'card_period') {
+    const patch = /^patch_(.+)$/i.exec(raw);
+    if (patch) return `Патч ${patch[1]}`;
+    const past = /^past_(\d+)_(hours?|days?)$/.exec(raw);
+    if (past) {
+      const amount = Number(past[1]);
+      return past[2].startsWith('hour')
+        ? countLabel(amount, { one: 'час', few: 'часа', many: 'часов' })
+        : countLabel(amount, { one: 'день', few: 'дня', many: 'дней' });
+    }
+  }
+  if (param === 'min_games' && toNumber(raw) !== null) return formatNumber(raw);
+  return raw;
 }
 
 // Reliability windows arrive as "24h" / "7d".

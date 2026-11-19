@@ -1,5 +1,5 @@
 import { getPage, getSession, serverData, serverResult } from '@/lib/backend';
-import { analyticsRequest, missingHint } from '@/lib/analytics-query';
+import { analyticsRequest } from '@/lib/analytics-query';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { matchesCard } from '@/lib/card-detail';
@@ -53,8 +53,8 @@ export default async function Page({
       meta: {},
     };
     let notice: { tone: 'hint' | 'error'; text: string } | null = null;
-    if (missing.length) notice = { tone: 'hint', text: missingHint(missing) };
-    else {
+    // A missing required filter is answered by the page itself (a field and a hint), not by a request.
+    if (!missing.length) {
       // A failing module is shown inside its page: the menu stays and "Обновить" asks again.
       const result = await serverResult<AnalyticsData>('analytics', backend);
       if (result.data) data = result.data;

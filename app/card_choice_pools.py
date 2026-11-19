@@ -284,6 +284,7 @@ class CardBase:
         standard_sets: Iterable[str],
         standard_dbf: Iterable[int] = (),
         names_ru: Mapping[str, str] | None = None,
+        texts_ru: Mapping[str, str] | None = None,
     ) -> None:
         self.all = [card for card in cards if card.get("id")]
         self.by_id = {str(card["id"]): card for card in self.all}
@@ -295,6 +296,7 @@ class CardBase:
         self.standard_sets = frozenset(standard_sets)
         self.standard_dbf = frozenset(int(dbf) for dbf in standard_dbf)
         self.names_ru = dict(names_ru or {})
+        self.texts_ru = dict(texts_ru or {})
         self.collectible = [
             card
             for card in self.all
@@ -350,15 +352,25 @@ def load_card_base() -> CardBase:
         return cached
     sets, extra = standard_evidence(by_dbf)
     try:
+        cards_ru = cards_index.cards_by_id("ruRU")
         names_ru = {
             card_id: str(card.get("name"))
-            for card_id, card in cards_index.cards_by_id("ruRU").items()
+            for card_id, card in cards_ru.items()
             if card.get("name")
         }
+        texts_ru = {
+            card_id: str(card.get("text"))
+            for card_id, card in cards_ru.items()
+            if card.get("text")
+        }
     except Exception:  # noqa: BLE001 - Russian names are decoration only
-        names_ru = {}
+        names_ru, texts_ru = {}, {}
     base = CardBase(
-        by_dbf.values(), standard_sets=sets, standard_dbf=extra, names_ru=names_ru
+        by_dbf.values(),
+        standard_sets=sets,
+        standard_dbf=extra,
+        names_ru=names_ru,
+        texts_ru=texts_ru,
     )
     _BASE_CACHE.update(base=base, index=by_dbf, built_at=now)
     return base

@@ -1,13 +1,23 @@
 'use client';
 import { useState } from 'react';
 import view from '@/lib/vendor/parsing-reliability.cjs';
-import { windowLabel } from '@/lib/format';
+import { normalizeShares, windowLabel } from '@/lib/format';
 import { record, text } from '@/lib/model';
 import { StatusBadge, Value } from './ui';
 import { Select } from './varylo-ui/forms/Select';
+function shares(value: unknown): unknown {
+  if (typeof value === 'string') return normalizeShares(value);
+  if (Array.isArray(value)) return value.map(shares);
+  if (value && typeof value === 'object')
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, shares(item)]));
+  return value;
+}
 export function Reliability({ data }: { data: unknown }) {
   const [window, setWindow] = useState('24h');
-  const model = view.buildReliabilityViewModel(data, window);
+  // The vendored model writes shares its own way (`98,19%`); the panel shows one shape everywhere.
+  const model = shares(view.buildReliabilityViewModel(data, window)) as ReturnType<
+    typeof view.buildReliabilityViewModel
+  >;
   const windows = Array.isArray(model.windows) ? model.windows.map(String) : [];
   const quality = record(model.verifiedCompleteness);
   return (
