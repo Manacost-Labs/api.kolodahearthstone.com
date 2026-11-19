@@ -173,17 +173,21 @@ export class LocaleLoader {
     let entry = this.inflight.get(key);
     if (!entry) {
       const controller = new AbortController();
+      // Only its own record leaves the pool: after a cancel a newer entry of the same key may be there.
+      const forget = () => {
+        if (this.inflight.get(key) === created) this.inflight.delete(key);
+      };
       const created: Entry = {
         controller,
         subscribers: 0,
         promise: this.run(lang, lookup, controller.signal).then(
           result => {
-            this.inflight.delete(key);
+            forget();
             if (!controller.signal.aborted && result.state !== 'error') this.remember(key, result);
             return result;
           },
           error => {
-            this.inflight.delete(key);
+            forget();
             throw error;
           },
         ),

@@ -42,8 +42,11 @@ function writeUrl(lang: CardLang | null) {
   window.history.replaceState(null, '', window.location.pathname + (next.size ? `?${next}` : ''));
 }
 
-// An unknown `?lang=` means Russian and is dropped; the saved choice must not bring it back at once.
-let skipRestore = false;
+// An unknown `?lang=` means Russian and is dropped; the saved choice must not bring it back. The mark is
+// the address left after the drop: every mounted `useCardLang` (catalogue and inspector) sees it, and it
+// stops counting as soon as the address is something else.
+let droppedAt: string | null = null;
+const here = () => window.location.pathname + window.location.search;
 
 /**
  * The language of card data: `?lang=` of the address, else the saved choice, else Russian. The
@@ -54,15 +57,17 @@ export function useCardLang(): { lang: CardLang; setLang: (lang: CardLang) => vo
   const fromUrl = parseLang(raw);
   useEffect(() => {
     if (raw !== null && fromUrl === null) {
-      skipRestore = true;
       writeUrl(null);
+      droppedAt = here();
       return;
     }
-    if (raw !== null) return;
-    if (skipRestore) {
-      skipRestore = false;
+    if (raw !== null) {
+      // A valid language is a new step: a later visit to the dropped address restores the saved choice.
+      droppedAt = null;
       return;
     }
+    if (droppedAt === here()) return;
+    droppedAt = null;
     // A link without `lang` (menu, old bookmark) opens on the last chosen language.
     const saved = savedLang();
     if (saved && saved !== 'ru') writeUrl(saved);
@@ -110,7 +115,14 @@ export function useRowLocales(rows: Row[], lang: CardLang): RowLocales {
         .load(lang, lookup, controller.signal)
         .then(
           result => {
-            if (result.state === 'error') setFailedKeys(current => new Set(current).add(key));
+            // A later success (or a definite "not in the catalogue") clears an earlier failure of the card.
+            setFailedKeys(current => {
+              if (result.state === 'error') return new Set(current).add(key);
+              if (!current.has(key)) return current;
+              const next = new Set(current);
+              next.delete(key);
+              return next;
+            });
             rerender();
           },
           error => {
