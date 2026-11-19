@@ -226,6 +226,7 @@ Production refresh schedule:
 
 - `hs-data-api-refresh.timer`: full parser run at `07:00 Europe/Warsaw`.
 - `hs-data-api-refresh-api.timer`: API-tier parser run at `18:00 Europe/Warsaw`; skips browser-protected sources to reduce proxy traffic.
+- `kolodahs-card-renders.timer` (installed by hand, not by `deploy-server.sh`): hourly download of localized card renders, at most 6000 requests per run; runbook in `docs/card-renders.md`.
 - `hs-data-api-freshness-check.timer`: audit at `07:45` and `18:45 Europe/Warsaw`.
 - `hs-data-api-docker-firecrawl-hsreplay-map.timer`: weekly HSReplay crawl-map/index refresh at `02:35 Europe/Warsaw` on Mondays.
 - `hs-data-api-docker-rebuild-hsreplay-index.timer`: daily derived-index rebuild at
