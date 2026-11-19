@@ -159,7 +159,9 @@ These three PHP adapters are reachable only through the private
   `archetype` field (`Value` in `components/ui.tsx` → `ArchetypeName.tsx`: the
   table column of meta, HSGuru archetypes and decks, and the details) shows the
   class icon, the Russian name and the English one below. Icons:
-  `public/class-icons/` (HearthPulse class art, see the README there). The
+  `assets/class-icons/` (HearthPulse class art, see the README there), imported by
+  `components/class-icons.ts` so they are served under `/_next/static/media/`
+  (nginx sends only `/`, `/api/panel` and `/_next/` to panel-next; `public/` files 404). The
   chart colours per class are `--meta-class-*` in `stats/meta-view.css` (≥ 3:1
   against the card in both themes).
 - Statistics filters (`panel-next/components/stats/`): one card above the KPI

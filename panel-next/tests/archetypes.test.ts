@@ -58,15 +58,16 @@ test('a name the dictionary lacks stays English, the class still comes from its 
   });
 });
 
-test('classIconSrc points at an existing file', async () => {
+test('every class has both icon files, and nothing the panel serves sits in public/class-icons', async () => {
   const { existsSync } = await import('node:fs');
-  const { classIconSrc, classSlugs } = await import('../lib/archetypes.ts');
+  const { classSlugs } = await import('../lib/archetypes.ts');
   for (const slug of classSlugs)
-    for (const size of [64, 96] as const)
+    for (const size of [64, 96])
       assert.ok(
-        existsSync(new URL('../public' + classIconSrc(slug, size), import.meta.url)),
+        existsSync(new URL(`../assets/class-icons/${slug}-${size}.webp`, import.meta.url)),
         `${slug}-${size}`,
       );
-  assert.ok(existsSync(new URL('../public' + classIconSrc(null), import.meta.url)));
-  assert.equal(classIconSrc('mage', 64, '/panel'), '/panel/class-icons/mage-64.webp');
+  assert.ok(existsSync(new URL('../assets/class-icons/all-96.webp', import.meta.url)));
+  // nginx sends only /, /api/panel and /_next/ to panel-next: a public/ image would 404 on prod.
+  assert.ok(!existsSync(new URL('../public/class-icons', import.meta.url)));
 });
