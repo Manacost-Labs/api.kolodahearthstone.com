@@ -4,7 +4,7 @@ export type CardTextToken =
   { kind: 'text'; text: string; bold: boolean; italic: boolean } | { kind: 'break' };
 
 const NBSP = ' ';
-// Placeholder for values the game computes at play time ("@", "{0}").
+// Placeholder for values the game computes at play time ("{0}").
 const DYNAMIC_VALUE = 'X';
 
 type Cell = { char: string; style: number }; // style bit 1 = bold, bit 2 = italic
@@ -41,6 +41,30 @@ function stripTags(source: string): Cell[] {
   return cells;
 }
 
+// `|4(one,two[,five])` picks a word form by the number written right before it.
+function pluralForm(forms: string[], before: string) {
+  const number = /(\d+)[\s\u00a0]*$/.exec(before);
+  if (!number || forms.length < 2) return forms[forms.length - 1];
+  const n = Number(number[1]);
+  if (forms.length === 2) return n === 1 ? forms[0] : forms[1];
+  const last = n % 10;
+  const lastTwo = n % 100;
+  if (last === 1 && lastTwo !== 11) return forms[0];
+  if (last >= 2 && last <= 4 && (lastTwo < 12 || lastTwo > 14)) return forms[1];
+  return forms[2] ?? forms[forms.length - 1];
+}
+
+// `@` separates variants of the text (base text, then dynamic hints): only the first non-empty
+// variant is the card text.
+function firstVariant(cells: Cell[]): Cell[] {
+  const variants: Cell[][] = [[]];
+  for (const cell of cells) {
+    if (cell.char === '@') variants.push([]);
+    else variants[variants.length - 1].push(cell);
+  }
+  return variants.find(variant => variant.some(cell => cell.char.trim() !== '')) ?? [];
+}
+
 // Pass 2: service markers. Removing one can complete another ("[x<b>]"), so repeat until stable.
 function stripMarkers(cells: Cell[]): Cell[] {
   let current = cells;
@@ -51,13 +75,22 @@ function stripMarkers(cells: Cell[]): Cell[] {
     while (index < current.length) {
       const rest = joined.slice(index);
       const { char, style } = current[index];
+      const plural = /^\|4\s*\(([^()]*)\)/.exec(rest);
       if (/^\[x\]/i.test(rest)) index += 3;
-      else if (/^[$#]+\d/.test(rest)) index += (rest.match(/^[$#]+/) as RegExpMatchArray)[0].length;
+      else if (/^[$#]+(?=[\d{])/.test(rest)) index += (rest.match(/^[$#]+/) as RegExpMatchArray)[0].length;
+      else if (plural) {
+        const form = pluralForm(
+          plural[1].split(',').map(item => item.trim()),
+          next.map(cell => cell.char).join(''),
+        );
+        for (const formChar of form) next.push({ char: formChar, style });
+        index += plural[0].length;
+      } else if (/^\|4\s*\(?/.test(rest)) index += (rest.match(/^\|4\s*\(?/) as RegExpMatchArray)[0].length;
       else if (/^\{\d+\}/.test(rest)) {
         next.push({ char: DYNAMIC_VALUE, style });
         index += (rest.match(/^\{\d+\}/) as RegExpMatchArray)[0].length;
       } else {
-        next.push({ char: char === '@' ? DYNAMIC_VALUE : char === '_' ? NBSP : char, style });
+        next.push({ char: char === '_' ? NBSP : char, style });
         index += 1;
       }
     }
@@ -69,7 +102,7 @@ function stripMarkers(cells: Cell[]): Cell[] {
 export function parseCardText(input: unknown): CardTextToken[] {
   const source = input === null || input === undefined ? '' : String(input);
   const tokens: CardTextToken[] = [];
-  for (const { char, style } of stripMarkers(stripTags(source))) {
+  for (const { char, style } of stripMarkers(firstVariant(stripTags(source)))) {
     if (char === '\n') {
       tokens.push({ kind: 'break' });
       continue;
