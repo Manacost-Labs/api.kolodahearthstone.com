@@ -1,0 +1,150 @@
+.ui-drawer {
+  --_pad: var(--ui-space-6);
+
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: var(--ui-drawer-radius);
+  box-shadow: var(--ui-highlight), var(--ui-shadow-modal);
+}
+
+/* Side drawers: full height, width by size */
+.ui-drawer:is([data-placement='left'], [data-placement='right']) {
+  --_w: 420px;
+  width: min(var(--_w), 100%);
+  height: 100%;
+}
+
+.ui-drawer:is([data-placement='left'], [data-placement='right'])[data-size='sm'] { --_w: 320px; }
+.ui-drawer:is([data-placement='left'], [data-placement='right'])[data-size='lg'] { --_w: 640px; }
+.ui-drawer:is([data-placement='left'], [data-placement='right'])[data-size='full'] { --_w: 100%; }
+
+/* Bottom sheet: full width, height follows content up to the size limit */
+.ui-drawer[data-placement='bottom'] {
+  --_max-h: 60vh;
+  width: 100%;
+  max-height: var(--_max-h);
+  border-radius: var(--ui-drawer-bottom-radius);
+}
+
+.ui-drawer[data-placement='bottom'][data-size='sm'] { --_max-h: 40vh; }
+.ui-drawer[data-placement='bottom'][data-size='lg'] { --_max-h: 85vh; }
+
+.ui-drawer[data-placement='bottom'][data-size='full'] {
+  --_max-h: 100%;
+  height: 100%;
+}
+
+/* Grab handle: a full-width strip so it is easy to catch; the pill is drawn inside. */
+.ui-drawer__handle {
+  position: relative;
+  flex-shrink: 0;
+  height: 20px;
+  cursor: grab;
+  touch-action: none;
+}
+
+.ui-drawer__handle::before {
+  content: '';
+  position: absolute;
+  top: var(--ui-space-2);
+  left: 50%;
+  width: var(--ui-drawer-handle-w);
+  height: 5px;
+  border-radius: var(--ui-radius-full);
+  background: var(--ui-drawer-handle-bg);
+  transform: translateX(-50%);
+  transition: background-color var(--ui-duration-fast) var(--ui-ease);
+}
+
+.ui-drawer__handle:hover::before {
+  background: var(--ui-drawer-handle-bg-hover);
+}
+
+.ui-drawer[data-dragging] .ui-drawer__handle::before {
+  background: var(--ui-drawer-handle-bg-hover);
+}
+
+.ui-drawer[data-placement='bottom'] {
+  transition: transform var(--ui-duration) var(--ui-ease);
+}
+
+.ui-drawer[data-dragging] {
+  transition: none;
+}
+
+.ui-drawer[data-dragging] .ui-drawer__handle {
+  cursor: grabbing;
+}
+
+.ui-drawer__header {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  gap: 4px;
+  padding: var(--ui-drawer-header-pad-top) var(--_pad) var(--ui-drawer-header-pad-bottom);
+  border-bottom: var(--ui-modal-section-border);
+}
+
+.ui-drawer[data-closable] .ui-drawer__header {
+  padding-inline-end: calc(var(--_pad) + 32px);
+}
+
+.ui-drawer__title {
+  margin: 0;
+  color: var(--ui-fg);
+  font-family: var(--ui-font-display, inherit);
+  font-size: var(--ui-drawer-title-size);
+  font-weight: var(--ui-weight-semibold);
+  line-height: var(--ui-leading-tight);
+  letter-spacing: var(--ui-tracking-tight);
+}
+
+.ui-drawer__description {
+  color: var(--ui-fg-muted);
+  font-size: var(--ui-text-sm);
+}
+
+.ui-drawer__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--ui-space-5) var(--_pad);
+  color: var(--ui-fg);
+}
+
+.ui-drawer__footer {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--ui-space-2);
+  padding: var(--ui-drawer-footer-pad-top) var(--_pad) var(--ui-modal-footer-pad-bottom, var(--_pad));
+  border-top: var(--ui-modal-section-border);
+  background: var(--ui-modal-footer-bg);
+}
+
+.ui-drawer__close {
+  position: absolute;
+  top: var(--ui-drawer-close-inset);
+  inset-inline-end: var(--ui-drawer-close-inset);
+  /* `initial`: the IconButton's own fill. */
+  background-color: var(--ui-modal-close-bg, var(--_bg));
+  color: var(--ui-fg-muted);
+}
+
+.ui-drawer[data-placement='bottom'] .ui-drawer__header {
+  padding-top: var(--ui-drawer-bottom-header-pad-top);
+}
+
+/* Centered on the title line, below the grab handle. */
+.ui-drawer[data-placement='bottom'] .ui-drawer__close {
+  top: var(--ui-drawer-bottom-close-top);
+}
+
+/* Keep the last row clear of the iPhone home indicator. */
+.ui-drawer[data-placement='bottom'] {
+  padding-bottom: env(safe-area-inset-bottom);
+}

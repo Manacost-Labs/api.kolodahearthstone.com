@@ -1,0 +1,11 @@
+/* The details drawer sits flush against the screen edges (the kit's floating gap is dropped): edge to edge on a phone. */
+.record-drawer-layer {
+  --ui-modal-edge-gap: 0px;
+  padding: 0;
+}
+.record-drawer .ui-drawer__body {
+  padding-top: var(--ui-space-3);
+}
+.record-drawer .modal-actions {
+  margin-top: 0;
+}

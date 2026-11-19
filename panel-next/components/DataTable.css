@@ -1,0 +1,72 @@
+/* Statistics tables: first column pinned while the rest scrolls, numbers on the right, long values wrap. */
+.data-table th.num,
+.data-table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.data-table th.num button {
+  justify-content: flex-end;
+}
+.data-table th button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+/* Long IDs and URLs wrap inside their cell instead of running into the next column. */
+table.data-table td {
+  overflow-wrap: break-word;
+}
+table.data-table td .value-code {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+table.data-table td .value-link {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+/* The record column stays in view; a hairline marks where the scrolling part begins. */
+.data-table th:first-child,
+.data-table td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--surface);
+  box-shadow: 1px 0 0 var(--line);
+}
+.data-table th:first-child {
+  z-index: 3;
+  background: var(--soft);
+}
+.data-table td:first-child {
+  min-width: 140px;
+}
+.data-table tbody tr:hover td:first-child {
+  background: color-mix(in srgb, var(--soft) 60%, var(--surface));
+}
+.data-table .row-clickable {
+  cursor: pointer;
+}
+/* The name is a real button (keyboard route to the details) that reads as a link. */
+.data-table .row-open {
+  display: block;
+  max-width: 100%;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--link);
+  font: inherit;
+  font-weight: 500;
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.data-table .row-open:hover {
+  text-decoration: underline;
+}
+.data-table .row-open :is(.value-code, .value-number, span) {
+  color: inherit;
+}
+/* A name that opens the details keeps room for one or two words instead of breaking mid-word. */
+.data-table td:has(> .row-open) {
+  min-width: 150px;
+}

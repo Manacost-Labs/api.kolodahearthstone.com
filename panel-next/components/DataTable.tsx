@@ -4,15 +4,19 @@ import { CaretDownIcon } from '@phosphor-icons/react/dist/ssr/CaretDown';
 import { ColumnsIcon } from '@phosphor-icons/react/dist/ssr/Columns';
 import { CaretUpIcon } from '@phosphor-icons/react/dist/ssr/CaretUp';
 import { MagnifyingGlassIcon } from '@phosphor-icons/react/dist/ssr/MagnifyingGlass';
-import { countLabel, rowMatches, rowNeedsAttention } from '@/lib/format';
+import { countLabel, inferKind, rowMatches, rowNeedsAttention } from '@/lib/format';
 import type { Row } from '@/lib/types';
 import { EmptyState, Value } from './ui';
+import './DataTable.css';
 import { useUrlState } from './useUrlState';
 import { DropdownMenu } from './varylo-ui/navigation/DropdownMenu';
 import { Pagination } from './varylo-ui/navigation/Pagination';
 import { SegmentedControl } from './varylo-ui/navigation/SegmentedControl';
 
 const PAGE = 25;
+// Clicks on these keep their own meaning; everything else in a row opens the details.
+const INTERACTIVE = 'a,button,summary,audio,video,input,select,textarea,label,[role=button]';
+
 export function DataTable({
   rows,
   columns,
@@ -58,6 +62,20 @@ export function DataTable({
   const totalPages = Math.max(1, Math.ceil(ordered.length / PAGE));
   const current = Math.min(page, totalPages);
   const visible = columns.filter((c, i) => i === 0 || !hidden.includes(c.key));
+  // The button that opens the details is the first column with readable text (an art thumbnail cannot name a row).
+  const openerKey = (visible.find(col => (col.type || inferKind(col.key)) !== 'image') ?? visible[0])?.key;
+  // Numbers line up on the right edge so digits of equal weight sit in one column.
+  const numeric = useMemo(() => {
+    const set = new Set<string>();
+    for (const col of columns) {
+      const sample = rows.find(
+        row => row[col.key] !== null && row[col.key] !== undefined && row[col.key] !== '',
+      );
+      const kind = col.type || inferKind(col.key, sample?.[col.key]);
+      if (kind === 'number' || kind === 'percent') set.add(col.key);
+    }
+    return set;
+  }, [rows, columns]);
   return (
     <>
       <div className="table-tools">
@@ -121,12 +139,14 @@ export function DataTable({
       {/* Focusable so keyboard users can scroll a table wider than the screen. */}
       {/* biome-ignore lint/a11y/noNoninteractiveTabindex: scrollable regions must be reachable by keyboard */}
       <div className="table-scroll" role="region" tabIndex={0} aria-label="Таблица данных">
-        <table>
+        <table className="data-table">
           <thead>
             <tr>
               {visible.map(col => (
                 <th
                   key={col.key}
+                  scope="col"
+                  className={numeric.has(col.key) ? 'num' : undefined}
                   aria-sort={sort?.key === col.key ? (sort.desc ? 'descending' : 'ascending') : 'none'}
                 >
                   <button
@@ -146,31 +166,53 @@ export function DataTable({
                   </button>
                 </th>
               ))}
-              {onDetail && <th>Детали</th>}
             </tr>
           </thead>
           <tbody>
             {ordered.slice((current - 1) * PAGE, current * PAGE).map(row => (
-              <tr key={rowKeys.get(row)}>
-                {visible.map(col => (
-                  <td key={col.key}>
-                    {col.type === 'text' && typeof row[col.key] === 'string' ? (
+              // A row click is a mouse shortcut: the keyboard route is the button in the first column.
+              <tr
+                key={rowKeys.get(row)}
+                className={onDetail ? 'row-clickable' : undefined}
+                onClick={
+                  onDetail
+                    ? event => {
+                        if ((event.target as Element).closest(INTERACTIVE)) return;
+                        // Focus the row's button first: the drawer hands focus back to it on close.
+                        event.currentTarget.querySelector<HTMLElement>('.row-open')?.focus();
+                        onDetail(row);
+                      }
+                    : undefined
+                }
+              >
+                {visible.map(col => {
+                  const cell =
+                    col.type === 'text' && typeof row[col.key] === 'string' ? (
                       // Long descriptions stay readable at three lines; the full text is in the tooltip and details.
                       <span className="cell-clamp" title={String(row[col.key])}>
                         <Value value={row[col.key]} name={col.key} kind={col.type} />
                       </span>
                     ) : (
                       <Value value={row[col.key]} name={col.key} kind={col.type} />
-                    )}
-                  </td>
-                ))}
-                {onDetail && (
-                  <td>
-                    <button type="button" className="link-button" onClick={() => onDetail(row)}>
-                      Подробнее
-                    </button>
-                  </td>
-                )}
+                    );
+                  return (
+                    <td key={col.key} className={numeric.has(col.key) ? 'num' : undefined}>
+                      {col.key === openerKey && onDetail ? (
+                        <button
+                          type="button"
+                          className="row-open"
+                          title={String(row[col.key] ?? '')}
+                          aria-haspopup="dialog"
+                          onClick={() => onDetail(row)}
+                        >
+                          {cell}
+                        </button>
+                      ) : (
+                        cell
+                      )}
+                    </td>
+                  );
+                })}
               </tr>
             ))}
           </tbody>

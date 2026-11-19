@@ -282,11 +282,87 @@ await pressEscape();
 await viewport(1487, 1058);
 await navigate(root + '?action=analytics', '!!document.querySelector("tbody tr")');
 await screenshot('analytics-desktop.png');
-await click('tbody .link-button');
-checks.analyticsDetails = await evaluate('!!document.querySelector("dialog[open]")');
+// Row details are a right-hand drawer (role=dialog, not <dialog>): row click, keyboard, Escape, the × button, focus back.
+const drawerOpen = '!!document.querySelector(".ui-drawer[data-state=open]")';
+const drawerGone = '!document.querySelector(".ui-drawer")';
+const settle = () => new Promise(resolve => setTimeout(resolve, 450));
+async function pressKey(key, code, vk) {
+  for (const type of ['keyDown', 'keyUp'])
+    await call('Input.dispatchKeyEvent', {
+      type,
+      ...(type === 'keyDown' && key === 'Enter' ? { text: '\r' } : {}),
+      key,
+      code,
+      windowsVirtualKeyCode: vk,
+      nativeVirtualKeyCode: vk,
+    });
+  await new Promise(resolve => setTimeout(resolve, 150));
+}
+checks.noDetailsColumn = await evaluate(
+  '![...document.querySelectorAll(".data-table thead th")].some(th=>th.textContent.trim()==="Детали")&&document.querySelectorAll(".data-table tbody .row-open").length>0',
+);
+assert.equal(checks.noDetailsColumn, true);
+checks.stickyFirstColumn = await evaluate(
+  'getComputedStyle(document.querySelector("tbody tr td:first-child")).position==="sticky"',
+);
+assert.equal(checks.stickyFirstColumn, true);
+await click('tbody tr:first-child td:last-child');
+await waitFor(drawerOpen);
+await settle();
+checks.drawer = await evaluate(
+  '(() => { const d=document.querySelector(".ui-drawer"); const r=d.getBoundingClientRect(); return {role:d.getAttribute("role"),named:!!d.getAttribute("aria-labelledby"),right:Math.abs(r.right-d.parentElement.getBoundingClientRect().right)<=1,facts:d.querySelectorAll(".facts dt").length>0,inside:d.contains(document.activeElement)}; })()',
+);
+assert.deepEqual(checks.drawer, { role: 'dialog', named: true, right: true, facts: true, inside: true });
+await screenshot('analytics-drawer-desktop.png');
 await pressEscape();
+await waitFor(drawerGone);
+checks.drawerEscFocus = await evaluate('document.activeElement.classList.contains("row-open")');
+assert.equal(checks.drawerEscFocus, true);
+await pressKey('Enter', 'Enter', 13);
+await waitFor(drawerOpen);
+await click('.ui-drawer__close');
+await waitFor(drawerGone);
+checks.drawerCloseFocus = await evaluate('document.activeElement.classList.contains("row-open")');
+assert.equal(checks.drawerCloseFocus, true);
+await viewport(390, 844);
+await navigate(root + '?action=analytics', '!!document.querySelector("tbody tr")');
+await click('tbody tr:first-child .row-open');
+await waitFor(drawerOpen);
+await settle();
+checks.drawerMobile = await evaluate(
+  '(() => { const r=document.querySelector(".ui-drawer").getBoundingClientRect(); return {full:Math.abs(r.width-innerWidth)<=1,overflow:document.documentElement.scrollWidth>innerWidth}; })()',
+);
+assert.deepEqual(checks.drawerMobile, { full: true, overflow: false });
+await screenshot('analytics-drawer-mobile.png');
+await pressEscape();
+await waitFor(drawerGone);
+await viewport(1487, 1058);
 await navigate(root + '?action=parsers', 'document.querySelectorAll(".sources-table tbody tr").length===3');
 await screenshot('parsers-desktop.png');
+// Source details use the same drawer as statistics rows, not a modal <dialog>.
+const sourceDetails = '.sources-table tbody tr:first-child .row-actions .link-button';
+await click(sourceDetails);
+await waitFor(drawerOpen);
+await settle();
+checks.sourceDrawer = await evaluate(
+  '(() => { const d=document.querySelector(".ui-drawer"); return {role:d.getAttribute("role"),modal:!!document.querySelector("dialog[open]"),facts:d.querySelectorAll(".facts dt").length>0,inside:d.contains(document.activeElement)}; })()',
+);
+assert.deepEqual(checks.sourceDrawer, { role: 'dialog', modal: false, facts: true, inside: true });
+await screenshot('parsers-drawer-desktop.png');
+await pressEscape();
+await waitFor(drawerGone);
+checks.sourceDrawerEscFocus = await evaluate(
+  `document.activeElement===document.querySelector(${JSON.stringify(sourceDetails)})`,
+);
+assert.equal(checks.sourceDrawerEscFocus, true);
+await click(sourceDetails);
+await waitFor(drawerOpen);
+await click('.ui-drawer__close');
+await waitFor(drawerGone);
+checks.sourceDrawerCloseFocus = await evaluate(
+  `document.activeElement===document.querySelector(${JSON.stringify(sourceDetails)})`,
+);
+assert.equal(checks.sourceDrawerCloseFocus, true);
 await click('tbody tr:first-child .row-actions button:last-child');
 checks.runConfirm = await evaluate('!!document.querySelector("dialog[open]")');
 await click('dialog .form-actions button:last-child');
@@ -372,7 +448,6 @@ assert.equal(checks.list, true);
 assert.equal(checks.savedView, true);
 assert.deepEqual(checks.mobile, { overflow: false, columns: 2 });
 assert.equal(checks.mobileDialog, true);
-assert.equal(checks.analyticsDetails, true);
 assert.equal(checks.runConfirm, true);
 assert.equal(checks.sectionRevision, true);
 assert.equal(checks.issue, true);
