@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Каталог карт на 4 языках (E24, срез данных): новая таблица
+  `hearthstone_card_localizations` (`panel/sql/card_localizations.sql`) хранит
+  для каждого id HearthstoneJSON полный объект карты в локалях `ruRU`, `enUS`,
+  `plPL`, `esES` (в том числе токены и карты всех режимов) и зеркало Postgres
+  `platform/sql/021_card_localizations.sql`. Её пишет суточный
+  `sync_full_card_catalog.py` в одной транзакции с `hearthstone_card_catalog`;
+  охрана публикации не пускает неполную локаль или набор id/dbf, отличающийся от
+  enUS, и пишет только изменившиеся строки. Новые флаги `--hsj-pl`, `--hsj-es`
+  и блок `localizations` в JSON-выводе. API не меняется. Порядок выкладки:
+  `docs/full-card-catalog.md`, раздел «Publication and rollback».
 - `panel/scripts`: в git перенесены прод-версии скриптов от 2026-11-04 (ручной
   патч прод-релиза `20261104T091515Z-auto-patch-final`), чтобы `deploy-panel.sh`
   не откатил их: `card_image_versions.py` (новый; изменённая картинка

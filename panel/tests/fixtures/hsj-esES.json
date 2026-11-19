@@ -1,0 +1,95 @@
+[
+ {
+  "cardClass": "MAGE",
+  "dbfId": 2550,
+  "id": "AT_006e",
+  "name": "Poder de Dalaran",
+  "set": "TGT",
+  "text": "Daño con hechizos aumentado.",
+  "type": "ENCHANTMENT"
+ },
+ {
+  "artist": "Steven Prescott",
+  "attack": 3,
+  "cardClass": "NEUTRAL",
+  "collectible": true,
+  "cost": 5,
+  "dbfId": 62176,
+  "elite": true,
+  "flavor": "Este tipo de trueque no se ve en las caravanas de los Zandalari.",
+  "health": 6,
+  "howToEarn": "Se desbloquea al abrir\nun sobre de Forjados en los Baldíos.",
+  "howToEarnGolden": "Se consigue con el\nlogro «Intercambio equivalente».",
+  "id": "BAR_080",
+  "mechanics": [
+   "BATTLECRY"
+  ],
+  "name": "Cazador de las Sombras Vol'jin",
+  "rarity": "LEGENDARY",
+  "set": "THE_BARRENS",
+  "targetingArrowText": "Intercambia a este esbirro por uno de la mano de su dueño.",
+  "text": "<b>Grito de batalla:</b> Eliges a un esbirro y lo intercambias por uno aleatorio de la mano de su dueño.",
+  "type": "MINION"
+ },
+ {
+  "attack": 10,
+  "cost": 4,
+  "dbfId": 70607,
+  "faction": "HORDE",
+  "health": 75,
+  "id": "BARL_002H_01",
+  "mercenariesRole": 2,
+  "name": "Varok Colmillosauro",
+  "race": "ORC",
+  "races": [
+   "ORC"
+  ],
+  "rarity": "EPIC",
+  "set": "LETTUCE",
+  "type": "MINION"
+ },
+ {
+  "artist": "Zoltan Boros",
+  "attack": 3,
+  "cardClass": "PRIEST",
+  "cost": 3,
+  "dbfId": 130406,
+  "health": 4,
+  "id": "BE_222t",
+  "mechanics": [
+   "LIFESTEAL"
+  ],
+  "name": "Alavacua",
+  "race": "BEAST",
+  "races": [
+   "BEAST"
+  ],
+  "set": "BE",
+  "text": "<b>Robo de vida</b>",
+  "type": "MINION"
+ },
+ {
+  "artist": "Ralph Horsley",
+  "attack": 1,
+  "battlegroundsPremiumDbfId": 97409,
+  "cardClass": "NEUTRAL",
+  "cost": 0,
+  "dbfId": 97408,
+  "elite": true,
+  "flavor": "Lady Blaumeux quería que la gente los conociera como «Lady Blaumeux y sus amigos», pero no pudo ser.",
+  "health": 7,
+  "id": "BG25_354",
+  "isBattlegroundsPoolMinion": true,
+  "mechanics": [
+   "AURA"
+  ],
+  "name": "Titus Osahendido",
+  "referencedTags": [
+   "DEATHRATTLE"
+  ],
+  "set": "BATTLEGROUNDS",
+  "techLevel": 5,
+  "text": "[x]Tus <b>Últimos alientos</b>\nse activan una vez más.",
+  "type": "MINION"
+ }
+]

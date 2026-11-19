@@ -1,0 +1,95 @@
+[
+ {
+  "cardClass": "MAGE",
+  "dbfId": 2550,
+  "id": "AT_006e",
+  "name": "Moc Dalaranu",
+  "set": "TGT",
+  "text": "Zwiększone obrażenia zaklęć.",
+  "type": "ENCHANTMENT"
+ },
+ {
+  "artist": "Steven Prescott",
+  "attack": 3,
+  "cardClass": "NEUTRAL",
+  "collectible": true,
+  "cost": 5,
+  "dbfId": 62176,
+  "elite": true,
+  "flavor": "Barter z trollem to zabawa dla odważnych.",
+  "health": 6,
+  "howToEarn": "Do odblokowania przy otwarciu pakietu Zahartowanych przez Pustkowia.",
+  "howToEarnGolden": "Do odblokowania z osiągnięciem „Równoważna wymiana”.",
+  "id": "BAR_080",
+  "mechanics": [
+   "BATTLECRY"
+  ],
+  "name": "Vol'jin, Łowca Cieni",
+  "rarity": "LEGENDARY",
+  "set": "THE_BARRENS",
+  "targetingArrowText": "Wymień na stronnika z_ręki.",
+  "text": "<b>Okrzyk bojowy:</b> Wybierz stronnika. Wymień go na losowego stronnika z ręki jego właściciela.",
+  "type": "MINION"
+ },
+ {
+  "attack": 10,
+  "cost": 4,
+  "dbfId": 70607,
+  "faction": "HORDE",
+  "health": 75,
+  "id": "BARL_002H_01",
+  "mercenariesRole": 2,
+  "name": "Varok Zaurzykieł",
+  "race": "ORC",
+  "races": [
+   "ORC"
+  ],
+  "rarity": "EPIC",
+  "set": "LETTUCE",
+  "type": "MINION"
+ },
+ {
+  "artist": "Zoltan Boros",
+  "attack": 3,
+  "cardClass": "PRIEST",
+  "cost": 3,
+  "dbfId": 130406,
+  "health": 4,
+  "id": "BE_222t",
+  "mechanics": [
+   "LIFESTEAL"
+  ],
+  "name": "Pustkoskrzydły",
+  "race": "BEAST",
+  "races": [
+   "BEAST"
+  ],
+  "set": "BE",
+  "text": "<b>Kradzież życia</b>",
+  "type": "MINION"
+ },
+ {
+  "artist": "Ralph Horsley",
+  "attack": 1,
+  "battlegroundsPremiumDbfId": 97409,
+  "cardClass": "NEUTRAL",
+  "cost": 0,
+  "dbfId": 97408,
+  "elite": true,
+  "flavor": "Kiedyś było pięcioro Jeźdźców, ale jeden wypiął się na kumpli, bo dostał lepszą fuchę na stanowisku przewodniczącego rady.",
+  "health": 7,
+  "id": "BG25_354",
+  "isBattlegroundsPoolMinion": true,
+  "mechanics": [
+   "AURA"
+  ],
+  "name": "Tytus Zerwikrusz",
+  "referencedTags": [
+   "DEATHRATTLE"
+  ],
+  "set": "BATTLEGROUNDS",
+  "techLevel": 5,
+  "text": "Twoje <b>Agonie</b> aktywują się dodatkowy raz.",
+  "type": "MINION"
+ }
+]

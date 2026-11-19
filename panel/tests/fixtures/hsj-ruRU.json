@@ -1,0 +1,95 @@
+[
+ {
+  "cardClass": "MAGE",
+  "dbfId": 2550,
+  "id": "AT_006e",
+  "name": "Мощь Даларана",
+  "set": "TGT",
+  "text": "Урон от заклинаний увеличен.",
+  "type": "ENCHANTMENT"
+ },
+ {
+  "artist": "Steven Prescott",
+  "attack": 3,
+  "cardClass": "NEUTRAL",
+  "collectible": true,
+  "cost": 5,
+  "dbfId": 62176,
+  "elite": true,
+  "flavor": "Такого обмена на зандаларской ярмарке не увидишь.",
+  "health": 6,
+  "howToEarn": "Награда за открытие комплекта «Закаленных Степями».",
+  "howToEarnGolden": "Можно открыть, получив достижение «Равноценный обмен».",
+  "id": "BAR_080",
+  "mechanics": [
+   "BATTLECRY"
+  ],
+  "name": "Темный охотник Вол'джин",
+  "rarity": "LEGENDARY",
+  "set": "THE_BARRENS",
+  "targetingArrowText": "Заменить существом из руки.",
+  "text": "<b>Боевой клич:</b> выбранное существо меняется местами со случайным существом в руке его владельца.",
+  "type": "MINION"
+ },
+ {
+  "attack": 10,
+  "cost": 4,
+  "dbfId": 70607,
+  "faction": "HORDE",
+  "health": 75,
+  "id": "BARL_002H_01",
+  "mercenariesRole": 2,
+  "name": "Варок Саурфанг",
+  "race": "ORC",
+  "races": [
+   "ORC"
+  ],
+  "rarity": "EPIC",
+  "set": "LETTUCE",
+  "type": "MINION"
+ },
+ {
+  "artist": "Zoltan Boros",
+  "attack": 3,
+  "cardClass": "PRIEST",
+  "cost": 3,
+  "dbfId": 130406,
+  "health": 4,
+  "id": "BE_222t",
+  "mechanics": [
+   "LIFESTEAL"
+  ],
+  "name": "Безднокрыл",
+  "race": "BEAST",
+  "races": [
+   "BEAST"
+  ],
+  "set": "BE",
+  "text": "<b>Похищение жизни</b>",
+  "type": "MINION"
+ },
+ {
+  "artist": "Ralph Horsley",
+  "attack": 1,
+  "battlegroundsPremiumDbfId": 97409,
+  "cardClass": "NEUTRAL",
+  "cost": 0,
+  "dbfId": 97408,
+  "elite": true,
+  "flavor": "Раньше всадников было пятеро, но потом один из них устроился работать в Мертвые копи. Там зарплата выше и отличная медстраховка.",
+  "health": 7,
+  "id": "BG25_354",
+  "isBattlegroundsPoolMinion": true,
+  "mechanics": [
+   "AURA"
+  ],
+  "name": "Тит Ривендер",
+  "referencedTags": [
+   "DEATHRATTLE"
+  ],
+  "set": "BATTLEGROUNDS",
+  "techLevel": 5,
+  "text": "Ваши <b>«Предсмертные хрипы»</b> срабатывают еще раз.",
+  "type": "MINION"
+ }
+]
