@@ -22,6 +22,19 @@
   `share_pct` / `winrate_pct` и идут по убыванию доли; в строках меты есть
   `class_name` из каталога HSGuru. Старые поля не менялись. Тест
   `panel/tests/analytics_model_test.php`, снимок реестра перегенерирован.
+- Источник `hsreplay_assemble` и REST `GET /v1/hsreplay/assemble` /
+  `GET /v1/hsreplay/assemble/cards`: механика «Собирает» (Assemble, 13 карт
+  Reign of the Black Empire). Один запрос HSReplay `assemble_choices_by_middle`
+  на формат (Стандарт, Вольный; Scrape.do без рендера, 1 кредит) даёт для каждой
+  карты базы с `offer_rate`, двух доноров и выбор их половин (эффект или
+  условие): «берут» и винрейт. Собранный текст варианта строится из базы карт
+  без сети (`app/assemble_pools.py`, ru и en; `\&` не разделитель, ведущие
+  ключевые слова отбрасываются). Снимок формата публикуется после пяти проверок,
+  иначе остаётся прошлый (`fetch_error` с причиной). Таймер
+  `hs-data-api-docker-refresh-hsreplay-assemble.timer` каждые 6 часов, не больше
+  6 кредитов в сутки UTC (`HS_ASSEMBLE_SCRAPE_DO_DAILY_CREDITS`). Ответы не
+  кэшируются по ETag. `CardBase` получил `texts_ru`. Документация:
+  `docs/HSREPLAY_ASSEMBLE.md`. Refs #136.
 - Загрузчик рендеров карт: оборванный ответ CDN (`IncompleteRead` и другие
   `http.client.HTTPException`) считается ошибкой апстрима, как таймаут или 5xx,
   и больше не роняет весь прогон; id повторяется в следующем. Refs #131.

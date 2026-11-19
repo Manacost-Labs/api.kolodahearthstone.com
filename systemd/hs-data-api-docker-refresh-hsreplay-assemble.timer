@@ -1,0 +1,10 @@
+[Unit]
+Description=Check the HSReplay Assemble statistics every 6 hours (a format is read when its last read is older than 20 h or failed)
+
+[Timer]
+OnCalendar=*-*-* 00/6:50:00 Europe/Warsaw
+AccuracySec=5min
+Persistent=false
+
+[Install]
+WantedBy=timers.target

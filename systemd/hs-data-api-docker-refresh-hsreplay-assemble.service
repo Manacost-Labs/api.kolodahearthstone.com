@@ -1,0 +1,18 @@
+[Unit]
+Description=Refresh HSReplay Assemble statistics (bases, donors, picks) in Docker
+Requires=hs-data-api-docker.service
+After=hs-data-api-docker.service network-online.target
+
+[Service]
+Type=oneshot
+SuccessExitStatus=10
+WorkingDirectory=/srv/hs-data-api
+# `docker compose run` outlives a stopped or timed-out unit; the container is
+# named after the unit so stale ones are removed before start and after stop.
+ExecStartPre=-/usr/bin/docker rm -f %N
+ExecStart=/usr/bin/docker compose -f /srv/hs-data-api/docker-compose.yml run --rm --name %N api python -m app.cli refresh-hsreplay-assemble --scheduled --schedule-id refresh-hsreplay-assemble
+ExecStopPost=-/usr/bin/docker stop --time 20 %N
+ExecStopPost=-/usr/bin/docker rm -f %N
+# At most one Scrape.do request per format (60 s timeout each).
+TimeoutStartSec=5min
+TimeoutStopSec=1min
