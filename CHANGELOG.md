@@ -19,6 +19,16 @@
   листании; выбранные фильтры не повторяются. «Статистика карты»
   без названия показывает поле поиска и подсказку. Только `panel-next`, API и
   PHP не менялись; `tests/stats-browser.mjs` обходит все 13 модулей.
+- Панель, таблицы статистики (срез S3c эпика E23 #106): подробности строки
+  открываются в боковой панели справа (Valyro `Drawer`, вендорен из локального
+  релиза кита) вместо модального окна: фокус уходит внутрь, Escape и крестик
+  закрывают, фокус возвращается на строку; на 390 панель на всю ширину. В
+  таблице нет последней колонки «Детали»: подробности открывает кнопка-название
+  в первой колонке или клик по строке. Первая колонка закреплена при
+  горизонтальной прокрутке, числа выровнены вправо с `tabular-nums`, длинные
+  ID переносятся и не наезжают на соседние колонки. Пропсы `DataTable` и
+  `RecordDetails` не менялись («Источники» используют ту же панель). Только
+  панель, API не менялся.
 - Панель, навигация статистики (E23 #103): в меню «Статистика» с пятью
   группами (Стандарт и Вольный, Поля сражений, Арена, Карты, Патчи), а
   «Реестр источников» и «Провайдеры» перенесены в «Мониторинг» к «Источникам».
@@ -216,7 +226,7 @@
   even if that candidate stopped being fun in the same run (it is counted
   once, in `rejected`; a `--format standard` run never evicts a Wild row);
   `variants` of the other format is kept (not reset) by a `--format
-  standard`/`wild` run, and decks sharing a title across classes or formats
+standard`/`wild` run, and decks sharing a title across classes or formats
   are never merged by the title dedupe. `structured.stats` adds
   `rejected_by_gate`, `quality_rejected`, `near_duplicates_absorbed`,
   `history_dropped` and `published_by_class`. The previous version's history
@@ -231,7 +241,7 @@
   (`commit`, `old`, `result=ok|rollback|fail`, `exit`, `failed_at`, every
   phase) on success, rollback and failure alike
   (`journalctl -t hs-data-api-deploy`). `--dry-run` is unchanged and writes
-  no journal line. The health wait polls every 2 s within a 150 s *time* budget
+  no journal line. The health wait polls every 2 s within a 150 s _time_ budget
   (`HEALTH_TIMEOUT`, default `HEALTH_RETRIES x HEALTH_DELAY` = 75 x 2; was
   5 s x 30): the same budget and the same criterion (HTTP 200 from
   `/v1/health`), a started API is noticed up to 3 s sooner, and a hanging
@@ -389,7 +399,6 @@
   `docs/HSGURU_BRAWL_ESPORTS.md`, `docs/API.md`, `docs/GRAPHQL_API.md`,
   `docs/SCRAPE_PROVIDERS.md`; the HSGuru coverage audit is in
   `docs/DATA_CATALOG.md`.
-
 
 - HSGuru matchup matrices for every public slice: new pipeline
   `hsguru_matchups` reads HSGuru `/matchups` for Standard and Wild, seven
