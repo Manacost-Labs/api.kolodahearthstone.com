@@ -326,5 +326,118 @@ class CliTest(unittest.TestCase):
             self.assertEqual(report["total"]["locales"]["plPL"]["percent"], 100.0)
 
 
+class RenderCoverageTest(unittest.TestCase):
+    SKIP = ["ENCHANTMENT", "PET", ""]
+
+    @staticmethod
+    def index(renders=(), missing=(), skip=None):
+        return {"version": 1, "size": "512x", "skip_types": RenderCoverageTest.SKIP if skip is None else skip,
+                "renders": {i: "0" * 12 for i in renders}, "missing": list(missing)}
+
+    def report(self, indexes, examples=5):
+        return cov.build_render_report(cards_by_locale(), indexes, DB_SETS, examples)
+
+    def group(self, report, key):
+        return next(g for g in report["groups"] if g["key"] == key)
+
+    def test_cells_missing_pending_and_skipped(self):
+        every = [c["id"] for c in CARDS if c["type"] not in self.SKIP]
+        report = self.report({
+            "ruRU": self.index(renders=["CORE_001"], missing=["CS2_001"]),
+            "enUS": self.index(renders=every),
+            "plPL": self.index(renders=["CS2_001"]),
+            "esES": None,
+        })
+        wild = self.group(report, "wild")["locales"]
+        self.assertEqual(wild["ruRU"], {"expected": 2, "have": 1, "missing_hsj": 1, "pending": 0,
+                                        "percent": 100.0, "pending_examples": []})
+        self.assertEqual(wild["enUS"]["percent"], 100.0)
+        self.assertEqual((wild["plPL"]["have"], wild["plPL"]["pending"], wild["plPL"]["percent"]), (1, 1, 50.0))
+        self.assertEqual(wild["plPL"]["pending_examples"], ["CORE_001"])
+        self.assertIsNone(wild["esES"])
+        # ENCHANTMENT / PET are not expected
+        other = self.group(report, "bg_other")["locales"]["enUS"]
+        self.assertEqual(other["expected"], 1)  # BGS_039; BG_Enchant (ENCHANTMENT) is not expected
+        pets = self.group(report, "pets")["locales"]["enUS"]
+        self.assertEqual(pets["expected"], 0)
+        self.assertEqual(report["no_data"], ["esES"])
+        total = report["total"]["locales"]["enUS"]
+        self.assertEqual(total["expected"], len(every))
+
+    def test_skip_types_come_from_the_index(self):
+        report = self.report({"enUS": self.index(skip=[])})
+        self.assertEqual(self.group(report, "pets")["locales"]["enUS"]["expected"], 1)
+
+    def test_percent_is_not_100_while_something_is_pending(self):
+        every = [c["id"] for c in CARDS if c["type"] not in self.SKIP]
+        report = self.report({"enUS": self.index(renders=every[:-1])})
+        total = report["total"]["locales"]["enUS"]
+        self.assertEqual(total["pending"], 1)
+        self.assertLess(total["percent"], 100.0)
+
+    def test_broken_or_incomplete_index_is_no_data(self):
+        report = self.report({"enUS": [], "ruRU": {"renders": []}, "plPL": {"version": 1}})
+        self.assertEqual(report["no_data"], list(cov.LOCALES))
+
+    def test_examples_limit(self):
+        report = self.report({"enUS": self.index()}, examples=1)
+        self.assertEqual(len(report["total"]["locales"]["enUS"]["pending_examples"]), 1)
+
+    def test_markdown_shows_no_data_and_columns(self):
+        md = cov.render_renders_markdown(self.report({"enUS": self.index(renders=["CORE_001"], missing=["CS2_001"])}))
+        self.assertIn("## Рендеры: локаль × режим", md)
+        self.assertIn("нет данных", md)
+        self.assertIn("Нет индекса рендеров (или он повреждён): ruRU, plPL, esES.", md)
+        self.assertIn("1 / 2, 404: 1, ещё: 0, 100.00%", md)
+
+
+class RendersCliTest(unittest.TestCase):
+    def run_cli(self, tmp, *extra):
+        out = []
+        with mock.patch("urllib.request.urlopen", side_effect=AssertionError("network")), \
+                mock.patch("builtins.print", side_effect=lambda s: out.append(s)):
+            code = cov.main(["--hsj-dir", tmp, "--db-sets-file", str(Path(tmp) / "sets.json"), *extra])
+        return code, out[0]
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        tmp = Path(self.tmp.name)
+        for loc in cov.LOCALES:
+            (tmp / f"{loc}.json").write_text(json.dumps(CARDS))
+        (tmp / "sets.json").write_text(json.dumps({k: sorted(v) for k, v in DB_SETS.items()}))
+        self.renders = tmp / "renders"
+        self.renders.mkdir()
+        (self.renders / "ruRU.index.json").write_text(json.dumps(
+            RenderCoverageTest.index(renders=["CORE_001"], missing=["CS2_001"])))
+        (self.renders / "enUS.index.json").write_text("{broken")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_text_output_is_unchanged_without_the_flag(self):
+        code, plain = self.run_cli(self.tmp.name)
+        self.assertEqual(code, 0)
+        self.assertNotIn("Рендеры", plain)
+        code, with_flag = self.run_cli(self.tmp.name, "--renders-dir", str(self.renders))
+        self.assertEqual(code, 0)
+        self.assertTrue(with_flag.startswith(plain + "\n\n## Рендеры: локаль × режим"))
+        self.assertIn("нет данных", with_flag)  # enUS broken, plPL/esES absent
+
+    def test_json_block_only_with_the_flag(self):
+        _, plain = self.run_cli(self.tmp.name, "--json")
+        _, with_flag = self.run_cli(self.tmp.name, "--json", "--renders-dir", str(self.renders))
+        base, extended = json.loads(plain), json.loads(with_flag)
+        self.assertNotIn("renders", base)
+        self.assertEqual(extended.pop("renders")["no_data"], ["enUS", "plPL", "esES"])
+        self.assertEqual(extended, base)
+
+    def test_image_files_are_not_touched(self):
+        (self.renders / "ruRU").mkdir()
+        (self.renders / "ruRU" / "dangling.webp").symlink_to(self.renders / "nowhere")
+        with mock.patch("pathlib.Path.stat", side_effect=AssertionError("stat")), \
+                mock.patch("pathlib.Path.iterdir", side_effect=AssertionError("listdir")):
+            cov.load_render_indexes(str(self.renders))
+
+
 if __name__ == "__main__":
     unittest.main()

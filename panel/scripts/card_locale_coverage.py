@@ -241,6 +241,122 @@ def build_report(
     }
 
 
+def _index_sets(index: Any) -> tuple[set[str], set[str], set[str]] | None:
+    """(skip_types, renders ids, missing ids) of a downloader index, None if unusable."""
+    if not isinstance(index, dict) or not isinstance(index.get("renders"), dict):
+        return None
+    missing = index.get("missing")
+    skip = index.get("skip_types")
+    return (
+        {t for t in skip if isinstance(t, str)} if isinstance(skip, list) else set(),
+        set(index["renders"]),
+        {i for i in missing if isinstance(i, str)} if isinstance(missing, list) else set(),
+    )
+
+
+def _render_cell(ids: list[str], types: dict[str, str], sets: tuple[set[str], set[str], set[str]],
+                 examples: int) -> dict[str, Any]:
+    skip, renders, missing = sets
+    expected = [i for i in ids if types.get(i, "") not in skip]
+    have = [i for i in expected if i in renders]
+    absent = [i for i in expected if i not in renders and i in missing]
+    pending = [i for i in expected if i not in renders and i not in missing]
+    return {
+        "expected": len(expected),
+        "have": len(have),
+        "missing_hsj": len(absent),
+        "pending": len(pending),
+        "percent": percent(len(have), len(expected) - len(absent)),
+        "pending_examples": pending[:examples],
+    }
+
+
+def build_render_report(
+    cards_by_locale: dict[str, list[dict[str, Any]]],
+    indexes: dict[str, Any],
+    db_sets: dict[str, set[str]] | None = None,
+    examples: int = 5,
+) -> dict[str, Any]:
+    """Render coverage by group x locale from downloader indexes (files are never touched)."""
+    reference = [c for c in cards_by_locale["enUS"] if isinstance(c.get("id"), str)]
+    types = {c["id"]: c.get("type") or "" for c in reference}
+    members: dict[str, list[str]] = {key: [] for key, _ in GROUPS}
+    for card in reference:
+        for key in classify(card, db_sets):
+            members[key].append(card["id"])
+    sets = {loc: _index_sets(indexes.get(loc)) for loc in LOCALES}
+
+    def locale_cells(ids: list[str]) -> dict[str, Any]:
+        return {loc: (_render_cell(ids, types, sets[loc], examples) if sets[loc] else None)
+                for loc in LOCALES}
+
+    groups = []
+    for key, title in GROUPS:
+        entry: dict[str, Any] = {"key": key, "title": title, "total": len(members[key]), "locales": {}}
+        reason = NA_REASONS.get(key)
+        if reason is None and key in DB_SET_GROUPS and db_sets is None:
+            reason = "id группы берутся из БД; не переданы (нужен --db или --db-sets-file)"
+        if reason is not None:
+            entry["na"] = reason
+        else:
+            entry["locales"] = locale_cells(members[key])
+        groups.append(entry)
+    return {
+        "locales": list(LOCALES),
+        "no_data": [loc for loc in LOCALES if not sets[loc]],
+        "hsj_total": len(reference),
+        "total": {"locales": locale_cells([c["id"] for c in reference])},
+        "groups": groups,
+    }
+
+
+def render_renders_markdown(report: dict[str, Any]) -> str:
+    locales = report["locales"]
+    head = ("| Группа | Всего id | " + " | ".join(f"{loc}: есть / ожидается, 404 у HSJ, ещё не скачано, %"
+                                                for loc in locales) + " | Ещё не скачано (примеры) |")
+    lines = ["## Рендеры: локаль × режим", "", head, "|" + " --- |" * (3 + len(locales))]
+
+    def cell(c: dict[str, Any] | None) -> str:
+        if c is None:
+            return "нет данных"
+        pct = f"{c['percent']:.2f}%" if c["expected"] else "—"
+        return f"{c['have']} / {c['expected']}, 404: {c['missing_hsj']}, ещё: {c['pending']}, {pct}"
+
+    def examples(cells: dict[str, Any]) -> str:
+        parts = [f"{loc}: " + ", ".join(f"`{i}`" for i in c["pending_examples"])
+                 for loc, c in cells.items() if c and c["pending_examples"]]
+        return "; ".join(parts) or "—"
+
+    for g in report["groups"]:
+        if "na" in g:
+            total = "—" if g["key"] in NA_REASONS or not g["total"] else g["total"]
+            lines.append(f"| {g['title']} | {total} | " + " | ".join([NA] * len(locales)) + f" | {g['na']} |")
+            continue
+        lines.append(f"| {g['title']} | {g['total']} | " + " | ".join(cell(g["locales"][l]) for l in locales)
+                     + f" | {examples(g['locales'])} |")
+    t = report["total"]["locales"]
+    lines.append(f"| **Все id HSJ** | {report['hsj_total']} | " + " | ".join(cell(t[l]) for l in locales)
+                 + f" | {examples(t)} |")
+    lines.append("")
+    if report["no_data"]:
+        lines.append("Нет индекса рендеров (или он повреждён): " + ", ".join(report["no_data"]) + ".")
+        lines.append("")
+    lines.append("Ожидается: id группы, чей тип не в `skip_types` индекса. Процент = есть / "
+                 "(ожидается − 404 у HSJ), округление вниз.")
+    return "\n".join(lines)
+
+
+def load_render_indexes(renders_dir: str) -> dict[str, Any]:
+    """Read {locale}.index.json only; a missing or broken index is None (no data)."""
+    out: dict[str, Any] = {}
+    for loc in LOCALES:
+        try:
+            out[loc] = json.loads((Path(renders_dir) / f"{loc}.index.json").read_bytes())
+        except (OSError, ValueError):
+            out[loc] = None
+    return out
+
+
 def render_markdown(report: dict[str, Any]) -> str:
     head = "| Группа | Всего id | " + " | ".join(f"{loc}: покрыто / %" for loc in report["locales"]) + " | Не покрыто (примеры) |"
     lines = [head, "|" + " --- |" * (3 + len(report["locales"]))]
@@ -352,6 +468,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--db-sets-file", help="JSON {standard,wild,coins,bartenders: [card ids]}")
     ap.add_argument("--examples", type=int, default=5, help="max uncovered ids per cell")
     ap.add_argument("--json", action="store_true", help="JSON output instead of Markdown")
+    ap.add_argument("--renders-dir", help="dir with {locale}.index.json of sync_card_renders: "
+                    "adds render coverage (only indexes are read, never the image files)")
     args = ap.parse_args(argv)
 
     rows: list[dict[str, Any]] = []
@@ -369,7 +487,18 @@ def main(argv: list[str] | None = None) -> int:
         db_sets = {k: set(v) for k, v in raw.items()}
     cards = {loc: load_hsj(loc, args.hsj_dir, getattr(args, f"hsj_{loc}")) for loc in LOCALES}
     report = build_report(cards, rows, db_sets, args.examples)
-    print(json.dumps(report, ensure_ascii=False, indent=2) if args.json else render_markdown(report))
+    renders = None
+    if args.renders_dir:
+        renders = build_render_report(cards, load_render_indexes(args.renders_dir), db_sets, args.examples)
+    if args.json:
+        if renders is not None:
+            report["renders"] = renders
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+    else:
+        out = render_markdown(report)
+        if renders is not None:
+            out += "\n\n" + render_renders_markdown(renders)
+        print(out)
     return 0
 
 
