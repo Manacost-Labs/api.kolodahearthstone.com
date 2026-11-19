@@ -709,6 +709,21 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Skip this scheduled pipeline when its admin section is disabled.",
     )
     assemble.add_argument("--schedule-id")
+    donor_report = sub.add_parser(
+        "assemble-donor-pool-report",
+        help=(
+            "Check the Assemble donor pool rules against the HSReplay snapshot "
+            "(no network): uncovered pairs, foreign-class shows, surplus donors."
+        ),
+    )
+    donor_report.add_argument(
+        "--format", choices=("standard", "wild"), default=None, dest="format_name"
+    )
+    donor_report.add_argument(
+        "--snapshot",
+        help="JSON of /datasets/hsreplay_assemble (default: the stored dataset).",
+    )
+    donor_report.add_argument("--json", action="store_true", dest="as_json")
     hsguru_analysis = sub.add_parser(
         "refresh-hsguru-archetype-analysis",
         help="Refresh Legend class matchups and card stats for active HSGuru archetypes.",
@@ -1869,6 +1884,25 @@ def main(argv: list[str] | None = None) -> int:
         if result.get("published"):
             return int(ExitCode.DEGRADED)
         return int(ExitCode.ERROR)
+    if args.command == "assemble-donor-pool-report":
+        from . import assemble_pool_report as donor_report
+        from . import card_choice_pools
+        from .hsreplay_assemble import FORMATS as assemble_formats
+        from .hsreplay_assemble import _load_state as load_assemble_state
+
+        card_base = card_choice_pools.load_card_base()
+        formats = (
+            donor_report.load_snapshot_file(args.snapshot)
+            if args.snapshot
+            else load_assemble_state()[0]
+        )
+        names = (args.format_name,) if args.format_name else tuple(assemble_formats)
+        report = donor_report.build_report(card_base, formats, names)
+        if args.as_json:
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+        else:
+            print(donor_report.render_table(report))
+        return 0 if report["ok"] else int(ExitCode.DEGRADED)
     if args.command == "refresh-hsreplay-assemble":
         source_id = "hsreplay_assemble"
         if args.scheduled:

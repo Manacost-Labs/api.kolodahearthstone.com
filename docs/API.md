@@ -956,7 +956,7 @@ curl -s "https://api.kolodahearthstone.com/v1/hsreplay/card-choices?card=CORE_YO
 | Endpoint | Что возвращает |
 | --- | --- |
 | `GET /v1/hsreplay/assemble/cards` | `format` (`standard`/`wild`). 13 карт со «Собирает»: `card`, `formats`, `state` (`ok`/`no_data`/`not_collected`/`failed`), `checked_at`, `stale`, `bases_total`, `win_rate` |
-| `GET /v1/hsreplay/assemble` | `card` (id или dbf), `format`, `base` (не указан — доноры у всех баз; `top` — только у первой; dbf — только у этой). `data.card` (+ `text`, `text_ru`), `data.stats`, `data.summary`, `data.bases[]` с `offer_rate`, `win_rate`, `donors_total`, `donors[]` и у каждого донора два `options[]` (`half` `effect`/`trigger`, `text.ru`/`text.en` = `{trigger, effect}`, `pick_rate`, `win_rate`, `picks`, `low_sample`, `undervalued`) |
+| `GET /v1/hsreplay/assemble` | `card` (id или dbf), `format`, `base` (не указан — доноры у всех баз; `top` — только у первой; dbf — только у этой), `class` (необязательный класс игрока для `donor_pool`, иначе 422). Добавлено: `data.donor_pool_status` (`state` `ok`/`mismatch`/`unavailable`, `class_dependent`, `player_class`, `observed_pairs`, `uncovered_pairs`, `uncovered_offer_share`) и `bases[].donor_pool` (полный пул доноров выбранной базы, `has_stats`, два `options[]` с текстами; иначе `null`). `data.card` (+ `text`, `text_ru`), `data.stats`, `data.summary`, `data.bases[]` с `offer_rate`, `win_rate`, `donors_total`, `donors[]` и у каждого донора два `options[]` (`half` `effect`/`trigger`, `text.ru`/`text.en` = `{trigger, effect}`, `pick_rate`, `win_rate`, `picks`, `low_sample`, `undervalued`) |
 
 Проценты — `float` 0–100 без округления. Не Assemble-карта или неизвестная база —
 `404`; формат без данных — `200` с `stats.state = "not_collected"`. Ответы не
