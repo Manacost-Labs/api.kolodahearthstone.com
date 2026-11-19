@@ -89,6 +89,11 @@ test('empty and missing input give no tokens', () => {
   assert.deepEqual(parseCardText(undefined), []);
 });
 
+test('whitespace-only text without variants is kept as is', () => {
+  assert.equal(plainCardText('\t'), '\t');
+  assert.equal(plainCardText(' '), ' ');
+});
+
 const plainChars = fc.string({ unit: 'binary' }).map(value => value.replace(/[<>[\]{}_@$#|\r\n]/g, ''));
 
 test('text without markup is shown unchanged', () => {

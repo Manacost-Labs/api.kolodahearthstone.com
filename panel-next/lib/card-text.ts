@@ -55,14 +55,14 @@ function pluralForm(forms: string[], before: string) {
 }
 
 // `@` separates variants of the text (base text, then dynamic hints): only the first non-empty
-// variant is the card text.
+// variant is the card text. Without a non-empty variant the first one stays as it is.
 function firstVariant(cells: Cell[]): Cell[] {
   const variants: Cell[][] = [[]];
   for (const cell of cells) {
     if (cell.char === '@') variants.push([]);
     else variants[variants.length - 1].push(cell);
   }
-  return variants.find(variant => variant.some(cell => cell.char.trim() !== '')) ?? [];
+  return variants.find(variant => variant.some(cell => cell.char.trim() !== '')) ?? variants[0];
 }
 
 // Pass 2: service markers. Removing one can complete another ("[x<b>]"), so repeat until stable.
