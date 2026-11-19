@@ -1,0 +1,186 @@
+/* Arena view (#109): win rate of every class as columns around 50 %. Scoped to .arena-view; tokens only. */
+.arena-view {
+  --arena-plot: 260px;
+  min-width: 0;
+  margin-bottom: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+.arena-view__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-3);
+  margin-bottom: var(--space-3);
+}
+.arena-view__head h3 {
+  margin: 0;
+  font-size: var(--text-lg);
+  line-height: 1.2;
+}
+.arena-view__note,
+.arena-view__legend {
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+.arena-view__legend {
+  margin: var(--space-2) 0 0;
+}
+.arena-cols {
+  display: grid;
+  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-flow: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.arena-col {
+  display: grid;
+  grid-template-rows: var(--arena-plot) auto auto auto;
+  grid-template-areas: 'plot' 'icon' 'name' 'pick';
+  justify-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  text-align: center;
+}
+.arena-col__plot {
+  position: relative;
+  grid-area: plot;
+  width: 100%;
+}
+/* the 50 % line */
+.arena-col__plot::before {
+  content: '';
+  position: absolute;
+  top: var(--line-y);
+  right: 0;
+  left: 0;
+  height: 1px;
+  background: var(--line-strong, var(--muted));
+  opacity: 0.6;
+}
+.arena-col__bar {
+  position: absolute;
+  left: 22%;
+  width: 56%;
+  height: var(--h);
+  min-height: 2px;
+  border-radius: var(--radius-sm);
+}
+.arena-col__bar[data-dir='up'] {
+  bottom: calc(var(--arena-plot) - var(--line-y));
+  background: var(--good);
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.arena-col__bar[data-dir='down'] {
+  top: var(--line-y);
+  background: var(--bad);
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+.arena-col__value {
+  grid-area: plot;
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.arena-col__value[data-dir='up'] {
+  align-self: start;
+  margin-top: calc(var(--line-y) - var(--h) - 22px);
+  color: var(--good);
+}
+.arena-col__value[data-dir='down'] {
+  align-self: start;
+  margin-top: calc(var(--line-y) + var(--h) + 4px);
+  color: var(--bad);
+}
+.arena-col__icon {
+  display: block;
+  grid-area: icon;
+  border-radius: var(--radius-full);
+}
+.arena-col__name {
+  grid-area: name;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+.arena-col__pick {
+  grid-area: pick;
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 900px) {
+  .arena-cols {
+    grid-auto-flow: row;
+  }
+  .arena-col {
+    grid-template-columns: 36px minmax(0, 1.3fr) minmax(72px, 1fr) 50px;
+    grid-template-rows: auto auto;
+    grid-template-areas: 'icon name plot value' 'icon pick plot value';
+    align-items: center;
+    justify-items: start;
+    gap: 0 var(--space-2);
+    padding: var(--space-1) 0;
+    border-top: 1px solid var(--line);
+    text-align: left;
+  }
+  .arena-col:first-child {
+    border-top: 0;
+  }
+  .arena-col__plot {
+    align-self: stretch;
+    min-height: 28px;
+  }
+  .arena-col__plot::before {
+    top: 0;
+    right: auto;
+    bottom: 0;
+    left: 50%;
+    width: 1px;
+    height: auto;
+  }
+  .arena-col__bar {
+    top: 22%;
+    left: auto;
+    width: calc(var(--dev) * 50%);
+    height: 56%;
+    min-width: 2px;
+    min-height: 0;
+  }
+  .arena-col__bar[data-dir='up'] {
+    bottom: auto;
+    left: 50%;
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  }
+  .arena-col__bar[data-dir='down'] {
+    top: 22%;
+    right: 50%;
+    border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+  }
+  .arena-col__value {
+    grid-area: value;
+    align-self: center;
+    margin: 0 !important;
+    justify-self: end;
+  }
+  .arena-col__icon {
+    width: 36px;
+    height: 36px;
+  }
+  .arena-col__name {
+    font-size: var(--text-sm);
+    overflow-wrap: break-word;
+  }
+}
+@media (max-width: 640px) {
+  .arena-view {
+    padding: var(--space-3);
+  }
+}

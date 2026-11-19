@@ -131,6 +131,68 @@ export default async function verify(page, root) {
   ensure((await zoolock.getAttribute('alt')) === 'Чернокнижник', 'HSGuru table icon');
   checks.hsguruNamesAndIcons = true;
 
+  // 4d. Battlegrounds and Arena: a chart above the table, no empty squares, the Arena icons are the meta ones (#109).
+  await open('bg_heroes');
+  ensure(await page.locator('.bg-view--heroes svg').first().isVisible(), 'BG heroes: no chart');
+  const heroTop = await page.locator('.bg-top__row').count();
+  ensure(heroTop === 10, 'BG heroes: top rows ' + heroTop);
+  const heroOrder = await page.evaluate(() => {
+    const view = document.querySelector('.bg-view--heroes').getBoundingClientRect();
+    const table = document.querySelector('.data-table').getBoundingClientRect();
+    return view.bottom <= table.top;
+  });
+  ensure(heroOrder, 'BG heroes: the chart is not above the table');
+  // The portraits are blocked here (remote requests abort): the name stays instead of an empty square.
+  await page.waitForFunction(() => document.querySelector('.bg-top__row .bg-art[data-state="broken"]'));
+  ensure(
+    (await page.locator('.bg-top__row .bg-art__ph b').first().innerText()) === 'Герой 1',
+    'BG hero placeholder',
+  );
+  ensure(
+    /Данные на/.test(await page.locator('.bg-view--heroes').first().innerText()),
+    'BG heroes: no data date',
+  );
+  await open('bg_minions');
+  const cards = await page.locator('.bg-card').count();
+  ensure(cards === 12, 'BG minions: cards ' + cards);
+  await page.waitForFunction(() => document.querySelector('.bg-card .bg-art[data-state="broken"]'));
+  const empty = await page.locator('.bg-card .bg-art').evaluateAll(
+    tiles =>
+      tiles.filter(tile => {
+        const loaded = tile.querySelector('img') && tile.dataset.state === 'ready';
+        const placeholder = tile.querySelector('.bg-art__ph');
+        return (
+          !loaded &&
+          (!placeholder ||
+            getComputedStyle(placeholder).display === 'none' ||
+            !placeholder.textContent.trim())
+        );
+      }).length,
+  );
+  ensure(empty === 0, 'BG minions: empty squares ' + empty);
+  ensure(
+    (await page.locator('.bg-card__tier').first().innerText()).trim().length > 0,
+    'BG minions: no tier chip',
+  );
+  checks.bgViews = true;
+  await open('arena');
+  const columns = await page.locator('.arena-col').count();
+  ensure(columns > 1, 'Arena: columns ' + columns);
+  const arenaOrder = await page.evaluate(() => {
+    const view = document.querySelector('.arena-view').getBoundingClientRect();
+    const table = document.querySelector('.data-table').getBoundingClientRect();
+    return view.bottom <= table.top;
+  });
+  ensure(arenaOrder, 'Arena: the chart is not above the table');
+  const arenaIcons = await page
+    .locator('.arena-col__icon')
+    .evaluateAll(images => images.map(image => image.getAttribute('src')));
+  ensure(
+    arenaIcons.every(src => /\/class-icons\/[a-z]+-(64|96)\.webp$/.test(src)),
+    'Arena icons are not the meta ones: ' + arenaIcons,
+  );
+  checks.arenaView = true;
+
   // 5. Reset only when something differs from the defaults.
   await open('meta');
   const reset = page.getByRole('button', { name: 'Сбросить' });
