@@ -22,27 +22,72 @@ on the legacy individual routes.
 
 ## Publication and rollback
 
-Prepare `panel/scripts/full_card_catalog.sql` separately from the data transaction.
-Run `panel/scripts/sync_full_card_catalog.py --hsj-ru RU.json --hsj-en EN.json`
-for a read-only plan, then repeat with `--apply --expect-total COUNT` using the
-same files and the existing panel global synchronization lock. The default
-network source is the free HSJSON catalog; no premium providers are called.
+The catalog is stored in two tables written by one loader in one transaction:
 
-Before production, back up the catalog table and verify its restoration in a
-disposable database. Initial installation creates a separate table; it never
-updates existing cards, format associations, images, or wiki metadata. Publish
-in batches of 200 within one transaction; a failed batch rolls back everything.
-Reject incomplete locale snapshots, duplicate IDs/dbfs and conflicting published
-identities. Repeating identical snapshots keeps data and timestamps unchanged.
-Historical entries are retained if later upstream snapshots omit them.
+- `hearthstone_card_catalog` (`panel/scripts/full_card_catalog.sql`): ruRU/enUS
+  columns, unchanged.
+- `hearthstone_card_localizations` (`panel/sql/card_localizations.sql`): one row
+  per `(card_id, locale)` for `ruRU`, `enUS`, `plPL`, `esES`; `dbf`, `name`,
+  `payload` (the full HSJ object of that locale in canonical JSON, so ruRU/enUS
+  equal `payload_ru`/`payload_en` byte for byte), `source_hash = sha256(payload)`
+  and `updated_at`, which changes only when the hash changes. Keys:
+  `PRIMARY KEY (card_id, locale)`, `UNIQUE (dbf, locale)`,
+  `KEY (locale, name)`. The locale list is an allow-list in the loader (no
+  `CHECK`/`ENUM`), so esMX needs no `ALTER`. The history triggers `cv1_*` and
+  `catalog_card_versions` do not touch these tables. The seven translatable HSJ
+  fields are `name`, `text`, `flavor`, `collectionText`, `howToEarn`,
+  `howToEarnGolden`, `targetingArrowText`; empty ones are normal.
 
-Deploy the new library and the small API dispatcher/fallback diff only after the
-data is ready. Preserve any existing runtime changes when constructing the
-release. Roll back by atomically returning the panel `current` symlink to its
-previous release; the separate catalog table can remain for recovery.
+`panel/scripts/sync_full_card_catalog.py` downloads the four
+`https://api.hearthstonejson.com/v1/latest/{locale}/cards.json` files (or takes
+`--hsj-ru/--hsj-en/--hsj-pl/--hsj-es`) and is a read-only plan by default. The
+JSON output has the catalog counters plus
+`"localizations": {"ruRU": {"insert", "update", "unchanged"}, ...}`. Run it
+under the panel's global sync lock. No premium providers are called.
 
-The supplied `kolodahs-full-card-catalog.timer` runs a daily free-source refresh
-under the same global sync lock. Its `--apply --refresh` mode requires an already
-published catalog and at least 95% identity coverage; a truncated upstream
-snapshot leaves the last good data available. Install the service/timer after
-the initial exact-count publication. Failures are visible in systemd/journald.
+Publication gate. Every locale must be a plain list of 10 000–100 000 cards
+under 32 MiB with valid, unique ids and dbfs, and all four locales must have
+exactly the same `id -> dbfId` set as enUS. Otherwise the loader stops before
+writing anything; a failed batch rolls back the catalog and all locales
+together. A locale with noticeably fewer ids than enUS is therefore rejected,
+not published. Rows for ids that vanish from HSJ are kept. Only new or changed
+locale rows are written: repeating an unchanged snapshot writes nothing
+(`unchanged` everywhere) and keeps every `updated_at`.
+
+`--apply --expect-total COUNT` is the initial publication. `--apply --refresh`
+(the daily `kolodahs-full-card-catalog.timer`, flags unchanged) additionally
+needs a non-empty `hearthstone_card_localizations` with at least 10 000 rows per
+locale and at least 95% of each locale's published ids present in the new
+snapshot; otherwise it fails and the last good data stays. If the table does not
+exist the loader reports it and creates nothing.
+
+### Deploy order (production, risk:high)
+
+1. Merge only after the panel-scripts sync (api#94) is deployed.
+2. `sudo ./scripts/deploy-server.sh` installs `platform/sql/021_card_localizations.sql`.
+   `platform/scripts/sync-shadow.php` loads every `generator` table and fails
+   when a table has no mirror, so check that
+   `catalog.hearthstone_card_localizations` exists **before** creating the
+   MariaDB table.
+3. Back up: `mysqldump --single-transaction generator hearthstone_card_catalog |
+   gzip` into `backups/e24-locales-<UTC>/`, and restore it into a throwaway
+   MariaDB to verify.
+4. `sudo mysql generator < panel/sql/card_localizations.sql` from the merge commit.
+5. `sudo ./scripts/deploy-panel.sh`.
+6. As `koloda` from `panel/current`, under `flock -w 300
+   /run/lock/kolodahs-sync/global.lock`: dry-run, then `--apply --expect-total N`,
+   then dry-run again (all `unchanged`).
+7. Wait for the next `hs-data-platform-shadow-sync.service` (`Result=success`),
+   watch the logs for 10 minutes and check the next
+   `kolodahs-full-card-catalog.service` run against `TimeoutStartSec=10min`.
+
+Check: `SELECT locale, COUNT(*), SUM(name IS NULL OR name='') FROM
+hearthstone_card_localizations GROUP BY locale` gives four rows with N ids and 0
+empty names.
+
+Rollback: revert the PR and run `deploy-panel.sh` again; the old loader never
+reads the new table. The MariaDB and PostgreSQL tables may stay (they are
+harmless); nothing is dropped without the owner. The catalog table is untouched,
+so no restore is needed for the catalog itself. The earlier rule for the
+catalog table still holds: a failed batch rolls back, and the panel `current`
+symlink can be returned atomically to the previous release.
