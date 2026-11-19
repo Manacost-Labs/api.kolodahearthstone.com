@@ -149,7 +149,8 @@ def cell_status(row: dict[str, Any] | None, ref: dict[str, Any]) -> str:
     if row is None:
         # no row is a gap unless HSJ itself has nothing localizable for the card
         return "ok" if all(ref.get(f) in (None, "") for f in LOCALIZED_FIELDS) else "missing"
-    if not str(row.get("name") or "").strip() and str(ref.get("name") or "").strip():
+    hsj_has_text = any(ref.get(f) not in (None, "") for f in LOCALIZED_FIELDS)
+    if not str(row.get("name") or "").strip() and hsj_has_text:
         return "missing"
     payload = _payload(row)
     for field in LOCALIZED_FIELDS:
@@ -159,6 +160,11 @@ def cell_status(row: dict[str, Any] | None, ref: dict[str, Any]) -> str:
         if payload.get(field) != expected:
             return "stale"
     return "ok"
+
+
+def percent(covered: int, total: int) -> float:
+    """Floor to 2 decimals: 100.0 only when covered == total."""
+    return covered * 10000 // total / 100 if total else 100.0
 
 
 def _cell(ids: list[str], status: Callable[[str], str], examples: int) -> dict[str, Any]:
@@ -172,7 +178,7 @@ def _cell(ids: list[str], status: Callable[[str], str], examples: int) -> dict[s
     covered = len(ids) - len(missing) - len(stale)
     return {
         "covered": covered,
-        "percent": round(100.0 * covered / len(ids), 2) if ids else 100.0,
+        "percent": percent(covered, len(ids)),
         "missing_count": len(missing),
         "missing_examples": missing[:examples],
         "stale_count": len(stale),

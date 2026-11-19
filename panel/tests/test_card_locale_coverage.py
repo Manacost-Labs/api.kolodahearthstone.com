@@ -161,6 +161,31 @@ class EmptyNameTest(unittest.TestCase):
         self.assertEqual(cov.cell_status(None, {"name": ""}), "ok")
 
 
+class RoundingAndEmptyNameTest(unittest.TestCase):
+    def test_percent_never_rounds_up_to_100(self):
+        self.assertEqual(cov.percent(36389, 36390), 99.99)
+        self.assertEqual(cov.percent(36390, 36390), 100.0)
+        self.assertEqual(cov.percent(0, 5), 0.0)
+        self.assertEqual(f"{cov.percent(36389, 36390):.2f}", "99.99")
+
+    def test_report_99_99_for_one_gap(self):
+        cards = [{"id": f"C{i}", "set": "CORE", "name": "n", "text": "t"} for i in range(36390)]
+        by_loc = {loc: cards for loc in cov.LOCALES}
+        data = [{"card_id": c["id"], "locale": loc, "name": "n", "payload": {"name": "n", "text": "t"}}
+                for c in cards for loc in cov.LOCALES if (c["id"], loc) != ("C0", "plPL")]
+        total = cov.build_report(by_loc, data)["total"]["locales"]
+        self.assertEqual(total["plPL"]["percent"], 99.99)
+        self.assertEqual(total["esES"]["percent"], 100.0)
+
+    def test_empty_name_row_with_hsj_text_is_missing(self):
+        row = {"card_id": "X", "locale": "esES", "name": "", "payload": {"text": "t"}}
+        self.assertEqual(cov.cell_status(row, {"name": "", "text": "t"}), "missing")
+
+    def test_empty_name_row_when_hsj_all_empty_is_ok(self):
+        row = {"card_id": "X", "locale": "esES", "name": "", "payload": {}}
+        self.assertEqual(cov.cell_status(row, {"name": ""}), "ok")
+
+
 class FakeCursor:
     def __init__(self, fail_on=None):
         self.sql, self.fail_on = [], fail_on
