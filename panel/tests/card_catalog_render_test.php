@@ -34,7 +34,8 @@ file_put_contents($tmp . '/panel/api/index.php', $patched);
 // Last-Modified must come from the data, not from the copied router file.
 touch($tmp . '/panel/api/index.php', strtotime('2000-01-01 00:00:00 UTC'));
 file_put_contents($tmp . '/panel/config.php', "<?php return ['db' => []];\n");
-file_put_contents($tmp . '/router.php', "<?php require __DIR__ . '/panel/api/index.php';\n");
+// php -S does not run auto_prepend_file for the router script, so the FS-boundary counter is required first.
+file_put_contents($tmp . '/router.php', "<?php require " . var_export(__DIR__ . '/fixtures/count_opens.php', true) . "; require __DIR__ . '/panel/api/index.php';\n");
 $statePath = $tmp . '/state.json';
 
 file_put_contents($tmp . '/fake_db.php', <<<'PHP'
@@ -129,7 +130,7 @@ $probe = stream_socket_server('tcp://127.0.0.1:0', $errno, $errstr);
 $port = (int)substr(strrchr((string)stream_socket_get_name($probe, false), ':'), 1);
 fclose($probe);
 $server = proc_open([PHP_BINARY, '-S', "127.0.0.1:$port", '-t', $tmp, $tmp . '/router.php'], [1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']], $pipes,
-    $tmp, ['FAKE_DB_FILE' => $tmp . '/fake_db.php', 'FAKE_STATE_FILE' => $statePath, 'PATH' => getenv('PATH') ?: '/usr/bin:/bin']);
+    $tmp, ['FAKE_DB_FILE' => $tmp . '/fake_db.php', 'FAKE_STATE_FILE' => $statePath, 'COUNT_OPENS_FILE' => $tmp . '/opens.log', 'PATH' => getenv('PATH') ?: '/usr/bin:/bin']);
 register_shutdown_function(static function () use ($server, $tmp): void {
     proc_terminate($server);
     proc_close($server);
@@ -162,6 +163,15 @@ $writeIndex = static function (string $locale, array $data, ?int $mtime = null) 
     file_put_contents("$indexDir/$locale.index.json", json_encode($data + ['version' => 1, 'locale' => $locale, 'size' => '512x',
         'updated_at' => '2026-11-18T00:00:00Z', 'skip_types' => ['ENCHANTMENT', 'PET'], 'renders' => [], 'missing' => []]));
     if ($mtime !== null) touch("$indexDir/$locale.index.json", $mtime);
+};
+// Opens of an index file per request, observed at the filesystem boundary by fixtures/count_opens.php (auto_prepend_file).
+$opens = static function () use ($tmp): array {
+    // The counter is written in a shutdown function, possibly just after the response was sent.
+    for ($i = 0; $i < 100 && !is_file($tmp . '/opens.log'); $i++) usleep(20000);
+    usleep(20000);
+    $lines = is_file($tmp . '/opens.log') ? array_map('intval', file($tmp . '/opens.log', FILE_IGNORE_NEW_LINES)) : [];
+    @unlink($tmp . '/opens.log');
+    return $lines;
 };
 $loc = static fn (array $card): array => $card['localized'];
 
@@ -242,14 +252,21 @@ $save();
 
 // 6. Listing esES per_page=200: fields on every card, .
 $writeIndex('esES', ['renders' => ['CS2_029' => 'fedcba987654'], 'missing' => ['MIS_1']]);
+$opens();
 [$s, $b] = get($port, '/api/v1/card-catalog?locale=esES&per_page=200');
 $cards = json_of($b)['data'];
 check($s === 200 && count($cards) === 6, 'listing status and size');
+$counted = $opens();
+check($counted === [1], 'listing opens the index once per request, got ' . json_encode($counted));
 foreach ($cards as $c) check(array_key_exists('render_url', $c['localized']) && is_bool($c['localized']['render_media_verified']), 'listing field on ' . $c['card_id']);
 $by = array_column($cards, null, 'card_id');
 check($by['CS2_029']['localized']['render_url'] === OURS . 'esES/512x/CS2_029.webp?v=fedcba987654'
     && $by['MIS_1']['localized']['render_url'] === null && $by['ENCH_1']['localized']['render_url'] === null
     && $by['WE_1']['localized']['render_url'] === HSJ . 'esES/512x/WE_1.png' && $by['TRK_1']['localized']['render_url'] === null, 'listing values');
+
+$opens();
+get($port, '/api/v1/card-catalog/CS2_029?locale=esES');
+check($opens() === [1], 'detail opens the index once');
 
 // 7. Without ?locale= nothing changes: no render fields, images.card and the top-level flag as before, even with indexes present.
 foreach (['/api/v1/card-catalog/CS2_029', '/api/v1/card-catalog/dbf/1', '/api/v1/card-catalog?per_page=200'] as $path) {
