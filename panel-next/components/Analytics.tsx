@@ -3,7 +3,7 @@ import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { countLabel, fieldLabel, formatNumber, toneOf } from '@/lib/format';
 import { maxPage, pageNumber, statsPageSize } from '@/lib/analytics-query';
-import { isChanged, pageCaption, pagesBackend, statsKpis, visibleParams } from '@/lib/stats-view';
+import { isChanged, isPartial, isServerPaged, pageCaption, statsKpis, visibleParams } from '@/lib/stats-view';
 import { statsHref } from '@/lib/stats-sections';
 import { queryHref, text } from '@/lib/model';
 import type { AnalyticsData, AnalyticsModule, Row } from '@/lib/types';
@@ -45,7 +45,8 @@ export function Analytics({
   const total = Number(data.meta?.total) || data.rows?.length || 0;
   // The last page the data (and the backend's `offset` limit) reaches; a page past it has no rows.
   const lastPage = Math.max(1, Math.min(Math.ceil(total / statsPageSize), maxPage(definition)));
-  const beyond = pagesBackend(definition) && pageNo > 1 && total > 0 && !data.rows?.length;
+  const paged = isServerPaged(module, definition);
+  const beyond = paged && pageNo > 1 && total > 0 && !data.rows?.length;
   const extras = Object.entries(data).filter(
     ([key]) =>
       ![
@@ -152,7 +153,12 @@ export function Analytics({
                   Измените фильтры или выберите другой набор.
                 </EmptyState>
               )}
-              {pagesBackend(definition) && data.rows?.length > 0 && (
+              {!paged && data.rows?.length > 0 && isPartial(data) && (
+                <p className="stats-note">
+                  Показаны первые {formatNumber(data.rows.length)} из {formatNumber(total)}.
+                </p>
+              )}
+              {paged && data.rows?.length > 0 && (
                 <StatsPager
                   caption={pageCaption(pageNo, data.rows.length, total)}
                   page={pageNo}

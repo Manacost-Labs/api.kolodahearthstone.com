@@ -150,10 +150,15 @@ These three PHP adapters are reachable only through the private
   with Russian wording from `lib/format.ts` (`optionLabel`: «24 часа»,
   «Патч 37.0.2», «Легенда», «Алмаз 4–1», «Стандарт»); lists apply at once,
   typed fields on Enter or blur, the search `q` is one field. There is no
-  «Применить», and `limit` / `offset` are never fields: modules that take
-  `offset` page by 25 (the table's own page size) with a Valyro `Pagination` («1–25 из 812»); the page is
-  the `page` URL parameter and `analyticsRequest` turns it into `limit` and
-  `offset`. «Сбросить» shows only when a filter or the page differs from the
+  «Применить», and `limit` / `offset` are never fields: only `decks` and
+  `patches` page on the server (`serverPagedModules` in `lib/analytics-query.ts`:
+  PHP applies `offset` there and the real total exceeds the `limit` maximum):
+  25 rows a page (the table's own page size), a Valyro `Pagination`
+  («1–25 из 812»), the `page` URL parameter turned into `limit` and `offset`.
+  Every other module asks for its largest `limit`, never for `offset` (PHP
+  ignores it for `bg_minions` and `bg_heroes`), and the table pages on the
+  client; when the total is larger than the rows, a note says «Показаны первые
+  N из T». «Сбросить» shows only when a filter or the page differs from the
   defaults. A module with a required filter and no value («Статистика карты»)
   shows the field and a «Выберите карту» hint instead of the KPI and table.
   `components/stats/ModuleView.tsx` is the empty slot for a module's own view.
@@ -162,7 +167,11 @@ These three PHP adapters are reachable only through the private
   decimal; a share between 0 and 1 % keeps two, `0,45 %`). KPI come from the
   answer's `summary` (`Данные на`, `Игр в выборке`, the count); an older PHP
   without keyed `summary` gets the date from `meta.updated_at`, the row count
-  and the sum of games counted by the panel (`lib/stats-view.ts`). Chosen
+  and the sum of games counted by the panel (`lib/stats-view.ts`). On a partial
+  answer (a page, or the first rows of a longer selection) the count is the real
+  `meta.total` and sums PHP derived from the rows it returned («Игр в выборке»,
+  «Со сборками», «Показано») are not shown, so the cards never change while
+  paging. Chosen
   filters are not repeated in the KPI, and «Данные на» replaces the
   «Обновлено» line. `tests/stats-browser.mjs` walks all 13 modules.
 - On the source registry (`stats=overview`) long ids wrap inside their column,

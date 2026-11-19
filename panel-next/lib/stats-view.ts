@@ -1,7 +1,7 @@
 // What a statistics module shows around its table: which filters are visible, the KPI cards and the
 // page caption. Pure functions (no React), so tests run as-is.
 import { formatDay, formatNumber, formatRelative, knownOptionValues, paramLabel } from './format.ts';
-import { maxPage, pageNumber, statsPageSize } from './analytics-query.ts';
+import { maxPage, pageNumber, serverPagedModules, statsPageSize } from './analytics-query.ts';
 import type { AnalyticsData, AnalyticsModule } from './types.ts';
 
 export type Param = AnalyticsModule['params'][string];
@@ -14,7 +14,15 @@ export const visibleParams = (definition?: AnalyticsModule): [string, Param][] =
   Object.entries(definition?.params ?? {}).filter(([key]) => !pagingParams.includes(key));
 
 /** A module can be paged only when the backend takes `offset`. */
-export const pagesBackend = (definition?: AnalyticsModule) => Boolean(definition?.params.offset);
+/** The module pages on the server (see `serverPagedModules`). */
+export const isServerPaged = (moduleKey: string, definition?: AnalyticsModule) =>
+  serverPagedModules.includes(moduleKey) && Boolean(definition?.params.offset);
+
+/** The answer holds only part of the selection: PHP sums and counts what it was given. */
+export function isPartial(data: AnalyticsData) {
+  const total = Number((data.meta as { total?: unknown } | undefined)?.total);
+  return Number.isFinite(total) && total > (data.rows?.length ?? 0);
+}
 
 /** String filters whose values are a known finite set (see `knownOptionValues`). */
 const catalogued = ['class_name', 'format_name'];
@@ -81,6 +89,9 @@ function dateKpi(value: unknown): Kpi | null {
     : { key: 'data_as_of', label: 'Данные на', value: day, hint: formatRelative(value) };
 }
 
+/** Summary keys PHP computes from the rows it returned. */
+const rowDerived = ['games', 'with_decks'];
+
 type SummaryItem = { key?: string; label: string; value: unknown; type?: string; tone?: string };
 
 /**
@@ -90,9 +101,15 @@ type SummaryItem = { key?: string; label: string; value: unknown; type?: string;
  */
 export function statsKpis(moduleKey: string, data: AnalyticsData, definition?: AnalyticsModule): Kpi[] {
   const filterLabels = new Set(visibleParams(definition).map(([key]) => paramLabel(key)));
-  const own = ((data.summary ?? []) as SummaryItem[]).filter(
-    item => item.label !== 'Записей' && !filterLabels.has(item.label),
-  );
+  // A partial answer (one page, or the first rows of a longer selection): the count is the real total,
+  // and what PHP derived from the rows it was given (sum of games, decks with builds, «Показано») is
+  // dropped, never relabelled or topped up, so the cards do not change when the user pages.
+  const partial = isPartial(data);
+  const total = Number((data.meta as { total?: unknown }).total);
+  const own = ((data.summary ?? []) as SummaryItem[])
+    .filter(item => item.label !== 'Записей' && !filterLabels.has(item.label))
+    .filter(item => !(partial && (rowDerived.includes(item.key ?? '') || item.label === 'Показано')))
+    .map(item => (partial && item.key === 'rows' ? { ...item, value: total } : item));
   if (own.length)
     return own.map(item => {
       const kpi = isDate(item) ? dateKpi(item.value) : null;
@@ -105,7 +122,6 @@ export function statsKpis(moduleKey: string, data: AnalyticsData, definition?: A
         }
       );
     });
-  const total = Number((data.meta as { total?: unknown }).total);
   const count = Number.isFinite(total) && total > 0 ? total : (data.rows?.length ?? 0);
   const games = data.columns?.find(column => /^games/.test(column.key));
   const sum = games ? data.rows.reduce((acc, row) => acc + (Number(row[games.key]) || 0), 0) : 0;
@@ -114,7 +130,8 @@ export function statsKpis(moduleKey: string, data: AnalyticsData, definition?: A
   if (!data.rows?.length && !date) return [];
   const kpis: Kpi[] = [];
   if (date) kpis.push(date);
-  if (games && sum > 0) kpis.push({ key: 'games', label: 'Игр в выборке', value: formatNumber(sum) });
+  if (games && sum > 0 && !partial)
+    kpis.push({ key: 'games', label: 'Игр в выборке', value: formatNumber(sum) });
   kpis.push({ key: 'rows', label: nouns[moduleKey] ?? 'Строк', value: formatNumber(count) });
   return kpis;
 }

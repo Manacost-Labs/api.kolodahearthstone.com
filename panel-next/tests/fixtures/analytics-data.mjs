@@ -287,10 +287,11 @@ const modules = {
       matched: Math.round(r() * 40),
     })),
     total: 322,
+    // As PHP writes it: unkeyed, «Показано» is the number of rows in the answer.
     summary: [
-      date,
-      { label: 'Всего', value: 322, type: 'number' },
-      { label: 'Сопоставлено', value: 200, type: 'number' },
+      { label: 'Показано', value: 0 },
+      { label: 'Всего', value: 322 },
+      { label: 'Сопоставлено', value: 200 },
     ],
   }),
   card: () => {
@@ -315,7 +316,17 @@ const modules = {
   },
 };
 
-/** The answer of one module for the given query: filtered by `q`, cut to `limit`/`offset` when the module has them. */
+// Where PHP applies `offset` (panel/tests/analytics_cli.php, offset 0 vs 25): the others slice the first
+// `limit` rows (analytics_filter_rows) and ignore it.
+const appliesOffset = ['archetypes', 'hsguru_archetypes', 'decks', 'arena', 'patches'];
+// PHP counts what it was given for these (`count($rows)`), the other modules pass the real total.
+const countsShownRows = ['hsguru_archetypes'];
+
+/**
+ * The answer of one module for the given query: filtered by `q`, cut like PHP (`limit`, and `offset` only
+ * where PHP uses it). The summary is computed from the returned rows, as `analytics_statistics_summary`
+ * does, so a panel that trusts it on a page shows the same wrong numbers PHP would give.
+ */
 export function moduleAnswer(module, definition, search) {
   const build = modules[module];
   if (!build) return null;
@@ -333,9 +344,20 @@ export function moduleAnswer(module, definition, search) {
     Number(search.get('limit')) || definition.params.limit?.default || rows.length,
     definition.params.limit?.max || rows.length,
   );
-  const offset = definition.params.offset ? Math.max(0, Number(search.get('offset')) || 0) : 0;
+  const offset =
+    definition.params.offset && appliesOffset.includes(module)
+      ? Math.max(0, Number(search.get('offset')) || 0)
+      : 0;
+  const shown = rows.slice(offset, offset + limit);
   const options = { ...built.options };
   for (const [name, rule] of Object.entries(definition.params))
     if (rule.type === 'enum' && !options[name]) options[name] = rule.values;
-  return { ...built, rows: rows.slice(offset, offset + limit), total, options };
+  const summary = built.summary.map(item => {
+    if (item.key === 'games') return { ...item, value: sum(shown, 'games') };
+    if (item.key === 'with_decks') return { ...item, value: shown.length };
+    if (item.key === 'rows' && countsShownRows.includes(module)) return { ...item, value: shown.length };
+    if (item.label === 'Показано') return { ...item, value: shown.length };
+    return item;
+  });
+  return { ...built, rows: shown, total, options, summary };
 }

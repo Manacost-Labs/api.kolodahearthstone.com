@@ -101,3 +101,8 @@
   border-radius: 0;
   background: transparent;
 }
+.stats-note {
+  margin: var(--space-3) 0 0;
+  color: var(--muted);
+  font-size: var(--text-md);
+}

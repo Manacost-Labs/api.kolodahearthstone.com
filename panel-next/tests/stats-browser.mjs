@@ -90,7 +90,7 @@ export default async function verify(page, root) {
   checks.periodHints = true;
 
   // 3. KPI: date, games, archetypes, without echoing the chosen filters.
-  const kpi = (await page.locator('.stats-kpis').innerText()).replace(/\s+/g, ' ');
+  const kpi = (await page.locator('.stats-kpis:visible').innerText()).replace(/\s+/g, ' ');
   for (const label of ['Данные на', 'Игр в выборке', 'Архетипов'])
     ensure(kpi.includes(label), `KPI «${label}» is missing: ${kpi}`);
   for (const echo of ['Формат', 'Ранг', 'Период', 'Стандарт', '7 дней'])
@@ -100,9 +100,11 @@ export default async function verify(page, root) {
 
   // 4. The old PHP answer (no keyed summary): the panel counts the KPI itself.
   await open('constructed_cards');
-  const legacy = (await page.locator('.stats-kpis').innerText()).replace(/\s+/g, ' ');
-  for (const label of ['Данные на', 'Игр в выборке', 'Карт'])
+  const legacy = (await page.locator('.stats-kpis:visible').innerText()).replace(/\s+/g, ' ');
+  // 200 of 1 281 rows came back: the count is the real total and no sum is made over the shown rows.
+  for (const label of ['Данные на', 'Карт 1 281'])
     ensure(legacy.includes(label), `fallback KPI «${label}» is missing: ${legacy}`);
+  ensure(!legacy.includes('Игр в выборке'), 'A sum over a partial answer: ' + legacy);
   checks.fallbackKpi = true;
 
   // 5. Reset only when something differs from the defaults.
@@ -148,6 +150,46 @@ export default async function verify(page, root) {
     );
   }
   checks.pageBeyondRange = true;
+
+  // 6d. Server paging only where PHP pages: the rows change with `page`, the KPI do not.
+  // The «N часов назад» hint follows the clock, so it is left out of the comparison.
+  const kpiText = async () =>
+    (await page.locator('.stats-kpis:visible').innerText())
+      .replace(/\s+/g, ' ')
+      .replace(/\d+ \S+ назад|только что/g, '');
+  for (const key of ['decks', 'patches']) {
+    await open(key);
+    const kpiFirst = await kpiText();
+    const rowsFirst = await page.locator('.analytics-main tbody tr').allInnerTexts();
+    await open(key + '&page=2');
+    ensure(
+      (await kpiText()) === kpiFirst,
+      `${key}: KPI change with the page: ${kpiFirst} / ${await kpiText()}`,
+    );
+    const rowsSecond = await page.locator('.analytics-main tbody tr').allInnerTexts();
+    ensure(
+      rowsSecond.length > 0 && rowsSecond[0] !== rowsFirst[0],
+      key + ': page 2 shows the rows of page 1',
+    );
+    ensure(!rowsSecond.some(row => rowsFirst.includes(row)), key + ': page 2 repeats rows of page 1');
+    ensure(!/Показано/.test(kpiFirst), key + ': «Показано» counts one page');
+  }
+  ensure(/Всего 322/.test(await kpiText()), 'patches: total is missing in the KPI');
+  // The rest ask for everything at once: no server pager, the table reaches the last rows, the KPI cover all.
+  const whole = {
+    bg_minions: ['Страница 10', 'Ember Imp 36', 'Существ 250'],
+    bg_heroes: ['Страница 5', 'Герой 116', 'Героев 116'],
+    hsguru_archetypes: ['Страница 10', null, 'Архетипов 242'],
+    archetypes: ['Страница 2', null, 'Архетипов 47'],
+  };
+  for (const [key, [lastPage, lastRow, count]] of Object.entries(whole)) {
+    await open(key);
+    ensure((await page.locator('.stats-pager').count()) === 0, key + ': a server pager is shown');
+    ensure((await kpiText()).includes(count), `${key}: KPI «${count}»: ${await kpiText()}`);
+    await page.getByRole('button', { name: lastPage, exact: true }).click();
+    if (lastRow) await page.locator('.analytics-main tbody tr', { hasText: lastRow }).first().waitFor();
+  }
+  checks.serverPagingOnlyWherePhpPages = true;
 
   // 6c. Deck filters: class and format are lists starting with «Все»; the source stays a typed field.
   await open('decks');

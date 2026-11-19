@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   isChanged,
   isList,
+  isServerPaged,
   optionHints,
   optionValues,
   pageCaption,
@@ -83,7 +84,7 @@ test('KPI: an old PHP answer is counted by the panel; filters and «Записе
       ],
       columns: [{ key: 'games', label: 'Игры' }],
       rows: [{ games: 1000 }, { games: 234 }],
-      meta: { total: 53, updated_at: '2026-11-19T11:00:02Z' },
+      meta: { total: 2, updated_at: '2026-11-19T11:00:02Z' },
     }),
     meta,
   );
@@ -92,7 +93,7 @@ test('KPI: an old PHP answer is counted by the panel; filters and «Записе
     [
       ['Данные на', '19 нояб. 2026 г.'],
       ['Игр в выборке', '1 234'],
-      ['Архетипов', '53'],
+      ['Архетипов', '2'],
     ],
   );
 });
@@ -144,4 +145,83 @@ test('period hints name the current patch and the default', () => {
   });
   assert.deepEqual(optionHints('period', data({})), {});
   assert.deepEqual(optionHints('format', answer), {});
+});
+
+const gamesKpis = [
+  { key: 'data_as_of', label: 'Данные на', value: '2026-11-19T11:00:02+00:00', type: 'date' },
+  { key: 'games', label: 'Игр в выборке', value: 100, type: 'number' },
+  { key: 'rows', label: 'Архетипов', value: 25, type: 'number' },
+  { key: 'with_decks', label: 'Со сборками', value: 25, type: 'number' },
+];
+
+test('KPI on a partial answer: the real count, no sums over the shown rows', () => {
+  const rows = Array.from({ length: 25 }, () => ({ games: 4 }));
+  const partial = statsKpis(
+    'hsguru_archetypes',
+    data({ summary: gamesKpis, rows, meta: { total: 242 } }),
+    meta,
+  );
+  assert.deepEqual(
+    partial.map(item => [item.label, item.value]),
+    [
+      ['Данные на', '19 нояб. 2026 г.'],
+      ['Архетипов', '242'],
+    ],
+  );
+  // The same answer when everything came back: nothing is dropped.
+  const whole = statsKpis('hsguru_archetypes', data({ summary: gamesKpis, rows, meta: { total: 25 } }), meta);
+  assert.deepEqual(
+    whole.map(item => item.label),
+    ['Данные на', 'Игр в выборке', 'Архетипов', 'Со сборками'],
+  );
+  // Unknown total: the rows are all there is.
+  assert.equal(statsKpis('hsguru_archetypes', data({ summary: gamesKpis, rows, meta: {} }), meta).length, 4);
+});
+
+test('KPI on a partial answer from an old PHP: count from meta.total, no games sum', () => {
+  const rows = Array.from({ length: 25 }, () => ({ games: 4 }));
+  const kpis = statsKpis(
+    'decks',
+    data({
+      columns: [{ key: 'games', label: 'Игры' }],
+      rows,
+      meta: { total: 2777, updated_at: '2026-11-19T11:00:02Z' },
+    }),
+    meta,
+  );
+  assert.deepEqual(
+    kpis.map(item => [item.label, item.value]),
+    [
+      ['Данные на', '19 нояб. 2026 г.'],
+      ['Колод', '2\u00a0777'],
+    ],
+  );
+});
+
+test('the patches summary loses its «Показано» counter on a partial answer, «Всего» stays', () => {
+  const rows = Array.from({ length: 25 }, () => ({}));
+  const kpis = statsKpis(
+    'patches',
+    data({
+      summary: [
+        { label: 'Показано', value: 25 },
+        { label: 'Всего', value: 322 },
+        { label: 'Сопоставлено', value: 200 },
+      ],
+      rows,
+      meta: { total: 322 },
+    }),
+    meta,
+  );
+  assert.deepEqual(
+    kpis.map(item => item.label),
+    ['Всего', 'Сопоставлено'],
+  );
+});
+
+test('only decks and patches page on the server', () => {
+  const noOffset = { ...meta, params: { format: meta.params.format } };
+  assert.equal(isServerPaged('decks', meta), true);
+  assert.equal(isServerPaged('bg_minions', meta), false);
+  assert.equal(isServerPaged('decks', noOffset), false);
 });
