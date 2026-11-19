@@ -129,6 +129,19 @@ export default async function verify(page, root) {
     .locator('.data-table tbody tr', { hasText: 'Зоолок' })
     .locator('.archetype-name__icon');
   ensure((await zoolock.getAttribute('alt')) === 'Чернокнижник', 'HSGuru table icon');
+  // nginx sends only /, /api/panel and /_next/ to the panel: an icon outside /_next/ is a 404 on prod (#107).
+  const iconPaths = await page
+    .locator('.meta-top__icon, .archetype-name__icon')
+    .evaluateAll(images => images.map(image => new URL(image.src).pathname));
+  ensure(
+    iconPaths.length > 0 && iconPaths.every(path => path.startsWith('/_next/static/')),
+    'Icons outside /_next/static/: ' +
+      iconPaths.filter(path => !path.startsWith('/_next/static/')).join(', '),
+  );
+  const loaded = await page
+    .locator('.meta-top__icon')
+    .evaluateAll(images => images.every(image => image.complete && image.naturalWidth > 0));
+  ensure(loaded, 'A class icon did not load');
   checks.hsguruNamesAndIcons = true;
 
   // 4d. Battlegrounds and Arena: a chart above the table, no empty squares, the Arena icons are the meta ones (#109).
@@ -212,12 +225,18 @@ export default async function verify(page, root) {
     return view.bottom <= table.top;
   });
   ensure(arenaOrder, 'Arena: the chart is not above the table');
+  // Same bundle icons as the meta (nginx serves only /_next/ to the panel, #157).
   const arenaIcons = await page
     .locator('.arena-col__icon')
-    .evaluateAll(images => images.map(image => image.getAttribute('src')));
+    .evaluateAll(images => images.map(image => new URL(image.src).pathname));
   ensure(
-    arenaIcons.every(src => /\/class-icons\/[a-z]+-(64|96)\.webp$/.test(src)),
-    'Arena icons are not the meta ones: ' + arenaIcons,
+    arenaIcons.length > 1 && arenaIcons.every(path => path.startsWith('/_next/static/')),
+    'Arena icons outside /_next/static/: ' + arenaIcons.join(', '),
+  );
+  await page.waitForFunction(() =>
+    [...document.querySelectorAll('.arena-col__icon')].every(
+      image => image.complete && image.naturalWidth > 0,
+    ),
   );
   checks.arenaView = true;
 

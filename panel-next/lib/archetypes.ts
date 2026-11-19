@@ -95,8 +95,3 @@ export function archetypeIdentity(name: unknown, className?: unknown): Archetype
     classSlug: resolveClass(className, en),
   };
 }
-
-/** The icon file for a class (`all` is the neutral one, which has only the 96 px size). */
-export function classIconSrc(slug: ClassSlug | null, size: 64 | 96 = 96, base = ''): string {
-  return slug ? `${base}/class-icons/${slug}-${size}.webp` : `${base}/class-icons/all-96.webp`;
-}
