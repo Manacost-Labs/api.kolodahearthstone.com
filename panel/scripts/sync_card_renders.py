@@ -16,11 +16,13 @@ import json
 import os
 import re
 import shutil
+import signal
 import sys
 import time
 import urllib.error
 import urllib.request
 import uuid
+from email.utils import parsedate_to_datetime
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -53,6 +55,10 @@ WHERE l.locale IN ({marks})"""
 
 class FetchError(Exception):
     """Network failure, timeout or unusable response (not a 404)."""
+
+
+class BadImage(Exception):
+    """HSJ answered 200 but the body is not a usable 512 px PNG."""
 
 
 def utc_iso(moment: datetime) -> str:
@@ -99,6 +105,22 @@ def read_json(path: Path, default: Any) -> Any:
         return default
 
 
+def retry_after_seconds(value: str | None, now: datetime) -> float:
+    """Retry-After as delta-seconds or HTTP-date, clamped to 0..24 h."""
+    if not value:
+        return 0.0
+    try:
+        delay = float(value)
+    except ValueError:
+        try:
+            delay = (parsedate_to_datetime(value.strip()) - now).total_seconds()
+        except (TypeError, ValueError):
+            return 0.0
+    if delay != delay:  # NaN
+        return 0.0
+    return min(max(delay, 0.0), float(MAX_RETRY_AFTER))
+
+
 def http_fetch(url: str) -> tuple[int, bytes, str | None]:
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     try:
@@ -126,16 +148,16 @@ def to_webp(body: bytes) -> bytes:
     from PIL import Image
 
     if len(body) > MAX_BODY:
-        raise FetchError("response too large")
+        raise BadImage("response too large")
     try:
         image = Image.open(io.BytesIO(body))
         image.load()
     except Exception as exc:
-        raise FetchError(f"invalid image: {exc}") from exc
+        raise BadImage(f"invalid image: {exc}") from exc
     if image.format != "PNG" or image.width != 512:
-        raise FetchError(f"unexpected image {image.format} width {image.width}")
+        raise BadImage(f"unexpected image {image.format} width {image.width}")
     out = io.BytesIO()
-    image.convert("RGBA").save(out, format="WEBP", quality=85, method=6)
+    image.convert("RGBA").save(out, format="WEBP", quality=85, method=4)
     return out.getvalue()
 
 
@@ -189,7 +211,7 @@ def build_plan(
         reason = None
         if item is None:
             reason = "new"
-        elif item.get("status") == 404:
+        elif item.get("status") in ("bad", 404):
             checked = parse_iso(item["checked_at"])
             if item.get("source_hash") != source_hash:
                 reason = "recheck_missing"
@@ -233,6 +255,8 @@ def main(
     parser.add_argument("--rows-file", help="JSON rows instead of the database")
     parser.add_argument("--rate", type=rate_arg, default=3.0, help="requests/s, 0.5-5")
     parser.add_argument("--max-requests", type=int, default=6000)
+    parser.add_argument("--max-seconds", type=float, default=2400.0,
+                        help="wall-clock budget of a run (default 40 min)")
     parser.add_argument("--min-free-gb", type=float, default=20.0)
     parser.add_argument("--recheck-missing-days", type=float, default=30.0)
     parser.add_argument("--locales", default=",".join(LOCALES))
@@ -284,7 +308,7 @@ def run(args, rows, locales, started, fetch, clock, sleep, utcnow) -> int:
             print(f"  {loc}: " + " ".join(f"{k}={v}" for k, v in counts[loc].items()))
         return 0
 
-    stats = {"requests": 0, "downloaded": 0, "not_found": 0, "errors": 0,
+    stats = {"requests": 0, "downloaded": 0, "not_found": 0, "bad_image": 0, "errors": 0,
              "bytes_written": 0}
     skipped_invalid = sum(c["skipped_invalid_id"] for c in counts.values())
     last_run_path = var_dir / "last-run.json"
@@ -324,6 +348,13 @@ def run(args, rows, locales, started, fetch, clock, sleep, utcnow) -> int:
         print(f"card renders: Retry-After until {until}, skipping run")
         return EXIT_UPSTREAM
 
+    if not args.uploads_dir.is_dir():
+        result = {"stopped_reason": "bad_uploads_dir"}
+        write_last_run()
+        print(f"card renders: --uploads-dir {args.uploads_dir} is not a directory",
+              file=sys.stderr)
+        return 2
+
     if low_disk():
         result = {"stopped_reason": "low_disk"}
         write_last_run()
@@ -334,12 +365,27 @@ def run(args, rows, locales, started, fetch, clock, sleep, utcnow) -> int:
         if not (var_dir / f"{loc}.index.json").exists():
             dirty.add(loc)
 
-    next_at = clock()
+    interrupted: list[int] = []
+
+    def on_signal(signum, _frame):
+        interrupted.append(signum)
+
+    old_handlers = {}
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            old_handlers[sig] = signal.signal(sig, on_signal)
+        except ValueError:  # not the main thread
+            pass
+    run_started = clock()
+    next_at = run_started
     consecutive = 0
     processed = 0
     code = 0
     try:
         for card_id, loc, source_hash, _reason in plan:
+            if interrupted:
+                result = {"stopped_reason": "signal"}
+                break
             if stats["requests"] >= args.max_requests:
                 result = {"stopped_reason": "budget"}
                 break
@@ -347,6 +393,9 @@ def run(args, rows, locales, started, fetch, clock, sleep, utcnow) -> int:
             if next_at > now_m:
                 sleep(next_at - now_m)
                 now_m = next_at
+            if now_m - run_started >= args.max_seconds:
+                result = {"stopped_reason": "time"}
+                break
             next_at = now_m + 1.0 / args.rate
             stats["requests"] += 1
             stop = None
@@ -355,10 +404,7 @@ def run(args, rows, locales, started, fetch, clock, sleep, utcnow) -> int:
                     URL.format(locale=loc, size=SIZE, card_id=card_id))
                 if status == 429:
                     stats["errors"] += 1
-                    try:
-                        delay = min(max(float(retry_after or 0), 0), MAX_RETRY_AFTER)
-                    except ValueError:
-                        delay = 0
+                    delay = retry_after_seconds(retry_after, utcnow())
                     stop = {"stopped_reason": "upstream_errors"}
                     if delay:
                         stop["retry_after_until"] = utc_iso(utcnow() + timedelta(seconds=delay))
@@ -382,6 +428,16 @@ def run(args, rows, locales, started, fetch, clock, sleep, utcnow) -> int:
                     dirty.add(loc)
                 else:
                     raise FetchError(f"HTTP {status}")
+            except BadImage as exc:
+                # Not an upstream outage: remember it like a 404 (backoff), do not
+                # count towards the consecutive-error stop.
+                states[loc]["items"][card_id] = {
+                    "status": "bad", "checked_at": utc_iso(utcnow()),
+                    "source_hash": source_hash}
+                stats["bad_image"] += 1
+                consecutive = 0
+                dirty.add(loc)
+                print(f"card renders: {loc}/{card_id}: {exc}", file=sys.stderr)
             except FetchError as exc:
                 stats["errors"] += 1
                 consecutive += 1
@@ -400,6 +456,8 @@ def run(args, rows, locales, started, fetch, clock, sleep, utcnow) -> int:
                     code = 1
                     break
     finally:
+        for sig, handler in old_handlers.items():
+            signal.signal(sig, handler)
         flush()
     write_last_run()
     print("card renders: " + json.dumps({**stats, **result}))

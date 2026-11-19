@@ -2,6 +2,7 @@
 Description=Download localized HearthstoneJSON card renders (WebP)
 Wants=network-online.target
 After=network-online.target mariadb.service
+OnFailure=notify-failure@%n.service
 
 [Service]
 Type=oneshot

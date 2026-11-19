@@ -180,15 +180,81 @@ class SyncCardRendersTests(unittest.TestCase):
         self.assertEqual(env.index()["missing"], [])
         self.assertEqual(env.last()["stopped_reason"], "upstream_errors")
 
-    def test_invalid_images_are_errors_not_missing(self):
-        env = Env(self, [row("A"), row("B")],
-                  {"A": (200, b"not a png", None), "B": (200, png(256), None)})
+    def test_bad_images_back_off_like_404_and_never_stop_the_run(self):
+        rows = [row(f"B{i:02d}") for i in range(25)] + [row("Z")]
+        env = Env(self, rows, {r["card_id"]: (200, b"not a png", None) for r in rows[:24]})
+        env.responses["B24"] = (200, png(256), None)
         self.assertEqual(env.run(), 0)
-        self.assertEqual(env.last()["errors"], 2)
-        self.assertEqual(env.index()["missing"], [])
+        last = env.last()
+        self.assertEqual((last["bad_image"], last["errors"], last["downloaded"]), (25, 0, 1))
+        self.assertEqual(last["stopped_reason"], "done")
+        self.assertEqual(env.index()["missing"], [])  # API falls back to the HSJ link
         env.calls.clear()
         env.run()
-        self.assertEqual(len(env.calls), 2)
+        self.assertEqual(env.calls, [])
+        env.rows = [row("B00", h="h2")] + rows[1:]
+        env.run()
+        self.assertEqual(len(env.calls), 1)
+        env.calls.clear()
+        env.utc = T0 + timedelta(days=31)
+        env.run()
+        self.assertEqual(len(env.calls), 25)
+
+    def test_time_budget_stops_with_code_zero(self):
+        env = Env(self, [row(f"T{i}") for i in range(10)])
+        real = env.fetch
+
+        def slow(url):
+            env.now += 10  # each request takes 10 s on the fake clock
+            return real(url)
+
+        env.fetch = slow
+        self.assertEqual(env.run("--max-seconds", "35"), 0)
+        self.assertEqual(env.last()["stopped_reason"], "time")
+        self.assertEqual(len(env.calls), 4)
+        self.assertEqual(len(env.index()["renders"]), 4)
+
+    def test_sigterm_flushes_index_state_and_last_run(self):
+        import signal
+        env = Env(self, [row(f"S{i}") for i in range(10)])
+        real = env.fetch
+
+        def fetch(url):
+            if len(env.calls) == 4:
+                os.kill(os.getpid(), signal.SIGTERM)
+            return real(url)
+
+        env.fetch = fetch
+        previous = signal.getsignal(signal.SIGTERM)
+        self.assertEqual(env.run(), 0)
+        self.assertEqual(signal.getsignal(signal.SIGTERM), previous)
+        self.assertEqual(env.last()["stopped_reason"], "signal")
+        self.assertEqual(len(env.index()["renders"]), 5)
+        env.calls.clear()
+        env.fetch = real
+        env.run()
+        self.assertEqual(len(env.calls), 5)  # only the rest, nothing downloaded twice
+
+    def test_missing_uploads_dir_is_a_clear_error_and_writes_last_run(self):
+        env = Env(self, [row("A")])
+        self.assertEqual(env.run("--uploads-dir", str(env.tmp / "nope")), 2)
+        self.assertEqual(env.calls, [])
+        self.assertEqual(env.last()["stopped_reason"], "bad_uploads_dir")
+
+    def test_retry_after_http_date_and_clamp(self):
+        now = T0
+        date = "Thu, 19 Nov 2026 12:05:00 GMT"
+        self.assertEqual(sync.retry_after_seconds(date, now), 300)
+        self.assertEqual(sync.retry_after_seconds("Wed, 18 Nov 2026 12:00:00 GMT", now), 0)
+        self.assertEqual(sync.retry_after_seconds("Sun, 06 Dec 2026 12:00:00 GMT", now), 86400)
+        self.assertEqual(sync.retry_after_seconds("999999", now), 86400)
+        self.assertEqual(sync.retry_after_seconds("garbage", now), 0)
+        env = Env(self, [row("A")], {"A": (429, b"", date)})
+        self.assertEqual(env.run(), 75)
+        self.assertEqual(env.last()["retry_after_until"], "2026-11-19T12:05:00Z")
+        env.calls.clear()
+        self.assertEqual(env.run(), 75)
+        self.assertEqual(env.calls, [])
 
     def test_low_disk_exits_1_without_network(self):
         env = Env(self, [row("A")])
@@ -266,7 +332,8 @@ class SyncCardRendersTests(unittest.TestCase):
             self.assertNotIn("global.lock", text)
             self.assertNotIn("sync.lock", text)
         for line in ("Type=oneshot", "User=koloda", "SuccessExitStatus=75",
-                     "ProtectSystem=strict", "TimeoutStartSec=50min"):
+                     "ProtectSystem=strict", "TimeoutStartSec=50min",
+                     "OnFailure=notify-failure@%n.service"):
             self.assertIn(line, service)
         for line in ("OnCalendar=hourly", "RandomizedDelaySec=10min", "Persistent=true"):
             self.assertIn(line, timer)
