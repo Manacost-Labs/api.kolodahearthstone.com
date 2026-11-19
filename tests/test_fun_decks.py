@@ -1459,6 +1459,225 @@ def test_variants_of_a_wild_deck_survive_a_standard_run_between_two_full_runs(
     assert after_second_full == after_full
 
 
+# --- 4b. packages depend on the meta (F1) ------------------------------------------
+
+_PACKAGE_MARKER_CARDS = {
+    "reno_highlander": [2883],
+    "odd_even": [48158],
+    "mechathun": [120231],
+    "togwaggle_mill": [46589],
+    "cthun": [102680],
+    "whizbang": [50477],
+    "sathrovarr": [56189],
+    "steal_package": [47211, 52715],
+    "yogg_package": [990001],
+}
+
+
+@pytest.fixture
+def yogg_marker(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(fun_decks, "_package_name_cache_ready", True)
+    monkeypatch.setattr(fun_decks, "_package_quest_ids", frozenset())
+    monkeypatch.setattr(fun_decks, "_package_yogg_ids", frozenset({990001}))
+
+
+def _marked_ladder(markers: list[int], *, games: int = LADDER_GAMES, cls: str = "Rogue") -> CatalogDeck:
+    """A big catalog deck that carries the package markers."""
+    return _deck("MARKED", [*range(500, 515 - len(markers)), *markers], "Meta Rogue", cls=cls, games=games)
+
+
+@pytest.mark.parametrize("label", sorted(fun_decks._SPICY_PACKAGES))
+def test_a_package_played_in_much_of_the_format_is_not_a_fun_signal(
+    label: str, yogg_marker: None
+) -> None:
+    markers = _PACKAGE_MARKER_CARDS[label]
+    twin = _deck("TWIN", [*range(1, 14), 201, 202], "", games=60)  # unnamed twin, 0.7647
+
+    scored = _classify(
+        "Custom Rogue", _sharing(13, extra=markers), twin, _marked_ladder(markers)
+    )
+
+    assert scored.concept_hit is False
+    assert "card_package" not in scored.reasons
+    assert "neutral_package" in scored.reasons
+    assert scored.is_fun is False
+    assert "needs_fun_signal_gate" in scored.reasons
+
+
+@pytest.mark.parametrize("label", sorted(fun_decks._SPICY_PACKAGES))
+def test_a_package_of_few_games_is_still_a_fun_signal(label: str, yogg_marker: None) -> None:
+    markers = _PACKAGE_MARKER_CARDS[label]
+    twin = _deck("TWIN", [*range(1, 14), 201, 202], "", games=60)
+    big = _deck("BIG", range(500, 515), "Meta Rogue", games=LADDER_GAMES)
+
+    scored = _classify("Custom Rogue", _sharing(13, extra=markers), twin, big)
+
+    assert scored.concept_hit is True
+    assert {"card_package", f"pkg:{label}"} <= set(scored.reasons)
+    assert scored.kind == "brew"
+
+
+def test_a_package_does_not_lift_the_generic_ladder_gate_when_it_is_meta(yogg_marker: None) -> None:
+    markers = _PACKAGE_MARKER_CARDS["yogg_package"]
+
+    scored = _classify(
+        "Beast Rogue", _sharing(0, extra=markers), _marked_ladder(markers)
+    )
+
+    assert "generic_ladder_gate" in scored.reasons
+    assert scored.kind is None
+
+
+def test_the_spicy_package_share_is_per_format_and_comes_from_the_environment(
+    monkeypatch: pytest.MonkeyPatch, yogg_marker: None
+) -> None:
+    markers = _PACKAGE_MARKER_CARDS["mechathun"]
+    # 5 % of the Standard games carry the marker; in Wild none do.
+    carrier = _marked_ladder(markers, games=5_000)
+    rest = _deck("REST", range(600, 615), "Meta Rogue", games=95_000)
+    cards = _sharing(0, extra=markers)
+
+    assert "card_package" not in _classify("Custom Rogue", cards, carrier, rest).reasons
+    assert "card_package" in _classify("Custom Rogue", cards, carrier, rest, fmt="Wild").reasons
+    monkeypatch.setenv("HS_FUN_DECK_SPICY_PACKAGE_MAX_SHARE_PCT", "10")
+    assert "card_package" in _classify("Custom Rogue", cards, carrier, rest).reasons
+
+
+def test_the_spicy_package_share_default_is_three_percent() -> None:
+    assert config.fun_deck_spicy_package_max_share_pct() == 3.0
+
+
+# --- 4c. meta popularity makes an archetype a ladder one (F2) -------------------------
+
+
+def _split_archetype_world(**index_kwargs: Any) -> tuple[Counter[int], CatalogIndex]:
+    harold = _deck("HAROLD", range(1, 14), "Harold DK", cls="DeathKnight", games=450)
+    big = _deck("BIG", range(500, 515), "Blood DK", cls="DeathKnight", games=99_550)
+    return _sharing(13), CatalogIndex([harold, big], **index_kwargs)
+
+
+def _harold(cards: Counter[int], index: CatalogIndex) -> Any:
+    return score_fun_deck(
+        deck_code="CANDIDATE",
+        title="BBU Harold DK",
+        format_name="Standard",
+        cards=cards,
+        hero_class="DeathKnight",
+        index=index,
+    )
+
+
+def test_a_small_archetype_is_not_ladder_without_meta_popularity() -> None:
+    cards, index = _split_archetype_world()
+
+    assert _harold(cards, index).kind == "brew"  # 0.45 % of the games: below the share floor
+
+
+def test_an_archetype_popular_in_the_meta_sources_is_ladder() -> None:
+    cards, index = _split_archetype_world(
+        meta_popularity={("standard", "deathknight", "harold blood dk"): 11.1}
+    )
+
+    scored = _harold(cards, index)
+
+    assert index.is_ladder_archetype("standard", "harold dk", "deathknight") is True
+    assert scored.is_fun is False
+    assert "ladder_member_gate" in scored.reasons
+
+
+@pytest.mark.parametrize(
+    "meta",
+    [
+        {("standard", "warlock", "harold warlock"): 11.1},  # another class
+        {("wild", "deathknight", "harold blood dk"): 11.1},  # another format
+        {("standard", "deathknight", "harold blood dk"): 0.9},  # below 1 %
+        {("standard", "deathknight", "blood dk"): 11.1},  # another archetype
+    ],
+)
+def test_meta_popularity_matches_only_within_format_class_and_threshold(
+    meta: dict[tuple[str, str, str], float],
+) -> None:
+    cards, index = _split_archetype_world(meta_popularity=meta)
+
+    assert index.is_ladder_archetype("standard", "harold dk", "deathknight") is False
+    assert "ladder_member_gate" not in _harold(cards, index).reasons
+
+
+def test_meta_popularity_is_read_from_the_meta_sources(monkeypatch: pytest.MonkeyPatch) -> None:
+    hsreplay = {
+        "data": {
+            "structured": {
+                "classes": [
+                    {
+                        "class": "DEATHKNIGHT",
+                        "archetypes": [
+                            {"archetype": "Harold Blood DK", "popularity": "11.10%"},
+                            {"archetype": "Tiny DK", "popularity": "0.40%"},
+                        ],
+                    }
+                ]
+            }
+        }
+    }
+    guru_wild = {
+        "data": {
+            "structured": {
+                "strategies": [
+                    {"Archetype": "Yogg Warrior", "Popularity": "4.7% (26509)"},
+                    {"Archetype": "Harold Lock", "Popularity": "2.0% (100)"},
+                    {"Archetype": "Mystery Deck", "Popularity": "9.0% (100)"},
+                ]
+            }
+        }
+    }
+    datasets = {"hsreplay_meta_legend_1d_firecrawl": hsreplay, "hsguru_meta_wild_legend": guru_wild}
+    monkeypatch.setattr(fun_decks, "load_resolved_public_dataset", lambda source_id: datasets.get(source_id))
+
+    popularity = fun_decks.build_meta_popularity()
+
+    assert popularity == {
+        ("standard", "deathknight", "harold blood dk"): 11.1,
+        ("standard", "deathknight", "tiny dk"): 0.4,
+        ("wild", "warrior", "yogg warrior"): 4.7,
+        ("wild", "warlock", "harold lock"): 2.0,
+    }
+
+
+# --- 4d. a member of its own archetype is not a unique list (F3) -----------------------
+
+
+def test_a_close_member_of_a_rare_archetype_is_off_meta_not_a_unique_brew() -> None:
+    twin = _deck("TWIN", [*range(1, 12), 201, 202, 203, 204], "Imbue Paladin", cls="Paladin", games=60)
+    big = _deck("BIG", range(500, 515), "Pure Paladin", cls="Paladin", games=LADDER_GAMES)
+
+    scored = _classify("Imbue Paladin", _sharing(11), twin, big, cls="Paladin")
+
+    assert (scored.twin_sim, scored.content_sim) == (0.5789, 0.5789)
+    assert scored.kind == "off_meta"
+    assert "unique_list" not in scored.reasons
+
+
+def test_a_list_far_from_its_own_archetype_is_still_a_unique_brew() -> None:
+    twin = _deck("TWIN", [*range(1, 9), 201, 202, 203, 204, 205, 206, 207], "Imbue Hunter", cls="Hunter", games=60)
+    big = _deck("BIG", range(500, 515), "Pure Hunter", cls="Hunter", games=LADDER_GAMES)
+
+    scored = _classify("Imbue Hunter", _sharing(8), twin, big, cls="Hunter")  # 0.3636
+
+    assert scored.content_sim < 0.55
+    assert scored.kind == "brew"
+    assert "unique_list" in scored.reasons
+
+
+def test_a_concept_title_is_a_brew_even_next_to_its_archetype_but_not_a_unique_list() -> None:
+    twin = _deck("TWIN", [*range(1, 12), 201, 202, 203, 204], "Casino Mill Mage", cls="Mage", games=60)
+    big = _deck("BIG", range(500, 515), "Pirate Mage", cls="Mage", games=LADDER_GAMES)
+
+    scored = _classify("Casino Mill Mage", _sharing(11), twin, big, cls="Mage")
+
+    assert scored.kind == "brew"
+    assert "unique_list" not in scored.reasons
+
+
 # --- 6. publication: brews first, off-meta after them -------------------------
 
 
