@@ -34,6 +34,15 @@
   останавливалась на `SecurityFatalError` (GHSA-mfr8-8qww-v76h,
   GHSA-vc7v-qv4w-wrv8, обе moderate, утечка кэша `use cache` между root
   params), из-за чего не проходили `npm run check` и деплой панели.
+- Каталог карт на 4 языках (E24, фаза 2): загрузчик
+  `panel/scripts/sync_card_renders.py` и таймер `kolodahs-card-renders` (раз в час)
+  скачивают рендеры HearthstoneJSON для `ruRU`, `enUS`, `plPL`, `esES` в WebP q85
+  (`uploads/card-renders/{locale}/512x/{id}.webp`) и ведут манифест в
+  `var/card-renders/` (`{locale}.index.json`, `state`, `last-run.json`). Сначала
+  коллекционные карты, 3 запроса/с, до 6000 запросов и 40 минут за прогон, стоп при свободном месте
+  меньше 20 ГБ, при SIGTERM индекс и state дописываются; WebP `method=4`
+  (в 13 раз быстрее `method=6`, файл на 3,5% больше). API пока не меняется (поле — api#122). Юниты ставятся вручную,
+  ранбук — `docs/card-renders.md`.
 - Каталог карт на 4 языках (E24, срез данных): новая таблица
   `hearthstone_card_localizations` (`panel/sql/card_localizations.sql`) хранит
   для каждого id HearthstoneJSON полный объект карты в локалях `ruRU`, `enUS`,
