@@ -241,15 +241,20 @@ def build_report(
     }
 
 
-def _index_sets(index: Any) -> tuple[set[str], set[str], set[str]] | None:
-    """(skip_types, renders ids, missing ids) of a downloader index, None if unusable."""
-    if not isinstance(index, dict) or not isinstance(index.get("renders"), dict):
+_RENDER_HASH = re.compile(r"[a-f0-9]{12}")
+
+
+def _index_sets(index: Any, locale: str) -> tuple[set[str], set[str], set[str]] | None:
+    """(skip_types, renders ids, missing ids); None unless the index is a valid
+    version 1 / `locale` / 512x manifest (same checks as panel/lib/full_card_catalog.php)."""
+    if (not isinstance(index, dict) or index.get("version") != 1 or isinstance(index.get("version"), bool)
+            or index.get("locale") != locale or index.get("size") != "512x"):
         return None
-    missing = index.get("missing")
-    skip = index.get("skip_types")
+    renders, missing, skip = index.get("renders"), index.get("missing"), index.get("skip_types")
     return (
         {t for t in skip if isinstance(t, str)} if isinstance(skip, list) else set(),
-        set(index["renders"]),
+        {str(i) for i, v in renders.items() if isinstance(v, str) and _RENDER_HASH.fullmatch(v)}
+        if isinstance(renders, dict) else set(),
         {i for i in missing if isinstance(i, str)} if isinstance(missing, list) else set(),
     )
 
@@ -284,7 +289,7 @@ def build_render_report(
     for card in reference:
         for key in classify(card, db_sets):
             members[key].append(card["id"])
-    sets = {loc: _index_sets(indexes.get(loc)) for loc in LOCALES}
+    sets = {loc: _index_sets(indexes.get(loc), loc) for loc in LOCALES}
 
     def locale_cells(ids: list[str]) -> dict[str, Any]:
         return {loc: (_render_cell(ids, types, sets[loc], examples) if sets[loc] else None)
@@ -319,7 +324,7 @@ def render_renders_markdown(report: dict[str, Any]) -> str:
     def cell(c: dict[str, Any] | None) -> str:
         if c is None:
             return "нет данных"
-        pct = f"{c['percent']:.2f}%" if c["expected"] else "—"
+        pct = f"{c['percent']:.2f}%" if c["expected"] - c["missing_hsj"] > 0 else "—"
         return f"{c['have']} / {c['expected']}, 404: {c['missing_hsj']}, ещё: {c['pending']}, {pct}"
 
     def examples(cells: dict[str, Any]) -> str:

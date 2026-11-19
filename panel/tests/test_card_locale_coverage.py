@@ -331,7 +331,7 @@ class RenderCoverageTest(unittest.TestCase):
 
     @staticmethod
     def index(renders=(), missing=(), skip=None):
-        return {"version": 1, "size": "512x", "skip_types": RenderCoverageTest.SKIP if skip is None else skip,
+        return {"version": 1, "locale": "enUS", "size": "512x", "skip_types": RenderCoverageTest.SKIP if skip is None else skip,
                 "renders": {i: "0" * 12 for i in renders}, "missing": list(missing)}
 
     def report(self, indexes, examples=5):
@@ -343,9 +343,9 @@ class RenderCoverageTest(unittest.TestCase):
     def test_cells_missing_pending_and_skipped(self):
         every = [c["id"] for c in CARDS if c["type"] not in self.SKIP]
         report = self.report({
-            "ruRU": self.index(renders=["CORE_001"], missing=["CS2_001"]),
+            "ruRU": {**self.index(renders=["CORE_001"], missing=["CS2_001"]), "locale": "ruRU"},
             "enUS": self.index(renders=every),
-            "plPL": self.index(renders=["CS2_001"]),
+            "plPL": {**self.index(renders=["CS2_001"]), "locale": "plPL"},
             "esES": None,
         })
         wild = self.group(report, "wild")["locales"]
@@ -379,6 +379,32 @@ class RenderCoverageTest(unittest.TestCase):
         report = self.report({"enUS": [], "ruRU": {"renders": []}, "plPL": {"version": 1}})
         self.assertEqual(report["no_data"], list(cov.LOCALES))
 
+    def test_invalid_manifest_header_is_no_data(self):
+        good = self.index(renders=["CORE_001"])
+        no_locale = {k: v for k, v in good.items() if k != "locale"}
+        for bad in ({**good, "locale": "ruRU"}, {**good, "size": "256x"}, {**good, "version": 2},
+                    {**good, "version": True}, no_locale):
+            report = self.report({"enUS": bad})
+            self.assertIn("enUS", report["no_data"], bad)
+            self.assertIsNone(report["total"]["locales"]["enUS"])
+        self.assertNotIn("enUS", self.report({"enUS": good})["no_data"])
+
+    def test_only_valid_values_are_counted(self):
+        idx = self.index(missing=["CS2_001", 5, None], skip=["PET", 1])
+        idx["renders"] = {"CORE_001": "a" * 12, "CS2_001": "A" * 12, "BG20_100": "abc", "BG20_HERO_100": 7}
+        cell = self.report({"enUS": idx})["total"]["locales"]["enUS"]
+        self.assertEqual(cell["have"], 1)
+        self.assertEqual(cell["missing_hsj"], 1)  # CS2_001: its bad hash is not a render
+        groups = self.report({"enUS": idx})
+        self.assertEqual(self.group(groups, "pets")["locales"]["enUS"]["expected"], 0)  # "PET" skipped
+        self.assertEqual(self.group(groups, "bg_other")["locales"]["enUS"]["expected"], 2)  # 1 is not a type
+
+    def test_all_404_group_prints_dash_not_100(self):
+        md = cov.render_renders_markdown(self.report({"enUS": self.index(missing=["CORE_001"])}))
+        standard = next(l for l in md.splitlines() if l.startswith("| Стандарт |"))
+        self.assertIn("0 / 1, 404: 1, ещё: 0, —", standard)
+        self.assertNotIn("100.00%", standard.split("|")[4])
+
     def test_examples_limit(self):
         report = self.report({"enUS": self.index()}, examples=1)
         self.assertEqual(len(report["total"]["locales"]["enUS"]["pending_examples"]), 1)
@@ -408,7 +434,7 @@ class RendersCliTest(unittest.TestCase):
         self.renders = tmp / "renders"
         self.renders.mkdir()
         (self.renders / "ruRU.index.json").write_text(json.dumps(
-            RenderCoverageTest.index(renders=["CORE_001"], missing=["CS2_001"])))
+            {**RenderCoverageTest.index(renders=["CORE_001"], missing=["CS2_001"]), "locale": "ruRU"}))
         (self.renders / "enUS.index.json").write_text("{broken")
 
     def tearDown(self):
