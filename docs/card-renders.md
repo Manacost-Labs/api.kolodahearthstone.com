@@ -9,8 +9,10 @@ the API field (`render_url`) is api#122 and the coverage report is api#123.
 
 - Source: `https://art.hearthstonejson.com/v1/render/latest/{locale}/512x/{card_id}.png`
   (free CDN, no paid providers, one thread, `User-Agent: KolodaCardRenders/1.0`).
-- Result: WebP, Pillow `quality=85, method=6`, alpha kept, about 50 KB per file,
-  about 1.4 GB per locale, 5.7 GB for four.
+- Result: WebP, Pillow `quality=85, method=4`, alpha kept, about 55 KB per file,
+  about 1.5 GB per locale, 6 GB for four. `method=4` instead of 6 costs +3.5% size
+  (56.1 vs 54.2 KB, 18 real renders) and is 13x faster (25 vs 339 ms CPU per image,
+  same quality setting).
 - Files: `panel-data/uploads/card-renders/{locale}/512x/{card_id}.webp`, served as
   `https://api.kolodahearthstone.com/uploads/card-renders/...`. Each file is written
   as `.tmp-<uuid>.webp`, `chmod 0644`, `fsync`, `os.replace`.
@@ -35,10 +37,10 @@ files written atomically (`.tmp-` + rename, 0644):
   HSJ answered with 404 at the last check. The index only lists files already
   written.
 - `{locale}.state.json`: loader internals. Per id either
-  `{source_hash, v, bytes, fetched_at}` or `{status: 404, checked_at, source_hash}`.
+  `{source_hash, v, bytes, fetched_at}` or `{status: 404|"bad", checked_at, source_hash}`.
 - `last-run.json`: `started_at`, `finished_at`, `requests`, `downloaded`,
-  `not_found`, `errors`, `skipped_invalid_id`, `bytes_written`, `avg_webp_bytes`,
-  `planned`, `stopped_reason` (`done|budget|upstream_errors|low_disk`), and
+  `not_found`, `bad_image`, `errors`, `skipped_invalid_id`, `bytes_written`, `avg_webp_bytes`,
+  `planned`, `stopped_reason` (`done|budget|time|signal|upstream_errors|low_disk|bad_uploads_dir`), and
   `retry_after_until` after a 429 with `Retry-After`.
 
 ## Plan and limits
@@ -51,21 +53,26 @@ takes the same rows as JSON. The plan uses only the state files:
 | --- | --- |
 | id not in state | download |
 | `source_hash` changed | download again |
-| 404 recorded | check again only if `source_hash` changed or the last check is at least `--recheck-missing-days` (30) old |
+| 404 or undecodable image ("bad") recorded | check again only if `source_hash` changed or the last check is at least `--recheck-missing-days` (30) old |
 | otherwise | nothing |
 
 Order: collectible cards first, then the rest; by `card_id`, all locales of one card
 in a row. Known limit: if HSJ redraws an image without a payload change we do not
 notice (no ETag rechecks).
 
-Responses: 200 + PNG 512 px wide becomes WebP; 404 is remembered; 429, 5xx,
-timeout (30 s) and invalid images are errors, they are not 404 and are retried
-next run. A 429 or 20 errors in a row stop the run with exit code 75
-(`upstream_errors`, the unit treats 75 as success); `Retry-After` (up to 24 h) is
-honoured by the following runs.
+Responses: 200 + PNG 512 px wide becomes WebP; 404 is remembered; a 200 body that
+is not a usable 512 px PNG is remembered as `bad` with the same backoff as 404 (it
+is not in `missing`, so the API keeps the HSJ link, and it never stops the run);
+429, 5xx and timeout (30 s) are errors, retried next run. A 429 or 20 errors in a
+row stop the run with exit code 75 (`upstream_errors`, the unit treats 75 as
+success); `Retry-After` (seconds or HTTP-date, clamped to 24 h) is honoured by the
+following runs.
+
+SIGTERM/SIGINT finish the current request, write index, state and `last-run.json`
+and exit 0 (`stopped_reason: signal`), so a stop or timeout loses nothing.
 
 Flags: `--apply` (without it a dry-run plan, no network, no writes), `--rows-file`,
-`--rate` (default 3 req/s, allowed 0.5-5), `--max-requests` (6000, about 35 min),
+`--rate` (default 3 req/s, allowed 0.5-5), `--max-requests` (6000), `--max-seconds` (2400, `stopped_reason: time`, exit 0),
 `--min-free-gb` (20), `--recheck-missing-days` (30), `--locales`, `--uploads-dir`,
 `--var-dir`. Free space of the `uploads` filesystem is checked before the start and
 every 500 files; below the threshold the run stops with exit code 1 and
@@ -74,8 +81,11 @@ first, so a crash costs at most a repeated download). A non-blocking `flock` on
 `var/card-renders/.lock` forbids parallel runs (second run exits 0). The global
 `kolodahs-sync/global.lock` and the platform `sync.lock` are not taken.
 
-Expected backfill: collectible cards (about 33k requests) in about 6 h, everything
-(about 118k) in about a day, 6000 requests per hourly run.
+Timing: a request takes about 0.18 s (download 0.15 s + WebP `method=4` 0.025 s),
+so the 3 req/s limit is the bottleneck: 6000 requests are about 33 min, inside the
+40 min `--max-seconds` cap and the 50 min `TimeoutStartSec`. Expected backfill:
+collectible cards (about 33k requests) in about 6 h, everything (about 118k) in
+about a day, at most 6000 requests per hourly run.
 
 ## Deploy runbook (for the Reviewer)
 
@@ -87,8 +97,9 @@ Only after phase 1 (#95, #116) is on production.
 4. `sudo ./scripts/deploy-panel.sh`.
 5. `df -h /srv/api-kolodahearthstone/panel-data`: at least 30 GB free.
    `systemctl is-active api-uploads-offload.timer` must be `active`.
-6. `sudo install -o root -g root -m 0644 panel/systemd/kolodahs-card-renders.{service,timer} /etc/systemd/system/`,
-   `sudo systemctl daemon-reload`, `systemd-analyze verify /etc/systemd/system/kolodahs-card-renders.{service,timer}`.
+6. From the root of that worktree: `sudo install -o root -g root -m 0644 panel/systemd/kolodahs-card-renders.{service,timer} /etc/systemd/system/`,
+   `sudo systemctl daemon-reload`. The unit has `OnFailure=notify-failure@%n.service`
+   like the other sync units. `systemd-analyze verify /etc/systemd/system/kolodahs-card-renders.{service,timer}`.
 7. Test run as `koloda`:
    `sudo -u koloda bash -c 'cd /srv/api-kolodahearthstone/panel/current && /opt/wiki-hs-parser/.venv/bin/python scripts/sync_card_renders.py --apply --max-requests 40'`.
    Expect 40 files in `uploads/card-renders/`, symlinks into `.s3-storage` within
