@@ -145,7 +145,10 @@ HearthstoneJSON размечает существа пула знаком `&` м
 `422`. Без `base` доноры есть у всех баз, `top` — только у первой (с наибольшим
 `offer_rate`), `<dbf>` — только у этой базы; у остальных `donors: null`, а
 `donors_total` известен всегда. Формат не собран — `200`, `stats.state =
-not_collected`, `bases: []`.
+not_collected`, `bases: []`; так же `200` с `bases: []` при `no_data`, даже если
+указана `base=<dbf>` (404 за неизвестную базу только когда у карты есть данные).
+Винрейт при выборах `null`, не число или вне 0–100 — формат ответа изменился:
+снимок отклоняется (`PayloadRejected`), остаётся прошлый.
 
 - `data.card` — `CardRef` + `text` и `text_ru` (текст карты без HTML).
 - `data.original_class_only` — всегда `false` (см. выше), `game_type`, `time_range`.

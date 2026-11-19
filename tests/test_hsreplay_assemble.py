@@ -229,6 +229,50 @@ def test_parse_merges_both_positions_of_a_donor() -> None:
     }
 
 
+@pytest.mark.parametrize("bad", [None, -1, 101, float("nan"), float("inf"), "x", True])
+@pytest.mark.parametrize("field", ["effect_win_rate", "trigger_win_rate"])
+def test_a_winrate_that_is_not_a_percent_is_rejected_when_there_are_picks(
+    field: str, bad: Any
+) -> None:
+    picks = {"effect_win_rate": "effect_picks", "trigger_win_rate": "trigger_picks"}[
+        field
+    ]
+    row = _row(**{picks: 3, field: bad})
+    with pytest.raises(ha.PayloadRejected):
+        ha.parse_payload({"series": {"data": {"1": [row]}}})
+
+
+def test_a_missing_winrate_without_picks_is_fine() -> None:
+    row = _row(
+        effect_picks=0, effect_win_rate=None, trigger_picks=0, trigger_win_rate="x"
+    )
+    cards, _ = ha.parse_payload({"series": {"data": {"1": [row]}}})
+    assert cards["1"][0][2][0][4:] == [None, None]
+
+
+def test_a_candidate_with_a_bad_winrate_keeps_the_last_good_snapshot(
+    isolated, base
+) -> None:
+    settings = ha.Settings(formats=("standard",))
+    _refresh(base, FakeHsReplay(base), settings=settings)
+    broken = good_payload(base)
+    row = next(
+        r for r in broken["series"]["data"][str(F3TCH3R)] if r["effect_picks"] > 0
+    )
+    row["effect_win_rate"] = float("nan")
+    fake = FakeHsReplay(
+        base, RANKED_STANDARD=FetchResult("ok", payload=broken, credits=1)
+    )
+    result = _refresh(base, fake, now=NOW + timedelta(hours=21), settings=settings)
+    assert result["published"] is False and result["state"] == "fetch_error"
+    status = load_status("hsreplay_assemble")
+    assert status["formats"]["standard"]["last_outcome"] == "contract"
+    kept = load_dataset("hsreplay_assemble")["data"]["structured"]["formats"][
+        "standard"
+    ]
+    assert kept["checked_at"] == NOW.isoformat()
+
+
 @pytest.mark.parametrize(
     "payload",
     [

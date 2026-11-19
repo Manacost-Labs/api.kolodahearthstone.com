@@ -27,6 +27,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 import os
 import statistics
 from collections.abc import Iterable, Mapping
@@ -125,6 +126,17 @@ def _num(value: Any) -> float | None:
         return None
 
 
+def _win(value: Any, picks: int) -> float:
+    """A winrate (percent) is required, finite and within 0-100 once there are picks."""
+
+    if not picks:
+        return 0.0
+    number = _num(value)
+    if number is None or not math.isfinite(number) or not 0.0 <= number <= 100.0:
+        raise PayloadRejected("a winrate is missing or outside 0-100 despite picks")
+    return number
+
+
 def _count(value: Any) -> int:
     number = _num(value)
     if number is None or number < 0:
@@ -179,8 +191,10 @@ def parse_payload(payload: Any) -> tuple[Rows, str | None]:
             merged[0] += _count(row.get("times_offered"))
             merged[1] += effect_picks
             merged[2] += trigger_picks
-            merged[3] += (_num(row.get("effect_win_rate")) or 0.0) * effect_picks
-            merged[4] += (_num(row.get("trigger_win_rate")) or 0.0) * trigger_picks
+            merged[3] += _win(row.get("effect_win_rate"), effect_picks) * effect_picks
+            merged[4] += (
+                _win(row.get("trigger_win_rate"), trigger_picks) * trigger_picks
+            )
         cards[str(card_dbf)] = [
             [
                 middle,
