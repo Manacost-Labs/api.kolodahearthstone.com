@@ -2046,6 +2046,73 @@ def test_history_of_the_previous_detector_version_is_dropped(fun_deck_world: Non
     assert _structured()["rows"] == []
 
 
+# --- one deck code in both formats (F8) ----------------------------------------------
+
+
+def _both_formats_row(fmt: str, **extra: Any) -> dict[str, Any]:
+    code = _deckstring(range(401, 416))
+    return {
+        **_row("Casino Mill Mage", code=code, cls="Mage", fmt=fmt, games=100),
+        "win_rate": 55.0,
+        "win_rate_ci_low": 45.2,
+        "win_rate_ci_high": 64.4,
+        "variants": 0,
+        "kind": "brew",
+        "last_seen_at": "2026-10-28T00:00:00+00:00",
+        **extra,
+    }
+
+
+def test_merge_history_keeps_the_rows_of_one_code_in_both_formats_apart() -> None:
+    standard = _both_formats_row("Standard", win_rate=51.0)
+    wild = _both_formats_row("Wild", win_rate=62.0)
+    fresh = _both_formats_row("Standard", win_rate=53.0, last_seen_at="2026-10-29T00:00:00+00:00")
+
+    merged = _merge_history(
+        [standard, wild], [fresh], retention_hours=10**6, now=datetime(2026, 10, 29, tzinfo=UTC)
+    )
+
+    assert {(r["format"], r["win_rate"]) for r in merged} == {("Standard", 53.0), ("Wild", 62.0)}
+
+
+def test_refresh_publishes_a_code_listed_by_both_catalogs_in_both_formats(fun_deck_world: None) -> None:
+    core = _catalog_row("Dragon Warrior", "Warrior", range(1, 16), games=500_000, win_rate=52.0)
+    wild_core = {**core, "format": "Wild"}
+    _save_world(
+        standard=[core, _catalog_row("Casino Mill Mage", "Mage", range(401, 416), games=100, win_rate=55.0)],
+        wild=[wild_core, _catalog_row("Casino Mill Mage", "Mage", range(401, 416), games=90, win_rate=50.0, fmt="Wild")],
+    )
+
+    _refresh_fun_decks_unlocked()
+
+    assert sorted((r["format"], r["games"]) for r in _structured()["rows"]) == [("Standard", 100), ("Wild", 90)]
+
+
+def test_a_standard_run_updates_its_row_and_leaves_the_wild_row_of_the_same_code(
+    fun_deck_world: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HS_FUN_DECK_RETENTION_HOURS", "100000")
+    _save_world(
+        standard=[
+            _catalog_row("Dragon Warrior", "Warrior", range(1, 16), games=500_000, win_rate=52.0),
+            _catalog_row("Casino Mill Mage", "Mage", range(401, 416), games=100, win_rate=55.0),
+        ]
+    )
+    _save_history(
+        [
+            _both_formats_row("Standard", games=70, win_rate=50.0),
+            _both_formats_row("Wild", games=90, win_rate=62.0),
+        ]
+    )
+
+    _refresh_fun_decks_unlocked(format_focus="standard")
+
+    rows = {r["format"]: r for r in _structured()["rows"]}
+    assert set(rows) == {"Standard", "Wild"}
+    assert (rows["Standard"]["games"], rows["Standard"]["win_rate"]) == (100, 55.0)  # recalculated
+    assert (rows["Wild"]["games"], rows["Wild"]["win_rate"]) == (90, 62.0)  # untouched
+
+
 # --- regression on a real catalog slice ----------------------------------------
 
 
