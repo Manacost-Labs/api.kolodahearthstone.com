@@ -33,6 +33,8 @@ LOCALES = ("ru", "en")
 _UNESCAPED_AMP = re.compile(r"(?<!\\)&")
 _TAG = re.compile(r"<[^>]+>")
 _SPACE = re.compile(r"\s+")
+# ruRU hyphenation marker inside a word, with the padding run after it.
+_WORD_BREAK = re.compile(r"\[d\]\s*")
 # One leading keyword: a bold group without a colon, with an optional dot,
 # followed by whitespace or a comma ("<b>Taunt</b>\n", "<b>Gigantic +3.</b> ").
 _LEADING_KEYWORD = re.compile(r"^\s*<b>[^<]*?(?<!:)\.?</b>[\s.,]*", re.IGNORECASE)
@@ -70,9 +72,10 @@ def _strip_leading_keywords(trigger: str) -> str:
 
 
 def clean(text: str) -> str:
-    """Plain text: no ``[x]``, tags, ``$``/``#`` markers, ``\\&`` unescaped, one space."""
+    """Plain text: no ``[x]``, ``[d]`` (glued), tags, ``$``/``#`` markers, ``\\&`` unescaped, one space."""
 
-    value = _TAG.sub("", text).replace("[x]", " ").replace("\\&", "&")
+    value = _WORD_BREAK.sub("", text)
+    value = _TAG.sub("", value).replace("[x]", " ").replace("\\&", "&")
     value = value.replace("$", "").replace("#", "")
     return _SPACE.sub(" ", value).strip()
 

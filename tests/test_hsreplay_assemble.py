@@ -156,6 +156,32 @@ def test_markers_and_spaces_are_cleaned() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        # HearthstoneJSON ruRU, 2026-11-19: the ``[d]`` hyphenation marker sits
+        # inside a word and is followed by a run of no-break spaces.
+        (
+            "[x]<b>Боевой клич:</b> в начале\nвашего следующего хода\nатака этого существа "
+            "ста[d]\xa0\xa0\xa0\xa0\xa0новится БЕСКОНЕЧНОЙ!\xa0\xa0\xa0\xa0",
+            "Боевой клич: в начале вашего следующего хода атака этого существа "
+            "становится БЕСКОНЕЧНОЙ!",
+        ),
+        (
+            "[x]<b>Перемотка</b>\nМетает в случайных против[d]ников 3\xa0кинжала, наносящих\n"
+            "по $2 ед. урона.",
+            "Перемотка Метает в случайных противников 3 кинжала, наносящих по 2 ед. урона.",
+        ),
+        (
+            "[x]После того как ваш герой\nатакует, вы сбрасываете\nкарту с наиболь[d]шей стоимостью.",
+            "После того как ваш герой атакует, вы сбрасываете карту с наибольшей стоимостью.",
+        ),
+    ],
+)
+def test_ru_word_break_marker_is_glued(raw: str, expected: str) -> None:
+    assert ap.clean(raw) == expected
+
+
 def test_english_case_follows_the_joint() -> None:
     assert ap.join_halves("At the end of your turn,", "Summon a 5/5.", "en") == {
         "trigger": "At the end of your turn,",
