@@ -12,12 +12,19 @@ export default async function verify(page, root, output) {
 
   await page.goto(root + '/?action=parsers');
   await page.getByRole('heading', { level: 1, name: 'Источники', exact: true }).waitFor();
+  const monitoring = sidebar.getByRole('list', { name: 'Мониторинг' });
+  for (const name of ['Источники', 'Реестр источников', 'Провайдеры'])
+    ensure(
+      await monitoring.getByRole('link', { name, exact: true }).isVisible(),
+      name + ' is not in Monitoring',
+    );
   ensure(
-    await sidebar
-      .getByRole('list', { name: 'Мониторинг' })
-      .getByRole('link', { name: 'Статистика' })
-      .isVisible(),
-    'Statistics is not in the visible Monitoring group',
+    (await monitoring.getByRole('link').count()) === 3,
+    'Monitoring must hold exactly Источники, Реестр источников, Провайдеры',
+  );
+  ensure(
+    await sidebar.getByRole('button', { name: 'Статистика', exact: true }).isVisible(),
+    'Statistics is not a menu group',
   );
   ensure(
     !(await sidebar.getByRole('link', { name: 'Существа', exact: true }).isVisible()),
@@ -26,6 +33,88 @@ export default async function verify(page, root, output) {
   ensure((await crumbs.innerText()).replace(/\s+/g, ' ').trim() === 'Мониторинг Источники', 'Crumbs');
   checks.groupedNavigation = true;
 
+  // Statistics: five groups; «Мета» is two clicks away and the tabs hold only the modules of the group.
+  const groups = ['Стандарт и Вольный', 'Поля сражений', 'Арена', 'Карты', 'Патчи'];
+  await sidebar.getByRole('button', { name: 'Статистика', exact: true }).click();
+  for (const name of groups)
+    await sidebar.getByRole('link', { name, exact: true }).waitFor({ state: 'visible' });
+  await sidebar.getByRole('link', { name: 'Стандарт и Вольный', exact: true }).click();
+  await page.getByRole('heading', { level: 1, name: 'Мета Standard / Wild' }).waitFor();
+  const tabNames = async () => (await page.getByRole('tab').allInnerTexts()).map(text => text.trim());
+  ensure(
+    JSON.stringify(await tabNames()) ===
+      JSON.stringify(['Мета', 'Архетипы HSGuru', 'Архетипы HSReplay', 'Колоды', 'Карты']),
+    'Tabs of Standard and Wild: ' + (await tabNames()),
+  );
+  ensure(
+    (await crumbs.innerText()).replace(/\s+/g, ' ').trim() === 'Статистика Стандарт и Вольный',
+    'Crumbs of the default statistics page',
+  );
+  await page.getByRole('tab', { name: 'Колоды', exact: true }).click();
+  await page.getByRole('heading', { level: 1, name: 'Колоды', exact: true }).waitFor();
+  ensure(page.url().includes('stats=decks'), 'A tab did not set `stats`');
+  checks.statsGroupsAndTabs = true;
+
+  // `/?action=analytics` without `stats` opens «Мета»; the old `stats=<key>` links keep working.
+  await page.goto(root + '/?action=analytics');
+  await page.getByRole('heading', { level: 1, name: 'Мета Standard / Wild' }).waitFor();
+  checks.defaultIsMeta = true;
+
+  // All 13 modules: breadcrumb and highlighted item name the same place the menu does.
+  const expected = {
+    meta: ['Статистика', 'Стандарт и Вольный'],
+    hsguru_archetypes: ['Статистика', 'Стандарт и Вольный'],
+    archetypes: ['Статистика', 'Стандарт и Вольный'],
+    decks: ['Статистика', 'Стандарт и Вольный'],
+    constructed_cards: ['Статистика', 'Стандарт и Вольный'],
+    bg_heroes: ['Статистика', 'Поля сражений'],
+    bg_minions: ['Статистика', 'Поля сражений'],
+    arena: ['Статистика', 'Арена'],
+    arena_cards: ['Статистика', 'Арена'],
+    card: ['Статистика', 'Карты'],
+    patches: ['Статистика', 'Патчи'],
+    overview: ['Мониторинг', 'Реестр источников'],
+    providers: ['Мониторинг', 'Провайдеры'],
+  };
+  for (const [key, [group, item]] of Object.entries(expected)) {
+    await page.goto(root + '/?action=analytics&stats=' + key);
+    await page.getByRole('heading', { level: 1 }).waitFor();
+    const crumb = (await crumbs.innerText()).replace(/\s+/g, ' ').trim();
+    ensure(crumb === group + ' ' + item, key + ' crumbs: ' + crumb);
+    const current = await sidebar.locator('[aria-current="page"]').allInnerTexts();
+    ensure(current.length === 1 && current[0].trim() === item, key + ' highlight: ' + current);
+    const tabs = await page.getByRole('tab').count();
+    ensure(group === 'Мониторинг' ? tabs === 0 : true, key + ' monitoring page has tabs');
+  }
+  checks.breadcrumbsMatchMenu = true;
+
+  // The source registry on desktop and phone: no sideways scrolling of the page, no cut columns.
+  for (const width of [1440, 1280, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto(root + '/?action=analytics&stats=overview');
+    await page.getByRole('heading', { level: 1, name: 'Все источники данных' }).waitFor();
+    const layout = await page.evaluate(() => {
+      const scroll = document.querySelector('.analytics-main .table-scroll');
+      return {
+        page: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        main:
+          (document.querySelector('#panel-main') ?? document.body).scrollWidth -
+          (document.querySelector('#panel-main') ?? document.body).clientWidth,
+        table: scroll ? scroll.scrollWidth - scroll.clientWidth : 0,
+      };
+    });
+    ensure(
+      layout.page <= 0 && layout.main <= 0,
+      'Page scrolls sideways at ' + width + ': ' + JSON.stringify(layout),
+    );
+    if (width >= 1280)
+      ensure(layout.table <= 0, 'Registry columns are cut at ' + width + ': ' + layout.table);
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  checks.registryLayout = true;
+
+  await page.goto(root + '/?action=parsers');
+  await page.getByRole('heading', { level: 1, name: 'Источники', exact: true }).waitFor();
   const hsguru = page.getByRole('row', { name: /^HSGuru/ });
   ensure(
     /просрочен на \d[\d\s]* (день|дня|дней)/u.test(await hsguru.innerText()),
@@ -52,7 +141,7 @@ export default async function verify(page, root, output) {
     .getByRole('button', { name: /^Мурлок-разведчик/ })
     .first()
     .waitFor();
-  ensure(!new URL(page.url()).searchParams.has('q'), 'Reset kept the search');
+  ensure(!/[?&]q=/.test(page.url()), 'Reset kept the search');
   ensure(
     (await page.getByRole('searchbox', { name: 'Поиск карт' }).inputValue()) === '',
     'Reset kept the text',

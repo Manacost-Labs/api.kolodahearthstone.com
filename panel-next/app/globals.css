@@ -1552,28 +1552,19 @@ time[title] {
   font-size: var(--text-xs);
 }
 .analytics-layout {
-  display: grid;
-  grid-template-columns: 200px minmax(0, 1fr);
-  gap: var(--space-5);
+  display: block;
 }
-.module-nav {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  align-self: start;
+/* Tabs of the modules in one group; large pills, the track scrolls sideways on a phone. */
+.stats-tabs {
+  margin-bottom: var(--space-5);
 }
-.module-nav button {
-  border: 0;
-  border-radius: var(--radius-sm);
-  padding: 7px 10px;
-  color: var(--muted);
-  background: transparent;
+.stats-tabs .ui-tabs__list {
+  gap: var(--space-2);
+}
+.stats-tabs .ui-tabs__tab {
+  min-height: 40px;
+  padding-inline: 16px;
   font-size: var(--text-md);
-  text-align: left;
-}
-.module-nav button[aria-current] {
-  background: var(--accent-soft);
-  color: var(--text);
   font-weight: 500;
 }
 .analytics-main {
@@ -1667,9 +1658,6 @@ time[title] {
 @media (max-width: 1100px) {
   .token-layout {
     grid-template-columns: 280px minmax(0, 1fr);
-  }
-  .analytics-layout {
-    grid-template-columns: 160px minmax(0, 1fr);
   }
 }
 @media (max-width: 700px) {
@@ -1803,19 +1791,6 @@ time[title] {
   }
   .summary-grid strong {
     font-size: var(--text-xl);
-  }
-  .analytics-layout {
-    display: block;
-  }
-  .module-nav {
-    flex-direction: row;
-    overflow-x: auto;
-    margin-bottom: 20px;
-  }
-  .module-nav button {
-    flex: 0 0 auto;
-    max-width: 220px;
-    white-space: nowrap;
   }
   .token-layout {
     display: block;
@@ -3234,4 +3209,61 @@ time.schedule-overdue {
 }
 .terms-grid > [hidden] {
   display: none;
+}
+
+/*
+ * Source registry (stats=overview): seven columns plus «Детали» have to fit 1280 px next to the menu.
+ * Long ids wrap inside their column instead of running into «Сайт», the description keeps two lines
+ * (the full text is in the details), badges and dates wrap instead of widening the table.
+ */
+.analytics-main[data-module='overview'] th,
+.analytics-main[data-module='overview'] td {
+  padding-inline: 6px;
+}
+.analytics-main[data-module='overview'] td,
+.analytics-main[data-module='overview'] td:has(> span:only-child) {
+  min-width: 0;
+  max-width: none;
+}
+.analytics-main[data-module='overview'] td:nth-child(1),
+.analytics-main[data-module='overview'] td:nth-child(1):has(> span:only-child) {
+  min-width: 8.5rem;
+}
+.analytics-main[data-module='overview'] td:nth-child(2),
+.analytics-main[data-module='overview'] td:nth-child(2):has(> span:only-child) {
+  min-width: 5.5rem;
+}
+.analytics-main[data-module='overview'] td:nth-child(3),
+.analytics-main[data-module='overview'] td:nth-child(3):has(> span:only-child) {
+  min-width: 6.5rem;
+}
+.analytics-main[data-module='overview'] td:nth-child(6),
+.analytics-main[data-module='overview'] td:nth-child(6):has(> span:only-child) {
+  min-width: 8rem;
+}
+.analytics-main[data-module='overview'] td .value-code {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.analytics-main[data-module='overview'] td .cell-clamp {
+  min-width: 0;
+  overflow-wrap: break-word;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+.analytics-main[data-module='overview'] td:nth-child(4) .cell-clamp {
+  min-width: 9rem;
+}
+.analytics-main[data-module='overview'] td time {
+  white-space: normal;
+}
+.analytics-main[data-module='overview'] td .ui-badge {
+  height: auto;
+  min-height: 20px;
+  padding-block: 2px;
+  white-space: normal;
+  text-align: left;
+}
+.analytics-main[data-module='overview'] td .ui-badge__label {
+  white-space: normal;
 }

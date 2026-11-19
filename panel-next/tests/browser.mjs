@@ -355,7 +355,7 @@ await waitFor('!document.querySelector("section[aria-busy=true]")');
 for (let i = 0; i < 40 && !analyticsRequests.some(u => u.includes('stats=arena')); i++)
   await new Promise(resolve => setTimeout(resolve, 100));
 checks.refreshRequested = analyticsRequests.some(u => u.includes('stats=arena') && u.includes('_rsc'));
-await clickText('nav.module-nav button', 'Патчи Hearthstone');
+await clickText('.panel-sidebar a', 'Патчи');
 await waitFor('document.querySelector("h1")?.textContent === "Патчи Hearthstone"');
 checks.menuAfterError = await evaluate(
   `({ heading: document.querySelector('h1').textContent, alert: !!document.querySelector('[role=alert]') })`,
