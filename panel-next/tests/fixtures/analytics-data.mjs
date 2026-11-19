@@ -196,6 +196,7 @@ const modules = {
   },
   bg_minions: () => ({
     columns: [
+      column('image_url', 'Карта', 'image'),
       column('name', 'Существо'),
       column('tavern_tier', 'Таверна', 'number'),
       column('popularity', 'Популярность', 'percent'),

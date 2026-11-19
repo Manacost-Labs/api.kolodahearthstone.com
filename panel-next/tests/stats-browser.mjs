@@ -215,6 +215,64 @@ export default async function verify(page, root) {
     const perRow = await cardsAt(width);
     ensure(new Set(perRow).size === 1, `BG minions at ${width}: uneven rows ${perRow}`);
   }
+  // Slow pictures (the cold S3 mount): the table thumbnails show a monogram, never an empty square (#109).
+  const pixel = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==',
+    'base64',
+  );
+  const slow = async route => {
+    await new Promise(resolve => setTimeout(resolve, 2500));
+    await route.fulfill({ status: 200, contentType: 'image/png', body: pixel }).catch(() => {});
+  };
+  await page.route('https://api.kolodahearthstone.com/uploads/**', slow);
+  // goto waits for the load event, which waits for the slow pictures: do not wait for it.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(root + '/?action=analytics&stats=bg_minions', { waitUntil: 'commit' });
+  await page.locator('.data-table .value-thumb').first().scrollIntoViewIfNeeded();
+  const waiting = await page.locator('.data-table .value-thumb').evaluateAll(links =>
+    links.map(link => {
+      const ph = link.querySelector('.value-thumb__ph');
+      const box = link.getBoundingClientRect();
+      return {
+        state: link.dataset.state,
+        text: ph?.textContent.trim() ?? '',
+        shown: ph ? getComputedStyle(ph).display !== 'none' : false,
+        size: [Math.round(box.width), Math.round(box.height)].join('x'),
+      };
+    }),
+  );
+  ensure(waiting.length > 0, 'Slow thumbnails: none in the table');
+  ensure(
+    waiting.every(item => item.state === 'loading' && item.shown && item.text.length > 0),
+    'Slow thumbnails: an empty square ' + JSON.stringify(waiting[0]),
+  );
+  ensure(
+    waiting.every(item => item.size === '40x40'),
+    'Thumbnail size changed: ' +
+      JSON.stringify(waiting.filter(item => item.size !== '40x40').slice(0, 2)) +
+      ' of ' +
+      waiting.length,
+  );
+  // After the load: the picture is shown and the monogram is gone (checked in one go, the table can remount).
+  await page.waitForFunction(
+    () => {
+      const links = [...document.querySelectorAll('.data-table .value-thumb')].filter(
+        link => link.getBoundingClientRect().top < innerHeight,
+      );
+      return (
+        links.length > 0 &&
+        links.every(
+          link =>
+            link.dataset.state === 'ready' &&
+            link.querySelector('img').naturalWidth > 0 &&
+            getComputedStyle(link.querySelector('.value-thumb__ph')).display === 'none',
+        )
+      );
+    },
+    undefined,
+    { timeout: 15000 },
+  );
+  await page.unroute('https://api.kolodahearthstone.com/uploads/**', slow);
   checks.bgViews = true;
   await open('arena');
   const columns = await page.locator('.arena-col').count();
