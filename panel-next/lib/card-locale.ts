@@ -36,6 +36,16 @@ export function resolveLang(fromUrl: unknown, saved: unknown): CardLang {
 /** The value of `?lang=` for a language: Russian is the default and has no parameter. */
 export const langParam = (lang: CardLang): CardLang | null => (lang === defaultCardLang ? null : lang);
 
+/** Puts `?lang=` into a panel href (or removes it for Russian); the rest of the query is kept. */
+export function withLangParam(href: string, lang: CardLang): string {
+  const [path, rest = ''] = href.split('?');
+  const next = new URLSearchParams(rest);
+  const value = langParam(lang);
+  if (value) next.set('lang', value);
+  else next.delete('lang');
+  return path + (next.size ? '?' + next.toString() : '');
+}
+
 /** How a panel row is found in the public catalogue. `null`: it has neither a card id nor a DBF. */
 export type Lookup = { id: string | null; dbf: string | null };
 
