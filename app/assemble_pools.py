@@ -390,6 +390,20 @@ class DonorPools:
         classes = pools.card_classes(donor)
         return pools.NEUTRAL in classes or player_class in classes
 
+    def copy_key(self, card: Mapping[str, Any]) -> str:
+        """One key for a ``CORE_X`` card and its original ``X`` (or ``countAsCopyOfDbfId``).
+
+        Only that pair is one donor (R9); equal texts of other cards stay apart.
+        """
+
+        card_id = str(card["id"])
+        if card_id.startswith("CORE_") and card_id[5:] in self.base.by_id:
+            return card_id[5:]
+        original = self.base.by_dbf.get(int(card.get("countAsCopyOfDbfId") or 0))
+        if original is not None and original is not card:
+            return self.copy_key(original)
+        return card_id
+
     def candidates(
         self,
         base_dbf: int,
@@ -412,13 +426,7 @@ class DonorPools:
                 continue
             if dbf not in kept and self.reject_reason(base_dbf, dbf) is not None:
                 continue
-            key = (
-                card.get("name"),
-                card.get("text"),
-                card.get("cost"),
-                tuple(pools.card_classes(card)),
-            )
-            chosen.setdefault(key, []).append(card)
+            chosen.setdefault(self.copy_key(card), []).append(card)
         result: list[Mapping[str, Any]] = []
         for group in chosen.values():
             wanted = [c for c in group if int(c["dbfId"]) in kept]

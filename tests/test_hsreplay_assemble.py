@@ -1256,12 +1256,24 @@ def test_a_core_copy_and_its_original_are_one_donor() -> None:
         _card("BASE", 100, 3, "At the end of your turn,& give +1/+1."),
         _card("CORE_X_1", 101, 3, "After you draw,& draw.", name="Twin"),
         _card("X_1", 102, 3, "After you draw,& draw.", card_set="NAXX", name="Twin"),
+        _card("Y_1", 103, 3, "After you heal,& draw.", card_set="NAXX", name="Same"),
+        _card("Y_2", 104, 3, "After you heal,& draw.", card_set="NAXX", name="Same"),
+        {
+            **_card("Z_2", 106, 3, "After you play,& draw.", name="Reprint"),
+            "countAsCopyOfDbfId": 105,
+        },
+        _card("Z_1", 105, 3, "After you play,& draw.", card_set="NAXX", name="Reprint"),
     ]
     card_base, rules = _rules(cards, fmt="wild")
-    assert _pool_ids(card_base, rules, 100) == ["CORE_X_1"]
+    ids = _pool_ids(card_base, rules, 100)
+    assert "CORE_X_1" in ids and "X_1" not in ids
+    # Equal cards that are not a CORE_ pair stay separate donors; countAsCopyOf joins.
+    assert {"Y_1", "Y_2"} <= set(ids) and len({"Z_1", "Z_2"} & set(ids)) == 1
     # HSReplay's copy wins, and a copy seen next to the base always stays.
-    assert _pool_ids(card_base, rules, 100, prefer=[102]) == ["X_1"]
-    assert _pool_ids(card_base, rules, 100, keep=[101, 102]) == ["CORE_X_1", "X_1"]
+    assert "X_1" in _pool_ids(card_base, rules, 100, prefer=[102])
+    assert "CORE_X_1" not in _pool_ids(card_base, rules, 100, prefer=[102])
+    kept = _pool_ids(card_base, rules, 100, keep=[101, 102])
+    assert {"CORE_X_1", "X_1"} <= set(kept)
 
 
 def test_the_player_class_gives_its_own_and_neutral_donors() -> None:
