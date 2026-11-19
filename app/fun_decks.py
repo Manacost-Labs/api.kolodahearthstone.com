@@ -1621,8 +1621,9 @@ def compute_fun_decks(
     rejected = 0
     rejected_by_gate: Counter[str] = Counter()
     quality_rejected: Counter[str] = Counter()
-    # (format, code) pairs whose fresh sample failed the gate, fun or not: evicted from
-    # the history. The format matters: a --format standard run looks at Standard
+    # (format, code) pairs whose fresh sample failed the gate, or that a fresh candidate
+    # turned away (a gate or the score threshold): evicted from the history, so an old
+    # row cannot outlive a violation. A deck with no fresh candidate stays. The format matters: a --format standard run looks at Standard
     # listings only and must not touch a Wild row that happens to share the code.
     quality_blocked: set[tuple[str, str]] = set()
     undecodable = 0
@@ -1656,6 +1657,7 @@ def compute_fun_decks(
         scored_all.append((row, scored))
         if not scored.is_fun:
             # counted here only; a not-fun deck is never also a quality rejection
+            quality_blocked.add((_format_bucket(format_name), code))
             rejected += 1
             rejected_by_gate.update(r for r in scored.reasons if r.endswith("_gate"))
             continue
