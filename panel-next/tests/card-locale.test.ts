@@ -306,6 +306,35 @@ test('loader: one subscriber leaving does not cancel a request another one still
   assert.equal((await stays).state, 'ok');
 });
 
+test('loader: a cancelled request finishing late does not drop the newer one from the pool', async () => {
+  const gates: (() => void)[] = [];
+  const { loader, calls } = loaderWith(
+    () =>
+      new Promise<Response>(resolve => {
+        // Neither request listens to abort: the old one finishes after a new one has been created.
+        gates.push(() => resolve(json(fixture('be036-plPL'))));
+      }),
+  );
+  const lookup = { id: 'BE_036', dbf: null };
+  const leaving = new AbortController();
+  const gone = loader.load('pl', lookup, leaving.signal);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(calls.length, 1);
+  leaving.abort();
+  await assert.rejects(gone, { name: 'AbortError' });
+  const second = loader.load('pl', lookup);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(calls.length, 2, 'the new request starts its own entry');
+  gates[0]?.(); // the old, cancelled entry settles now
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const third = loader.load('pl', lookup);
+  assert.equal(calls.length, 2, 'a third simultaneous request joins the second one');
+  gates[1]?.();
+  assert.equal((await second).state, 'ok');
+  assert.equal((await third).state, 'ok');
+  assert.equal(calls.length, 2);
+});
+
 test('loader: the cache is bounded', async () => {
   const { loader } = loaderWith(() => json(fixture('be036-plPL')));
   const small = new LocaleLoader({ fetch: async () => json(fixture('be036-plPL')), cacheLimit: 3 });
