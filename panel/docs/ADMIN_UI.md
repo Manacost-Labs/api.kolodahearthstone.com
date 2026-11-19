@@ -88,7 +88,10 @@ These three PHP adapters are reachable only through the private
   size.
 - Card inspector text follows the game: `<b>` is bold, `<i>` italic, `\n` a
   line break; `[x]`, `$N` and `#N` markers are reduced to the number, `_` is a
-  non-breaking space, `@` and `{0}` show as `X`, unknown tags are dropped.
+  non-breaking space, `{0}` shows as `X`, unknown tags are dropped. `@`
+  separates variants of the text (base text, then in-hand hints such as
+  “(3 left!)”); only the first non-empty variant is shown. Plural forms
+  `|4(ход,хода,ходов)` resolve to the form for the number written before them.
   The text is built from React elements; markup from data is never inserted
   into the DOM.
 - Every statistics row has “Подробнее”. The keyboard-accessible drawer exposes
