@@ -1,0 +1,22 @@
+{
+  "data": {
+    "card_id": "BE_036",
+    "dbf": 128132,
+    "name": {
+      "ru": "МАТРИАРХ",
+      "en": "M.O.T.H.E.R."
+    },
+    "localized": {
+      "locale": "esES",
+      "requested_locale": "esES",
+      "fallback": false,
+      "name": "MADRE",
+      "text": "<b>Grito de batalla:</b>\nReduce en (5) el coste de una carta de tu mano. Sigue por la izquierda y la derecha disminuyendo la reducción en (1).",
+      "flavor": "¡HA LLEGADO LA MADRE!",
+      "collection_text": null,
+      "how_to_earn": "Se desbloquea tras_completar las misiones iniciales.",
+      "how_to_earn_golden": "Se puede conseguir al_comprar el pase de taberna de <i>El Auge del Imperio Negro</i>.",
+      "targeting_arrow_text": null
+    }
+  }
+}

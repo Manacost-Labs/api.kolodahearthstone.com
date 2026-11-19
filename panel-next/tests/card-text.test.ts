@@ -140,3 +140,108 @@ test('no input can leak tags or service symbols into the output', () => {
     }),
   );
 });
+
+// Real strings from the public API (2026-11-19).   is a non-breaking space, as in the source.
+test('pl: |4(…) after a number and a non-breaking space (EDR_259)', () => {
+  assert.equal(
+    plainCardText(
+      '<b>Okrzyk bojowy:</b> Rzuć zaklęcie o najwyższym koszcie z twojej ręki jako Aurę działającą przez 3 |4(turę,tury,tur).',
+      'pl',
+    ),
+    'Okrzyk bojowy: Rzuć zaklęcie o najwyższym koszcie z twojej ręki jako Aurę działającą przez 3 tury.',
+  );
+});
+
+test('pl: 1 takes the first form (JAIL_470)', () => {
+  assert.equal(
+    plainCardText('Zadaj 1 pkt. Wystrzel 1 |4(raz,razy,razy)!', 'pl'),
+    'Zadaj 1 pkt. Wystrzel 1 raz!',
+  );
+});
+
+test('pl and ru count three forms differently', () => {
+  const form = (n: number, lang: 'ru' | 'pl') => plainCardText(`${n} |4(a,b,c)`, lang);
+  assert.equal(form(1, 'pl'), '1 a');
+  assert.equal(form(2, 'pl'), '2 b');
+  assert.equal(form(4, 'pl'), '4 b');
+  assert.equal(form(5, 'pl'), '5 c');
+  assert.equal(form(12, 'pl'), '12 c');
+  assert.equal(form(14, 'pl'), '14 c');
+  assert.equal(form(22, 'pl'), '22 b');
+  assert.equal(form(25, 'pl'), '25 c');
+  assert.equal(form(0, 'pl'), '0 c');
+  // 21 and 31 are the divergence: "many" in pl, "one" in ru.
+  assert.equal(form(21, 'pl'), '21 c');
+  assert.equal(form(21, 'ru'), '21 a');
+  assert.equal(form(31, 'pl'), '31 c');
+  assert.equal(form(11, 'ru'), '11 c');
+  assert.equal(form(23, 'ru'), '23 b');
+});
+
+test('en and es have two forms: exactly 1, or anything else', () => {
+  for (const lang of ['en', 'es'] as const) {
+    assert.equal(plainCardText('1 |4(card,cards)', lang), '1 card');
+    assert.equal(plainCardText('2 |4(card,cards)', lang), '2 cards');
+    assert.equal(plainCardText('21 |4(card,cards)', lang), '21 cards');
+    assert.equal(plainCardText('0 |4(card,cards)', lang), '0 cards');
+  }
+});
+
+test('default language is ru', () => {
+  assert.equal(plainCardText('21 |4(a,b,c)'), '21 a');
+});
+
+test('an upper-case </I> closes italics (EDR_493)', () => {
+  assert.deepEqual(parseCardText('<b>Grito de batalla:</b>\nUno. <i>(Conservan coste)</I>.', 'es'), [
+    text('Grito de batalla:', true),
+    { kind: 'break' },
+    text('Uno. '),
+    text('(Conservan coste)', false, true),
+    text('.'),
+  ]);
+  assert.equal(
+    plainCardText('<b>Okrzyk bojowy:</b> Przemień.\n<i>(Zachowają statystyki i koszt).</I>', 'pl'),
+    'Okrzyk bojowy: Przemień.\n(Zachowają statystyki i koszt).',
+  );
+});
+
+test('@ keeps the first variant and {0} becomes X (CATA_131)', () => {
+  assert.equal(
+    plainCardText(
+      '<b>Grito de batalla:</b> Obtienes un cristal. <i>(¡{0} más!)</i>.@<b>Grito de batalla:</b> Obtienes un cristal. <i>(¡Listo!)</i>.@<b>Grito de batalla:</b> Obtienes un cristal.',
+      'es',
+    ),
+    'Grito de batalla: Obtienes un cristal. (¡X más!).',
+  );
+  assert.equal(
+    plainCardText(
+      '<b>Okrzyk bojowy:</b>\nOtrzymujesz. <i>(Jeszcze {0}!)</i>@<b>Okrzyk bojowy:</b>\nKoniec.',
+      'pl',
+    ),
+    'Okrzyk bojowy:\nOtrzymujesz. (Jeszcze X!)',
+  );
+});
+
+test('[x] is dropped from es text and line breaks stay (LOE_006)', () => {
+  assert.equal(
+    plainCardText(
+      '[x]<b>Grito de batalla:\nDescubre</b> una carta con\n<b>Último aliento</b>. Cuesta\n(1) cristal menos.',
+      'es',
+    ),
+    'Grito de batalla:\nDescubre una carta con\nÚltimo aliento. Cuesta\n(1) cristal menos.',
+  );
+});
+
+test('$3 is a plain number in pl and es (LOE_002)', () => {
+  assert.equal(
+    plainCardText(
+      'Zadaj $3 pkt. obrażeń. Wtasuj do twojej talii „Buzującą pochodnię” zadającą 6 pkt. obrażeń.',
+      'pl',
+    ),
+    'Zadaj 3 pkt. obrażeń. Wtasuj do twojej talii „Buzującą pochodnię” zadającą 6 pkt. obrażeń.',
+  );
+  assert.equal(
+    plainCardText('Inflige $3 p. de daño. Mete en tu mazo una antorcha.', 'es'),
+    'Inflige 3 p. de daño. Mete en tu mazo una antorcha.',
+  );
+});

@@ -1,3 +1,5 @@
+import type { CardLang } from './card-locale.ts';
+
 // Hearthstone card text (HearthstoneJSON conventions) as render-ready tokens.
 // The output is data, never markup: the UI draws it with React elements.
 export type CardTextToken =
@@ -41,17 +43,26 @@ function stripTags(source: string): Cell[] {
   return cells;
 }
 
-// `|4(one,two[,five])` picks a word form by the number written right before it.
-function pluralForm(forms: string[], before: string) {
-  const number = /(\d+)[\s\u00a0]*$/.exec(before);
-  if (!number || forms.length < 2) return forms[forms.length - 1];
-  const n = Number(number[1]);
-  if (forms.length === 2) return n === 1 ? forms[0] : forms[1];
+// `|4(one,two[,five])` picks a word form by the number written right before it. The rule depends
+// on the language: ru and pl have three forms but count differently (21 is "one" in ru, "many" in
+// pl); en and es have two: exactly 1, or anything else.
+function formIndex(n: number, lang: CardLang, count: number): number {
+  if (count === 2 || lang === 'en' || lang === 'es') return n === 1 ? 0 : 1;
   const last = n % 10;
   const lastTwo = n % 100;
-  if (last === 1 && lastTwo !== 11) return forms[0];
-  if (last >= 2 && last <= 4 && (lastTwo < 12 || lastTwo > 14)) return forms[1];
-  return forms[2] ?? forms[forms.length - 1];
+  if (lang === 'pl') {
+    if (n === 1) return 0;
+    return last >= 2 && last <= 4 && (lastTwo < 12 || lastTwo > 14) ? 1 : 2;
+  }
+  if (last === 1 && lastTwo !== 11) return 0;
+  if (last >= 2 && last <= 4 && (lastTwo < 12 || lastTwo > 14)) return 1;
+  return 2;
+}
+
+function pluralForm(forms: string[], before: string, lang: CardLang) {
+  const number = /(\d+)[\s\u00a0]*$/.exec(before);
+  if (!number || forms.length < 2) return forms[forms.length - 1];
+  return forms[Math.min(formIndex(Number(number[1]), lang, forms.length), forms.length - 1)];
 }
 
 // `@` separates variants of the text (base text, then dynamic hints): only the first non-empty
@@ -66,7 +77,7 @@ function firstVariant(cells: Cell[]): Cell[] {
 }
 
 // Pass 2: service markers. Removing one can complete another ("[x<b>]"), so repeat until stable.
-function stripMarkers(cells: Cell[]): Cell[] {
+function stripMarkers(cells: Cell[], lang: CardLang): Cell[] {
   let current = cells;
   for (;;) {
     const joined = current.map(cell => cell.char).join('');
@@ -82,6 +93,7 @@ function stripMarkers(cells: Cell[]): Cell[] {
         const form = pluralForm(
           plural[1].split(',').map(item => item.trim()),
           next.map(cell => cell.char).join(''),
+          lang,
         );
         for (const formChar of form) next.push({ char: formChar, style });
         index += plural[0].length;
@@ -99,10 +111,10 @@ function stripMarkers(cells: Cell[]): Cell[] {
   }
 }
 
-export function parseCardText(input: unknown): CardTextToken[] {
+export function parseCardText(input: unknown, lang: CardLang = 'ru'): CardTextToken[] {
   const source = input === null || input === undefined ? '' : String(input);
   const tokens: CardTextToken[] = [];
-  for (const { char, style } of stripMarkers(firstVariant(stripTags(source)))) {
+  for (const { char, style } of stripMarkers(firstVariant(stripTags(source)), lang)) {
     if (char === '\n') {
       tokens.push({ kind: 'break' });
       continue;
@@ -117,8 +129,8 @@ export function parseCardText(input: unknown): CardTextToken[] {
 }
 
 /** Text without formatting, for accessible names and tests. */
-export function plainCardText(input: unknown): string {
-  return parseCardText(input)
+export function plainCardText(input: unknown, lang: CardLang = 'ru'): string {
+  return parseCardText(input, lang)
     .map(token => (token.kind === 'break' ? '\n' : token.text))
     .join('');
 }

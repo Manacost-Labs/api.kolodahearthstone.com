@@ -1,0 +1,22 @@
+{
+  "data": {
+    "card_id": "BE_036",
+    "dbf": 128132,
+    "name": {
+      "ru": "МАТРИАРХ",
+      "en": "M.O.T.H.E.R."
+    },
+    "localized": {
+      "locale": "plPL",
+      "requested_locale": "plPL",
+      "fallback": false,
+      "name": "M.A.T.K.A.",
+      "text": "<b>Okrzyk bojowy:</b> Zmniejsz koszt karty w twojej ręce o (5). Efekt przechodzi w lewo i w prawo z redukcją mniejszą o (1).",
+      "flavor": "M.A.T.K.A. PRZYBYŁA!",
+      "collection_text": null,
+      "how_to_earn": "Odblokowane po ukończeniu zadań startowych.",
+      "how_to_earn_golden": "Do zdobycia po zakupie Karnetu Karczmarza z_<i>Rządów Czarnego Imperium</i>.",
+      "targeting_arrow_text": null
+    }
+  }
+}
