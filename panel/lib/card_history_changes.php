@@ -236,6 +236,14 @@ function catalog_history_scan(PDO $pdo, array $entities, string $fromSql, string
             if ($lastObserved === null || $version['observed_at'] > $lastObserved) $lastObserved = $version['observed_at'];
         }
     } while (count($rows) === CARD_HISTORY_SCAN_CHUNK);
+    // Rows may be inserted out of observed_at order (see CARD_HISTORY_ID_SKEW): order each card by time, then id.
+    foreach ($timeline as &$cards) {
+        foreach ($cards as &$versions) {
+            usort($versions, static fn(array $a, array $b): int => [$a['observed_at'], $a['id']] <=> [$b['observed_at'], $b['id']]);
+        }
+        unset($versions);
+    }
+    unset($cards);
     return [$timeline, $scanned, $lastObserved];
 }
 
@@ -290,20 +298,27 @@ function catalog_card_history_changes(PDO $pdo, array $entities, DateTimeImmutab
             'total_pages' => (int)ceil($total / $perPage)]];
 }
 
-/** Last stored version of each card observed before $fromSql, one bounded query per chunk. */
+/** Latest observed version of each card before $fromSql (ties by id), one bounded query per chunk. */
 function catalog_history_before_versions(PDO $pdo, string $entity, array $cardIds, string $fromSql): array
 {
     $result = [];
     foreach (array_chunk(array_map('strval', $cardIds), 200) as $chunk) {
-        $bindings = ['entity' => $entity, 'from_at' => $fromSql];
+        $bindings = ['entity' => $entity, 'outer_entity' => $entity, 'from_at' => $fromSql];
         $list = catalog_history_in_list('card', $chunk, $bindings);
         $stmt = $pdo->prepare('SELECT v.id, v.entity, v.card_id, v.observed_at, v.event_kind, v.snapshot_json FROM catalog_card_versions v '
-            . 'JOIN (SELECT MAX(id) AS id FROM catalog_card_versions WHERE entity = :entity AND card_id IN (' . $list . ') '
-            . 'AND observed_at < :from_at AND event_kind IN (' . CARD_HISTORY_EVENTS . ') GROUP BY card_id) latest ON latest.id = v.id');
+            . 'JOIN (SELECT card_id, MAX(observed_at) AS observed_at FROM catalog_card_versions WHERE entity = :entity AND card_id IN (' . $list . ') '
+            . 'AND observed_at < :from_at AND event_kind IN (' . CARD_HISTORY_EVENTS . ') GROUP BY card_id) latest '
+            . 'ON v.entity = :outer_entity AND v.card_id = latest.card_id AND v.observed_at = latest.observed_at '
+            . 'WHERE v.event_kind IN (' . CARD_HISTORY_EVENTS . ')');
         $stmt->execute($bindings);
+        $latestIds = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $cardId = (string)$row['card_id'];
+            if (isset($latestIds[$cardId]) && $latestIds[$cardId] > (int)$row['id']) continue;
             $version = catalog_history_version($entity, $row);
-            if ($version !== null) $result[(string)$row['card_id']] = $version;
+            if ($version === null) continue;
+            $latestIds[$cardId] = (int)$row['id'];
+            $result[$cardId] = $version;
         }
     }
     return $result;

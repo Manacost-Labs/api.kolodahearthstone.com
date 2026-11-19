@@ -63,12 +63,19 @@ class ChangesTestPDO extends PDO
         if (str_contains($query, 'GROUP BY card_id')) return new ChangesTestStatement(function (array $p) use ($query): array {
             check(str_contains($query, 'observed_at < :from_at'), 'The before lookup must be bounded by the window start');
             $cards = array_filter($p, fn($key) => str_starts_with((string)$key, 'card'), ARRAY_FILTER_USE_KEY);
-            $latest = [];
+            check(str_contains($query, 'MAX(observed_at)'), 'The before lookup must pick the latest observation, not the latest insert');
+            $matching = [];
+            $latestAt = [];
             foreach ($this->versions as $row) {
                 if ($row['entity'] === $p['entity'] && in_array($row['card_id'], $cards, true) && $row['observed_at'] < $p['from_at']
-                    && in_array($row['event_kind'], ['baseline', 'changed', 'renamed'], true)) $latest[$row['card_id']] = $row;
+                    && in_array($row['event_kind'], ['baseline', 'changed', 'renamed'], true)) {
+                    $matching[] = $row;
+                    $latestAt[$row['card_id']] = max($latestAt[$row['card_id']] ?? '', $row['observed_at']);
+                }
             }
-            return array_values($latest);
+            // Every row at the latest observed_at, in reverse id order, so the code must break ties by id itself.
+            $rows = array_values(array_filter($matching, fn($row) => $row['observed_at'] === $latestAt[$row['card_id']]));
+            return array_reverse($rows);
         });
         check(str_contains($query, 'id > :after AND id <= :high'), 'Version scan must use an id range');
         return new ChangesTestStatement(function (array $p): array {
@@ -220,6 +227,24 @@ check($range->rangeRows > 0 && $range->rangeRows < 400, 'The scan must read an i
 foreach ($range->queries as $query) {
     check(!preg_match('/WHERE observed_at/', $query), 'No table-wide time filter');
 }
+
+// Rows inserted out of observed_at order: before/after follow observed_at, then id.
+$late = new ChangesTestPDO();
+$late->add('constructed_card', 'LATE', '2026-10-20 00:00:00', constructed(['mana_cost' => 5]), 'changed', 10);
+$late->add('constructed_card', 'LATE', '2026-10-10 00:00:00', constructed(['mana_cost' => 3]), 'changed', 11);
+$late->add('constructed_card', 'TIE', '2026-10-10 00:00:00', constructed(['attack' => 1]), 'changed', 12);
+$late->add('constructed_card', 'TIE', '2026-10-10 00:00:00', constructed(['attack' => 2]), 'changed', 13);
+$late->add('constructed_card', 'LATE', '2026-11-03 18:00:00', constructed(['mana_cost' => 6]), 'changed', 20);
+$late->add('constructed_card', 'LATE', '2026-11-03 17:00:00', constructed(['mana_cost' => 7]), 'changed', 21);
+$late->add('constructed_card', 'TIE', '2026-11-03 17:00:00', constructed(['attack' => 9]), 'changed', 22);
+$lateById = [];
+foreach (catalog_card_history_changes($late, ['constructed_card'], $from, $to)['changes'] as $change) $lateById[$change['card_id']] = $change;
+check($lateById['LATE']['before']['version_id'] === 10 && $lateById['LATE']['fields']['mana_cost']['before'] === 5,
+    'before is the latest observation before the window, not the latest insert');
+check($lateById['LATE']['after']['version_id'] === 20 && $lateById['LATE']['fields']['mana_cost']['after'] === 6,
+    'after is the latest observation in the window, not the latest insert');
+check($lateById['TIE']['before']['version_id'] === 13 && $lateById['TIE']['fields']['attack'] === ['before' => 2, 'after' => 9],
+    'Equal observed_at falls back to the higher id');
 
 // Chunked scanning keeps every row of a large window.
 $big = new ChangesTestPDO();
