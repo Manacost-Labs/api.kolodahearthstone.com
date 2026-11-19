@@ -44,6 +44,9 @@ TIMEOUT = 30
 MAX_BODY = 8 * 1024 * 1024
 FLUSH_EVERY = 500
 MAX_CONSECUTIVE_ERRORS = 20
+BAD_BACKOFF_BASE = timedelta(hours=1)
+BAD_BACKOFF_MAX = timedelta(days=7)
+BAD_BACKOFF_SLACK = timedelta(minutes=10)  # hourly timer jitter / run length
 MAX_RETRY_AFTER = 24 * 3600
 EXIT_UPSTREAM = 75
 GB = 1024**3
@@ -211,7 +214,13 @@ def build_plan(
         reason = None
         if item is None:
             reason = "new"
-        elif item.get("status") in ("bad", 404):
+        elif item.get("status") == "bad":
+            if item.get("source_hash") != source_hash:
+                reason = "recheck_missing"
+            elif now - parse_iso(item["checked_at"]) >= (
+                    bad_backoff(int(item.get("bad_attempts", 1))) - BAD_BACKOFF_SLACK):
+                reason = "recheck_missing"
+        elif item.get("status") == 404:
             checked = parse_iso(item["checked_at"])
             if item.get("source_hash") != source_hash:
                 reason = "recheck_missing"
@@ -227,6 +236,11 @@ def build_plan(
         ordered.append((collectible, card_id, locales.index(locale), source_hash, reason))
     ordered.sort(key=lambda t: t[:3])
     return [(c, locales[li], h, r) for _, c, li, h, r in ordered], counts
+
+
+def bad_backoff(attempts: int) -> timedelta:
+    """1 h, 2 h, 4 h ... capped at 7 days, by consecutive failed attempts."""
+    return min(BAD_BACKOFF_BASE * 2 ** max(attempts - 1, 0), BAD_BACKOFF_MAX)
 
 
 def build_index(locale: str, state: dict[str, Any], now: datetime) -> dict[str, Any]:
@@ -429,11 +443,15 @@ def run(args, rows, locales, started, fetch, clock, sleep, utcnow) -> int:
                 else:
                     raise FetchError(f"HTTP {status}")
             except BadImage as exc:
-                # Not an upstream outage: remember it like a 404 (backoff), do not
+                # Not an upstream outage: exponential backoff per id, do not
                 # count towards the consecutive-error stop.
+                old = states[loc]["items"].get(card_id) or {}
+                attempts = (int(old.get("bad_attempts", 1)) + 1
+                            if old.get("status") == "bad"
+                            and old.get("source_hash") == source_hash else 1)
                 states[loc]["items"][card_id] = {
                     "status": "bad", "checked_at": utc_iso(utcnow()),
-                    "source_hash": source_hash}
+                    "source_hash": source_hash, "bad_attempts": attempts}
                 stats["bad_image"] += 1
                 consecutive = 0
                 dirty.add(loc)

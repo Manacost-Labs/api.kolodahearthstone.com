@@ -37,7 +37,7 @@ files written atomically (`.tmp-` + rename, 0644):
   HSJ answered with 404 at the last check. The index only lists files already
   written.
 - `{locale}.state.json`: loader internals. Per id either
-  `{source_hash, v, bytes, fetched_at}` or `{status: 404|"bad", checked_at, source_hash}`.
+  `{source_hash, v, bytes, fetched_at}` or `{status: 404, checked_at, source_hash}` or `{status: "bad", checked_at, source_hash, bad_attempts}`.
 - `last-run.json`: `started_at`, `finished_at`, `requests`, `downloaded`,
   `not_found`, `bad_image`, `errors`, `skipped_invalid_id`, `bytes_written`, `avg_webp_bytes`,
   `planned`, `stopped_reason` (`done|budget|time|signal|upstream_errors|low_disk|bad_uploads_dir`), and
@@ -53,7 +53,7 @@ takes the same rows as JSON. The plan uses only the state files:
 | --- | --- |
 | id not in state | download |
 | `source_hash` changed | download again |
-| 404 or undecodable image ("bad") recorded | check again only if `source_hash` changed or the last check is at least `--recheck-missing-days` (30) old |
+| 404 recorded | check again only if `source_hash` changed or the last check is at least `--recheck-missing-days` (30) old |
 | otherwise | nothing |
 
 Order: collectible cards first, then the rest; by `card_id`, all locales of one card
@@ -61,8 +61,10 @@ in a row. Known limit: if HSJ redraws an image without a payload change we do no
 notice (no ETag rechecks).
 
 Responses: 200 + PNG 512 px wide becomes WebP; 404 is remembered; a 200 body that
-is not a usable 512 px PNG is remembered as `bad` with the same backoff as 404 (it
-is not in `missing`, so the API keeps the HSJ link, and it never stops the run);
+is not a usable 512 px PNG is remembered as `bad` with an exponential backoff per id
+(`bad_attempts` in state: 1 h, 2 h, 4 h, 8 h ... capped at 7 days; reset by a
+success or a `source_hash` change; a 10 min slack covers timer jitter). It is not
+in `missing`, so the API keeps the HSJ link, and it never stops the run;
 429, 5xx and timeout (30 s) are errors, retried next run. A 429 or 20 errors in a
 row stop the run with exit code 75 (`upstream_errors`, the unit treats 75 as
 success); `Retry-After` (seconds or HTTP-date, clamped to 24 h) is honoured by the
@@ -81,8 +83,10 @@ first, so a crash costs at most a repeated download). A non-blocking `flock` on
 `var/card-renders/.lock` forbids parallel runs (second run exits 0). The global
 `kolodahs-sync/global.lock` and the platform `sync.lock` are not taken.
 
-Timing: a request takes about 0.18 s (download 0.15 s + WebP `method=4` 0.025 s),
-so the 3 req/s limit is the bottleneck: 6000 requests are about 33 min, inside the
+Timing: on an idle host a request takes about 0.18 s (download 0.15 s + WebP
+`method=4` 0.025 s), so the 3 req/s limit is the bottleneck and 6000 requests are
+about 33 min. QA measured 0.37 s per request on a loaded stand, 6000 requests
+about 37 min. Either way inside the
 40 min `--max-seconds` cap and the 50 min `TimeoutStartSec`. Expected backfill:
 collectible cards (about 33k requests) in about 6 h, everything (about 118k) in
 about a day, at most 6000 requests per hourly run.

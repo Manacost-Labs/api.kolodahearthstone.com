@@ -195,10 +195,37 @@ class SyncCardRendersTests(unittest.TestCase):
         env.rows = [row("B00", h="h2")] + rows[1:]
         env.run()
         self.assertEqual(len(env.calls), 1)
-        env.calls.clear()
-        env.utc = T0 + timedelta(days=31)
-        env.run()
-        self.assertEqual(len(env.calls), 25)
+
+    def test_bad_image_backoff_grows_to_seven_days_and_success_resets(self):
+        env = Env(self, [row("A")], {"A": (200, b"broken", None)})
+
+        def state():
+            return json.loads((env.var / "plPL.state.json").read_text())["items"]["A"]
+
+        def attempt(after):
+            env.utc += after
+            env.calls.clear()
+            env.run()
+            return len(env.calls)
+
+        self.assertEqual(attempt(timedelta(0)), 1)
+        self.assertEqual(state()["bad_attempts"], 1)
+        expected = [1, 2, 4, 8, 16, 32, 64, 128, 168, 168]  # hours, capped at 7 d
+        for n, hours in enumerate(expected[1:], start=2):
+            interval = timedelta(hours=expected[n - 2])
+            self.assertEqual(attempt(interval - timedelta(minutes=30)), 0, n)
+            self.assertEqual(attempt(timedelta(minutes=30)), 1, n)
+            self.assertEqual(state()["bad_attempts"], n)
+        self.assertEqual(sync.bad_backoff(30), timedelta(days=7))
+        self.assertEqual(env.index()["missing"], [])
+        env.responses["A"] = (200, png(), None)  # CDN recovered
+        self.assertEqual(attempt(timedelta(days=7)), 1)
+        self.assertNotIn("bad_attempts", state())
+        self.assertIn("A", env.index()["renders"])
+        env.responses["A"] = (200, b"broken", None)
+        env.rows = [row("A", h="h2")]  # source_hash change resets the counter
+        self.assertEqual(attempt(timedelta(0)), 1)
+        self.assertEqual(state()["bad_attempts"], 1)
 
     def test_time_budget_stops_with_code_zero(self):
         env = Env(self, [row(f"T{i}") for i in range(10)])
