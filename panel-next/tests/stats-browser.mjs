@@ -116,6 +116,21 @@ export default async function verify(page, root) {
   ensure(alt === 'Охотник', 'Archetype icon without a class word in the name: ' + alt);
   checks.archetypeClassFromRow = true;
 
+  // 4c. HSGuru meta: the top and the table show the Russian name, the English one and the class icon.
+  await open('hsguru_archetypes');
+  const leader = page.locator('.meta-top__row').first();
+  ensure((await leader.locator('b').innerText()) === 'Зоолок', 'HSGuru top: ' + (await leader.innerText()));
+  ensure(
+    (await leader.locator('small').innerText()) === 'Zoolock',
+    'HSGuru top, English: ' + (await leader.innerText()),
+  );
+  ensure((await leader.locator('img').getAttribute('alt')) === 'Чернокнижник', 'HSGuru top icon');
+  const zoolock = page
+    .locator('.data-table tbody tr', { hasText: 'Зоолок' })
+    .locator('.archetype-name__icon');
+  ensure((await zoolock.getAttribute('alt')) === 'Чернокнижник', 'HSGuru table icon');
+  checks.hsguruNamesAndIcons = true;
+
   // 5. Reset only when something differs from the defaults.
   await open('meta');
   const reset = page.getByRole('button', { name: 'Сбросить' });

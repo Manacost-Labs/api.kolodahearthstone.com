@@ -122,9 +122,10 @@ const modules = {
     };
   },
   hsguru_archetypes: () => {
+    // The panel adapter names the field `archetype` (panel/lib/analytics.php); row 1 is a dictionary name.
     const rows = make(242, 13, (i, r) => ({
-      name: archetype(i),
-      class_name: classes[(i * 3) % classes.length],
+      archetype: i === 0 ? 'Zoolock' : archetype(i),
+      class_name: i === 0 ? 'Warlock' : classes[(i * 3) % classes.length],
       winrate: i === 0 ? 61 : round(61.3 - i * 0.12 + r() * 0.2, 1),
       popularity_pct: round(Math.max(0.05, 10.5 - i * 0.07), 2),
       top_deck_win_rate: i % 7 === 3 ? null : round(65 - i * 0.1, 1),
@@ -133,7 +134,7 @@ const modules = {
     }));
     return {
       columns: [
-        column('name', 'Архетип'),
+        column('archetype', 'Архетип'),
         column('class_name', 'Класс'),
         column('winrate', 'Винрейт', 'percent'),
         column('popularity_pct', 'Популярность', 'percent'),
