@@ -69,7 +69,8 @@ export function Catalog({
     if (openedHere.current) {
       openedHere.current = false;
       // Back returns to the entry written before the card opened; the language chosen since then stays.
-      window.addEventListener('popstate', () => setLang(langRef.current), { once: true });
+      const keep = langRef.current;
+      window.addEventListener('popstate', () => setLang(keep), { once: true });
       window.history.back();
     } else window.history.replaceState(null, '', cardUrl(null));
   };
