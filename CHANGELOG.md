@@ -2,6 +2,48 @@
 
 ## Unreleased
 
+- Панель, инспектор карты: текст карты с форматированием — «Боевой клич»
+  жирным, курсив, переносы строк; теги, `[x]`, `$`, `#` и `_` не видны,
+  разбор в `panel-next/lib/card-text.ts`, без `dangerouslySetInnerHTML`.
+- Панель, «История изменений»: открывается на последнем настоящем изменении
+  карты, а не на паре версий, отличающихся служебными ссылками на картинки;
+  переключатель «Только изменения данных» (по умолчанию включён) скрывает
+  служебные версии и поля (`local_*`, `source_hash`). Картинка «После» берётся
+  из архива `image_url` версии, а не из `local_image_url`, который в момент
+  изменения ещё указывал на старый файл (BE_036: «После» показывала 9 маны
+  вместо 10). Картинки сравнения грузятся с высоким приоритетом, до загрузки —
+  скелетон. Только панель, API не менялся.
+- Панель `panel-next`: Next.js 16.4.3 → 16.4.6. С 2026-11-17 сборка на 16.4.3
+  останавливалась на `SecurityFatalError` (GHSA-mfr8-8qww-v76h,
+  GHSA-vc7v-qv4w-wrv8, обе moderate, утечка кэша `use cache` между root
+  params), из-за чего не проходили `npm run check` и деплой панели.
+- Каталог карт на 4 языках (E24, срез данных): новая таблица
+  `hearthstone_card_localizations` (`panel/sql/card_localizations.sql`) хранит
+  для каждого id HearthstoneJSON полный объект карты в локалях `ruRU`, `enUS`,
+  `plPL`, `esES` (в том числе токены и карты всех режимов) и зеркало Postgres
+  `platform/sql/021_card_localizations.sql`. Её пишет суточный
+  `sync_full_card_catalog.py` в одной транзакции с `hearthstone_card_catalog`;
+  охрана публикации не пускает неполную локаль или набор id/dbf, отличающийся от
+  enUS, и пишет только изменившиеся строки. Новые флаги `--hsj-pl`, `--hsj-es`
+  и блок `localizations` в JSON-выводе. API не меняется. Порядок выкладки:
+  `docs/full-card-catalog.md`, раздел «Publication and rollback».
+- `panel/scripts`: в git перенесены прод-версии скриптов от 2026-11-04 (ручной
+  патч прод-релиза `20261104T091515Z-auto-patch-final`), чтобы `deploy-panel.sh`
+  не откатил их: `card_image_versions.py` (новый; изменённая картинка
+  публикуется в `uploads/card-history-media/<sha256>.png`, старые версии не
+  перезаписываются), хеш версии карты без локальных зеркал картинок и служебных
+  полей, `install_card_history.py --upgrade-triggers --trigger-backup`, правки
+  синков картинок и каталога конструкта, BG pool patch. Тесты приведены к
+  прод-поведению. Поведение прода не меняется.
+- `GET /api/v1/card-catalog`, `/card-catalog/{card_id}` и
+  `/card-catalog/dbf/{dbf}` принимают `?locale=ruRU|enUS|plPL|esES` (регистр
+  важен). С параметром у карты появляется блок `localized` (`locale`,
+  `requested_locale`, `fallback`, `name`, `text`, `flavor`, `collection_text`,
+  `how_to_earn`, `how_to_earn_golden`, `targeting_arrow_text`) из таблицы
+  `hearthstone_card_localizations`. Нет строки локали или самой таблицы —
+  тексты enUS, `fallback: true`, 200. Неизвестное значение — 400
+  `invalid_parameter`. `q` ищет и по имени выбранной локали, `Last-Modified`
+  учитывает строку локали. Без параметра ответ не меняется.
 - Новый скрипт `panel/scripts/card_locale_coverage.py`: отчёт покрытия каталога
   карт «локаль × режим» (ruRU, enUS, plPL, esES) по таблице
   `hearthstone_card_localizations`, только чтение; Markdown и `--json`,

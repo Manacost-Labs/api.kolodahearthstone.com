@@ -1,6 +1,12 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { type CardHistoryData, historyChanges, historyDate } from '@/lib/card-history';
+import {
+  type CardHistoryData,
+  dataVersions,
+  historyChanges,
+  historyDate,
+  latestDataChange,
+} from '@/lib/card-history';
 import { fieldLabel } from '@/lib/format';
 import { Value } from './ui';
 import { HistoryImage } from './HistoryImage';
@@ -19,8 +25,10 @@ export function CardHistory({ entity, cardId }: { entity: string; cardId: string
   const page = request.page;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [before, setBefore] = useState(0);
-  const [after, setAfter] = useState(0);
+  // Only the data changes are interesting by default; service-only versions are hidden.
+  const [dataOnly, setDataOnly] = useState(true);
+  // The reader's own choice; until then the newest real change (or the two newest versions) is shown.
+  const [chosen, setChosen] = useState<{ before: number; after: number } | null>(null);
   useEffect(() => {
     const page = request.page;
     const controller = new AbortController();
@@ -53,10 +61,7 @@ export function CardHistory({ entity, cardId }: { entity: string; cardId: string
                 ),
               },
         );
-        if (page === 1) {
-          setAfter(incoming.versions[0]?.version_id || 0);
-          setBefore(incoming.versions[1]?.version_id || 0);
-        }
+        if (page === 1) setChosen(null);
       })
       .catch(cause => {
         if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Ошибка загрузки.');
@@ -66,10 +71,20 @@ export function CardHistory({ entity, cardId }: { entity: string; cardId: string
       });
     return () => controller.abort();
   }, [entity, cardId, legacy, request]);
-  const versions = data?.versions || [];
-  const oldVersion = versions.find(version => version.version_id === before);
-  const newVersion = versions.find(version => version.version_id === after);
-  const changes = oldVersion && newVersion ? historyChanges(oldVersion.snapshot, newVersion.snapshot) : [];
+  const loaded = data?.versions || [];
+  const versions = dataOnly ? dataVersions(loaded) : loaded;
+  const defaults = dataOnly
+    ? latestDataChange(loaded)
+    : loaded.length > 1
+      ? { after: loaded[0].version_id, before: loaded[1].version_id }
+      : null;
+  const { before, after } = chosen ?? defaults ?? { before: 0, after: 0 };
+  const hasMore = !!data && page < data.pagination.total_pages;
+  const noDataChange = dataOnly && !chosen && !defaults && loaded.length > 1;
+  const oldVersion = loaded.find(version => version.version_id === before);
+  const newVersion = loaded.find(version => version.version_id === after);
+  const changes =
+    oldVersion && newVersion ? historyChanges(oldVersion.snapshot, newVersion.snapshot, !dataOnly) : [];
   const versionLabel = (version: (typeof versions)[number]) =>
     historyDate(version.observed_at) + ' · ' + (eventNames[version.event] || version.event);
   const select = (label: string, value: number, update: (value: number) => void) => (
@@ -123,9 +138,39 @@ export function CardHistory({ entity, cardId }: { entity: string; cardId: string
       )}
       {versions.length > 0 && (
         <>
+          <label className="history-filter">
+            <input
+              type="checkbox"
+              checked={dataOnly}
+              onChange={event => {
+                setDataOnly(event.target.checked);
+                setChosen(null);
+              }}
+            />
+            <span>Только изменения данных</span>
+          </label>
+          {noDataChange && (
+            <div role="status" className="notice history-no-change">
+              <p>На загруженных страницах менялись только служебные поля, изменений данных карты нет.</p>
+              {hasMore ? (
+                <button
+                  type="button"
+                  className="button secondary"
+                  disabled={busy || !!error}
+                  onClick={() => setRequest(value => ({ page: value.page + 1 }))}
+                >
+                  Показать ещё
+                </button>
+              ) : (
+                <button type="button" className="button secondary" onClick={() => setDataOnly(false)}>
+                  Показать все версии
+                </button>
+              )}
+            </div>
+          )}
           <div className="history-comparison-controls">
-            {select('До', before, setBefore)}
-            {select('После', after, setAfter)}
+            {select('До', before, value => setChosen({ before: value, after }))}
+            {select('После', after, value => setChosen({ before, after: value }))}
           </div>
           {oldVersion && newVersion && (
             <section aria-label="Различия версий">
@@ -177,8 +222,10 @@ export function CardHistory({ entity, cardId }: { entity: string; cardId: string
                   type="button"
                   className="button secondary"
                   onClick={() => {
-                    setAfter(version.version_id);
-                    setBefore(versions[versions.indexOf(version) + 1]?.version_id || 0);
+                    setChosen({
+                      after: version.version_id,
+                      before: versions[versions.indexOf(version) + 1]?.version_id || 0,
+                    });
                   }}
                 >
                   Сравнить с предыдущей
@@ -190,7 +237,7 @@ export function CardHistory({ entity, cardId }: { entity: string; cardId: string
               </li>
             ))}
           </ol>
-          {data && page < data.pagination.total_pages && (
+          {hasMore && !noDataChange && (
             <button
               type="button"
               className="button secondary"

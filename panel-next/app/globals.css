@@ -2317,11 +2317,53 @@ textarea {
   margin: 0;
   text-align: center;
 }
+.history-image__frame {
+  position: relative;
+  height: 240px;
+  border-radius: 0.5rem;
+}
 .history-image img {
   display: block;
   width: 100%;
-  height: 240px;
+  height: 100%;
   object-fit: contain;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.history-image[data-state='loaded'] img {
+  opacity: 1;
+}
+/* Skeleton of the final size until the picture has loaded. */
+.history-image[data-state='loading'] .history-image__frame {
+  background: linear-gradient(100deg, var(--line) 40%, var(--surface) 50%, var(--line) 60%) 0 0 / 250% 100%;
+  animation: history-image-shimmer 1.2s linear infinite;
+}
+@keyframes history-image-shimmer {
+  to {
+    background-position: -150% 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .history-image[data-state='loading'] .history-image__frame {
+    animation: none;
+  }
+  .history-image img {
+    transition: none;
+  }
+}
+.history-filter {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.75rem;
+}
+.history-no-change {
+  display: grid;
+  gap: 0.5rem;
+  justify-items: start;
+}
+.history-no-change p {
+  margin: 0;
 }
 .history-image figcaption {
   display: grid;
@@ -2370,7 +2412,7 @@ textarea {
     padding: 0.5rem;
     grid-template-rows: 180px auto;
   }
-  .history-image img {
+  .history-image__frame {
     height: 180px;
   }
 }

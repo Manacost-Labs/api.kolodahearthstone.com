@@ -25,13 +25,16 @@ export type CardHistoryData = {
 };
 
 export function archivedHistoryImage(version: HistoryVersion) {
+  // The source image of the version comes first: its archive is what the card looked like when it
+  // was observed. `local_*` is our own mirror; at the moment of a change it still points to the old
+  // file, so it is only a fallback.
   const priorities = [
-    'local_image_url',
+    'image_url',
     'card_image',
     'card_image_url',
     'framed_image',
-    'image_url',
     'hero_image_url',
+    'local_image_url',
   ];
   const media = Object.entries(version.media || {}).sort(([a], [b]) => {
     const rank = (key: string) => {
@@ -79,11 +82,42 @@ function canonical(value: unknown): string {
     );
   return JSON.stringify(value) ?? 'undefined';
 }
-export function historyChanges(before: Row, after: Row) {
+// Fields that change when our own mirror or the importer moves, not when the card changes.
+const serviceFields = new Set(['source_hash']);
+export function isServiceField(key: string) {
+  return key.startsWith('local_') || serviceFields.has(key);
+}
+export function historyChanges(before: Row, after: Row, includeService = false) {
   return [...new Set([...Object.keys(before), ...Object.keys(after)])]
-    .filter(key => !ignored.has(key) && canonical(before[key]) !== canonical(after[key]))
+    .filter(
+      key =>
+        !ignored.has(key) &&
+        (includeService || !isServiceField(key)) &&
+        canonical(before[key]) !== canonical(after[key]),
+    )
     .sort()
     .map(key => ({ key, before: before[key], after: after[key] }));
+}
+const hasDataChange = (older: HistoryVersion, newer: HistoryVersion) =>
+  newer.event !== 'changed' || historyChanges(older.snapshot, newer.snapshot).length > 0;
+/**
+ * Versions with a real change of card data, newest first. A version without a loaded older
+ * neighbour cannot be judged and stays. Versions that differ only in service fields are dropped.
+ */
+export function dataVersions(versions: HistoryVersion[]) {
+  return versions.filter((version, index) => {
+    const older = versions[index + 1];
+    return !older || hasDataChange(older, version);
+  });
+}
+/** The newest real change and the version before it; null when the loaded versions hold none. */
+export function latestDataChange(versions: HistoryVersion[]) {
+  const visible = dataVersions(versions);
+  for (let index = 0; index < visible.length - 1; index++) {
+    if (hasDataChange(visible[index + 1], visible[index]))
+      return { after: visible[index].version_id, before: visible[index + 1].version_id };
+  }
+  return null;
 }
 export function historyIdentity(row: Row, apiBase?: string) {
   const endpoint = apiBase?.split('/').pop();

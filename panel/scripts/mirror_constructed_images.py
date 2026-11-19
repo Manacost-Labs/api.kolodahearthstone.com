@@ -21,6 +21,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
+from card_image_versions import current_image_path, publish_image
 
 from backfill_constructed_images import (
     connect_db,
@@ -144,8 +145,6 @@ def local_is_current(target: Path, source_url: str, entry: Any) -> bool:
     меняется картинка. Если записи нет (файл скачан до появления состояния),
     подтверждаем иначе: у Blizzard хешем из пути, у остальных датой на сервере.
     """
-    if isinstance(entry, dict) and entry.get("source_url") == source_url:
-        return True
     expected = content_hash_from_url(source_url)
     if expected is not None:
         return sha256_file(target) == expected
@@ -161,14 +160,22 @@ def candidates(conn, kind: str, force: bool) -> list[dict[str, Any]]:
     url_col = spec["url_column"]
     where = f"c.{url_col} IS NOT NULL AND c.{url_col} <> ''"
     sql = f"""
-        SELECT c.card_id, c.{url_col} AS source_url, c.{local_col} AS local_url
+        SELECT c.card_id, c.{url_col} AS source_url, c.{local_col} AS local_url,
+               h.card_id AS hsj_card_id
         FROM constructed_cards c
+        LEFT JOIN hearthstone_card_catalog h ON h.card_id=c.card_id
         WHERE {where}
         ORDER BY c.card_id ASC
     """
     with conn.cursor() as cur:
         cur.execute(sql)
-        return list(cur.fetchall())
+        rows = list(cur.fetchall())
+    if kind == "normal":
+        for row in rows:
+            if row.get("hsj_card_id"):
+                row["fallback_url"] = row["source_url"]
+                row["source_url"] = HSJ_RENDER.format(card_id=row["card_id"])
+    return rows
 
 
 def download(urls: list[str], target: Path) -> tuple[int, str]:
@@ -216,7 +223,7 @@ def mirror(conn, config: dict[str, Any], kind: str, limit: int | None,
            dry_run: bool, force: bool, state: dict[str, Any],
            seed_state: bool) -> dict[str, Any]:
     spec = KINDS[kind]
-    upload_dir = Path(str(config.get("upload_dir") or APP_ROOT / "uploads"))
+    upload_dir = Path(str(config.get("upload_dir") or APP_ROOT / "uploads")).resolve()
     upload_url = str(config.get("upload_url") or "/uploads").rstrip("/")
     target_dir = upload_dir / spec["dirname"]
 
@@ -228,6 +235,8 @@ def mirror(conn, config: dict[str, Any], kind: str, limit: int | None,
         source_url = str(row["source_url"])
         rel_url = f"{upload_url}/{spec['dirname']}/{safe_card_id(card_id)}.png"
         target = target_dir / f"{safe_card_id(card_id)}.png"
+        target = current_image_path(row.get("local_url"), upload_dir, target)
+        rel_url = upload_url + "/" + target.relative_to(upload_dir).as_posix()
         key = f"{kind}:{card_id}"
         on_disk = target.is_file() and target.stat().st_size > 0
 
@@ -283,10 +292,21 @@ def mirror(conn, config: dict[str, Any], kind: str, limit: int | None,
         if on_disk:
             return ("linked", card_id, rel_url, 0, None)
         urls = [str(row["source_url"])]
+        if row.get("fallback_url"):
+            urls.append(str(row["fallback_url"]))
         if kind == "normal":
             urls.append(HSJ_RENDER.format(card_id=card_id))
         try:
-            size, used = download(urls, target)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            descriptor, name = tempfile.mkstemp(dir=target.parent, suffix=".png")
+            os.close(descriptor)
+            candidate = Path(name)
+            try:
+                size, used = download(urls, candidate)
+                published, _digest = publish_image(candidate, target, upload_dir)
+                rel_url = upload_url + "/" + published.relative_to(upload_dir).as_posix()
+            finally:
+                candidate.unlink(missing_ok=True)
             return ("downloaded" if used == urls[0] else "downloaded_fallback",
                     card_id, rel_url, size, None)
         except Exception as exc:
