@@ -339,6 +339,30 @@ await waitFor(drawerGone);
 await viewport(1487, 1058);
 await navigate(root + '?action=parsers', 'document.querySelectorAll(".sources-table tbody tr").length===3');
 await screenshot('parsers-desktop.png');
+// Source details use the same drawer as statistics rows, not a modal <dialog>.
+const sourceDetails = '.sources-table tbody tr:first-child .row-actions .link-button';
+await click(sourceDetails);
+await waitFor(drawerOpen);
+await settle();
+checks.sourceDrawer = await evaluate(
+  '(() => { const d=document.querySelector(".ui-drawer"); return {role:d.getAttribute("role"),modal:!!document.querySelector("dialog[open]"),facts:d.querySelectorAll(".facts dt").length>0,inside:d.contains(document.activeElement)}; })()',
+);
+assert.deepEqual(checks.sourceDrawer, { role: 'dialog', modal: false, facts: true, inside: true });
+await screenshot('parsers-drawer-desktop.png');
+await pressEscape();
+await waitFor(drawerGone);
+checks.sourceDrawerEscFocus = await evaluate(
+  `document.activeElement===document.querySelector(${JSON.stringify(sourceDetails)})`,
+);
+assert.equal(checks.sourceDrawerEscFocus, true);
+await click(sourceDetails);
+await waitFor(drawerOpen);
+await click('.ui-drawer__close');
+await waitFor(drawerGone);
+checks.sourceDrawerCloseFocus = await evaluate(
+  `document.activeElement===document.querySelector(${JSON.stringify(sourceDetails)})`,
+);
+assert.equal(checks.sourceDrawerCloseFocus, true);
 await click('tbody tr:first-child .row-actions button:last-child');
 checks.runConfirm = await evaluate('!!document.querySelector("dialog[open]")');
 await click('dialog .form-actions button:last-child');
