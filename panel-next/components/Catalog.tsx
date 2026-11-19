@@ -47,6 +47,8 @@ export function Catalog({
   const { pending, params, search, changeSearch, go, mode, view } = useCatalogQuery(query);
   const { lang, setLang } = useCardLang();
   const locales = useRowLocales(data.records, lang);
+  const langRef = useRef(lang);
+  langRef.current = lang;
   const [filtersOpen, setFiltersOpen] = useState(false);
   // The open card lives in the URL (?card=…), so it can be shared, reloaded and closed with Back.
   // history.pushState is synced by the Next router and needs no server round trip.
@@ -66,6 +68,8 @@ export function Catalog({
   const closeCard = () => {
     if (openedHere.current) {
       openedHere.current = false;
+      // Back returns to the entry written before the card opened; the language chosen since then stays.
+      window.addEventListener('popstate', () => setLang(langRef.current), { once: true });
       window.history.back();
     } else window.history.replaceState(null, '', cardUrl(null));
   };
