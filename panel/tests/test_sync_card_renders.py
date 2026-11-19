@@ -263,6 +263,44 @@ class SyncCardRendersTests(unittest.TestCase):
         env.run()
         self.assertEqual(len(env.calls), 5)  # only the rest, nothing downloaded twice
 
+    def test_incomplete_read_is_an_upstream_error_not_a_crash(self):
+        import http.client
+
+        class Resp:
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self, _n):
+                if self.broken:
+                    raise http.client.IncompleteRead(b"par", 100)
+                return png()
+
+        calls = []
+
+        def urlopen(request, timeout):
+            calls.append(request.full_url)
+            resp = Resp()
+            resp.broken = request.full_url.endswith("/B.png")
+            return resp
+
+        env = Env(self, [row("A"), row("B"), row("C")])
+        env.fetch = sync.http_fetch
+        with patch.object(sync.urllib.request, "urlopen", urlopen):
+            self.assertEqual(env.run(), 0)
+            self.assertEqual(len(calls), 3)  # the run went on after B
+            last = env.last()
+            self.assertEqual((last["errors"], last["downloaded"]), (1, 2))
+            self.assertEqual(sorted(env.index()["renders"]), ["A", "C"])
+            self.assertEqual(env.index()["missing"], [])
+            calls.clear()
+            env.run()
+            self.assertEqual([c.rsplit("/", 1)[1] for c in calls], ["B.png"])
+
     def test_missing_uploads_dir_is_a_clear_error_and_writes_last_run(self):
         env = Env(self, [row("A")])
         self.assertEqual(env.run("--uploads-dir", str(env.tmp / "nope")), 2)

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Загрузчик рендеров карт: оборванный ответ CDN (`IncompleteRead` и другие
+  `http.client.HTTPException`) считается ошибкой апстрима, как таймаут или 5xx,
+  и больше не роняет весь прогон; id повторяется в следующем. Refs #131.
 - Каталог карт на 4 языках (E24, срез рендеров): при `?locale=` блок
   `localized` в `/api/v1/card-catalog`, `/{id}` и `/dbf/{dbf}` получает
   `render_url` и `render_media_verified`. Скачанный рендер — ссылка на наш
