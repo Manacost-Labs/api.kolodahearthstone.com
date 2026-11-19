@@ -124,8 +124,8 @@ test('numbers, percents and counts use Russian grouping', () => {
   assert.match(formatNumber(1234.567), /^1\s234,57$/u);
   assert.equal(formatNumber('0'), '0');
   assert.equal(formatNumber(null), '—');
-  assert.equal(formatPercent(52.3), '52,3%');
-  assert.equal(formatPercent('12%'), '12%');
+  assert.equal(formatPercent(52.3), '52,3\u00a0%');
+  assert.equal(formatPercent('12%'), '12,0\u00a0%');
   assert.equal(countLabel(21, { one: 'источник', few: 'источника', many: 'источников' }), '21 источник');
   assert.equal(yesNo(1), 'Да');
   assert.equal(yesNo('0'), 'Нет');
@@ -192,7 +192,7 @@ test('statistics filters use the PHP panel wording', () => {
   assert.equal(paramLabel('card_period'), 'Период карт');
   assert.equal(paramLabel('unknown_param'), 'Unknown param');
   assert.equal(optionLabel('card_period', '7d'), '7 дней');
-  assert.equal(optionLabel('rating', '50'), 'Top 50%');
+  assert.equal(optionLabel('rating', '50'), 'Лучшие 50 %');
   assert.equal(optionLabel('rank', 'not_listed'), 'not_listed');
 });
 
@@ -229,4 +229,70 @@ test('table rows: attention follows status tones and search folds case and ё', 
   assert.equal(rowMatches({ description: 'Ёлка' }, columns, 'елка'), true);
   assert.equal(rowMatches(fresh, columns, 'radars'), false);
   assert.equal(rowMatches(fresh, columns, ''), true);
+});
+
+// One reading of a share: comma, U+00A0 before the sign, one decimal (two between 0 and 1 %).
+const percentShape = /^[-\u2212]?\d{1,3}(\u00a0\d{3})*,\d{1,2}\u00a0%$/u;
+
+test('every percent, as a number or as text, reads in one shape', () => {
+  const numbers = fc.double({ min: -100000, max: 100000, noNaN: true });
+  fc.assert(
+    fc.property(numbers, value => {
+      assert.match(formatPercent(value), percentShape);
+      assert.match(formatPercent(String(value)), percentShape);
+      assert.match(formatPercent(`${value}%`), percentShape);
+      assert.match(formatPercent(`${value} %`), percentShape);
+    }),
+  );
+  // The same share in any spelling gives the same text.
+  fc.assert(
+    fc.property(fc.integer({ min: 0, max: 100000 }), tenths => {
+      const value = tenths / 10;
+      const text = formatPercent(value);
+      assert.equal(formatPercent(`${value}%`), text);
+      assert.equal(formatPercent(String(value).replace('.', ',') + ' %'), text);
+    }),
+  );
+});
+
+test('percent decimals: one, two only for a value between 0 and 1 %, never 0,0 for a non-zero share', () => {
+  fc.assert(
+    fc.property(fc.double({ min: 1, max: 100000, noNaN: true }), value => {
+      assert.match(formatPercent(value), /,\d\u00a0%$/u);
+    }),
+  );
+  fc.assert(
+    fc.property(fc.double({ min: 0.005, max: 0.994, noNaN: true }), value => {
+      assert.match(formatPercent(value), /,\d\d\u00a0%$/u);
+      assert.notEqual(formatPercent(value), '0,00\u00a0%');
+    }),
+  );
+  assert.equal(formatPercent('7.98%'), '8,0\u00a0%');
+  assert.equal(formatPercent(58.5), '58,5\u00a0%');
+  assert.equal(formatPercent('57.70%'), '57,7\u00a0%');
+  assert.equal(formatPercent(0.45), '0,45\u00a0%');
+  assert.equal(formatPercent(0), '0,0\u00a0%');
+  assert.equal(formatPercent(0.001), '0,0\u00a0%');
+  assert.equal(formatPercent(null), '—');
+  assert.equal(formatPercent('n/a'), '—');
+  assert.equal(formatPercent(Number.NaN), '—');
+});
+
+test('filter values read in Russian, never as slugs', () => {
+  assert.equal(optionLabel('period', 'past_day'), '24 часа');
+  assert.equal(optionLabel('period', 'past_week'), '7 дней');
+  assert.equal(optionLabel('period', 'patch_37.0.2'), 'Патч 37.0.2');
+  assert.equal(optionLabel('period', 'black_empire'), 'Чёрная империя');
+  assert.equal(optionLabel('period', 'black_empire_ban'), 'Баны');
+  assert.equal(optionLabel('rank', 'legend'), 'Легенда');
+  assert.equal(optionLabel('rank', 'diamond_4to1'), 'Алмаз 4–1');
+  assert.equal(optionLabel('rank', 'top_legend'), 'Топ легенды');
+  assert.equal(optionLabel('format', 'standard'), 'Стандарт');
+  assert.equal(optionLabel('format', 'STANDARD'), 'Стандарт');
+  assert.equal(optionLabel('game_type', 'RANKED_STANDARD'), 'Рейтинговый стандарт');
+  assert.equal(optionLabel('rank_range', 'DIAMOND_FOUR_THROUGH_DIAMOND_ONE'), 'Алмаз 4–1');
+  assert.equal(optionLabel('min_games', '1000'), '1\u00a0000');
+  assert.equal(optionLabel('mode', 'duos'), 'Дуо');
+  // Paging is the panel's own affair: it has no wording of limit and offset.
+  assert.equal(paramLabel('limit'), 'Limit');
 });

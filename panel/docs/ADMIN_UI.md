@@ -120,6 +120,27 @@ These three PHP adapters are reachable only through the private
   `/?action=analytics` without `stats` opens «Мета»; old
   `/?action=analytics&stats=<key>` links keep working. The page heading stays
   the registry title of the module.
+- Statistics filters (`panel-next/components/stats/`): one card above the KPI
+  row. Every enum parameter, and a token parameter that the answer carries
+  `options` for (the meta period, with the current patch), is a Valyro `Select`
+  with Russian wording from `lib/format.ts` (`optionLabel`: «24 часа»,
+  «Патч 37.0.2», «Легенда», «Алмаз 4–1», «Стандарт»); lists apply at once,
+  typed fields on Enter or blur, the search `q` is one field. There is no
+  «Применить», and `limit` / `offset` are never fields: modules that take
+  `offset` page by 25 (the table's own page size) with a Valyro `Pagination` («1–25 из 812»); the page is
+  the `page` URL parameter and `analyticsRequest` turns it into `limit` and
+  `offset`. «Сбросить» shows only when a filter or the page differs from the
+  defaults. A module with a required filter and no value («Статистика карты»)
+  shows the field and a «Выберите карту» hint instead of the KPI and table.
+  `components/stats/ModuleView.tsx` is the empty slot for a module's own view.
+- Numbers: `formatPercent` takes percent units as a number or as text
+  (`"7.98%"`, `"58.5"`) and writes `58,5 %` (comma, U+00A0 before the sign, one
+  decimal; a share between 0 and 1 % keeps two, `0,45 %`). KPI come from the
+  answer's `summary` (`Данные на`, `Игр в выборке`, the count); an older PHP
+  without keyed `summary` gets the date from `meta.updated_at`, the row count
+  and the sum of games counted by the panel (`lib/stats-view.ts`). Chosen
+  filters are not repeated in the KPI, and «Данные на» replaces the
+  «Обновлено» line. `tests/stats-browser.mjs` walks all 13 modules.
 - On the source registry (`stats=overview`) long ids wrap inside their column,
   «Что загружается» keeps two lines (full text in «Подробнее»), and the seven
   columns fit 1280 and 1440 px without sideways scrolling.

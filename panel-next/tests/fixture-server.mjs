@@ -3,6 +3,7 @@ import http from 'node:http';
 import { execFile } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { promisify } from 'node:util';
+import { moduleAnswer } from './fixtures/analytics-data.mjs';
 const run = promisify(execFile);
 // Mirror of analytics_module_registry() as the PHP adapter exposes it; panel/tests/analytics_registry_snapshot_test.php keeps it current.
 const registry = JSON.parse(
@@ -58,22 +59,30 @@ function fixtureAnalytics(module, search) {
       502,
     ];
   const card = (search.get('card_name') || '').trim();
+  const answer = moduleAnswer(module, definition, search);
+  const generic = [
+    { name: 'fixture ' + module + ' 1', rows: 10 },
+    { name: 'fixture ' + module + ' 2', rows: 20 },
+  ];
   return [
     {
       ok: true,
       module,
       title: card ? definition.title + ': ' + card : definition.title,
       description: definition.description,
-      summary: [{ label: 'Записей', value: 2 }],
-      columns: [
+      summary: answer && !answer.legacy ? answer.summary : [{ label: 'Записей', value: 2 }],
+      columns: answer?.columns ?? [
         { key: 'name', label: 'Название' },
         { key: 'rows', label: 'Строк' },
       ],
-      rows: [
-        { name: 'fixture ' + module + ' 1', rows: 10 },
-        { name: 'fixture ' + module + ' 2', rows: 20 },
-      ],
-      meta: { total: 2, updated_at: '2026-10-02T12:00:00Z', cached: false, stale: false },
+      rows: answer?.rows ?? generic,
+      meta: {
+        total: answer?.total ?? 2,
+        updated_at: answer ? '2026-11-19T11:00:02Z' : '2026-10-02T12:00:00Z',
+        cached: false,
+        stale: false,
+      },
+      ...(answer?.options && !answer.legacy ? { options: answer.options } : {}),
     },
     200,
   ];

@@ -55,3 +55,20 @@ test('response message comes from the adapter or falls back to a neutral text', 
   assert.equal(responseMessage(null, 502), 'Не удалось загрузить статистику (код 502).');
   assert.equal(responseMessage({ message: 42 }, 422), 'Не удалось загрузить статистику (код 422).');
 });
+
+test('page becomes limit and offset for a module that pages, and never reaches other modules', () => {
+  const paged = { params: { limit: { type: 'int' }, offset: { type: 'int' } } };
+  const third = analyticsRequest(
+    new URLSearchParams('stats=decks&page=3&offset=9&limit=500'),
+    'decks',
+    paged,
+  );
+  assert.equal(third.backend.get('limit'), '25');
+  assert.equal(third.backend.get('offset'), '50');
+  assert.equal(third.backend.has('page'), false);
+  const first = analyticsRequest(new URLSearchParams('stats=decks&page=abc'), 'decks', paged);
+  assert.equal(first.backend.get('offset'), '0');
+  const flat = analyticsRequest(new URLSearchParams('stats=meta&page=3&offset=5'), 'meta', meta);
+  assert.equal(flat.backend.has('offset'), false);
+  assert.equal(flat.backend.has('page'), false);
+});

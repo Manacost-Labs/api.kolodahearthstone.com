@@ -43,7 +43,14 @@ export interface AnalyticsModule {
   description: string;
   params: Record<
     string,
-    { type: string; values?: string[]; default?: string | number; min?: number; max?: number }
+    {
+      type: string;
+      values?: string[];
+      default?: string | number;
+      min?: number;
+      max?: number;
+      required?: boolean;
+    }
   >;
 }
 export interface AnalyticsData {
@@ -52,7 +59,9 @@ export interface AnalyticsData {
   description: string;
   columns: { key: string; label: string; type?: string }[];
   rows: Row[];
-  summary: { label: string; value: string | number; tone?: string }[];
+  summary: { key?: string; label: string; value: string | number; type?: string; tone?: string }[];
+  /** Values of the list filters (#104); the period list comes from the data, so it is never in the registry. */
+  options?: Record<string, string[]>;
   meta: Row;
   [key: string]: unknown;
 }
