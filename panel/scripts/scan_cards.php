@@ -1297,9 +1297,10 @@ function scan_hearthstonejson(PDO $pdo, bool $dryRun = false): array
 {
     $ruCards = fetch_json(HSJ_RU_URL);
     $enCards = fetch_json(HSJ_EN_URL);
+    validate_battleground_catalog_snapshots($ruCards, $enCards);
     $poolPatch = json_decode(file_get_contents(__DIR__ . '/../data/battleground-pool-36.6.1.json'), true, 512, JSON_THROW_ON_ERROR);
-    $ruCards = apply_battleground_pool_patch($ruCards, $poolPatch);
-    $enCards = apply_battleground_pool_patch($enCards, $poolPatch);
+    $ruCards = apply_battleground_pool_patch($ruCards, $poolPatch, true);
+    $enCards = apply_battleground_pool_patch($enCards, $poolPatch, true);
     $enById = [];
     foreach ($enCards as $card) {
         if (is_array($card) && !empty($card['id'])) {
@@ -1339,7 +1340,9 @@ function scan_hearthstonejson(PDO $pdo, bool $dryRun = false): array
                AND premium.variant_kind = 'golden'
             SET base_card.golden_image = premium.card_image
             WHERE premium.card_image IS NOT NULL AND premium.card_image <> ''
-              AND (base_card.golden_image IS NULL OR base_card.golden_image NOT LIKE '/uploads/golden/%')
+              AND (base_card.golden_image IS NULL OR
+                   (base_card.golden_image NOT LIKE '/uploads/golden/%'
+                    AND base_card.golden_image NOT LIKE '/uploads/card-history-media/%'))
         ");
     }
 

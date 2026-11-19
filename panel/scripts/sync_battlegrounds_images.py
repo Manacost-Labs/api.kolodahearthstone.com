@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from backfill_constructed_images import connect_db, load_php_config
+from card_image_versions import publish_image
 
 
 APP_ROOT = Path(os.environ.get("KOLODAHS_APP_ROOT") or Path(__file__).resolve().parents[1])
@@ -69,7 +70,7 @@ def active_cards(conn, limit: int | None, include_archived: bool = False, card_i
     """
     params: list[Any] = []
     if not include_archived:
-        sql += " AND base.in_pool = 1"
+        sql += " AND (base.in_pool = 1 OR base.changed_at >= UTC_TIMESTAMP() - INTERVAL 2 DAY)"
     if card_ids:
         if any(not SAFE_CARD_ID_RE.fullmatch(card_id) for card_id in card_ids):
             raise ValueError("Invalid card id")
@@ -86,7 +87,7 @@ def active_cards(conn, limit: int | None, include_archived: bool = False, card_i
 
 def local_path(public_path: str, expected_dir: str) -> Path:
     prefix = f"/uploads/{expected_dir}/"
-    if not public_path.startswith(prefix):
+    if not public_path.startswith((prefix, "/uploads/card-history-media/")):
         raise ValueError(f"Unexpected local image path: {public_path}")
     candidate = APP_ROOT / public_path.lstrip("/")
     if candidate.name in ("", ".", ".."):
@@ -94,7 +95,8 @@ def local_path(public_path: str, expected_dir: str) -> Path:
     # Keep the final link: offload replaces staged images with links into the
     # S3 mount, and the resolved remote path is outside this directory.
     path = candidate.parent.resolve() / candidate.name
-    allowed = (APP_ROOT / "uploads" / expected_dir).resolve()
+    directory = "card-history-media" if public_path.startswith("/uploads/card-history-media/") else expected_dir
+    allowed = (APP_ROOT / "uploads" / directory).resolve()
     if path.parent != allowed:
         raise ValueError(f"Image path escapes {allowed}: {public_path}")
     return path
@@ -227,16 +229,20 @@ def replace_normal_card(metadata: dict[str, Any]) -> str:
     output = Path(output_name)
     try:
         download(str(metadata["source_url"]), source)
+        if target.is_file() and sha256_file(source) == sha256_file(target):
+            return sha256_file(target)
         subprocess.run(
-            ["convert", str(source), "-resize", "256x388!", str(output)],
+            ["convert", str(source), "-resize", "256x388!", "-strip", str(output)],
             check=True,
             capture_output=True,
             text=True,
         )
         identify_png(output, (256, 388))
         os.chmod(output, 0o644)
-        os.replace(output, target)
-        return sha256_file(target)
+        published, digest = publish_image(output, target, APP_ROOT / "uploads")
+        metadata["target"] = str(published)
+        metadata["public_path"] = "/uploads/" + published.relative_to((APP_ROOT / "uploads").resolve()).as_posix()
+        return digest
     finally:
         source.unlink(missing_ok=True)
         output.unlink(missing_ok=True)
@@ -253,25 +259,19 @@ def replace_golden_card(metadata: dict[str, Any]) -> str:
     output = Path(output_name)
     try:
         download(str(metadata["source_url"]), source)
+        if target.is_file() and sha256_file(source) == sha256_file(target):
+            return sha256_file(target)
         subprocess.run(
-            ["convert", str(source), "-resize", "512x776!", str(output)],
+            ["convert", str(source), "-resize", "512x776!", "-strip", str(output)],
             check=True,
             capture_output=True,
             text=True,
         )
         identify_png(output, (512, 776))
         os.chmod(output, 0o644)
-        digest = sha256_file(output)
-        # Keep older renders available to snapshots and rollback. Content hashes
-        # also invalidate application/CDN caches without relying on timestamps.
-        versioned = target.with_name(str(metadata["card_id"]) + "-" + digest + ".png")
-        if versioned.exists():
-            if sha256_file(versioned) != digest:
-                raise RuntimeError("Immutable golden asset collision")
-        else:
-            os.replace(output, versioned)
-        metadata["target"] = str(versioned)
-        metadata["public_path"] = "/uploads/golden/" + versioned.name
+        published, digest = publish_image(output, target, APP_ROOT / "uploads")
+        metadata["target"] = str(published)
+        metadata["public_path"] = "/uploads/" + published.relative_to((APP_ROOT / "uploads").resolve()).as_posix()
         return digest
     finally:
         source.unlink(missing_ok=True)
@@ -283,7 +283,7 @@ def normal_assets(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for row in rows:
         card_id = str(row["card_id"])
         public_path = str(row.get("card_image") or "")
-        if not public_path.startswith("/uploads/cards/"):
+        if not public_path.startswith(("/uploads/cards/", "/uploads/card-history-media/")):
             continue
         assets.append(
             {
@@ -292,6 +292,7 @@ def normal_assets(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "kind": "normal",
                 "source_url": HSJ_BGS_RENDER_BASE + urllib.parse.quote(card_id) + ".png",
                 "target": str(local_path(public_path, "cards")),
+                "public_path": public_path,
             }
         )
     return assets
@@ -355,11 +356,11 @@ def golden_assets(rows: list[dict[str, Any]], urls: dict[int, str]) -> list[dict
         # Golden variants are separate rows in HearthstoneJSON. The public
         # golden toggle belongs to the base card, so avoid constructing invalid
         # names such as BG36_921_G_G_triple.png for variant rows.
-        if card_id.endswith("_G") or card_id.endswith("_Gt"):
+        if row.get("variant_kind") == "golden" or re.search(r"_Gt?\d*$", card_id):
             continue
         public_path = str(row.get("golden_image") or "")
         blizzard_url = urls.get(int(row.get("dbf") or 0))
-        has_local_path = public_path.startswith("/uploads/golden/")
+        has_local_path = public_path.startswith(("/uploads/golden/", "/uploads/card-history-media/"))
 
         if not has_local_path:
             public_path = f"/uploads/golden/{card_id}.png"
@@ -407,12 +408,14 @@ def persist_golden_paths(conn, assets: list[dict[str, Any]]) -> int:
             updated += cur.execute(
                 """
                 UPDATE battlegrounds_cards
-                SET golden_image = %s,
+                SET {field} = %s,
                     updated_at = CURRENT_TIMESTAMP
-                WHERE card_id = %s AND (NOT (golden_image <=> %s) OR %s)
-                """,
-                (asset["public_path"], asset["card_id"], asset["public_path"], bool(asset.get("bytes_refreshed"))),
+                WHERE card_id = %s AND NOT ({field} <=> %s)
+                """.format(field="card_image" if asset["kind"] == "normal" else "golden_image"),
+                (asset["public_path"], asset["card_id"], asset["public_path"]),
             )
+            if asset["kind"] != "golden":
+                continue
             # The standalone golden record must use the same verified BG frame.
             # HSJ upsert preserves existing local images, so subsequent scans
             # retain this link rather than falling back to a constructed frame.
@@ -422,9 +425,9 @@ def persist_golden_paths(conn, assets: list[dict[str, Any]]) -> int:
                 INNER JOIN battlegrounds_cards AS base ON premium.dbf = base.premium_dbf
                 SET premium.card_image = %s, premium.updated_at = CURRENT_TIMESTAMP
                 WHERE base.card_id = %s AND premium.variant_kind = 'golden'
-                  AND (NOT (premium.card_image <=> %s) OR %s)
+                  AND NOT (premium.card_image <=> %s)
                 """,
-                (asset["public_path"], asset["card_id"], asset["public_path"], bool(asset.get("bytes_refreshed"))),
+                (asset["public_path"], asset["card_id"], asset["public_path"]),
             )
     conn.commit()
     return updated
@@ -531,9 +534,10 @@ def main() -> int:
                 golden_stats = {"checked": 0, "refreshed": 0, "unchanged": 0, "errors": [{"kind": "golden", "error": str(exc)}]}
             golden_stats.pop("_refreshed_assets", None)
             verified_golden_assets = golden_stats.pop("_verified_assets", [])
-            normal_stats.pop("_refreshed_assets", None)
+            refreshed_normal_assets = normal_stats.pop("_refreshed_assets", [])
             normal_stats.pop("_verified_assets", None)
             persisted_golden = 0 if args.dry_run else persist_golden_paths(conn, verified_golden_assets)
+            persisted_normal = 0 if args.dry_run else persist_golden_paths(conn, refreshed_normal_assets)
             if not args.dry_run:
                 save_state(args.state_file, state)
             errors = list(normal_stats["errors"]) + list(golden_stats["errors"])
@@ -543,6 +547,7 @@ def main() -> int:
                 "normal": normal_stats,
                 "golden": golden_stats,
                 "golden_paths_persisted": persisted_golden,
+                "normal_paths_persisted": persisted_normal,
                 "golden_source": {
                     "available": len(golden_urls),
                     "fallbacks": sum(asset.get("source_kind") == "hearthpwn_fallback" for asset in golden_asset_list),
