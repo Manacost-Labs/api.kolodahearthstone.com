@@ -1727,6 +1727,151 @@ def test_a_concept_title_is_a_brew_even_next_to_its_archetype_but_not_a_unique_l
     assert "unique_list" not in scored.reasons
 
 
+# --- 4e. a concept word backed by a meta package is no concept (F5) ------------------
+
+_WORD_PACKAGE = [
+    ("Yogg", "yogg_package"),
+    ("Reno", "reno_highlander"),
+    ("Highlander", "reno_highlander"),
+    ("HL", "reno_highlander"),
+    ("Odd", "odd_even"),
+    ("Even", "odd_even"),
+    ("Tog", "togwaggle_mill"),
+    ("Mill", "togwaggle_mill"),
+    ("CThun", "cthun"),
+]
+
+
+def _named_twin(title: str, cls: str = "Priest") -> CatalogDeck:
+    """A rare, non-ladder list of the candidate's own name, 13 of 15 cards shared."""
+    return _deck("TWIN", [*range(1, 14), 201, 202], title, cls=cls, games=60)
+
+
+@pytest.mark.parametrize(("word", "label"), _WORD_PACKAGE)
+def test_a_concept_word_whose_package_is_meta_in_the_format_gives_no_concept_title(
+    word: str, label: str, yogg_marker: None
+) -> None:
+    title = f"{word} Priest"
+    markers = _PACKAGE_MARKER_CARDS.get(label) or [_PACKAGE_MARKER_CARDS["cthun"][0]]
+    scored = _classify(
+        title,
+        _sharing(13),
+        _named_twin(title),
+        _marked_ladder(markers, cls="Priest"),
+        cls="Priest",
+    )
+
+    assert scored.concept_hit is False
+    assert "concept_title" not in scored.reasons
+    assert scored.kind == "off_meta"
+
+
+@pytest.mark.parametrize(("word", "label"), _WORD_PACKAGE)
+def test_a_concept_word_whose_package_is_rare_in_the_format_still_counts(
+    word: str, label: str, yogg_marker: None
+) -> None:
+    title = f"{word} Priest"
+    big = _deck("BIG", range(500, 515), "Pure Priest", cls="Priest", games=LADDER_GAMES)
+
+    scored = _classify(title, _sharing(13), _named_twin(title), big, cls="Priest")
+
+    assert scored.concept_hit is True
+    assert "concept_title" in scored.reasons
+    assert scored.kind == "brew"
+
+
+def test_standard_yogg_priest_next_to_its_own_archetype_is_off_meta(yogg_marker: None) -> None:
+    markers = _PACKAGE_MARKER_CARDS["yogg_package"]
+    twin = _named_twin("Yogg Priest")
+
+    scored = _classify("Yogg Priest", _sharing(13, extra=markers), twin, _marked_ladder(markers, cls="Priest"), cls="Priest")
+
+    assert (scored.content_sim, scored.kind) == (0.7647, "off_meta")
+    assert scored.is_fun is True
+
+
+def test_a_second_concept_word_keeps_the_concept_title(yogg_marker: None) -> None:
+    markers = _PACKAGE_MARKER_CARDS["yogg_package"]
+
+    scored = _classify(
+        "Casino Yogg Priest",
+        _sharing(13),
+        _named_twin("Casino Yogg Priest"),
+        _marked_ladder(markers, cls="Priest"),
+        cls="Priest",
+    )
+
+    assert "concept_title" in scored.reasons
+    assert scored.kind == "brew"
+
+
+@pytest.mark.parametrize("word", ["Casino", "Rainbow", "Questline", "XL"])
+def test_concept_words_without_a_package_work_as_before(word: str, yogg_marker: None) -> None:
+    markers = _PACKAGE_MARKER_CARDS["yogg_package"]
+
+    scored = _classify(
+        f"{word} Priest",
+        _sharing(13),
+        _named_twin(f"{word} Priest"),
+        _marked_ladder(markers, cls="Priest"),
+        cls="Priest",
+    )
+
+    assert "concept_title" in scored.reasons
+    assert scored.kind == "brew"
+
+
+# --- 4f. generic names are judged without service prefixes (F6) -------------------------
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "XL Blood DK",
+        "XL Elemental Shaman",
+        "HL Aggro Paladin",
+        "XL HL Dude Paladin",
+        "Highlander Face Hunter",
+        "BBU Blood DK",
+        "STD XL Frost DK",
+        "Unholy DK",
+    ],
+)
+def test_a_generic_name_behind_service_prefixes_is_still_generic(title: str) -> None:
+    assert fun_decks._generic_ladder_title(title) is True
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "XL LPG Mage",
+        "XL Protoss Druid",
+        "XL Starship Rogue",
+        "XL Questline Shaman",
+        "XL HL Imbue Rogue",
+        "XL BBU Harold DK",
+        "FUU Plague DK",
+        "BBB Even DK",
+        "XL",
+        "Blood Dragon Mill",
+    ],
+)
+def test_a_distinctive_name_behind_service_prefixes_is_not_generic(title: str) -> None:
+    assert fun_decks._generic_ladder_title(title) is False
+
+
+def test_generic_gate_fires_for_a_prefixed_generic_name_but_not_with_a_spicy_package() -> None:
+    cards = _sharing(0)
+    big = _deck("BIG", range(500, 515), "Pure Shaman", cls="Shaman", games=LADDER_GAMES)
+
+    gated = _classify("XL Elemental Shaman", cards, big, cls="Shaman")
+    spicy = _classify("XL Elemental Shaman", _sharing(0, extra=[SPICY_CARD]), big, cls="Shaman")
+
+    assert "generic_ladder_gate" in gated.reasons
+    assert gated.is_fun is False
+    assert "generic_ladder_gate" not in spicy.reasons
+
+
 # --- 6. publication: brews first, off-meta after them -------------------------
 
 
