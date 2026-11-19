@@ -49,8 +49,7 @@ export default async function verify(page, root) {
     await open(key + (key === 'card' ? '&card_name=Тестовая карта' : ''));
     const text = await visible();
     for (const word of forbidden) ensure(!word.test(text), `${key}: «${word}» in visible text`);
-    if (key === 'overview')
-      ensure((await page.locator('.reliability').count()) === 1, 'overview: no reliability block');
+    if (key === 'overview') await page.locator('.reliability').waitFor();
     const fields = await page.locator('input[name="limit"], input[name="offset"]').count();
     ensure(fields === 0, key + ': limit/offset fields are shown');
     const shares = await page
