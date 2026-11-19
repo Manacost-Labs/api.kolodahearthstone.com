@@ -32,6 +32,10 @@ CARDS = [
     {"id": "PET_1", "set": "PET", "type": "PET", "name": "N"},
     {"id": "TOKEN_1", "set": "CORE", "type": "MINION", "name": "O"},
     {"id": "COIN_1", "set": "CORE", "type": "SPELL", "name": "P"},
+    {"id": "BG_OG_044_G", "set": "OG", "type": "MINION", "name": "R", "techLevel": 3},
+    {"id": "TB_BaconUps_004", "set": "EXPERT1", "type": "MINION", "name": "S"},
+    {"id": "BGS_039", "set": "LEGACY", "type": "SPELL", "name": "T"},
+    {"id": "EMPTY_1", "set": "CREDITS", "type": "ENCHANTMENT", "name": ""},
     {"id": "CRED_1", "set": "CREDITS", "type": "MINION", "name": "Q"},
 ]
 DB_SETS = {"standard": {"CORE_001"}, "wild": {"CORE_001", "CS2_001"},
@@ -73,6 +77,9 @@ class ClassifyTest(unittest.TestCase):
             "TOKEN_1": {"bartenders"},
             "COIN_1": {"coins"},
             "CRED_1": {"other"},
+            "BG_OG_044_G": {"bg_minions"},
+            "TB_BaconUps_004": {"bg_minions"},
+            "BGS_039": {"bg_other"},
         }
         for cid, groups in expect.items():
             self.assertEqual(cov.classify(by_id(cid), DB_SETS), groups, cid)
@@ -141,6 +148,87 @@ class CoverageTest(unittest.TestCase):
     def test_examples_limit(self):
         report = cov.build_report(cards_by_locale(), [], DB_SETS, examples=1)
         self.assertEqual(len(self.group(report, "mercenaries")["locales"]["ruRU"]["missing_examples"]), 1)
+
+
+class EmptyNameTest(unittest.TestCase):
+    def test_no_row_and_nothing_localizable_in_hsj_is_not_a_gap(self):
+        data = rows(cov.LOCALES, skip={("EMPTY_1", loc) for loc in cov.LOCALES})
+        report = cov.build_report(cards_by_locale(), data, DB_SETS)
+        self.assertEqual(report["total"]["locales"]["plPL"]["percent"], 100.0)
+
+    def test_no_row_with_hsj_text_is_a_gap(self):
+        self.assertEqual(cov.cell_status(None, {"name": "", "text": "x"}), "missing")
+        self.assertEqual(cov.cell_status(None, {"name": ""}), "ok")
+
+
+class FakeCursor:
+    def __init__(self, fail_on=None):
+        self.sql, self.fail_on = [], fail_on
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def execute(self, sql):
+        self.sql.append(sql)
+        if self.fail_on and self.fail_on in sql:
+            raise RuntimeError(1146, "Table doesn't exist")
+
+    def fetchall(self):
+        return [{"card_id": "X", "locale": "plPL", "name": "n", "payload": "{}"}]
+
+
+class FakeConn:
+    def __init__(self, cursor):
+        self.cur, self.closed = cursor, False
+
+    def cursor(self):
+        return self.cur
+
+    def close(self):
+        self.closed = True
+
+
+def fake_module(conn):
+    import types
+    return types.SimpleNamespace(connect_db=lambda cfg: conn, load_php_config=lambda: {})
+
+
+class ReadDbTest(unittest.TestCase):
+    def test_sets_read_only_first_and_reads_payload(self):
+        cur = FakeCursor()
+        conn = FakeConn(cur)
+        with mock.patch.dict(sys.modules, {"sync_constructed_related_cards": fake_module(conn)}):
+            rows_, sets = cov.read_db()
+        self.assertEqual(cur.sql[0], "SET SESSION TRANSACTION READ ONLY")
+        self.assertIn("payload", cur.sql[1])
+        self.assertTrue(all(q.lstrip().upper().startswith(("SELECT", "SET SESSION")) for q in cur.sql))
+        self.assertTrue(conn.closed)
+        self.assertEqual(len(rows_), 1)
+        self.assertEqual(set(sets), {"standard", "wild", "coins", "bartenders"})
+
+    def run_main(self):
+        err = []
+        with mock.patch("sys.stderr") as stderr:
+            stderr.write.side_effect = err.append
+            code = cov.main(["--db", "--hsj-dir", "/nonexistent"])
+        return code, "".join(err)
+
+    def test_missing_table_is_a_clear_error(self):
+        conn = FakeConn(FakeCursor(fail_on="hearthstone_card_localizations"))
+        with mock.patch.dict(sys.modules, {"sync_constructed_related_cards": fake_module(conn)}):
+            code, err = self.run_main()
+        self.assertEqual(code, 2)
+        self.assertIn("does not exist", err)
+        self.assertTrue(conn.closed)
+
+    def test_missing_driver_is_a_clear_error(self):
+        with mock.patch.dict(sys.modules, {"sync_constructed_related_cards": None}):
+            code, err = self.run_main()
+        self.assertEqual(code, 2)
+        self.assertIn("driver is unavailable", err)
 
 
 class StaleTest(unittest.TestCase):

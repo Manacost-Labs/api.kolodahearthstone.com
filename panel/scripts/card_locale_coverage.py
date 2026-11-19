@@ -53,7 +53,7 @@ GROUPS = (
     ("coins", "Монетки"),
     ("pets", "Питомцы"),
     ("bartenders", "Тавернщики"),
-    ("other", "Прочие неколлекционные и токены"),
+    ("other", "Прочие"),
 )
 TITLES = dict(GROUPS)
 NA_REASONS = {
@@ -70,11 +70,18 @@ DB_SET_GROUPS = {
 }
 
 
+# BG cards that keep a classic/event `set`: BG_OG_044_G, BGS_039, TB_BaconUps_*, BG31_BOBt*.
+# HSJ has no BG flag for them (techLevel / battlegrounds*DbfId also appear on
+# collectible constructed cards), so the id prefix is the reliable signal.
+BG_ID = re.compile(r"^(BG\d*_|BGS_|TB_BaconUps_|HM_BG_)")
+
+
 def classify(card: dict[str, Any], db_sets: dict[str, set[str]] | None = None) -> set[str]:
     """Return the group keys of one HSJ card. Never empty."""
     db_sets = db_sets or {}
     cid = card.get("id") or ""
     cset, ctype = card.get("set"), card.get("type")
+    is_bg = cset == "BATTLEGROUNDS" or bool(BG_ID.match(cid))
     collectible = bool(card.get("collectible"))
     groups: set[str] = set()
 
@@ -84,11 +91,11 @@ def classify(card: dict[str, Any], db_sets: dict[str, set[str]] | None = None) -
     if cset == "VANILLA" and collectible:
         groups.add("classic")
 
-    if cset == "BATTLEGROUNDS" and ctype == "HERO":
+    if is_bg and ctype == "HERO":
         groups.add("bg_heroes")
-    if cset == "BATTLEGROUNDS" and ctype == "HERO_POWER":
+    if is_bg and ctype == "HERO_POWER":
         groups.add("bg_hero_powers")
-    if cset == "BATTLEGROUNDS" and ctype == "MINION" and not card.get("isBattlegroundsBuddy"):
+    if is_bg and ctype == "MINION" and not card.get("isBattlegroundsBuddy"):
         groups.add("bg_minions")
     if card.get("isBattlegroundsBuddy") or ctype == "BATTLEGROUND_HERO_BUDDY":
         groups.add("bg_buddies")
@@ -99,13 +106,13 @@ def classify(card: dict[str, Any], db_sets: dict[str, set[str]] | None = None) -
     if ctype == "BATTLEGROUND_ANOMALY":
         groups.add("bg_anomalies")
     if ctype == "BATTLEGROUND_QUEST_REWARD" or (
-        cset == "BATTLEGROUNDS" and ctype == "SPELL" and "QUEST" in (card.get("mechanics") or [])
+        is_bg and ctype == "SPELL" and "QUEST" in (card.get("mechanics") or [])
     ):
         groups.add("bg_quests")
     if card.get("battlegroundsDarkmoonPrizeTurn") is not None:
         groups.add("bg_darkmoon")
     bg_groups = {g for g in groups if g.startswith("bg_")}
-    if cset == "BATTLEGROUNDS" and not bg_groups:
+    if is_bg and not bg_groups:
         groups.add("bg_other")
 
     if (
@@ -140,7 +147,8 @@ def _payload(row: dict[str, Any]) -> dict[str, Any]:
 def cell_status(row: dict[str, Any] | None, ref: dict[str, Any]) -> str:
     """Return "ok", "missing" (no row / empty name) or "stale" (field differs)."""
     if row is None:
-        return "missing"
+        # no row is a gap unless HSJ itself has nothing localizable for the card
+        return "ok" if all(ref.get(f) in (None, "") for f in LOCALIZED_FIELDS) else "missing"
     if not str(row.get("name") or "").strip() and str(ref.get("name") or "").strip():
         return "missing"
     payload = _payload(row)
@@ -251,6 +259,11 @@ def render_markdown(report: dict[str, Any]) -> str:
     cells = " | ".join(f"{t[l]['covered']} / {t[l]['percent']:.2f}%" for l in report["locales"])
     lines.append(f"| **Все id HSJ** | {report['hsj_total']} | {cells} | {examples(t)} |")
     lines.append("")
+    if any("na" in g and g["key"] in DB_SET_GROUPS for g in report["groups"]):
+        lines.append("Без `--db` коллекционные карты Стандарта и Вольного попадают в «Прочие» "
+                     "(и другие группы по своим полям), а Стандарт, Вольный, Монетки и Тавернщики "
+                     "выводятся как n/a.")
+        lines.append("")
     lines.append(f"Id в группах (объединение): {report['grouped_total']} из {report['hsj_total']}.")
     return "\n".join(lines)
 
@@ -278,16 +291,32 @@ def load_hsj(locale: str, hsj_dir: str | None, hsj_file: str | None = None) -> l
     return data
 
 
+class CoverageError(RuntimeError):
+    """A user-facing failure: printed without a traceback, exit code 2."""
+
+
 def read_db(config_loader: Callable[[], dict[str, Any]] | None = None):
     """Read-only SELECTs. Returns (rows, db_sets)."""
     sys.path.insert(0, str(Path(__file__).resolve().parent))
-    from sync_constructed_related_cards import connect_db, load_php_config  # noqa: E402
-
-    conn = connect_db(load_php_config())
+    try:
+        from sync_constructed_related_cards import connect_db, load_php_config  # noqa: E402
+    except ImportError as exc:
+        raise CoverageError(f"DB driver is unavailable ({exc}); run with the panel venv "
+                            "or use --rows-file") from exc
+    try:
+        conn = connect_db(load_php_config())
+    except Exception as exc:
+        raise CoverageError(f"cannot connect to the DB: {type(exc).__name__}: {exc}") from exc
     try:
         with conn.cursor() as cur:
             cur.execute("SET SESSION TRANSACTION READ ONLY")
-            cur.execute("SELECT card_id, locale, name, payload FROM hearthstone_card_localizations")
+            try:
+                cur.execute("SELECT card_id, locale, name, payload FROM hearthstone_card_localizations")
+            except Exception as exc:
+                if exc.args and exc.args[0] == 1146:
+                    raise CoverageError("table hearthstone_card_localizations does not exist yet "
+                                        "(created by api#95)") from exc
+                raise CoverageError(f"query failed: {type(exc).__name__}: {exc}") from exc
             rows = list(cur.fetchall())
             sets = {}
             for key, sql in (
@@ -296,7 +325,10 @@ def read_db(config_loader: Callable[[], dict[str, Any]] | None = None):
                 ("coins", "SELECT card_id FROM hearthstone_coins"),
                 ("bartenders", "SELECT card_id FROM battlegrounds_bartender_skins"),
             ):
-                cur.execute(sql)
+                try:
+                    cur.execute(sql)
+                except Exception as exc:
+                    raise CoverageError(f"query failed ({key}): {type(exc).__name__}: {exc}") from exc
                 sets[key] = {r["card_id"] for r in cur.fetchall()}
     finally:
         conn.close()
@@ -319,7 +351,11 @@ def main(argv: list[str] | None = None) -> int:
     rows: list[dict[str, Any]] = []
     db_sets: dict[str, set[str]] | None = None
     if args.db:
-        rows, db_sets = read_db()
+        try:
+            rows, db_sets = read_db()
+        except CoverageError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
     elif args.rows_file:
         rows = json.loads(Path(args.rows_file).read_text("utf-8"))
     if args.db_sets_file:
