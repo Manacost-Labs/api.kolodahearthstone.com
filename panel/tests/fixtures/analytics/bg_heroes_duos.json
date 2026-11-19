@@ -1,0 +1,117 @@
+{
+ "data": [
+  {
+   "hero": "Patchwerk",
+   "dbfId": 59397,
+   "pick_rate": "49.30%",
+   "avg_placement": 2.134,
+   "tier": "A",
+   "id": "TB_BaconShop_HERO_34",
+   "pick_rate_value": 49.3,
+   "placement_distribution": [
+    "34.12%",
+    "30.85%",
+    "22.50%",
+    "12.52%"
+   ],
+   "key_minions_top3": [],
+   "anomaly_adjusted": false
+  },
+  {
+   "hero": "Death Speaker Blackthorn",
+   "dbfId": 71458,
+   "pick_rate": "31.55%",
+   "avg_placement": 2.174,
+   "tier": "A",
+   "id": "BG20_HERO_103",
+   "pick_rate_value": 31.55,
+   "placement_distribution": [
+    "34.88%",
+    "26.16%",
+    "25.58%",
+    "13.37%"
+   ],
+   "key_minions_top3": [],
+   "anomaly_adjusted": false
+  },
+  {
+   "hero": "A. F. Kay",
+   "dbfId": 57944,
+   "pick_rate": "68.84%",
+   "avg_placement": 2.186,
+   "tier": "A",
+   "id": "TB_BaconShop_HERO_16",
+   "pick_rate_value": 68.84,
+   "placement_distribution": [
+    "33.96%",
+    "29.78%",
+    "20.00%",
+    "16.26%"
+   ],
+   "key_minions_top3": [],
+   "anomaly_adjusted": false
+  },
+  {
+   "hero": "C'Thun",
+   "dbfId": 58535,
+   "pick_rate": "9.86%",
+   "avg_placement": 2.21,
+   "tier": "A",
+   "id": "TB_BaconShop_HERO_29",
+   "pick_rate_value": 9.86,
+   "placement_distribution": [
+    "25.81%",
+    "37.10%",
+    "27.42%",
+    "9.68%"
+   ],
+   "key_minions_top3": [],
+   "anomaly_adjusted": false
+  },
+  {
+   "hero": "Galakrond",
+   "dbfId": 57635,
+   "pick_rate": "69.11%",
+   "avg_placement": 2.216,
+   "tier": "A",
+   "id": "TB_BaconShop_HERO_02",
+   "pick_rate_value": 69.11,
+   "placement_distribution": [
+    "32.57%",
+    "30.87%",
+    "18.92%",
+    "17.64%"
+   ],
+   "key_minions_top3": [],
+   "anomaly_adjusted": false
+  },
+  {
+   "hero": "Y'Shaarj",
+   "dbfId": 66196,
+   "pick_rate": "22.81%",
+   "avg_placement": 2.239,
+   "tier": "A",
+   "id": "TB_BaconShop_HERO_92",
+   "pick_rate_value": 22.81,
+   "placement_distribution": [
+    "36.03%",
+    "23.48%",
+    "21.05%",
+    "19.43%"
+   ],
+   "key_minions_top3": [],
+   "anomaly_adjusted": false
+  }
+ ],
+ "meta": {
+  "source_id": "hsreplay_battlegrounds_hero_details",
+  "fetched_at": "2026-11-19T03:35:02.875727+00:00",
+  "stale": false,
+  "count": 115,
+  "limit": 6,
+  "offset": 0,
+  "list_fetched_at": "2026-11-19T03:35:02.875727+00:00",
+  "details_fetched_at": "2026-11-19T03:35:02.875727+00:00",
+  "list_source_id": "hsreplay_battlegrounds_hero_details"
+ }
+}

@@ -1,0 +1,509 @@
+{
+ "data": {
+  "format": "standard",
+  "rank": "legend",
+  "period": "past_day",
+  "coin": "any_player",
+  "min_games": 100,
+  "source_url": "https://www.hsguru.com/meta?format=2&rank=legend&period=past_day&min_games=10",
+  "items": [
+   {
+    "archetype": "Yogg Warrior",
+    "winrate": 57.1,
+    "popularity": 4.7,
+    "games": 3958,
+    "turns": 8.3,
+    "duration_minutes": 7.4,
+    "climbing_speed": 1.14
+   },
+   {
+    "archetype": "Zee Shaman",
+    "winrate": 55.3,
+    "popularity": 3.8,
+    "games": 3226,
+    "turns": 8.3,
+    "duration_minutes": 8.2,
+    "climbing_speed": 0.78
+   },
+   {
+    "archetype": "Lo'Gosh Warrior",
+    "winrate": 54.9,
+    "popularity": 1.5,
+    "games": 1270,
+    "turns": 9.5,
+    "duration_minutes": 8.5,
+    "climbing_speed": 0.69
+   },
+   {
+    "archetype": "Quest Priest",
+    "winrate": 54.2,
+    "popularity": 4.2,
+    "games": 3541,
+    "turns": 9.2,
+    "duration_minutes": 8.6,
+    "climbing_speed": 0.59
+   },
+   {
+    "archetype": "Mug Shaman",
+    "winrate": 54.0,
+    "popularity": 9.9,
+    "games": 8383,
+    "turns": 8.3,
+    "duration_minutes": 8.5,
+    "climbing_speed": 0.56
+   },
+   {
+    "archetype": "Void C'Thun DH",
+    "winrate": 54.0,
+    "popularity": 5.8,
+    "games": 4926,
+    "turns": 8.0,
+    "duration_minutes": 7.0,
+    "climbing_speed": 0.68
+   },
+   {
+    "archetype": "C'Thun DH",
+    "winrate": 53.7,
+    "popularity": 0.6,
+    "games": 508,
+    "turns": 8.7,
+    "duration_minutes": 8.3,
+    "climbing_speed": 0.54
+   },
+   {
+    "archetype": "Chef Druid",
+    "winrate": 53.7,
+    "popularity": 0.1,
+    "games": 108,
+    "turns": 8.1,
+    "duration_minutes": 7.8,
+    "climbing_speed": 0.57
+   },
+   {
+    "archetype": "Zee C'Thun Shaman",
+    "winrate": 53.4,
+    "popularity": 3.6,
+    "games": 3034,
+    "turns": 8.4,
+    "duration_minutes": 7.9,
+    "climbing_speed": 0.52
+   },
+   {
+    "archetype": "Pirate Warrior",
+    "winrate": 53.2,
+    "popularity": 1.0,
+    "games": 859,
+    "turns": 8.0,
+    "duration_minutes": 7.0,
+    "climbing_speed": 0.55
+   },
+   {
+    "archetype": "Harold Shaman",
+    "winrate": 52.8,
+    "popularity": 1.7,
+    "games": 1454,
+    "turns": 8.9,
+    "duration_minutes": 8.5,
+    "climbing_speed": 0.39
+   },
+   {
+    "archetype": "Holy Paladin",
+    "winrate": 52.2,
+    "popularity": 2.7,
+    "games": 2310,
+    "turns": 8.9,
+    "duration_minutes": 7.4,
+    "climbing_speed": 0.36
+   },
+   {
+    "archetype": "AYAYA Rogue",
+    "winrate": 52.1,
+    "popularity": 9.6,
+    "games": 8161,
+    "turns": 7.6,
+    "duration_minutes": 7.4,
+    "climbing_speed": 0.34
+   },
+   {
+    "archetype": "N'Zoth Warrior",
+    "winrate": 52.0,
+    "popularity": 3.5,
+    "games": 2966,
+    "turns": 10.1,
+    "duration_minutes": 9.4,
+    "climbing_speed": 0.26
+   },
+   {
+    "archetype": "Pure Paladin",
+    "winrate": 51.9,
+    "popularity": 1.0,
+    "games": 822,
+    "turns": 9.1,
+    "duration_minutes": 8.1,
+    "climbing_speed": 0.29
+   },
+   {
+    "archetype": "Unholy N'Zoth DK",
+    "winrate": 51.9,
+    "popularity": 0.3,
+    "games": 283,
+    "turns": 7.9,
+    "duration_minutes": 7.8,
+    "climbing_speed": 0.3
+   },
+   {
+    "archetype": "Yogg Warlock",
+    "winrate": 51.8,
+    "popularity": 1.1,
+    "games": 893,
+    "turns": 8.5,
+    "duration_minutes": 8.1,
+    "climbing_speed": 0.27
+   },
+   {
+    "archetype": "Zoolock",
+    "winrate": 51.6,
+    "popularity": 0.4,
+    "games": 376,
+    "turns": 7.4,
+    "duration_minutes": 6.3,
+    "climbing_speed": 0.3
+   },
+   {
+    "archetype": "Burn Mage",
+    "winrate": 51.4,
+    "popularity": 4.1,
+    "games": 3443,
+    "turns": 7.5,
+    "duration_minutes": 6.5,
+    "climbing_speed": 0.25
+   },
+   {
+    "archetype": "Vyranoth DK",
+    "winrate": 51.2,
+    "popularity": 0.9,
+    "games": 782,
+    "turns": 9.2,
+    "duration_minutes": 8.8,
+    "climbing_speed": 0.16
+   },
+   {
+    "archetype": "N'Zoth DH",
+    "winrate": 50.8,
+    "popularity": 0.4,
+    "games": 309,
+    "turns": 9.1,
+    "duration_minutes": 8.6,
+    "climbing_speed": 0.11
+   },
+   {
+    "archetype": "N'Zoth Mech Hunter",
+    "winrate": 50.7,
+    "popularity": 1.5,
+    "games": 1249,
+    "turns": 8.1,
+    "duration_minutes": 7.3,
+    "climbing_speed": 0.11
+   },
+   {
+    "archetype": "Harold Blood DK",
+    "winrate": 50.0,
+    "popularity": 8.7,
+    "games": 7371,
+    "turns": 10.1,
+    "duration_minutes": 9.7,
+    "climbing_speed": -0.0
+   },
+   {
+    "archetype": "Blood DK",
+    "winrate": 49.9,
+    "popularity": 4.5,
+    "games": 3779,
+    "turns": 10.1,
+    "duration_minutes": 9.7,
+    "climbing_speed": -0.01
+   },
+   {
+    "archetype": "Egg Priest",
+    "winrate": 49.6,
+    "popularity": 0.1,
+    "games": 121,
+    "turns": 10.0,
+    "duration_minutes": 9.7,
+    "climbing_speed": -0.05
+   },
+   {
+    "archetype": "Harold C'Thun Warlock",
+    "winrate": 49.2,
+    "popularity": 0.3,
+    "games": 266,
+    "turns": 9.4,
+    "duration_minutes": 9.0,
+    "climbing_speed": -0.1
+   },
+   {
+    "archetype": "Yogg Priest",
+    "winrate": 49.1,
+    "popularity": 0.2,
+    "games": 161,
+    "turns": 9.0,
+    "duration_minutes": 7.8,
+    "climbing_speed": -0.14
+   },
+   {
+    "archetype": "Harold Warlock",
+    "winrate": 48.8,
+    "popularity": 1.0,
+    "games": 818,
+    "turns": 9.1,
+    "duration_minutes": 8.7,
+    "climbing_speed": -0.17
+   },
+   {
+    "archetype": "Quest Mage",
+    "winrate": 48.5,
+    "popularity": 0.9,
+    "games": 750,
+    "turns": 8.6,
+    "duration_minutes": 8.8,
+    "climbing_speed": -0.2
+   },
+   {
+    "archetype": "Merithra Druid",
+    "winrate": 48.1,
+    "popularity": 1.0,
+    "games": 835,
+    "turns": 8.7,
+    "duration_minutes": 8.6,
+    "climbing_speed": -0.26
+   },
+   {
+    "archetype": "Infinity Paladin",
+    "winrate": 48.1,
+    "popularity": 0.8,
+    "games": 688,
+    "turns": 8.6,
+    "duration_minutes": 7.2,
+    "climbing_speed": -0.31
+   },
+   {
+    "archetype": "Summoner Mage",
+    "winrate": 47.5,
+    "popularity": 0.8,
+    "games": 649,
+    "turns": 9.5,
+    "duration_minutes": 8.6,
+    "climbing_speed": -0.35
+   },
+   {
+    "archetype": "Thief Priest",
+    "winrate": 47.4,
+    "popularity": 4.5,
+    "games": 3846,
+    "turns": 11.4,
+    "duration_minutes": 11.0,
+    "climbing_speed": -0.28
+   },
+   {
+    "archetype": "Harold Rogue",
+    "winrate": 47.2,
+    "popularity": 0.9,
+    "games": 758,
+    "turns": 9.2,
+    "duration_minutes": 9.0,
+    "climbing_speed": -0.37
+   },
+   {
+    "archetype": "Rafaamlock",
+    "winrate": 47.0,
+    "popularity": 2.2,
+    "games": 1829,
+    "turns": 9.5,
+    "duration_minutes": 8.6,
+    "climbing_speed": -0.41
+   },
+   {
+    "archetype": "Mill Paladin",
+    "winrate": 47.0,
+    "popularity": 0.3,
+    "games": 215,
+    "turns": 9.7,
+    "duration_minutes": 8.8,
+    "climbing_speed": -0.41
+   },
+   {
+    "archetype": "Wallow Warlock",
+    "winrate": 46.2,
+    "popularity": 0.1,
+    "games": 106,
+    "turns": 8.4,
+    "duration_minutes": 8.0,
+    "climbing_speed": -0.57
+   },
+   {
+    "archetype": "Leyline Mage",
+    "winrate": 45.0,
+    "popularity": 0.2,
+    "games": 189,
+    "turns": 8.5,
+    "duration_minutes": 7.0,
+    "climbing_speed": -0.87
+   },
+   {
+    "archetype": "Void DH",
+    "winrate": 44.9,
+    "popularity": 0.1,
+    "games": 107,
+    "turns": 9.0,
+    "duration_minutes": 8.9,
+    "climbing_speed": -0.69
+   },
+   {
+    "archetype": "C'Thun Priest",
+    "winrate": 44.7,
+    "popularity": 0.6,
+    "games": 515,
+    "turns": 10.1,
+    "duration_minutes": 9.0,
+    "climbing_speed": -0.71
+   },
+   {
+    "archetype": "Raza DH",
+    "winrate": 43.7,
+    "popularity": 0.7,
+    "games": 611,
+    "turns": 7.9,
+    "duration_minutes": 8.1,
+    "climbing_speed": -0.93
+   },
+   {
+    "archetype": "Quest Warrior",
+    "winrate": 42.2,
+    "popularity": 1.5,
+    "games": 1299,
+    "turns": 10.3,
+    "duration_minutes": 9.7,
+    "climbing_speed": -0.97
+   },
+   {
+    "archetype": "N'Zoth Paladin",
+    "winrate": 41.5,
+    "popularity": 0.2,
+    "games": 200,
+    "turns": 9.6,
+    "duration_minutes": 8.6,
+    "climbing_speed": -1.19
+   },
+   {
+    "archetype": "Control Priest",
+    "winrate": 40.5,
+    "popularity": 0.4,
+    "games": 336,
+    "turns": 11.1,
+    "duration_minutes": 10.1,
+    "climbing_speed": -1.13
+   },
+   {
+    "archetype": "Harold Warrior",
+    "winrate": 40.1,
+    "popularity": 0.2,
+    "games": 182,
+    "turns": 10.0,
+    "duration_minutes": 8.8,
+    "climbing_speed": -1.35
+   },
+   {
+    "archetype": "Deathrattle Druid",
+    "winrate": 39.2,
+    "popularity": 1.0,
+    "games": 888,
+    "turns": 9.7,
+    "duration_minutes": 9.1,
+    "climbing_speed": -1.42
+   },
+   {
+    "archetype": "N'Zoth Priest",
+    "winrate": 38.7,
+    "popularity": 0.1,
+    "games": 119,
+    "turns": 10.2,
+    "duration_minutes": 9.3,
+    "climbing_speed": -1.46
+   },
+   {
+    "archetype": "Void Soul DH",
+    "winrate": 38.3,
+    "popularity": 0.2,
+    "games": 128,
+    "turns": 9.0,
+    "duration_minutes": 8.3,
+    "climbing_speed": -1.68
+   },
+   {
+    "archetype": "Mill Rogue",
+    "winrate": 38.3,
+    "popularity": 3.3,
+    "games": 2770,
+    "turns": 8.2,
+    "duration_minutes": 8.1,
+    "climbing_speed": -1.75
+   },
+   {
+    "archetype": "Burn Rogue",
+    "winrate": 36.9,
+    "popularity": 0.1,
+    "games": 122,
+    "turns": 7.8,
+    "duration_minutes": 7.4,
+    "climbing_speed": -2.13
+   },
+   {
+    "archetype": "Companion Hunter",
+    "winrate": 35.2,
+    "popularity": 0.1,
+    "games": 108,
+    "turns": 8.9,
+    "duration_minutes": 8.1,
+    "climbing_speed": -2.21
+   },
+   {
+    "archetype": "N'Zoth Rogue",
+    "winrate": 34.1,
+    "popularity": 0.1,
+    "games": 126,
+    "turns": 9.0,
+    "duration_minutes": 9.2,
+    "climbing_speed": -2.07
+   },
+   {
+    "archetype": "Beast Druid",
+    "winrate": 33.0,
+    "popularity": 0.1,
+    "games": 112,
+    "turns": 8.5,
+    "duration_minutes": 7.6,
+    "climbing_speed": -2.67
+   }
+  ]
+ },
+ "meta": {
+  "source_id": "hsguru_meta_matrix",
+  "fetched_at": "2026-11-19T11:00:02.858147+00:00",
+  "stale": false,
+  "count": 53,
+  "available_periods": [
+   "past_3_hours",
+   "past_6_hours",
+   "past_day",
+   "past_3_days",
+   "past_week",
+   "past_2_weeks",
+   "past_30_days",
+   "patch_37.0.2",
+   "black_empire",
+   "black_empire_ban"
+  ],
+  "current_period": "black_empire",
+  "current_patch_period": "patch_37.0.2"
+ }
+}
