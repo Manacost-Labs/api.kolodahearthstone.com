@@ -58,7 +58,8 @@ const column = (key, label, type = 'text') => ({ key, label, type });
 const modules = {
   meta: () => {
     const rows = make(53, 11, (i, r) => ({
-      archetype: archetype(i),
+      // Row 2 has a name without a class word: its icon must come from `class_name` (#107).
+      archetype: i === 1 ? 'Plugh Xyzzy' : archetype(i),
       winrate: i % 4 === 0 ? 54 : round(46 + r() * 11, 1),
       popularity: round(9.9 - i * 0.17 + r() * 0.1, 1),
       games: Math.round(8383 - i * 140 + r() * 90),

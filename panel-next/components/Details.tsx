@@ -94,7 +94,7 @@ export function RecordTabs({
             <div key={key}>
               <dt>{fieldLabel(key)}</dt>
               <dd>
-                <Value value={value} name={key} />
+                <Value value={value} name={key} row={row} />
               </dd>
             </div>
           ))}
