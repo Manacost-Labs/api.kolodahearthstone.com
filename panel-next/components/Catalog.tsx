@@ -285,7 +285,12 @@ export function Catalog({
             />
           </div>
         )}
-        <LocaleSwitch className="locale-switch" lang={lang} onChange={setLang} />
+        <div className="locale-field">
+          <span className="locale-label" aria-hidden="true">
+            Язык карт
+          </span>
+          <LocaleSwitch className="locale-switch" lang={lang} onChange={setLang} />
+        </div>
         <SegmentedControl
           className="view-switch"
           aria-label="Вид каталога"
@@ -305,7 +310,10 @@ export function Catalog({
       </div>
       {locales.failed > 0 && (
         <p className="locale-status">
-          <span>Не удалось загрузить перевод для {locales.failed} карт</span>
+          <span>
+            Не удалось загрузить перевод для{' '}
+            {countLabel(locales.failed, { one: 'карту', few: 'карты', many: 'карт' })}
+          </span>
           <button type="button" className="link-button" onClick={locales.retry}>
             Повторить
           </button>

@@ -234,7 +234,7 @@ export default async function verify(page, root, output, fixtures, live) {
     behaviour.failServer = true;
     requests.length = 0;
     await load('card_type=constructed&view=grid&lang=es');
-    await page.getByText('Не удалось загрузить перевод для 1 карт').waitFor();
+    await page.getByText('Не удалось загрузить перевод для 1 карту').waitFor();
     equal(
       await page.locator('.locale-status[role="alert"], .locale-status [role="alert"]').count(),
       0,
