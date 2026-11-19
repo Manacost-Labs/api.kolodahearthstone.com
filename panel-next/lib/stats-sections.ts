@@ -4,8 +4,14 @@
 export type StatsModuleEntry = { key: string; label?: string };
 export type StatsGroup = { key: string; label: string; modules: StatsModuleEntry[] };
 
-/** The module that opens for `/?action=analytics` without `stats`. */
+/** The module a link with an unknown `stats` value falls back to. */
 export const defaultStatsModule = 'meta';
+/** `/?action=analytics` without `stats` (or with this value) opens the «Сводка» page, not a module. */
+export const statsHomeKey = 'summary';
+export const statsHomeHref = '/?action=analytics';
+export const statsHomeMenuId = 'stats:home';
+export const isStatsHome = (candidate: string | null | undefined): boolean =>
+  !candidate || candidate === statsHomeKey;
 /** Key of the group collecting registry modules that this map does not know. */
 export const otherGroupKey = 'other';
 
@@ -86,14 +92,18 @@ export function placeOf(moduleKey: string, registry?: Record<string, { title: st
   return placeOf(defaultStatsModule);
 }
 
-/** The module a link with this `stats` value opens: a registry key, otherwise the default «Мета». */
+/**
+ * The module a link with this `stats` value opens: a registry key, otherwise the default «Мета» (an old or
+ * mistyped link still lands on a useful page; the summary is for a link without `stats`, see `isStatsHome`).
+ */
 export function resolveModule(candidate: string | null, registry: Record<string, unknown>): string {
   if (candidate && registry[candidate]) return candidate;
   if (registry[defaultStatsModule]) return defaultStatsModule;
   return Object.keys(registry)[0] ?? defaultStatsModule;
 }
 
-export const statsHref = (key: string) => '/?action=analytics&stats=' + encodeURIComponent(key);
+export const statsHref = (key: string) =>
+  key === statsHomeKey ? statsHomeHref : '/?action=analytics&stats=' + encodeURIComponent(key);
 
 /** Menu id of the group (or monitoring page) that a module highlights. */
 export const menuIdOf = (moduleKey: string, registry?: Record<string, { title: string }>): string => {

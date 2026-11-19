@@ -313,3 +313,11 @@ test('shares inside text and the finite filter sets read in the common way', () 
   assert.equal(optionLabel('class_name', ''), 'Все');
   assert.equal(optionLabel('format_name', 'wild'), 'Вольный');
 });
+
+test('formatTwoDecimals: two decimals with a comma, a dash for a missing value', async () => {
+  const { formatTwoDecimals } = await import('../lib/format.ts');
+  assert.equal(formatTwoDecimals(3.98), '3,98');
+  assert.equal(formatTwoDecimals(4), '4,00');
+  assert.equal(formatTwoDecimals('4.1'), '4,10');
+  assert.equal(formatTwoDecimals(null), '—');
+});

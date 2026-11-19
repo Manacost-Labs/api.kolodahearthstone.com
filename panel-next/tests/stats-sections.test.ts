@@ -4,12 +4,17 @@ import { readFileSync } from 'node:fs';
 import {
   groupLabelOf,
   groupTabs,
+  isStatsHome,
   menuIdOf,
   monitoringModules,
   otherGroup,
   placeOf,
   resolveModule,
   statsGroups,
+  statsHomeHref,
+  statsHomeKey,
+  statsHomeMenuId,
+  statsHref,
 } from '../lib/stats-sections.ts';
 
 const registry: Record<string, { title: string }> = JSON.parse(
@@ -81,10 +86,25 @@ test('a module the map does not know is gathered in «Прочее» instead of 
   assert.equal(menuIdOf('arena_cards', extended), 'stats:arena');
 });
 
-test('`stats` that is missing or unknown opens «Мета»; old links keep their module', () => {
-  assert.equal(resolveModule(null, registry), 'meta');
-  assert.equal(resolveModule('', registry), 'meta');
+test('a link without `stats` opens the summary; old links and unknown keys still open a module', () => {
+  assert.equal(isStatsHome(null), true);
+  assert.equal(isStatsHome(undefined), true);
+  assert.equal(isStatsHome(''), true);
+  assert.equal(isStatsHome(statsHomeKey), true);
+  for (const key of [...Object.keys(registry), 'nope']) assert.equal(isStatsHome(key), false, key);
+  // Old links keep their module; an unknown key falls back to «Мета» (a useful page, not a blank one).
   assert.equal(resolveModule('nope', registry), 'meta');
+  assert.equal(resolveModule(null, registry), 'meta');
   for (const key of Object.keys(registry)) assert.equal(resolveModule(key, registry), key);
   assert.equal(menuIdOf('meta', registry), 'stats:standard');
+});
+
+test('the summary has its own address and menu id; no module collides with it', () => {
+  assert.equal(statsHomeHref, '/?action=analytics');
+  assert.equal(statsHref(statsHomeKey), statsHomeHref);
+  assert.equal(statsHref('meta'), '/?action=analytics&stats=meta');
+  assert.equal(statsHomeMenuId, 'stats:home');
+  assert.equal(statsHomeKey in registry, false);
+  const ids = statsGroups.map(group => 'stats:' + group.key);
+  assert.equal(ids.includes(statsHomeMenuId), false);
 });
