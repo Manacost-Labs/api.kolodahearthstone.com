@@ -535,9 +535,13 @@ def save_card(conn, card: dict[str, Any], dry_run: bool) -> None:
                 armor = COALESCE(armor, VALUES(armor)),
                 artist = COALESCE(NULLIF(artist, ''), VALUES(artist)),
                 image_url = COALESCE(NULLIF(VALUES(image_url), ''), image_url),
-                local_image_url = COALESCE(NULLIF(VALUES(local_image_url), ''), local_image_url),
+                -- local_*: the image mirror owns them once set (it republishes under
+                -- card-history-media/<sha>.png). Only fill an empty value, never
+                -- overwrite, otherwise the two writers flip the path daily and each
+                -- flip is a false history version (#100).
+                local_image_url = COALESCE(NULLIF(local_image_url, ''), NULLIF(VALUES(local_image_url), '')),
                 crop_image_url = COALESCE(NULLIF(VALUES(crop_image_url), ''), crop_image_url),
-                local_crop_image_url = COALESCE(NULLIF(VALUES(local_crop_image_url), ''), local_crop_image_url),
+                local_crop_image_url = COALESCE(NULLIF(local_crop_image_url, ''), NULLIF(VALUES(local_crop_image_url), '')),
                 mechanics_json = COALESCE(mechanics_json, VALUES(mechanics_json)),
                 referenced_tags_json = COALESCE(referenced_tags_json, VALUES(referenced_tags_json)),
                 wiki_page_title = COALESCE(NULLIF(wiki_page_title, ''), VALUES(wiki_page_title)),
