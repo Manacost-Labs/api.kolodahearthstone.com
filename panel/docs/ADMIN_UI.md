@@ -73,6 +73,24 @@ These three PHP adapters are reachable only through the private
   `stats_format`, `stats_rank`, and `stats_period` in the URL.
 - Card rows link to `stats=card` using the English card name. The card module
   combines ranked trends with Battlegrounds minion and hero matches.
+- Card inspector → “История изменений” opens on the newest real change of the
+  card: the last version whose data differ from the previous one, compared with
+  that previous version. Service fields (`local_*` mirrors of images,
+  `source_hash`, polling timestamps, raw payload) are not changes. The
+  “Только изменения данных” switch (on by default) hides versions that differ
+  only in service fields from the lists and the changes table; off, every
+  loaded version and field is shown. When the loaded page holds no data change
+  the panel says so and offers “Показать ещё” (or “Показать все версии” once
+  everything is loaded). The “После” and “До” pictures are the archive of the
+  version's own `image_url`; the local mirror (`local_image_url`) is only a
+  fallback, because at the moment of a change it still points to the old file.
+  The two pictures load with high priority behind a skeleton of their final
+  size.
+- Card inspector text follows the game: `<b>` is bold, `<i>` italic, `\n` a
+  line break; `[x]`, `$N` and `#N` markers are reduced to the number, `_` is a
+  non-breaking space, `@` and `{0}` show as `X`, unknown tags are dropped.
+  The text is built from React elements; markup from data is never inserted
+  into the DOM.
 - Every statistics row has “Подробнее”. The keyboard-accessible drawer exposes
   every scalar and nested source field, including all HSGuru decks and all BG
   combat rounds; raw JSON remains available for integration/debugging.

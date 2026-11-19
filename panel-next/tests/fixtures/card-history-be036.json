@@ -1,0 +1,258 @@
+{
+  "entity": "constructed_card",
+  "card_id": "BE_036",
+  "versions": [
+    {
+      "version_id": 35424,
+      "observed_at": "2026-11-15 06:39:57.150301",
+      "event": "changed",
+      "snapshot": {
+        "card_id": "BE_036",
+        "name_ru": "МАТРИАРХ",
+        "name_en": "M.O.T.H.E.R.",
+        "text_ru": "<b>Боевой клич</b>: уменьшает стоимость карты в вашей руке на (5). Затем эффект применяется к соседним картам, но ослабляется на (1).",
+        "text_en": "<b>Battlecry:</b> Reduce the Cost of a card in your hand by (5). This continues to the left and right with (1) less reduction.",
+        "card_type": "MINION",
+        "rarity": "LEGENDARY",
+        "mana_cost": 10,
+        "attack": 9,
+        "health": 7,
+        "image_url": "https://d15f34w2p8l1cc.cloudfront.net/hearthstone/9a947b36a7df4bb529a5e06e51ee2262d2f65663178fd88497aa15e7eb6bbfbc.png",
+        "local_image_url": "/uploads/constructed-related/BE_036.png",
+        "local_gold_image_url": "/uploads/card-history-media/21f5923cb6a414931934c96c4223349cf828955196f3425e5f59376b3bc6487c.png",
+        "source_hash": "d1bd685332c2f45be058aee2da3c6a5fd42684f029e6b4b257836605a5c0cd3b",
+        "last_seen_at": "2026-11-15 04:30:49",
+        "updated_at": "2026-11-15 06:39:57"
+      },
+      "media": {
+        "image_url": {
+          "status": "archived",
+          "reason": null,
+          "archive_url": "/uploads/card-history-media/9a947b36a7df4bb529a5e06e51ee2262d2f65663178fd88497aa15e7eb6bbfbc.png",
+          "sha256": "9a947b36a7df4bb529a5e06e51ee2262d2f65663178fd88497aa15e7eb6bbfbc",
+          "evidence": "captured_after_observation",
+          "captured_at": "2026-11-15 06:40:18.866134"
+        },
+        "local_image_url": {
+          "status": "archived",
+          "reason": null,
+          "archive_url": "/uploads/card-history-media/9a947b36a7df4bb529a5e06e51ee2262d2f65663178fd88497aa15e7eb6bbfbc.png",
+          "sha256": "9a947b36a7df4bb529a5e06e51ee2262d2f65663178fd88497aa15e7eb6bbfbc",
+          "evidence": "captured_after_observation",
+          "captured_at": "2026-11-15 06:40:18.959549"
+        }
+      }
+    },
+    {
+      "version_id": 34032,
+      "observed_at": "2026-11-08 06:48:23.891336",
+      "event": "changed",
+      "snapshot": {
+        "card_id": "BE_036",
+        "name_ru": "МАТРИАРХ",
+        "name_en": "M.O.T.H.E.R.",
+        "text_ru": "<b>Боевой клич</b>: уменьшает стоимость карты в вашей руке на (5). Затем эффект применяется к соседним картам, но ослабляется на (1).",
+        "text_en": "<b>Battlecry:</b> Reduce the Cost of a card in your hand by (5). This continues to the left and right with (1) less reduction.",
+        "card_type": "MINION",
+        "rarity": "LEGENDARY",
+        "mana_cost": 10,
+        "attack": 9,
+        "health": 7,
+        "image_url": "https://d15f34w2p8l1cc.cloudfront.net/hearthstone/9a947b36a7df4bb529a5e06e51ee2262d2f65663178fd88497aa15e7eb6bbfbc.png",
+        "local_image_url": "/uploads/constructed-related/BE_036.png",
+        "local_gold_image_url": "/uploads/card-history-media/97c21cc59e2d926462f97474c253191bda30f45a47300845d9b70ed3bbd2cef0.png",
+        "source_hash": "d1bd685332c2f45be058aee2da3c6a5fd42684f029e6b4b257836605a5c0cd3b",
+        "last_seen_at": "2026-11-08 04:34:43",
+        "updated_at": "2026-11-08 06:48:23"
+      },
+      "media": {
+        "image_url": {
+          "status": "archived",
+          "reason": null,
+          "archive_url": "/uploads/card-history-media/9a947b36a7df4bb529a5e06e51ee2262d2f65663178fd88497aa15e7eb6bbfbc.png",
+          "sha256": "9a947b36a7df4bb529a5e06e51ee2262d2f65663178fd88497aa15e7eb6bbfbc",
+          "evidence": "captured_after_observation",
+          "captured_at": "2026-11-08 06:49:04.528852"
+        },
+        "local_image_url": {
+          "status": "archived",
+          "reason": null,
+          "archive_url": "/uploads/card-history-media/9a947b36a7df4bb529a5e06e51ee2262d2f65663178fd88497aa15e7eb6bbfbc.png",
+          "sha256": "9a947b36a7df4bb529a5e06e51ee2262d2f65663178fd88497aa15e7eb6bbfbc",
+          "evidence": "captured_after_observation",
+          "captured_at": "2026-11-08 06:49:04.651878"
+        }
+      }
+    },
+    {
+      "version_id": 32380,
+      "observed_at": "2026-11-03 20:29:37.596806",
+      "event": "changed",
+      "snapshot": {
+        "card_id": "BE_036",
+        "name_ru": "МАТРИАРХ",
+        "name_en": "M.O.T.H.E.R.",
+        "text_ru": "<b>Боевой клич</b>: уменьшает стоимость карты в вашей руке на (5). Затем эффект применяется к соседним картам, но ослабляется на (1).",
+        "text_en": "<b>Battlecry:</b> Reduce the Cost of a card in your hand by (5). This continues to the left and right with (1) less reduction.",
+        "card_type": "MINION",
+        "rarity": "LEGENDARY",
+        "mana_cost": 10,
+        "attack": 9,
+        "health": 7,
+        "image_url": "https://d15f34w2p8l1cc.cloudfront.net/hearthstone/9a947b36a7df4bb529a5e06e51ee2262d2f65663178fd88497aa15e7eb6bbfbc.png",
+        "local_image_url": "/uploads/constructed-related/BE_036.png",
+        "local_gold_image_url": "/uploads/constructed-golden/BE_036.png",
+        "source_hash": "d1bd685332c2f45be058aee2da3c6a5fd42684f029e6b4b257836605a5c0cd3b",
+        "last_seen_at": "2026-11-03 20:29:37",
+        "updated_at": "2026-11-03 20:29:37"
+      },
+      "media": {
+        "image_url": {
+          "status": "archived",
+          "reason": null,
+          "archive_url": "/uploads/card-history-media/9a947b36a7df4bb529a5e06e51ee2262d2f65663178fd88497aa15e7eb6bbfbc.png",
+          "sha256": "9a947b36a7df4bb529a5e06e51ee2262d2f65663178fd88497aa15e7eb6bbfbc",
+          "evidence": "captured_after_observation",
+          "captured_at": "2026-11-03 20:51:47.566817"
+        },
+        "local_image_url": {
+          "status": "archived",
+          "reason": null,
+          "archive_url": "/uploads/card-history-media/f1d0a999db274d35cbe0007314c676ce0712b33fa8332c3d1ae4aaeab0224958.png",
+          "sha256": "f1d0a999db274d35cbe0007314c676ce0712b33fa8332c3d1ae4aaeab0224958",
+          "evidence": "captured_after_observation",
+          "captured_at": "2026-11-03 20:51:48.089037"
+        }
+      }
+    },
+    {
+      "version_id": 29220,
+      "observed_at": "2026-10-13 20:29:02.769992",
+      "event": "changed",
+      "snapshot": {
+        "card_id": "BE_036",
+        "name_ru": "МАТРИАРХ",
+        "name_en": "M.O.T.H.E.R.",
+        "text_ru": "<b>Боевой клич</b>: уменьшает стоимость карты в вашей руке на (5). Затем эффект применяется к соседним картам, но ослабляется на (1).",
+        "text_en": "<b>Battlecry:</b> Reduce the Cost of a card in your hand by (5). This continues to the left and right with (1) less reduction.",
+        "card_type": "MINION",
+        "rarity": "LEGENDARY",
+        "mana_cost": 9,
+        "attack": 9,
+        "health": 7,
+        "image_url": "https://d15f34w2p8l1cc.cloudfront.net/hearthstone/f1d0a999db274d35cbe0007314c676ce0712b33fa8332c3d1ae4aaeab0224958.png",
+        "local_image_url": "/uploads/constructed-related/BE_036.png",
+        "local_gold_image_url": "/uploads/constructed-golden/BE_036.png",
+        "source_hash": "0477d89c2e7bf6a03236c04b8910056a47936905c235f129e123eeaeb1a91da0",
+        "last_seen_at": "2026-10-13 20:29:02",
+        "updated_at": "2026-10-13 20:29:02"
+      },
+      "media": {
+        "image_url": {
+          "status": "archived",
+          "reason": null,
+          "archive_url": "/uploads/card-history-media/f1d0a999db274d35cbe0007314c676ce0712b33fa8332c3d1ae4aaeab0224958.png",
+          "sha256": "f1d0a999db274d35cbe0007314c676ce0712b33fa8332c3d1ae4aaeab0224958",
+          "evidence": "captured_after_observation",
+          "captured_at": "2026-10-13 22:32:13.569662"
+        },
+        "local_image_url": {
+          "status": "archived",
+          "reason": null,
+          "archive_url": "/uploads/card-history-media/37cefbca7f87b464fa5ed9702ec875f46a4cfef1bbe173aa3caafb2262649d4c.png",
+          "sha256": "37cefbca7f87b464fa5ed9702ec875f46a4cfef1bbe173aa3caafb2262649d4c",
+          "evidence": "captured_after_observation",
+          "captured_at": "2026-10-13 22:32:15.452707"
+        }
+      }
+    },
+    {
+      "version_id": 28076,
+      "observed_at": "2026-10-12 00:26:13.468421",
+      "event": "changed",
+      "snapshot": {
+        "card_id": "BE_036",
+        "name_ru": "МАТРИАРХ",
+        "name_en": "M.O.T.H.E.R.",
+        "text_ru": "<b>Боевой клич</b>: уменьшает стоимость карты в вашей руке на (5). Затем эффект применяется к соседним картам, но ослабляется на (1).",
+        "text_en": "<b>Battlecry:</b> Reduce the Cost of a card in your hand by (5). This continues to the left and right with (1) less reduction.",
+        "card_type": "MINION",
+        "rarity": "LEGENDARY",
+        "mana_cost": 9,
+        "attack": 9,
+        "health": 7,
+        "image_url": "https://d15f34w2p8l1cc.cloudfront.net/hearthstone/37cefbca7f87b464fa5ed9702ec875f46a4cfef1bbe173aa3caafb2262649d4c.png",
+        "local_image_url": "/uploads/constructed-related/BE_036.png",
+        "local_gold_image_url": "/uploads/constructed-golden/BE_036.png",
+        "source_hash": "95a23c067425d9403233e612a15764c3e46ed376df8ef0a3e71dfb12fd2d9f56",
+        "last_seen_at": "2026-10-12 00:26:13",
+        "updated_at": "2026-10-12 00:26:13"
+      },
+      "media": {
+        "image_url": {
+          "status": "archived",
+          "reason": null,
+          "archive_url": "/uploads/card-history-media/37cefbca7f87b464fa5ed9702ec875f46a4cfef1bbe173aa3caafb2262649d4c.png",
+          "sha256": "37cefbca7f87b464fa5ed9702ec875f46a4cfef1bbe173aa3caafb2262649d4c",
+          "evidence": "captured_after_observation",
+          "captured_at": "2026-10-12 16:34:55.972613"
+        },
+        "local_image_url": {
+          "status": "archived",
+          "reason": null,
+          "archive_url": "/uploads/card-history-media/37cefbca7f87b464fa5ed9702ec875f46a4cfef1bbe173aa3caafb2262649d4c.png",
+          "sha256": "37cefbca7f87b464fa5ed9702ec875f46a4cfef1bbe173aa3caafb2262649d4c",
+          "evidence": "captured_after_observation",
+          "captured_at": "2026-10-12 16:34:55.995837"
+        }
+      }
+    },
+    {
+      "version_id": 533,
+      "observed_at": "2026-10-11 23:57:09.912017",
+      "event": "baseline",
+      "snapshot": {
+        "card_id": "BE_036",
+        "name_ru": "МАТРИАРХ",
+        "name_en": "M.O.T.H.E.R.",
+        "text_ru": "<b>Боевой клич</b>: уменьшает стоимость карты в вашей руке на (5). Затем эффект применяется к соседним картам, но ослабляется на (1).",
+        "text_en": "<b>Battlecry:</b> Reduce the Cost of a card in your hand by (5). This continues to the left and right with (1) less reduction.",
+        "card_type": "MINION",
+        "rarity": "LEGENDARY",
+        "mana_cost": 9,
+        "attack": 9,
+        "health": 7,
+        "image_url": "https://d15f34w2p8l1cc.cloudfront.net/hearthstone/37cefbca7f87b464fa5ed9702ec875f46a4cfef1bbe173aa3caafb2262649d4c.png",
+        "local_image_url": "/uploads/constructed-related/BE_036.png",
+        "local_gold_image_url": "/uploads/constructed-golden/BE_036.png",
+        "source_hash": "951132555444aba595b3198bdbf1c00c727528985d85b507149acf0c48ba5dd9",
+        "last_seen_at": "2026-10-11 20:28:35",
+        "updated_at": "2026-10-11 20:28:35"
+      },
+      "media": {
+        "image_url": {
+          "status": "unverified",
+          "reason": "historical_mutable_url",
+          "archive_url": null,
+          "sha256": null,
+          "evidence": null,
+          "captured_at": "2026-10-12 16:08:47.020708"
+        },
+        "local_image_url": {
+          "status": "unverified",
+          "reason": "historical_mutable_url",
+          "archive_url": null,
+          "sha256": null,
+          "evidence": null,
+          "captured_at": "2026-10-12 16:08:47.082875"
+        }
+      }
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "per_page": 50,
+    "total": 6,
+    "total_pages": 1
+  }
+}

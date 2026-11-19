@@ -8,6 +8,7 @@ import { ChartBarIcon } from '@phosphor-icons/react/dist/ssr/ChartBar';
 import { PencilSimpleIcon } from '@phosphor-icons/react/dist/ssr/PencilSimple';
 import { SparkleIcon } from '@phosphor-icons/react/dist/ssr/Sparkle';
 import { cardDetail } from '@/lib/card-detail';
+import { parseCardText } from '@/lib/card-text';
 import { text } from '@/lib/model';
 import type { Row } from '@/lib/types';
 import { Artwork } from './Artwork';
@@ -29,6 +30,24 @@ type Props = {
   onNext?: () => void;
   onClose: () => void;
 };
+
+// Card text as React elements: tags never reach the DOM as markup.
+function CardText({ value }: { value: string }) {
+  const nodes: React.ReactNode[] = [];
+  let offset = 0; // the position in the text is a stable key
+  for (const token of parseCardText(value)) {
+    if (token.kind === 'break') nodes.push(<br key={offset} />);
+    else {
+      let node: React.ReactNode = token.text;
+      if (token.italic) node = <i>{node}</i>;
+      if (token.bold) node = <strong>{node}</strong>;
+      nodes.push(<span key={offset}>{node}</span>);
+      offset += token.text.length;
+    }
+    offset += 1;
+  }
+  return nodes;
+}
 
 export function CardInspector({
   row,
@@ -126,7 +145,11 @@ export function CardInspector({
               )}
               {(detail.text.ru || detail.mechanics.length > 0 || detail.text.en) && (
                 <section className="inspector-text" aria-label="Текст карты">
-                  {detail.text.ru && <p>{detail.text.ru}</p>}
+                  {detail.text.ru && (
+                    <p>
+                      <CardText value={detail.text.ru} />
+                    </p>
+                  )}
                   {detail.mechanics.length > 0 && (
                     <ul className="mechanics" aria-label="Механики">
                       {detail.mechanics.map(mechanic => (
@@ -136,7 +159,7 @@ export function CardInspector({
                   )}
                   {detail.text.en && (
                     <p className="inspector-text__en" lang="en">
-                      {detail.text.en}
+                      <CardText value={detail.text.en} />
                     </p>
                   )}
                   {detail.text.flavor && <p className="inspector-flavor">{detail.text.flavor}</p>}
