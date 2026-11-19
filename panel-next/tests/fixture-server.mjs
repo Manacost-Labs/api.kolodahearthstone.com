@@ -118,6 +118,28 @@ const rows = Array.from({ length: 24 }, (_, i) => ({
   notes: 'Тестовая запись для проверки интерфейса.',
   golden_variant: { card_id: 'BG_FIXTURE_' + (i + 1) + '_G', dbf: 79000 + i },
 }));
+// BE_036 (the Standard / Wild section only): real Russian panel data for the card language tests.
+const constructedRows = [
+  {
+    id: 1001,
+    card_id: 'BE_036',
+    dbf: 128132,
+    name: 'МАТРИАРХ',
+    name_ru: 'МАТРИАРХ',
+    name_en: 'M.O.T.H.E.R.',
+    card_type: 'minion',
+    rarity: 'legendary',
+    mana_cost: 8,
+    attack: 8,
+    health: 8,
+    text_ru:
+      '[x]<b>Боевой клич</b>: уменьшает стоимость\nкарты в вашей руке на (5). Затем\nэффект применяется к соседним\nкартам, но ослабляется на (1).',
+    text_en:
+      '[x]<b>Battlecry:</b> Reduce the Cost of\na card in your hand by (5). This\ncontinues to the left and right\nwith (1) less reduction.',
+    flavor_ru: 'МАТРИАРХ УЖЕ ЗДЕСЬ!',
+    updated_at: '2026-10-02T12:00:00Z',
+  },
+];
 const scopes = {
   'database:read': { label: 'Чтение полной базы', description: 'Collections и records' },
   admin: { label: 'Управление API', description: 'Служебные endpoints' },
@@ -436,7 +458,7 @@ export const server = http.createServer(async (req, res) => {
   if (action === 'analytics_registry') return send({ ok: true, modules: registry.modules });
   const type = input.get('card_type') || '';
   const perPage = Math.max(1, Number(input.get('per_page') || 8));
-  const filtered = rows.filter(
+  const filtered = (type === 'constructed' ? [...constructedRows, ...rows] : rows).filter(
     row =>
       (!input.get('q') ||
         (row.name + ' ' + row.card_id).toLowerCase().includes(input.get('q').toLowerCase())) &&
