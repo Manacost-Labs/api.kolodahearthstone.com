@@ -19,11 +19,13 @@
   "standard|pure paladin": 106022,
   "standard|deathrattle druid": 58589,
   "standard|mill rogue": 49370,
+  "standard|c'thun priest": 54248,
   "standard|mill paladin": 18335,
   "standard|merithra druid": 20289,
   "standard|end of turnadin": 8213,
   "standard|harold dk": 16994,
   "standard|c'thun druid": 7306,
+  "standard|yogg priest": 4932,
   "standard|beast druid": 8908,
   "standard|control priest": 21304,
   "standard|n'zoth paladin": 6879,
@@ -40,6 +42,7 @@
   "standard|azshara druid": 1313,
   "standard|aggro paladin": 492,
   "standard|garona rogue": 390,
+  "standard|deios priest": 329,
   "standard|dude paladin": 350,
   "standard|imbue hunter": 285,
   "standard|magmaw hunter": 98,
@@ -69,6 +72,7 @@
   "wild|beast hunter": 998,
   "wild|aggro dk": 855,
   "wild|clone cta paladin": 1325,
+  "wild|elemental shaman": 583,
   "wild|lc quest paladin": 951,
   "wild|xl blood dk": 2061,
   "wild|infinity paladin": 698,
@@ -78,6 +82,7 @@
   "wild|xl shudderwock shaman": 484,
   "wild|big shaman": 972,
   "wild|xl plague dk": 511,
+  "wild|zee shaman": 466,
   "wild|questline shaman": 147,
   "wild|xl hunter": 283,
   "wild|xl highlander dh": 786,
@@ -112,6 +117,7 @@
   "wild|xl starship rogue": 54,
   "wild|cute paladin": 53,
   "wild|hl shudder shaman": 103,
+  "wild|xl elemental shaman": 50,
   "wild|amalgam hunter": 50,
   "wild|ashtongue warlock": 100
  },
@@ -1213,6 +1219,27 @@
    "games": 70
   },
   {
+   "deck_code": "AAECAa0GBMODB6jfB+L6B/OJCA2FhgfElAfW4AfX6QeO8Qfo8Qfh+gfj+gfk+gfc+weAgwj7iQj8iQgAAA==",
+   "archetype": "C'Thun Priest",
+   "class": "priest",
+   "format": "standard",
+   "games": 900
+  },
+  {
+   "deck_code": "AAECAa0GBMODB6jfB+L6B/OJCA2g+waFhgfElAfW4AfX6QeO8Qfo8Qfh+gfj+gfk+gfc+wf7iQj8iQgAAA==",
+   "archetype": "C'Thun Priest",
+   "class": "priest",
+   "format": "standard",
+   "games": 1913
+  },
+  {
+   "deck_code": "AAECAa0GDJegBKD7BsODB/q/B7LFB5PfB6jfB9XgB9fpB+L6B9z7B/OJCAntrAfW4Af04Afo8Qfh+gfj+gfk+gf7iQj8iQgAAA==",
+   "archetype": "C'Thun Priest",
+   "class": "priest",
+   "format": "standard",
+   "games": 661
+  },
+  {
    "deck_code": "AAECAa0GCqn1BsODB6iWB5ObB/ypB4CqB4SqB4utB+SyB5LcBwrwnwTRngag+waFhgedrQeyxQevyQeT3wf04Afh+gcAAA==",
    "archetype": "Control Priest",
    "class": "priest",
@@ -1232,6 +1259,20 @@
    "class": "priest",
    "format": "standard",
    "games": 102
+  },
+  {
+   "deck_code": "AAECAa0GBPCfBJmxB/TgB+L6Bw2C7AWg+waG/QaFhgfElAf2wQfW4AeO8Qfo8Qfh+gfj+gfk+gf8iQgAAA==",
+   "archetype": "Deios Priest",
+   "class": "priest",
+   "format": "standard",
+   "games": 204
+  },
+  {
+   "deck_code": "AAECAa0GBvCfBIb9BpmxB9XgB/TgB+L6BwyC7AWg+waFhgfElAfW4AeO8Qfo8Qfh+gfj+gfk+geAgwj8iQgAAA==",
+   "archetype": "Deios Priest",
+   "class": "priest",
+   "format": "standard",
+   "games": 50
   },
   {
    "deck_code": "AAECAa0GBsODB/WYB9edB+eyB5LcB4XrBwzwnwSg+waFhgfgnQedrQfksgeyxQevyQeT3wfV4Af04Afh+gcAAA==",
@@ -1260,6 +1301,34 @@
    "class": "priest",
    "format": "standard",
    "games": 66
+  },
+  {
+   "deck_code": "AAECAa0GBJmxB+L6B9z7B8OLCA3wnwTElAftrAfosgeT3wfW4Af04AeO8Qfo8Qfh+gfj+gfk+gf8iQgAAA==",
+   "archetype": "Yogg Priest",
+   "class": "priest",
+   "format": "standard",
+   "games": 57
+  },
+  {
+   "deck_code": "AAECAa0GBKD7BqjfB+L6B8OLCA3ElAedrQeyxQevyQeT3wfW4Afo8Qfh+gfj+gfk+gfc+weAgwj8iQgAAA==",
+   "archetype": "Yogg Priest",
+   "class": "priest",
+   "format": "standard",
+   "games": 1167
+  },
+  {
+   "deck_code": "AAECAa0GBMODB6jfB+L6B8OLCA3ElAeyxQevyQewyQeT3wfV4AfW4AfZ4Afo8Qfh+gfk+gfc+wf8iQgAAA==",
+   "archetype": "Yogg Priest",
+   "class": "priest",
+   "format": "standard",
+   "games": 120
+  },
+  {
+   "deck_code": "AAECAa0GBvCfBJmxB+L6B9z7B8OLCMGMCAzElAftrAfosgeT3wfW4Af04AeO8Qfo8Qfh+gfj+gfk+gf8iQgAAA==",
+   "archetype": "Yogg Priest",
+   "class": "priest",
+   "format": "standard",
+   "games": 660
   },
   {
    "deck_code": "AAECAaIHCM7+BoaoB4eoB4ioB+WvB8XBB6XYB8OLCAuRnwT3nwTZogaQgwfBlwfHrge0wQek2AeR2QeN2ge88gcAAA==",
@@ -1577,11 +1646,25 @@
    "games": 74
   },
   {
+   "deck_code": "AAEBAfHhBA642QSX7wT9xAXt/wWw6wav9AbblweRqweosQfQvwfqyQeb1Aew5Ael+gcN9OME/eMEieQEu7EG2OUGgf0GloIHs7EHj74HmsUH0MUHi/oH+/sHAAEDq4AF/cQF6e0G/cQFk5sH/cQFAAA=",
+   "archetype": "XL Blood DK",
+   "class": "deathknight",
+   "format": "wild",
+   "games": 52
+  },
+  {
    "deck_code": "AAEBAfHhBA6FF8nCApfvBP3EBe3/BZWiBq/0Bqn1BsODB/SqB+rJB6X6B6H8B7eACA394wSJ5AS2+gSrgAW7sQbY5QaWgge6lQftrAeL+gfb+gf7+we9jAgAAQP21gP9xAWRqwf9xAWw5Af9xAUAAA==",
    "archetype": "XL Blood DK",
    "class": "deathknight",
    "format": "wild",
    "games": 235
+  },
+  {
+   "deck_code": "AAEBAfHhBAqX7wTt/wWSoAap9QbQvwfqyQeb1Aew5Ael+geLhggP/eMEieQEq4AFlJUG2OUG/fwGgf0GloIHj74HmsUH0MUHp9wHi/oH2/oH+/sHAAA=",
+   "archetype": "XL Blood DK",
+   "class": "deathknight",
+   "format": "wild",
+   "games": 58
   },
   {
    "deck_code": "AAEBAfHhBBKFF5fvBLL3BP3EBe3/Bc2eBruxBqe4BuntBqz0Bqn1BpOVB6ixB7OxB53bB7LjB6X6B6H8BwuNtQSJ5AS2+gSrgAXY5Qb9/AaB/QaWggeL+gfb+gf7+wcAAQOlrQT9xAWq6gb9xAWsiAf9xAUAAA==",
@@ -1596,6 +1679,34 @@
    "class": "deathknight",
    "format": "wild",
    "games": 60
+  },
+  {
+   "deck_code": "AAEBAfHhBBKFF8PqApfvBO+iBf3EBe3/BcekBqrqBq/0Bqn1BsODB9uXB9C/B+rJB5vUB7DkB6X6B/v7Bwv94wSJ5ASH9gSrgAXY5Qb9/AaB/QaWggePvgeaxQfQxQcAAQa9mQP9xAX1swbHpAb3swbHpAbu3gbHpAbp7Qb9xAWTmwf9xAUAAA==",
+   "archetype": "XL Blood DK",
+   "class": "deathknight",
+   "format": "wild",
+   "games": 167
+  },
+  {
+   "deck_code": "AAEBAfHhBBL6DonkBJfvBLb6BOKkBe3/BZWiBqrqBsODB9uXB6ixB7OxB9C/B+rJB5vUB7DkB4TpB6X6Bwv94wSH9gSrgAXY5Qb9/AaB/QaWggePvgeaxQfQxQeL+gcAAA==",
+   "archetype": "XL Blood DK",
+   "class": "deathknight",
+   "format": "wild",
+   "games": 67
+  },
+  {
+   "deck_code": "AAEBAfHhBBL6DonkBJfvBLb6BOKkBe3/BZWiBsODB7qVB9uXB6ixB7OxB9C/B+rJB5vUB7DkB4TpB6X6Bwv94wSH9gSrgAXY5Qb9/AaB/QaWggePvgeaxQfQxQeL+gcAAA==",
+   "archetype": "XL Blood DK",
+   "class": "deathknight",
+   "format": "wild",
+   "games": 123
+  },
+  {
+   "deck_code": "AAEBAfHhBBSFF8PqApfvBIf2BLb6BKuABf3EBe3/Ba/0Bqn1BtuXB5mxB9C/B+rJB5vUB53bB7DkB4TpB4v6B6X6BwqJ5ATY5Qb9/AaB/QaPvgeaxQfQxQfb+gf7+we9jAgAAQP7sAP9xAWIsQP9xAWTmwf9xAUAAA==",
+   "archetype": "XL Blood DK",
+   "class": "deathknight",
+   "format": "wild",
+   "games": 217
   },
   {
    "deck_code": "AAEBAfHhBAyX7wSt7QWT+wXt/wXYgQb/lwbHpAakwAa6wQaWywa6zgbM4QYO9eME9fcFgvgFu/kF6/8FyoMG0IMG9YwGubEG/7oGv74Gw74GkMsG/eYGAAED9bMGx6QG97MGx6QG7t4Gx6QGAAA=",
@@ -2144,6 +2255,27 @@
    "games": 101
   },
   {
+   "deck_code": "AAEBAaoIAA/wB4yfBLWfBPmfBPufBP2fBKKgBKugBLq0BO7TBNOeBtSeBu3mBuyWB4ecBwAA",
+   "archetype": "Elemental Shaman",
+   "class": "shaman",
+   "format": "wild",
+   "games": 52
+  },
+  {
+   "deck_code": "AAEBAaoIBObkBcCPBr2+Bq3hBg2WtwXf/gWwjQaKjwa+jwbDjwbslQbTngbMogamwAaozgbt5gaxsAcAAA==",
+   "archetype": "Elemental Shaman",
+   "class": "shaman",
+   "format": "wild",
+   "games": 268
+  },
+  {
+   "deck_code": "AAEBAaoIBOjmBq/jB/HjB+b9Bw2MnwSvnwT5nwT7nwT9nwSf1ATTngbTvgbt5gbLrQf8rQexsAe59gcAAA==",
+   "archetype": "Elemental Shaman",
+   "class": "shaman",
+   "format": "wild",
+   "games": 263
+  },
+  {
    "deck_code": "AAEBAaoIHvoOvBTDFva9AqvnAu/3AsO2A/bWA5LkA+PuA6bvA9OABLmRBP2fBMeyBP3EBY31Bcj4BeWVBp+eBtCeBtGeBp2iBsekBqelBq+oBv2oBqn1BuaWB/SqBwAAAQaVlAP9xAWg1AT9xAXRngb9xAX1swbHpAb3swbHpAbu3gbHpAYAAA==",
    "archetype": "HL Shudder Shaman",
    "class": "shaman",
@@ -2177,6 +2309,13 @@
    "class": "shaman",
    "format": "wild",
    "games": 479
+  },
+  {
+   "deck_code": "AAEBAaoIBpfvBObkBcCPBv2wBq3hBrKwBxHg7APA9gPB9gPB0AXf/gWwjQa+jwbDjwbqmAbxnQbBnwbMogakpwamwAbR0Abt5gaxsAcAAA==",
+   "archetype": "XL Elemental Shaman",
+   "class": "shaman",
+   "format": "wild",
+   "games": 50
   },
   {
    "deck_code": "AAEBAaoIKPoO0hO8FMMW9r0CoM4Cq+cC7/cC/KMDw7YD9tYD9+gDpu8DhvoD04AEuZEE/Z8Ex7IE6dkEl+8E6aMF/cQFrekFjfUFyPgF+YwG5ZUGn54G0J4G0Z4Gx6QGp6UGpKcGr6gG66kGzsAG0MAGreEGx4cH5pYHAAABBsCPA/3EBemjBf3EBfWzBsekBvezBsekBu7eBsekBpObB/3EBQAA",
@@ -2268,6 +2407,34 @@
    "class": "shaman",
    "format": "wild",
    "games": 144
+  },
+  {
+   "deck_code": "AAEBAaoIBqvnAvqwA4b6A8CPBq3hBtDbBwyt7gPA9gOVkgSn5ATMogaozgbt5gaYrAexsAfOuwfJ2wfI5QcAAA==",
+   "archetype": "Zee Shaman",
+   "class": "shaman",
+   "format": "wild",
+   "games": 104
+  },
+  {
+   "deck_code": "AAEBAaoIBubkBcCPBq3hBtDbB8jlB8D/BwyTwQKt7gPA9gOVkgSn5ATf/gW+jwbTngbMogaozgbt5gaxsAcAAA==",
+   "archetype": "Zee Shaman",
+   "class": "shaman",
+   "format": "wild",
+   "games": 66
+  },
+  {
+   "deck_code": "AAEBAaoICKvnAvqwA4b6A+bkBb6PBsCPBq3hBtDbBwuTwQKt7gPA9gOVkgSn5ATMogaozgbt5gaxsAfJ2wfI5QcAAA==",
+   "archetype": "Zee Shaman",
+   "class": "shaman",
+   "format": "wild",
+   "games": 53
+  },
+  {
+   "deck_code": "AAEBAaoICqvnAvqwA4b6A6fkBObkBbCNBr6PBsCPBq3hBtDbBwqTwQKt7gPA9gOVkgTMogaozgbt5gaxsAfJ2wfI5QcAAA==",
+   "archetype": "Zee Shaman",
+   "class": "shaman",
+   "format": "wild",
+   "games": 78
   },
   {
    "deck_code": "AAEBAf0GBJPHAuO+A5yzBpXKBg2PBvLQAuSKA5PkA5TuA4jvA4SgBM7kBcSeBqOgBsO4BsSSB4SZBwAA",

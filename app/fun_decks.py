@@ -114,7 +114,7 @@ _LADDER_ARCHETYPE_RE = re.compile(
 # bare "<word> <class>" title it is only a style label.
 _GENERIC_DECK_WORDS = (
     r"aggro|midrange|control|tempo|face|burn|ramp|tokens?|zoo|secrets?|dragons?|"
-    r"elementals?|dude|big\s+spell|spell|mech|beast|pirate|undead"
+    r"elementals?|dude|big\s+spell|spell|mech|beast|pirate|undead|blood|frost|unholy"
 )
 _CLASS_NAME_WORDS = (
     r"death\s*knight|dk|demon\s*hunter|dh|druid|hunter|mage|paladin|priest|rogue|"
@@ -554,6 +554,10 @@ class CatalogIndex:
             return 0.0
         return round(100.0 * self._package_games.get((fmt, label), 0) / total, 4)
 
+    def is_neutral_package(self, fmt: str, label: str) -> bool:
+        """The format plays the package a lot: it is meta there, not a fun signal."""
+        return self.package_share_pct(fmt, label) >= self._spicy_share_cap
+
     def sharp_packages(self, fmt: str, packages: tuple[str, ...]) -> tuple[str, ...]:
         """The spicy packages that are still rare in the format (a fun signal)."""
         return tuple(
@@ -855,13 +859,34 @@ def _spicy_packages(packages: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(label for label in packages if label in _SPICY_PACKAGES)
 
 
-def _concept_hit(title: str) -> bool:
+# Concept words that only name a card package; backed by a package the format plays a lot,
+# such a word is no concept (Yogg in Standard).
+_WORD_PACKAGE = {
+    "yogg": "yogg_package",
+    "reno": "reno_highlander",
+    "highlander": "reno_highlander",
+    "hl": "reno_highlander",
+    "odd": "odd_even",
+    "even": "odd_even",
+    "tog": "togwaggle_mill",
+    "togwaggle": "togwaggle_mill",
+    "mill": "togwaggle_mill",
+    "mechathun": "mechathun",
+}
+
+
+def _concept_words(title: str) -> list[str]:
+    """The concept words of a title, casefolded; none for a named ladder package."""
     if _ladder_archetype_name(title) or _EGG_LADDER_RE.search(title or ""):
-        return False
-    if _CONCEPT_TITLE_RE.search(title or ""):
-        return True
-    # Off-class egg titles only count when not already ladder-gated above.
-    return bool(_EGG_TITLE_RE.search(title or "")) and not _ladder_archetype_name(title)
+        return []
+    words = [re.sub(r"[^a-z0-9]", "", m.group(1).casefold()) for m in _CONCEPT_TITLE_RE.finditer(title or "")]
+    if _EGG_TITLE_RE.search(title or ""):
+        words.append("egg")
+    return words
+
+
+def _concept_hit(title: str) -> bool:
+    return bool(_concept_words(title))
 
 
 def strip_format_prefix(title: str) -> str:
@@ -875,9 +900,18 @@ def strip_format_prefix(title: str) -> str:
     return text
 
 
+# Service prefixes of a title that say nothing about the deck: XL / HL / Highlander and the
+# rune letters of a Death Knight list (BBU, FFU, BFU...).
+_SERVICE_TITLE_PREFIX_RE = re.compile(r"^(?:(?:xl|hl|highlander|[bfu]{3})\b\s*)+", re.IGNORECASE)
+
+
 def _generic_ladder_title(title: str) -> bool:
-    """True for a bare "<Aggro|Dragon|Dude|...> <class>" name (format prefix ignored)."""
-    return bool(_GENERIC_LADDER_TITLE_RE.match(strip_format_prefix(title)))
+    """True for a bare "<Aggro|Dragon|Dude|...> <class>" name (service prefixes ignored)."""
+    text = strip_format_prefix(title)
+    return bool(
+        _GENERIC_LADDER_TITLE_RE.match(text)
+        or _GENERIC_LADDER_TITLE_RE.match(_SERVICE_TITLE_PREFIX_RE.sub("", text, count=1).strip())
+    )
 
 
 def wilson_interval(win_rate_pct: float, games: int) -> tuple[float, float]:
@@ -1008,7 +1042,11 @@ def score_fun_deck(
     packages = detect_card_packages(bag)
     # A package that much of the format plays is meta, not a concept.
     spicy = index.sharp_packages(fmt, _spicy_packages(packages))
-    title_concept = _concept_hit(title_name)
+    # A word backed by a package that much of the format plays is no concept.
+    title_concept = any(
+        not (label := _WORD_PACKAGE.get(word)) or not index.is_neutral_package(fmt, label)
+        for word in _concept_words(title_name)
+    )
     concept = title_concept or bool(spicy)
 
     # 1. Ladder lists are turned away first, whatever concept words or packages say.

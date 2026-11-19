@@ -1182,7 +1182,7 @@ def test_refresh_publishes_only_decks_that_pass_every_v8_rule(fun_deck_world: No
         streamer=[
             # a streamer list has no games / win rate in this dataset
             {
-                "Deck": "XL HL Blood DK",
+                "Deck": "XL HL Casino DK",
                 "Format": "Wild",
                 "class": "DeathKnight",
                 "deck_code": _deckstring(range(1001, 1016)),
@@ -1738,7 +1738,6 @@ _WORD_PACKAGE = [
     ("Even", "odd_even"),
     ("Tog", "togwaggle_mill"),
     ("Mill", "togwaggle_mill"),
-    ("CThun", "cthun"),
 ]
 
 
@@ -2083,18 +2082,20 @@ def test_real_catalog_slice_rejects_every_ladder_list_and_keeps_the_brews(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     verdicts = _golden_verdicts(monkeypatch)
-    assert len(verdicts) == 42
+    assert len(verdicts) == 45
 
     passed = [e["title"] for e, s in verdicts if e["expected"] == "reject" and s.is_fun]
     lost = [e["title"] for e, s in verdicts if e["expected"] == "brew" and not (s.is_fun and s.kind == "brew")]
     off_as_brew = [e["title"] for e, s in verdicts if e["expected"] == "off_meta" and s.kind == "brew"]
 
     assert passed == []
-    assert lost == ["Y'Shaarj Paladin"]  # at most 2 of the 17 brews may be lost
+    # at most 2 of the 17 brews may be lost: Yogg Druid is a Yogg variant now (F5)
+    assert lost == ["Yogg Druid", "Y'Shaarj Paladin"]
     assert off_as_brew == []
     assert {e["title"] for e, s in verdicts if e["expected"] == "off_meta" and s.is_fun} == {
         "Imbue Druid",
         "Imbue Paladin",
+        "Yogg Priest",
     }
 
 
@@ -2109,6 +2110,8 @@ def test_real_catalog_slice_rejects_every_ladder_list_and_keeps_the_brews(
         ("Aggro Paladin", "generic_ladder_gate"),
         ("Dude Paladin", "generic_ladder_gate"),
         ("Mech Rogue", "generic_ladder_gate"),
+        ("XL Blood DK", "generic_ladder_gate"),
+        ("XL Elemental Shaman", "generic_ladder_gate"),
     ],
 )
 def test_real_catalog_slice_names_the_gate_of_each_audited_reject(

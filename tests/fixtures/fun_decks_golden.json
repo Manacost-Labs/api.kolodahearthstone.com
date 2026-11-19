@@ -462,6 +462,39 @@
    "expected": "off_meta",
    "note": "близкий вариант (0.62) именованного архетипа (F3)",
    "source": "live-catalog-20261119-review"
+  },
+  {
+   "title": "Yogg Priest",
+   "format": "Standard",
+   "class": "Priest",
+   "deck_code": "AAECAa0GBJmxB+L6B9z7B8OLCA3wnwTElAftrAfosgeT3wfW4Af04AeO8Qfo8Qfh+gfj+gfk+gf8iQgAAA==",
+   "games": 57,
+   "win_rate": 49.1,
+   "expected": "off_meta",
+   "note": "Yogg-Saron — мета в Standard (9.7%), слово «Yogg» не концепт (F5); вариант архетипа",
+   "source": "live-catalog-20261119-owner-review"
+  },
+  {
+   "title": "XL Blood DK",
+   "format": "Wild",
+   "class": "DeathKnight",
+   "deck_code": "AAEBAfHhBA642QSX7wT9xAXt/wWw6wav9AbblweRqweosQfQvwfqyQeb1Aew5Ael+gcN9OME/eMEieQEu7EG2OUGgf0GloIHs7EHj74HmsUH0MUHi/oH+/sHAAEDq4AF/cQF6e0G/cQFk5sH/cQFAAA=",
+   "games": 52,
+   "win_rate": 59.6,
+   "expected": "reject",
+   "note": "общее название после приставки XL (F6)",
+   "source": "live-catalog-20261119-owner-review"
+  },
+  {
+   "title": "XL Elemental Shaman",
+   "format": "Wild",
+   "class": "Shaman",
+   "deck_code": "AAEBAaoIBpfvBObkBcCPBv2wBq3hBrKwBxHg7APA9gPB9gPB0AXf/gWwjQa+jwbDjwbqmAbxnQbBnwbMogakpwamwAbR0Abt5gaxsAcAAA==",
+   "games": 50,
+   "win_rate": 52.0,
+   "expected": "reject",
+   "note": "общее название после приставки XL (F6)",
+   "source": "live-catalog-20261119-owner-review"
   }
  ]
 }
