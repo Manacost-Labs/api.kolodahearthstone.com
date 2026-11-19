@@ -1,0 +1,337 @@
+{
+  "modules": {
+    "overview": {
+      "title": "Все источники данных",
+      "description": "Полный реестр источников: состояние, назначение и время последнего успешного обновления.",
+      "params": []
+    },
+    "providers": {
+      "title": "Провайдеры",
+      "description": "Каждый вызов Decodo, Scrape.do, Firecrawl и Scrapfly: успешность, время ответа, трафик и расход по дням (UTC).",
+      "params": {
+        "provider": {
+          "type": "enum",
+          "values": ["all", "decodo", "scrape_do", "firecrawl", "scrapfly"],
+          "default": "all"
+        },
+        "days": {
+          "type": "enum",
+          "values": ["7", "30"],
+          "default": "30"
+        },
+        "source_id": {
+          "type": "token",
+          "max": 160
+        }
+      }
+    },
+    "meta": {
+      "title": "Мета Standard / Wild",
+      "description": "Архетипы HSGuru: винрейт, популярность, число игр и скорость подъёма.",
+      "params": {
+        "format": {
+          "type": "enum",
+          "values": ["standard", "wild"],
+          "default": "standard"
+        },
+        "rank": {
+          "type": "enum",
+          "values": [
+            "all",
+            "diamond",
+            "diamond_4to1",
+            "diamond_to_legend",
+            "legend",
+            "top_5k",
+            "top_legend",
+            "top_500",
+            "top_100"
+          ],
+          "default": "legend"
+        },
+        "period": {
+          "type": "token",
+          "default": "past_day",
+          "max": 64
+        },
+        "min_games": {
+          "type": "int",
+          "default": 100,
+          "min": 0,
+          "max": 1000000
+        }
+      }
+    },
+    "archetypes": {
+      "title": "Архетипы HSReplay",
+      "description": "Архетипы рейтинговой игры с долей меты и общей статистикой.",
+      "params": {
+        "q": {
+          "type": "string",
+          "max": 120
+        },
+        "class_name": {
+          "type": "string",
+          "max": 80
+        },
+        "rank_range": {
+          "type": "token",
+          "default": "LEGEND",
+          "max": 80
+        },
+        "game_type": {
+          "type": "token",
+          "default": "RANKED_STANDARD",
+          "max": 80
+        },
+        "limit": {
+          "type": "int",
+          "default": 100,
+          "min": 1,
+          "max": 200
+        },
+        "offset": {
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "max": 10000
+        }
+      }
+    },
+    "hsguru_archetypes": {
+      "title": "Архетипы HSGuru",
+      "description": "Полный каталог актуальных архетипов Standard и Wild со статистикой и доступными сборками.",
+      "params": {
+        "q": {
+          "type": "string",
+          "max": 120
+        },
+        "format": {
+          "type": "enum",
+          "values": ["standard", "wild"],
+          "default": "standard"
+        },
+        "min_games": {
+          "type": "int",
+          "default": 50,
+          "min": 50,
+          "max": 1000000
+        },
+        "sort": {
+          "type": "enum",
+          "values": ["games", "winrate", "popularity", "name"],
+          "default": "games"
+        },
+        "order": {
+          "type": "enum",
+          "values": ["asc", "desc"],
+          "default": "desc"
+        },
+        "limit": {
+          "type": "int",
+          "default": 300,
+          "min": 1,
+          "max": 500
+        },
+        "offset": {
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "max": 10000
+        }
+      }
+    },
+    "decks": {
+      "title": "Колоды",
+      "description": "Собранные колоды из всех доступных источников.",
+      "params": {
+        "q": {
+          "type": "string",
+          "max": 120
+        },
+        "class_name": {
+          "type": "string",
+          "max": 80
+        },
+        "format_name": {
+          "type": "string",
+          "max": 80
+        },
+        "source_id": {
+          "type": "token",
+          "max": 120
+        },
+        "limit": {
+          "type": "int",
+          "default": 50,
+          "min": 1,
+          "max": 100
+        },
+        "offset": {
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "max": 10000
+        }
+      }
+    },
+    "bg_heroes": {
+      "title": "Герои по рейтингу",
+      "description": "Герои Battlegrounds по MMR-срезам: выбор, среднее место, первые места и размер выборки.",
+      "params": {
+        "q": {
+          "type": "string",
+          "max": 120
+        },
+        "mode": {
+          "type": "enum",
+          "values": ["solo", "duos"],
+          "default": "solo"
+        },
+        "rating": {
+          "type": "enum",
+          "values": ["100", "50", "25", "10", "1"],
+          "default": "50"
+        },
+        "limit": {
+          "type": "int",
+          "default": 200,
+          "min": 1,
+          "max": 200
+        },
+        "offset": {
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "max": 10000
+        }
+      }
+    },
+    "bg_minions": {
+      "title": "Существа Battlegrounds",
+      "description": "Подробная статистика существ: популярность, влияние, винрейт боя, средняя позиция и показатели по раундам.",
+      "params": {
+        "q": {
+          "type": "string",
+          "max": 120
+        },
+        "tavern_tier": {
+          "type": "int",
+          "min": 1,
+          "max": 7
+        },
+        "limit": {
+          "type": "int",
+          "default": 500,
+          "min": 1,
+          "max": 500
+        },
+        "offset": {
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "max": 10000
+        }
+      }
+    },
+    "arena": {
+      "title": "Арена",
+      "description": "Винрейт, частота выбора и число драфтов по классам.",
+      "params": {
+        "limit": {
+          "type": "int",
+          "default": 20,
+          "min": 1,
+          "max": 100
+        },
+        "offset": {
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "max": 10000
+        }
+      }
+    },
+    "arena_cards": {
+      "title": "Карты Арены",
+      "description": "Карты обычной и Подпольной Арены: тир, винрейт, выбор и размер выборки.",
+      "params": {
+        "q": {
+          "type": "string",
+          "max": 120
+        },
+        "arena_source": {
+          "type": "enum",
+          "values": ["hsreplay", "firestone", "underground"],
+          "default": "firestone"
+        },
+        "limit": {
+          "type": "int",
+          "default": 200,
+          "min": 1,
+          "max": 500
+        }
+      }
+    },
+    "constructed_cards": {
+      "title": "Карты Standard / Wild",
+      "description": "Статистика карт по формату, рейтингу и периоду: винрейт, популярность, муллиган и игры.",
+      "params": {
+        "q": {
+          "type": "string",
+          "max": 120
+        },
+        "format": {
+          "type": "enum",
+          "values": ["standard", "wild"],
+          "default": "standard"
+        },
+        "card_rank": {
+          "type": "enum",
+          "values": ["platinum", "diamond", "diamond_4_1", "legend"],
+          "default": "legend"
+        },
+        "card_period": {
+          "type": "enum",
+          "values": ["1d", "3d", "7d", "14d", "patch"],
+          "default": "7d"
+        },
+        "limit": {
+          "type": "int",
+          "default": 200,
+          "min": 1,
+          "max": 500
+        }
+      }
+    },
+    "patches": {
+      "title": "Патчи Hearthstone",
+      "description": "Сопоставление официальных патчей и публикаций HS-Manacost.",
+      "params": {
+        "limit": {
+          "type": "int",
+          "default": 50,
+          "min": 1,
+          "max": 100
+        },
+        "offset": {
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "max": 10000
+        }
+      }
+    },
+    "card": {
+      "title": "Статистика карты",
+      "description": "Все найденные показатели карты в рейтинге и Battlegrounds.",
+      "params": {
+        "card_name": {
+          "type": "string",
+          "required": true,
+          "max": 120
+        }
+      }
+    }
+  }
+}
