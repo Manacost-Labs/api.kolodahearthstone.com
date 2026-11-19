@@ -174,6 +174,34 @@ export default async function verify(page, root) {
     (await page.locator('.bg-card__tier').first().innerText()).trim().length > 0,
     'BG minions: no tier chip',
   );
+  // The tavern tier is a list «Все / 1…7», and the choice goes to the backend as tavern_tier=3.
+  const tierSelect = page.getByRole('combobox', { name: 'Уровень таверны', exact: true });
+  ensure((await tierSelect.innerText()).trim() === 'Все', 'Tavern tier is not a list with «Все»');
+  const tierRequest = page.waitForRequest(request => request.url().includes('tavern_tier=3'));
+  await tierSelect.click();
+  await page.getByRole('option', { name: '3', exact: true }).click();
+  await tierRequest;
+  await settled();
+  ensure(page.url().includes('tavern_tier=3'), 'The tier is not in the address: ' + page.url());
+  await tierSelect.click();
+  await page.getByRole('option', { name: 'Все', exact: true }).click();
+  await page.waitForFunction(() => !location.search.includes('tavern_tier'));
+  await settled();
+  const rows = await page.locator('.bg-card').count();
+  const cardsAt = async width => {
+    await open('bg_minions', width);
+    return page.locator('.bg-card').evaluateAll(items => {
+      const tops = items.map(item => Math.round(item.getBoundingClientRect().top));
+      const counts = {};
+      for (const top of tops) counts[top] = (counts[top] ?? 0) + 1;
+      return Object.values(counts);
+    });
+  };
+  ensure(rows === 12, 'BG minions after reset: ' + rows);
+  for (const width of [1440, 1280]) {
+    const perRow = await cardsAt(width);
+    ensure(new Set(perRow).size === 1, `BG minions at ${width}: uneven rows ${perRow}`);
+  }
   checks.bgViews = true;
   await open('arena');
   const columns = await page.locator('.arena-col').count();

@@ -281,7 +281,7 @@ html[data-mode='dark'] .bg-view {
 /* Top minions */
 .bg-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: var(--space-3);
   margin: 0;
   padding: 0;
@@ -319,9 +319,19 @@ html[data-mode='dark'] .bg-view {
   color: var(--good);
 }
 
+@media (max-width: 1360px) {
+  .bg-cards {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
 @media (max-width: 1100px) {
   .bg-view {
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 900px) {
+  .bg-cards {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 @media (max-width: 640px) {

@@ -503,7 +503,8 @@ export function normalizeShares(text: string): string {
 /** The Russian wording of a filter value: "past_day" → «24 часа», "patch_37.0.2" → «Патч 37.0.2». */
 export function optionLabel(param: string, value: string): string {
   const raw = String(value);
-  if (raw === '' && (param === 'class_name' || param === 'format_name')) return 'Все';
+  if (raw === '' && (param === 'class_name' || param === 'format_name' || param === 'tavern_tier'))
+    return 'Все';
   if (param === 'class_name') return classLabel(raw);
   const known = optionLabels[param]?.[raw] ?? optionLabels[param]?.[raw.toLowerCase()];
   if (known) return known;

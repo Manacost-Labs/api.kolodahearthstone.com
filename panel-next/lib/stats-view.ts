@@ -37,6 +37,18 @@ export function optionValues(key: string, param: Param, data: AnalyticsData | un
   let list = (Array.isArray(offered) ? offered : (param.values ?? [])).map(String);
   // A token the panel has wording for (the period), or a class/format string: a list even without `options`.
   if (!list.length && (param.type === 'token' || catalogued.includes(key))) list = knownOptionValues(key);
+  // A small bounded integer without a default (the tavern tier, 1–7) is a list with «Все» first, not a typed field.
+  const { min, max } = param;
+  if (
+    !list.length &&
+    param.type === 'int' &&
+    param.default === undefined &&
+    typeof min === 'number' &&
+    typeof max === 'number' &&
+    max >= min &&
+    max - min <= 10
+  )
+    list = ['', ...Array.from({ length: max - min + 1 }, (_, index) => String(min + index))];
   if (current && list.length && !list.includes(current)) list.unshift(current);
   return list;
 }
