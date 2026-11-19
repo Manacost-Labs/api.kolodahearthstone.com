@@ -37,7 +37,14 @@ from typing import Any
 from urllib.parse import urlencode
 
 from . import card_choice_pools as pools
-from .assemble_pools import AssembleTexts, assemble_cards, is_assemble_card
+from .assemble_pools import (
+    AssembleTexts,
+    DonorPools,
+    assemble_cards,
+    is_assemble_card,
+    is_class_dependent,
+    player_class_of,
+)
 from .hsreplay_mulligan import (
     JsonFetcher,
     ScrapeDoClient,
@@ -69,6 +76,10 @@ DONORS_OFFER_RANGE = (190.0, 210.0)
 ANY_HALF_PICK_RANGE = (48.0, 52.0)
 MIN_CHECKED_BASE_OFFER = 1.0
 MAX_UNRESOLVED_SHARE = 0.05
+# Donor pool gate: more than this share (percent) of a card's donor shows that the
+# computed pool does not cover turns the pool off (``donor_pool_status.state``).
+POOL_MISMATCH_SHARE = 1.0
+POOL_WORST_EXAMPLES = 5
 
 
 def _env_int(name: str, default: int, *, minimum: int = 0, maximum: int = 1000) -> int:
@@ -717,6 +728,144 @@ def summarize_card(
     }
 
 
+UNRESOLVED_REASONS = frozenset({"unknown_card", "no_separator"})
+
+
+def _donor_pool_check(rules: DonorPools, rows: list[list[Any]]) -> dict[str, Any]:
+    """Pairs of the snapshot (base, donor) the class-independent pool does not cover.
+
+    A pair whose base or donor has no known card or no trigger/effect separator
+    cannot be shown at all (``bases[]`` and ``donors[]`` skip it, see
+    ``stats.unresolved_rows``): it is counted apart (``unresolved_pairs``) and
+    stays out of the gate.
+    """
+
+    pairs = unresolved = uncovered = 0
+    shown = missed = 0
+    reasons: dict[str, int] = {}
+    worst: list[dict[str, Any]] = []
+    for middle_dbf, _middle_offered, donor_rows in rows:
+        for row in donor_rows:
+            offered = int(row[1])
+            pairs += 1
+            reason = rules.reject_reason(int(middle_dbf), int(row[0]))
+            if reason in UNRESOLVED_REASONS:
+                unresolved += 1
+                continue
+            shown += offered
+            if reason is None:
+                continue
+            uncovered += 1
+            missed += offered
+            reasons[reason] = reasons.get(reason, 0) + 1
+            worst.append(
+                {
+                    "base_dbf": int(middle_dbf),
+                    "donor_dbf": int(row[0]),
+                    "offered": offered,
+                    "reason": reason,
+                }
+            )
+    worst.sort(key=lambda item: (-item["offered"], item["base_dbf"], item["donor_dbf"]))
+    share = _pct(missed, shown) or 0.0
+    return {
+        "observed_pairs": pairs - unresolved,
+        "unresolved_pairs": unresolved,
+        "uncovered_pairs": uncovered,
+        "uncovered_offer_share": round(share, 4),
+        "mismatch": share > POOL_MISMATCH_SHARE,
+        "reasons": reasons,
+        "worst": worst[:POOL_WORST_EXAMPLES],
+    }
+
+
+_CHECK_CACHE: dict[tuple[Any, ...], tuple[Any, dict[str, Any]]] = {}
+
+
+def donor_pool_check(
+    card_base: pools.CardBase,
+    texts: AssembleTexts,
+    card: Mapping[str, Any],
+    format_name: str,
+    snapshot: Mapping[str, Any],
+    rows: list[list[Any]],
+) -> dict[str, Any]:
+    """The check of one card in one format, once per snapshot (``content_hash``)."""
+
+    key = (snapshot.get("content_hash"), format_name, int(card["dbfId"]))
+    cached = _CHECK_CACHE.get(key)
+    if cached is not None and cached[0] is card_base and key[0]:
+        return cached[1]
+    result = _donor_pool_check(DonorPools(card_base, texts, card, format_name), rows)
+    if key[0]:
+        if len(_CHECK_CACHE) > 64:
+            _CHECK_CACHE.clear()
+        _CHECK_CACHE[key] = (card_base, result)
+    return result
+
+
+def donor_pool_status(
+    card: Mapping[str, Any],
+    player_class: str | None,
+    check: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """``donor_pool_status`` of the answer (``check`` is ``None`` without a snapshot)."""
+
+    if check is None:
+        state = "unavailable"
+    else:
+        state = "mismatch" if check["mismatch"] else "ok"
+    return {
+        "state": state,
+        "class_dependent": is_class_dependent(card),
+        "player_class": player_class,
+        "observed_pairs": check["observed_pairs"] if check else None,
+        "uncovered_pairs": check["uncovered_pairs"] if check else None,
+        "uncovered_offer_share": check["uncovered_offer_share"] if check else None,
+    }
+
+
+def build_donor_pool(
+    card_base: pools.CardBase,
+    texts: AssembleTexts,
+    rules: DonorPools,
+    item: Mapping[str, Any],
+    player_class: str | None,
+    seen_donors: Iterable[int],
+) -> list[dict[str, Any]]:
+    """The full pool of one base: donors with stats first (``donors[]`` order), then the rest."""
+
+    base_dbf = int(item["_dbf"])
+    observed = [int(donor["card"]["dbf_id"]) for donor in item["donors"]]
+    cards = {
+        int(card["dbfId"]): card
+        for card in rules.candidates(
+            base_dbf, player_class, prefer=seen_donors, keep=observed
+        )
+    }
+    ordered = [dbf for dbf in observed if dbf in cards]
+    listed = set(ordered)
+    rest = sorted(
+        (dbf for dbf in cards if dbf not in listed),
+        key=lambda dbf: (
+            str(card_base.name_ru(cards[dbf]) or cards[dbf].get("name") or ""),
+            dbf,
+        ),
+    )
+    stats = set(observed)
+    return [
+        {
+            "card": card_ref(card_base, cards[dbf]),
+            "has_stats": dbf in stats,
+            "options": [
+                {"half": half, "text": texts.option(base_dbf, dbf, half)}
+                for half in ("effect", "trigger")
+            ],
+        }
+        for dbf in ordered + rest
+    ]
+
+
 def _load_state() -> tuple[dict[str, Any], dict[str, Any]]:
     try:
         dataset = load_dataset(SOURCE_ID)
@@ -773,6 +922,7 @@ def get_assemble(
     *,
     format_name: str = "standard",
     base_selector: str | None = None,
+    class_name: str | None = None,
     base: pools.CardBase | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
@@ -798,6 +948,16 @@ def get_assemble(
         if bases and wanted not in {item["_dbf"] for item in bases}:
             raise BaseNotFound(f"base {wanted} is not in the pool of {card['id']}")
     expanded = base_selector is None
+    stats_state = _card_state(snapshot, rows, format_state, _is_configured(format_name))
+    player_class = player_class_of(card, class_name)
+    check = (
+        donor_pool_check(card_base, texts, card, format_name, snapshot or {}, rows)
+        if stats_state == "ok" and rows
+        else None
+    )
+    pool_status = donor_pool_status(card, player_class, check)
+    rules = DonorPools(card_base, texts, card, format_name)
+    seen_donors = {int(row[0]) for middle in (rows or []) for row in middle[2]}
     out_bases = []
     for item in bases:
         shown = expanded or item["_dbf"] == wanted
@@ -807,15 +967,18 @@ def get_assemble(
                 {key: value for key, value in donor.items() if key != "_dbf"}
                 for donor in item["donors"]
             ]
-        out_bases.append(
-            {
-                key: (donors if key == "donors" else value)
-                for key, value in item.items()
-                if key != "_dbf"
-            }
+        out_base = {
+            key: (donors if key == "donors" else value)
+            for key, value in item.items()
+            if key != "_dbf"
+        }
+        out_base["donor_pool"] = (
+            build_donor_pool(card_base, texts, rules, item, player_class, seen_donors)
+            if item["_dbf"] == wanted and pool_status["state"] == "ok"
+            else None
         )
+        out_bases.append(out_base)
     checked_at = (snapshot or {}).get("checked_at")
-    stats_state = _card_state(snapshot, rows, format_state, _is_configured(format_name))
     data = {
         "card": {
             **card_ref(card_base, card),
@@ -835,6 +998,7 @@ def get_assemble(
             "unresolved_rows": summary["unresolved_rows"],
         },
         "summary": {"bases_total": len(bases), "win_rate": summary["win_rate"]},
+        "donor_pool_status": pool_status,
         "bases": out_bases,
     }
     return data

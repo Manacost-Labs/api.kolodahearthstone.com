@@ -15,6 +15,7 @@ from starlette.testclient import TestClient
 from app import assemble_pools as ap
 from app import card_choice_pools as pools
 from app import hsreplay_assemble as ha
+from app.exit_codes import ExitCode
 from app.hsreplay_mulligan import FetchResult
 from app.storage import load_dataset, load_status
 
@@ -42,6 +43,7 @@ def base() -> pools.CardBase:
     return pools.CardBase(
         CARD_FIXTURE["cards"],
         standard_sets=CARD_FIXTURE["standard_sets"],
+        standard_dbf=CARD_FIXTURE["standard_dbf"],
         names_ru=CARD_FIXTURE["names_ru"],
         texts_ru=CARD_FIXTURE["texts_ru"],
     )
@@ -1081,3 +1083,446 @@ def test_the_source_is_registered_as_a_daily_pipeline() -> None:
     source = SOURCE_BY_ID["hsreplay_assemble"]
     assert source.kind == "pipeline" and source.stale_hours == 36
     assert source.url == "https://hsreplay.net/cards/assemble-pools/"
+
+
+# --- full donor pool ------------------------------------------------------------------------
+
+
+def _card(
+    card_id: str,
+    dbf: int,
+    cost: int,
+    text: str = "At the end of your turn,& draw a card.",
+    *,
+    card_class: str = "NEUTRAL",
+    card_set: str = "CORE",
+    card_type: str = "MINION",
+    name: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "id": card_id,
+        "dbfId": dbf,
+        "name": name or card_id,
+        "text": text,
+        "set": card_set,
+        "type": card_type,
+        "cost": cost,
+        "cardClass": card_class,
+        "collectible": True,
+    }
+
+
+def _assemble_card(card_id: str, dbf: int, card_class: str) -> dict[str, Any]:
+    return _card(
+        card_id,
+        dbf,
+        3,
+        "<b>Battlecry:</b> <b>Assemble</b> a minion.",
+        card_class=card_class,
+        card_set="BE",
+    )
+
+
+def _mini_base(cards: list[dict[str, Any]]) -> pools.CardBase:
+    return pools.CardBase(
+        [
+            _assemble_card("BE_044", 1, "NEUTRAL"),
+            _assemble_card("BE_702", 2, "ROGUE"),
+            _assemble_card("BE_045", 3, "PRIEST"),
+            _assemble_card("BE_004", 4, "PALADIN"),
+            *cards,
+        ],
+        standard_sets=["CORE", "BE"],
+    )
+
+
+def _rules(cards: list[dict[str, Any]], assemble: str = "BE_044", fmt="standard"):
+    card_base = _mini_base(cards)
+    card = card_base.by_id[assemble]
+    return card_base, ap.DonorPools(card_base, ap.AssembleTexts(card_base), card, fmt)
+
+
+def _pool_ids(
+    card_base, rules, base_dbf: int, player_class=None, **kwargs
+) -> list[str]:
+    return [
+        str(card["id"]) for card in rules.candidates(base_dbf, player_class, **kwargs)
+    ]
+
+
+def test_donor_cost_is_the_base_cost_up_to_plus_two() -> None:
+    cards = [_card("BASE", 100, 3)] + [
+        _card(f"D{cost}", 110 + cost, cost, f"After you draw {cost},& draw a card.")
+        for cost in range(8)
+    ]
+    card_base, rules = _rules(cards)
+    assert _pool_ids(card_base, rules, 100) == ["D3", "D4", "D5"]
+    assert rules.reject_reason(100, 112) == "cost"
+    assert rules.reject_reason(100, 116) == "cost"
+
+
+@pytest.mark.parametrize("base_cost", [8, 9, 10])
+def test_a_base_of_8_to_10_gets_donors_of_8_to_10(base_cost) -> None:
+    cards = [_card("BASE", 100, base_cost)] + [
+        _card(f"D{cost}", 110 + cost, cost, f"After you draw {cost},& draw a card.")
+        for cost in range(6, 11)
+    ]
+    card_base, rules = _rules(cards)
+    assert _pool_ids(card_base, rules, 100) == ["D8", "D9", "D10"]
+
+
+def test_mismatcher_wants_donors_of_five_and_more_for_any_base() -> None:
+    cards = [_card("BASE", 100, 1)] + [
+        _card(f"D{cost}", 110 + cost, cost, f"After you draw {cost},& draw a card.")
+        for cost in range(1, 10)
+    ]
+    card_base, rules = _rules(cards, "BE_045")
+    assert _pool_ids(card_base, rules, 100) == [f"D{cost}" for cost in range(5, 10)]
+
+
+def test_rajhs_pool_is_a_curated_list_of_any_class_and_cost(base, texts) -> None:
+    rajh = base.by_id["BE_004"]
+    rules = ap.DonorPools(base, texts, rajh, "standard")
+    antonidas = base.by_dbf[ANTONIDAS]
+    ids = {str(card["id"]) for card in rules.candidates(ANTONIDAS, None)}
+    expected = set(ap.CURATED_DONORS["BE_004"]) - {"CORE_EX1_559"}
+    assert ids == expected - {
+        card_id
+        for card_id in expected
+        if ap.same_condition(
+            texts.halves(base.by_id[card_id]["dbfId"], "en")[0],
+            texts.halves(ANTONIDAS, "en")[0],
+        )
+    }
+    assert {base.by_id[card_id]["cost"] for card_id in ids} >= {2, 3, 4, 5}
+    assert {pools.card_classes(base.by_id[card_id])[0] for card_id in ids} > {"NEUTRAL"}
+    assert rules.reject_reason(ANTONIDAS, 130973) is not None  # not in the list
+    assert antonidas["cost"] == 7
+    assert ap.player_class_of(rajh, "MAGE") is None
+
+
+def test_a_donor_with_the_base_condition_is_not_offered() -> None:
+    cards = [
+        _card("BASE", 100, 3, "At the end of your turn,& give +1/+1."),
+        _card("PUNCT", 101, 3, "at the end of your turn& draw a card."),
+        _card("OTHER", 102, 3, "At the start of your turn,& draw a card."),
+        _card("BASE_B", 103, 3, "Battlecry:& draw a card."),
+        _card("BC_DR", 104, 3, "<b>Battlecry and Deathrattle:</b>& draw a card."),
+        _card("DR", 105, 3, "<b>Deathrattle:</b>& draw a card."),
+        _card("COND_BC", 106, 3, "<b>Battlecry:</b> If you hold a Dragon,& draw."),
+        _card("SPELL_A", 107, 3, "After you cast a spell,& draw a card."),
+        _card("SPELL_B", 108, 3, "Whenever you cast a spell,& draw a card."),
+        _card("SPELL_C", 109, 3, "After you cast a Holy spell,& draw a card."),
+    ]
+    card_base, rules = _rules(cards)
+    assert rules.reject_reason(100, 101) == "same_trigger"
+    assert rules.reject_reason(100, 100) == "self"
+    assert rules.reject_reason(100, 102) is None
+    assert rules.reject_reason(103, 104) == "same_trigger"
+    assert rules.reject_reason(103, 106) == "same_trigger"
+    assert rules.reject_reason(103, 105) is None
+    assert rules.reject_reason(104, 105) == "same_trigger"
+    assert rules.reject_reason(107, 108) == "same_trigger"
+    assert rules.reject_reason(107, 109) is None
+    assert "BASE" not in _pool_ids(card_base, rules, 100)
+
+
+def test_formats_collectible_text_and_unknown_cards() -> None:
+    cards = [
+        _card("BASE", 100, 3, "At the end of your turn,& give +1/+1."),
+        _card("OLD", 101, 3, "After you draw,& draw.", card_set="NAXX"),
+        _card("WEAPON", 102, 3, "After your hero attacks,& draw.", card_type="WEAPON"),
+        _card(
+            "SPELL", 103, 3, "At the start of your next turn,& draw.", card_type="SPELL"
+        ),
+        _card("PLAIN", 104, 3, "Draw a card."),
+        {**_card("HIDDEN", 105, 3, "After you heal,& draw."), "collectible": False},
+    ]
+    card_base, standard = _rules(cards, fmt="standard")
+    _, wild = _rules(cards, fmt="wild")
+    assert standard.reject_reason(100, 101) == "format"
+    assert wild.reject_reason(100, 101) is None
+    assert standard.reject_reason(100, 102) is None  # weapons and spells are donors too
+    assert standard.reject_reason(100, 103) is None
+    assert standard.reject_reason(100, 104) == "no_separator"
+    assert standard.reject_reason(100, 105) == "unknown_card"
+    assert standard.reject_reason(100, 999) == "unknown_card"
+    assert standard.reject_reason(999, 102) == "unknown_card"
+    assert set(_pool_ids(card_base, standard, 100)) == {"WEAPON", "SPELL"}
+
+
+def test_a_core_copy_and_its_original_are_one_donor() -> None:
+    cards = [
+        _card("BASE", 100, 3, "At the end of your turn,& give +1/+1."),
+        _card("CORE_X_1", 101, 3, "After you draw,& draw.", name="Twin"),
+        _card("X_1", 102, 3, "After you draw,& draw.", card_set="NAXX", name="Twin"),
+    ]
+    card_base, rules = _rules(cards, fmt="wild")
+    assert _pool_ids(card_base, rules, 100) == ["CORE_X_1"]
+    # HSReplay's copy wins, and a copy seen next to the base always stays.
+    assert _pool_ids(card_base, rules, 100, prefer=[102]) == ["X_1"]
+    assert _pool_ids(card_base, rules, 100, keep=[101, 102]) == ["CORE_X_1", "X_1"]
+
+
+def test_the_player_class_gives_its_own_and_neutral_donors() -> None:
+    cards = [
+        _card("BASE", 100, 3, "At the end of your turn,& give +1/+1."),
+        _card("MAGE_D", 101, 3, "After you draw,& draw.", card_class="MAGE"),
+        _card("ROGUE_D", 102, 3, "After you heal,& draw.", card_class="ROGUE"),
+        _card("NEUTRAL_D", 103, 3, "After you play,& draw."),
+    ]
+    card_base, rules = _rules(cards)
+    assert _pool_ids(card_base, rules, 100, "MAGE") == ["MAGE_D", "NEUTRAL_D"]
+    assert _pool_ids(card_base, rules, 100, "ROGUE") == ["ROGUE_D", "NEUTRAL_D"]
+    assert _pool_ids(card_base, rules, 100) == ["MAGE_D", "ROGUE_D", "NEUTRAL_D"]
+    # A class donor seen next to the base is only kept for the player's class.
+    assert _pool_ids(card_base, rules, 100, "MAGE", keep=[102]) == [
+        "MAGE_D",
+        "NEUTRAL_D",
+    ]
+
+
+def test_player_class_and_class_dependence_of_the_13_cards(base) -> None:
+    by_id = {card["id"]: card for card in ap.assemble_cards(base)}
+    assert ap.player_class_of(by_id["BE_044"]) is None
+    assert ap.player_class_of(by_id["BE_044"], "mage") == "MAGE"
+    assert ap.player_class_of(by_id["BE_702"]) == "ROGUE"
+    assert ap.player_class_of(by_id["BE_702"], "MAGE") == "MAGE"
+    assert ap.player_class_of(by_id["BE_004"]) is None
+    assert [
+        card_id for card_id, card in by_id.items() if ap.is_class_dependent(card)
+    ] == ["BE_044"]
+
+
+# --- the check against a snapshot --------------------------------------------------------------
+
+
+def test_the_live_rows_of_the_two_cards_are_covered_by_the_pool(base, texts) -> None:
+    rows, _ = ha.parse_payload(LIVE)
+    for card_id in ("BE_044", "BE_004"):
+        card = base.by_id[card_id]
+        rules = ap.DonorPools(base, texts, card, "standard")
+        check = ha._donor_pool_check(rules, rows[str(card["dbfId"])])
+        assert check["mismatch"] is False, check
+        assert check["uncovered_offer_share"] < 0.1
+        assert check["observed_pairs"] > 100
+    # Every donor with statistics (the live pairs the rules cover) stands in the pool.
+    f3tch3r = base.by_id["BE_044"]
+    rules = ap.DonorPools(base, texts, f3tch3r, "standard")
+    for middle, _offered, donor_rows in rows[str(F3TCH3R)]:
+        covered = {
+            int(row[0])
+            for row in donor_rows
+            if rules.reject_reason(int(middle), int(row[0])) is None
+        }
+        pool = {
+            int(card["dbfId"])
+            for card in rules.candidates(int(middle), None, keep=covered)
+        }
+        assert covered <= pool
+
+
+def _store_and_read(base, mutate, *, card="BE_044", fmt="standard", **params):
+    from app.storage import load_dataset, save_dataset
+
+    dataset = load_dataset("hsreplay_assemble")
+    snapshot = dataset["data"]["structured"]["formats"][fmt]
+    mutate(snapshot)
+    snapshot["content_hash"] = ha.content_hash(snapshot["cards"])
+    save_dataset("hsreplay_assemble", dataset)
+    return ha.get_assemble(card, format_name=fmt, base=base, **params)
+
+
+def test_a_spoiled_snapshot_turns_the_pool_off(isolated, base) -> None:
+    _refresh(base, FakeHsReplay(base))
+    good = ha.get_assemble("BE_044", base_selector="top", base=base)
+    assert good["donor_pool_status"]["state"] == "ok"
+    assert good["bases"][0]["donor_pool"]
+
+    def spoil(snapshot) -> None:
+        rows = snapshot["cards"][str(F3TCH3R)]
+        # One donor outside every rule (cost 0 Moonfire-like row) with 5% of the shows.
+        total = sum(row[1] for middle in rows for row in middle[2])
+        rows[0][2].append([ANTONIDAS, int(total * 0.05), 0, 0, None, None])
+        rows[0][0] = HOURGLASS
+
+    bad = _store_and_read(base, spoil, base_selector="top")
+    status = bad["donor_pool_status"]
+    assert status["state"] == "mismatch" and status["uncovered_offer_share"] > 1.0
+    assert status["uncovered_pairs"] >= 1 and status["observed_pairs"] > 100
+    assert all(item["donor_pool"] is None for item in bad["bases"])
+    # The rest of the answer stays as it was.
+    assert bad["stats"]["state"] == "ok" and bad["bases"][0]["donors"]
+
+
+def test_without_a_snapshot_the_pool_is_unavailable(isolated, base) -> None:
+    data = ha.get_assemble("BE_044", base_selector="top", base=base)
+    assert data["stats"]["state"] == "not_collected"
+    assert data["donor_pool_status"] == {
+        "state": "unavailable",
+        "class_dependent": True,
+        "player_class": None,
+        "observed_pairs": None,
+        "uncovered_pairs": None,
+        "uncovered_offer_share": None,
+    }
+
+
+# --- the contract ---------------------------------------------------------------------------
+
+
+def _pool(client, **params):
+    body = _assemble(client, **params).json()["data"]
+    chosen = [item for item in body["bases"] if item["donor_pool"] is not None]
+    return body, chosen
+
+
+def test_the_f3tch3r_pool_has_stats_donors_first_then_the_rest(client) -> None:
+    body, chosen = _pool(client, base=str(HOURGLASS))
+    assert len(chosen) == 1 and chosen[0]["card"]["dbf_id"] == HOURGLASS
+    status = body["donor_pool_status"]
+    assert status["state"] == "ok" and status["class_dependent"] is True
+    assert status["player_class"] is None and status["observed_pairs"] > 100
+    pool = chosen[0]["donor_pool"]
+    donors = chosen[0]["donors"]
+    flags = [entry["has_stats"] for entry in pool]
+    assert flags == sorted(flags, reverse=True) and not all(flags)
+    with_stats = [entry["card"]["dbf_id"] for entry in pool if entry["has_stats"]]
+    assert with_stats == [donor["card"]["dbf_id"] for donor in donors]
+    rest = [entry["card"] for entry in pool if not entry["has_stats"]]
+    assert [card["name_ru"] or "" for card in rest] == sorted(
+        card["name_ru"] or "" for card in rest
+    )
+    first_entry = pool[0]
+    assert set(first_entry["card"]) == {
+        "card_id",
+        "dbf_id",
+        "name",
+        "name_ru",
+        "card_class",
+        "cost",
+        "type",
+        "rarity",
+    }
+    assert [option["half"] for option in first_entry["options"]] == [
+        "effect",
+        "trigger",
+    ]
+    for entry in pool:
+        for option in entry["options"]:
+            assert set(option) == {"half", "text"}
+            assert set(option["text"]) == {"ru", "en"}
+            assert set(option["text"]["en"]) == {"trigger", "effect"}
+    # The text is the very one of donors[].options[].text.
+    first = donors[0]
+    entry = next(
+        item for item in pool if item["card"]["dbf_id"] == first["card"]["dbf_id"]
+    )
+    assert [option["text"] for option in entry["options"]] == [
+        option["text"] for option in first["options"]
+    ]
+    assert {item["card"]["cost"] for item in pool} <= {4, 5, 6}
+
+
+def test_the_class_parameter_limits_the_donors(client) -> None:
+    body = _assemble(client, base=str(HOURGLASS), **{"class": "mage"}).json()["data"]
+    assert body["donor_pool_status"]["player_class"] == "MAGE"
+    pool = next(item for item in body["bases"] if item["donor_pool"] is not None)[
+        "donor_pool"
+    ]
+    assert pool and {entry["card"]["card_class"] for entry in pool} == {
+        "MAGE",
+        "NEUTRAL",
+    }
+    assert _assemble(client, base=str(HOURGLASS), **{"class": "FOO"}).status_code == 422
+    assert _assemble(client, **{"class": ""}).status_code == 422
+    assert _assemble(client, base="top", **{"class": "Warlock"}).status_code == 200
+
+
+def test_rajh_ignores_the_class_parameter(client) -> None:
+    plain = _assemble(client, card="BE_004", base=str(ANTONIDAS))
+    other = _assemble(client, card="BE_004", base=str(ANTONIDAS), **{"class": "MAGE"})
+    assert plain.status_code == 200 and plain.content == other.content
+    status = plain.json()["data"]["donor_pool_status"]
+    assert status["player_class"] is None and status["class_dependent"] is False
+    chosen = next(
+        item for item in plain.json()["data"]["bases"] if item["donor_pool"] is not None
+    )
+    ids = {entry["card"]["card_id"] for entry in chosen["donor_pool"]}
+    assert ids <= ap.CURATED_DONORS["BE_004"] and "CORE_EX1_559" not in ids
+    assert len({entry["card"]["card_class"] for entry in chosen["donor_pool"]}) > 3
+
+
+def test_a_classed_card_gets_its_class_and_neutral_donors(isolated, base) -> None:
+    _refresh(base, FakeHsReplay(base))
+    data = ha.get_assemble("BE_702", base_selector="top", base=base)
+    assert data["donor_pool_status"]["player_class"] == "ROGUE"
+    assert data["donor_pool_status"]["class_dependent"] is False
+    top = data["bases"][0]
+    classes = {entry["card"]["card_class"] for entry in top["donor_pool"] or []}
+    assert classes <= {"ROGUE", "NEUTRAL"}
+
+
+def test_without_a_base_every_pool_is_null_and_other_fields_stay(client) -> None:
+    full = _assemble(client).json()["data"]
+    assert all(item["donor_pool"] is None for item in full["bases"])
+    top = _assemble(client, base="top").json()["data"]
+    stripped = {
+        **top,
+        "donor_pool_status": None,
+        "bases": [
+            {key: value for key, value in item.items() if key != "donor_pool"}
+            for item in top["bases"]
+        ],
+    }
+    plain = {
+        **full,
+        "donor_pool_status": None,
+        "bases": [
+            {key: value for key, value in item.items() if key != "donor_pool"}
+            for item in full["bases"]
+        ],
+    }
+    assert set(full) == {
+        "card",
+        "format",
+        "game_type",
+        "time_range",
+        "original_class_only",
+        "stats",
+        "summary",
+        "donor_pool_status",
+        "bases",
+    }
+    assert set(stripped) == set(plain)
+    assert stripped["bases"][0]["donors"] == plain["bases"][0]["donors"]
+
+
+def test_the_donor_pool_report_runs_on_a_snapshot_file(
+    isolated, base, tmp_path, capsys
+) -> None:
+    _refresh(base, FakeHsReplay(base), settings=ha.Settings(formats=("standard",)))
+    from app import cli
+    from app.storage import load_dataset
+
+    path = tmp_path / "assemble.json"
+    path.write_text(json.dumps(load_dataset("hsreplay_assemble")))
+    code = cli.main(
+        [
+            "assemble-donor-pool-report",
+            "--format",
+            "standard",
+            "--snapshot",
+            str(path),
+            "--json",
+        ]
+    )
+    report = json.loads(capsys.readouterr().out)
+    # The filler rows of the other 11 cards do not follow the rules: DEGRADED.
+    assert code == int(ExitCode.DEGRADED) and report["ok"] is False
+    by_card = {row["card_id"]: row for row in report["rows"]}
+    assert set(by_card) == {card["id"] for card in ap.assemble_cards(base)}
+    assert by_card["BE_044"]["state"] == "ok"
+    assert by_card["BE_044"]["worst"] is not None
+    assert by_card["BE_044"]["surplus"]["min_base_offered"] == 300
+    assert report["mismatch_share_threshold"] == 1.0

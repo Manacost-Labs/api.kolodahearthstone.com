@@ -5,6 +5,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query
 
+from ..card_choice_pools import CLASSES
 from ..hsreplay_assemble import (
     SOURCE_ID,
     BaseNotFound,
@@ -38,6 +39,17 @@ BASE_QUERY = Query(
     ),
 )
 
+CLASS_QUERY = Query(
+    None,
+    alias="class",
+    pattern=r"(?i)^(" + "|".join(CLASSES) + r")$",
+    description=(
+        "Player class for ``bases[].donor_pool`` (one of the 11 classes, any case). "
+        "Default: the Assemble card's class; none for a neutral card (all classes). "
+        "Ignored for BE_004 (curated pool)."
+    ),
+)
+
 
 def _meta(*, fetched_at: str | None, stale: bool, count: int) -> dict[str, Any]:
     return ApiMeta(
@@ -54,6 +66,7 @@ async def hsreplay_assemble(
     card: str = CARD_QUERY,
     format_name: Format = FORMAT_QUERY,
     base: str | None = BASE_QUERY,
+    class_name: str | None = CLASS_QUERY,
 ) -> dict[str, Any]:
     """HSReplay Assemble Pools of one card: which base minions come up
     (``offer_rate``, sums to about 100), which two donors are offered with each
@@ -67,11 +80,21 @@ async def hsreplay_assemble(
     point above the base's average that is taken less often than the median.
     ``stats.state``: ``ok`` (also a last-good snapshot), ``no_data``,
     ``not_collected`` or ``failed``.
+
+    ``bases[].donor_pool`` (only for the base picked by ``base``, else ``null``) is
+    the full pool of donors that can be offered next to the base, with and without
+    statistics (``has_stats``), for the player's class (``class``). It is ``null``
+    unless ``donor_pool_status.state`` is ``ok``: ``unavailable`` (no snapshot) and
+    ``mismatch`` (the rules do not cover the snapshot) publish no pool.
     """
 
     try:
         data = await asyncio.to_thread(
-            get_assemble, card, format_name=format_name, base_selector=base
+            get_assemble,
+            card,
+            format_name=format_name,
+            base_selector=base,
+            class_name=class_name,
         )
     except (CardNotFound, BaseNotFound) as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from None
