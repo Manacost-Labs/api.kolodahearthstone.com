@@ -13,7 +13,9 @@ connection and never answers, like a stalled MariaDB.
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import signal
 import socket
 import subprocess
 import tempfile
@@ -68,7 +70,10 @@ class NextDataSessionLockTest(unittest.TestCase):
             env={"PHP_CLI_SERVER_WORKERS": "4", "PATH": "/usr/bin:/bin"},
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            # Own process group: the forked workers are stopped with the master.
+            start_new_session=True,
         )
+        self.addCleanup(self._stop_server)  # also runs when setUp fails below
         for _ in range(100):
             try:
                 socket.create_connection(("127.0.0.1", int(self.origin.rsplit(":", 1)[1])), 0.1).close()
@@ -76,9 +81,23 @@ class NextDataSessionLockTest(unittest.TestCase):
             except OSError:
                 time.sleep(0.05)
 
-    def tearDown(self) -> None:
-        self.server.kill()
+    def _stop_server(self) -> None:
+        try:
+            os.killpg(self.server.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass  # already stopped
         self.server.wait(5)
+        # The workers die a moment after the master; wait until the group is gone.
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            try:
+                os.killpg(self.server.pid, 0)
+            except ProcessLookupError:
+                return
+            time.sleep(0.01)
+
+    def tearDown(self) -> None:
+        self._stop_server()
         for connection in self.stalled:
             connection.close()
         self.database.close()
@@ -157,6 +176,15 @@ class NextDataSessionLockTest(unittest.TestCase):
         self.assertEqual((first_status, second_status), (200, 200))
         self.assertEqual(second["logoutCsrf"], first["logoutCsrf"])
         self.assertEqual(second["parserCsrf"], first["parserCsrf"])
+
+    def test_stopping_the_server_also_stops_its_workers(self) -> None:
+        # Regression: killing only the master left the forked
+        # PHP_CLI_SERVER_WORKERS running until the host rebooted.
+        self._stop_server()
+
+        port = int(self.origin.rsplit(":", 1)[1])
+        with self.assertRaises(ConnectionRefusedError):
+            socket.create_connection(("127.0.0.1", port), 1).close()
 
 
 if __name__ == "__main__":
