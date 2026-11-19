@@ -329,3 +329,58 @@ def test_fetcher_preserves_adapter_and_scrape_do_transport_provenance() -> None:
     assert parsed["_backend"] == "hsreplay_trinkets_api"
     assert parsed["_transport_backend"] == "scrape_do"
     assert parsed["structured"]["source"]["backend"] == "hsreplay_trinkets_api"
+
+
+def test_explicit_null_placement_preserves_rows_and_completeness() -> None:
+    from app.source_contracts import field_availability_status
+    source = SOURCE_BY_ID['hsreplay_battlegrounds_trinkets_lesser']
+    raw = _raw_trinket(1001, 'lesser')
+    raw['avg_final_placement'] = None
+    raw['final_placement_distribution'] = None
+    with (
+        patch('app.hsreplay_bg_trinkets.fetch_hsreplay_json', AsyncMock(return_value={'data': [raw]})),
+        patch('app.hsreplay_extract.cards_by_dbfid', return_value={1001: _card(1001)}),
+        patch('app.structured.cards_by_id', return_value={}),
+    ):
+        result = asyncio.run(fetch_battlegrounds_trinkets(source))
+    assert result['row_retrieval']['unexplained_drops'] == 0
+    row = result['trinkets'][0]
+    assert row['avg_placement'] is None
+    assert row['placement_distribution'] is None
+    assert row['games'] is None
+    assert row['pick_rate'] == '12.5%'
+    assert field_availability_status(source.id, row, 'avg_placement') == (
+        'explained_unavailable', 'upstream_explicit_null')
+
+
+def test_missing_or_malformed_placement_is_not_explained_as_null() -> None:
+    from app.hsreplay_extract import parse_bg_trinkets_api_payload
+    for field, value in [('avg_final_placement', 'bad'), ('final_placement_distribution', [1])]:
+        raw = _raw_trinket(1001, 'lesser')
+        raw[field] = value
+        with patch('app.hsreplay_extract.cards_by_dbfid', return_value={1001: _card(1001)}):
+            assert parse_bg_trinkets_api_payload([raw], trinket_type='Lesser') == []
+    raw = _raw_trinket(1001, 'lesser')
+    del raw['avg_final_placement']
+    with patch('app.hsreplay_extract.cards_by_dbfid', return_value={1001: _card(1001)}):
+        assert parse_bg_trinkets_api_payload([raw], trinket_type='Lesser') == []
+
+
+def test_null_placement_candidate_passes_gate_without_fabricating_metrics() -> None:
+    source = SOURCE_BY_ID['hsreplay_battlegrounds_trinkets_lesser']
+    rows = [_raw_trinket(i, 'lesser') for i in range(1000, 1100)]
+    for raw in rows[:25]:
+        raw['avg_final_placement'] = None
+        raw['final_placement_distribution'] = None
+    with (
+        patch('app.hsreplay_bg_trinkets.fetch_hsreplay_json', AsyncMock(return_value={'data': rows})),
+        patch('app.hsreplay_extract.cards_by_dbfid', return_value={i: _card(i) for i in range(1000, 1100)}),
+        patch('app.structured.cards_by_id', return_value={}),
+    ):
+        structured = asyncio.run(fetch_battlegrounds_trinkets(source))
+    report = contract_quality_report(source.id, structured)
+    assert report['retrieval_complete'] is True
+    assert report['critical_fields']['avg_placement']['explained_unavailable'] == 25
+    assert report['critical_fields']['avg_placement']['filled'] == 75
+    gate = validate_candidate_for_publish(source, {'structured': structured}, backend='hsreplay_trinkets_api')
+    assert gate.ok, gate

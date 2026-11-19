@@ -180,6 +180,12 @@
   2026-11-16: 16 из 90). Раньше исправный ответ отклонялся как `PARSE_FAIL` на
   всех каналах. Список, где статистики мест нет ни у одного героя, отклоняется
   при разборе.
+- Трикеты Полей сражений (`hsreplay_battlegrounds_trinkets*`): если HSReplay
+  явно отдаёт `null` вместо средней позиции и/или распределения мест (малая
+  выборка), трикет больше не отбрасывается. Он остаётся в ответе с
+  `avg_placement: null`, `placement_distribution: null`, `games: null` и
+  объяснением в `field_availability` (`upstream_explicit_null`). Отсутствующие
+  ключи и неверные значения по-прежнему отклоняются проверкой контракта.
 - `GET /v1/battlegrounds/heroes/compositions?mmr=TOP_50_PERCENT`: композиции
   всех героев одним ответом из уже хранимого `hsreplay_battlegrounds_hero_details`
   (`composition_id`, `name`, `num_games`, `avg_placement`,

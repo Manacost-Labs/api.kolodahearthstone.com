@@ -97,17 +97,24 @@ def parse_bg_trinkets_api_payload(
             continue
         try:
             pick_rate = f"{float(raw.get('pick_rate')):.1f}%"
-            avg_placement = f"{float(raw.get('avg_final_placement')):.2f}"
+            avg_placement = (
+                None if raw.get("avg_final_placement") is None
+                else f"{float(raw['avg_final_placement']):.2f}"
+            )
         except (TypeError, ValueError):
             continue
         distribution = raw.get("final_placement_distribution")
-        if not isinstance(distribution, list) or len(distribution) != 8:
+        # Only explicit upstream nulls are explained absences. Missing keys
+        # and malformed non-null values must still fail retrieval checks.
+        if "avg_final_placement" not in raw or "final_placement_distribution" not in raw:
+            continue
+        if distribution is not None and (not isinstance(distribution, list) or len(distribution) != 8):
             continue
         try:
             placement_distribution = [
                 {"place": index + 1, "rate": f"{float(value):.2f}%"}
-                for index, value in enumerate(distribution)
-            ]
+                for index, value in enumerate(distribution or [])
+            ] if distribution is not None else None
         except (TypeError, ValueError):
             continue
         extra_data = raw.get("extra_data")
@@ -128,7 +135,17 @@ def parse_bg_trinkets_api_payload(
             "pick_rate": pick_rate,
             "avg_placement": avg_placement,
             "placement_distribution": placement_distribution,
-            "games": infer_minimum_games(distribution),
+            "field_availability": {
+                field: {
+                    "available": value is not None,
+                    "reason": None if value is not None else "upstream_explicit_null",
+                }
+                for field, value in (
+                    ("avg_placement", avg_placement),
+                    ("placement_distribution", placement_distribution),
+                )
+            },
+            "games": infer_minimum_games(distribution) if distribution is not None else None,
             "games_is_minimum": True,
             "extra_data": extra_data,
             "tribe": tribe,
