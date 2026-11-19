@@ -56,7 +56,9 @@ function analytics_cli_smoke(): int
             echo $module . ' ' . ($usable ? 'ok' : 'fail') . ' ' . $rows . "\n";
             $failed += $usable ? 0 : 1;
         } catch (Throwable $exception) {
-            echo $module . ' fail ' . get_class($exception) . ': ' . $exception->getMessage() . "\n";
+            // Class and code only: a message may carry a URL, DSN or token.
+            $code = (int)$exception->getCode();
+            echo $module . ' fail ' . get_class($exception) . ($code !== 0 ? ' code=' . $code : '') . "\n";
             $failed++;
         }
     }

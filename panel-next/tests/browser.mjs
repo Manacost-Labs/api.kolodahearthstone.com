@@ -330,6 +330,36 @@ for (const action of ['analytics', 'parsers', 'api_tokens']) {
   checks[action + 'MobileOverflow'] = await evaluate('document.documentElement.scrollWidth>innerWidth');
   await screenshot(action + '-mobile.png');
 }
+// A failing statistics module keeps its page: message in an alert, heading, refresh and menu still work.
+const analyticsRequests = [];
+ws.addEventListener('message', event => {
+  const message = JSON.parse(event.data);
+  if (message.method === 'Network.requestWillBeSent') analyticsRequests.push(message.params.request.url);
+});
+const clickText = async (selector, label) => {
+  const point = await evaluate(
+    `(() => { const e = [...document.querySelectorAll(${JSON.stringify(selector)})].find(b => b.textContent.includes(${JSON.stringify(label)})); e.scrollIntoView({block:'center'}); const r=e.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()`,
+  );
+  await call('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, ...point });
+  await call('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...point });
+};
+await viewport(1440, 900);
+await navigate(root + '?action=analytics&stats=arena&fixture_fail=1', '!!document.querySelector("h1")');
+checks.moduleError = await evaluate(
+  `({ alert: document.querySelector('[role=alert]')?.textContent, heading: document.querySelector('h1')?.textContent, crash: document.body.textContent.includes('Сервер данных панели не ответил') })`,
+);
+await screenshot('analytics-module-error.png');
+analyticsRequests.length = 0;
+await clickText('button', 'Обновить');
+await waitFor('!document.querySelector("section[aria-busy=true]")');
+for (let i = 0; i < 40 && !analyticsRequests.some(u => u.includes('stats=arena')); i++)
+  await new Promise(resolve => setTimeout(resolve, 100));
+checks.refreshRequested = analyticsRequests.some(u => u.includes('stats=arena') && u.includes('_rsc'));
+await clickText('nav.module-nav button', 'Патчи Hearthstone');
+await waitFor('document.querySelector("h1")?.textContent === "Патчи Hearthstone"');
+checks.menuAfterError = await evaluate(
+  `({ heading: document.querySelector('h1').textContent, alert: !!document.querySelector('[role=alert]') })`,
+);
 checks.errors = errors;
 assert.deepEqual(checks.catalog, { cards: 15, overflow: false, columns: 5 });
 assert.equal(checks.details.focus, 'Закрыть');
@@ -350,6 +380,13 @@ assert.equal(checks.freshNonce, true);
 assert.equal(checks.revoke, true);
 assert.equal(checks.save, true);
 assert.equal(checks.terms, true);
+assert.deepEqual(checks.moduleError, {
+  alert: 'Не удалось загрузить статистику.',
+  heading: 'Арена',
+  crash: false,
+});
+assert.equal(checks.refreshRequested, true);
+assert.deepEqual(checks.menuAfterError, { heading: 'Патчи Hearthstone', alert: false });
 for (const a of ['analytics', 'parsers', 'api_tokens']) assert.equal(checks[a + 'MobileOverflow'], false);
 assert.deepEqual(errors, []);
 await fs.writeFile(output + '/checks.json', JSON.stringify(checks, null, 2));
