@@ -27,6 +27,7 @@ def _no_store_path(path: str) -> bool:
             "/v1/hsguru/mulligan/coverage",
             "/v1/hsreplay/mulligan/coverage",
             "/v1/hsreplay/card-choices/coverage",
+            "/v1/hsreplay/assemble",
             "/v1/hsguru/streaming-now",
             "/v1/hsguru/streamers/coverage",
             "/v1/leaderboards/coverage",
@@ -57,10 +58,13 @@ def _cacheable_path(path: str) -> bool:
             "/v1/hsguru/mulligan/coverage",
             "/v1/hsreplay/mulligan/coverage",
             "/v1/hsreplay/card-choices/coverage",
+            "/v1/hsreplay/assemble",
             "/v1/leaderboards/coverage",
         )
     ):
-        # Run rows change without a new snapshot (failed or unchanged pages).
+        # Run rows change without a new snapshot (failed or unchanged pages);
+        # Assemble answers carry ``state`` and ``stale`` of the status file and
+        # of the request time, which no dataset revision covers.
         return False
     if path.startswith(("/v1/hsguru/streaming-now", "/v1/hsguru/streamers/coverage")):
         # "stale" is measured against the request time; a run-revision ETag

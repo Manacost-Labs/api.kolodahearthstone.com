@@ -636,6 +636,25 @@ SOURCES: tuple[Source, ...] = (
         kind="pipeline",
     ),
     Source(
+        id="hsreplay_assemble",
+        url="https://hsreplay.net/cards/assemble-pools/",
+        site="hsreplay",
+        category="ranked_cards",
+        description=(
+            "HSReplay Assemble Pools of the 13 Reign of the Black Empire cards "
+            "(assemble_choices_by_middle: how often each base minion comes up, which "
+            "donors are offered with it and how often their effect or trigger half is "
+            "taken, with winrates). One plain Scrape.do read (1 credit) per format, "
+            "re-read when the last good one is older than 20 h, through "
+            "hs-data-api-docker-refresh-hsreplay-assemble.timer every 6 h (<= 6 credits "
+            "a UTC day). A candidate that breaks a publication check keeps the last "
+            "good snapshot. Texts of assembled minions come from the card base; "
+            "stale_hours = daily cadence + 12h slack."
+        ),
+        stale_hours=36,
+        kind="pipeline",
+    ),
+    Source(
         id="hsreplay_battlegrounds_compositions_screenshot",
         url="https://hsreplay.net/battlegrounds/compositions/",
         site="hsreplay",

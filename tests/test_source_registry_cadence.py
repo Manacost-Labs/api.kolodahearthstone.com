@@ -46,6 +46,7 @@ PIPELINE_IDS = (
     "hsreplay_archetypes",
     "hsreplay_mulligan",
     "hsreplay_card_choices",
+    "hsreplay_assemble",
 )
 
 
