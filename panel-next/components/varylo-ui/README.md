@@ -3,7 +3,7 @@
 Source copied from the VaryloUI registry (`r/<name>.json`, local release in
 `/home/debian/varylo-ui-release`, equivalent to `npx varylo-cli add <name…>`).
 Items: app-shell, sidebar, dropdown-menu, tooltip, command-palette, tabs,
-segmented-control, select, pagination, dialog, badge, skeleton, button,
+segmented-control, select, pagination, dialog, drawer, badge, skeleton, button,
 icon-button, spinner, text-input, empty-state, theme, styles, primitives, icons,
 scatter-chart, bar-chart (with the shared `charts/*`; only `ScatterChart` is used so far, the meta view, #107).
 

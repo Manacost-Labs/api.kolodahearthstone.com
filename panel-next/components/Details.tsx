@@ -1,7 +1,9 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Modal } from './Modal';
+import { Drawer } from './varylo-ui/feedback/Drawer';
+import './RecordDrawer.css';
 import { fieldLabel } from '@/lib/format';
 import { imagesFrom, record, text } from '@/lib/model';
 import type { Row } from '@/lib/types';
@@ -172,20 +174,24 @@ export function RecordTabs({
         </section>
       )}
       {preview && (
-        <Modal title={preview.label} onClose={() => setPreview(null)}>
-          {isVideo(preview.url) ? (
-            <video
-              className="image-full"
-              controls
-              muted
-              preload="metadata"
-              src={preview.url}
-              aria-label={preview.label}
-            />
-          ) : (
-            <img className="image-full" src={preview.url} alt={preview.label} />
-          )}
-        </Modal>
+        // Escape closes only the preview: the drawer below listens on the document and must not see it.
+        // biome-ignore lint/a11y/noStaticElementInteractions: keyboard events are only intercepted, nothing is activated
+        <div onKeyDown={event => event.key === 'Escape' && event.stopPropagation()}>
+          <Modal title={preview.label} onClose={() => setPreview(null)}>
+            {isVideo(preview.url) ? (
+              <video
+                className="image-full"
+                controls
+                muted
+                preload="metadata"
+                src={preview.url}
+                aria-label={preview.label}
+              />
+            ) : (
+              <img className="image-full" src={preview.url} alt={preview.label} />
+            )}
+          </Modal>
+        </div>
       )}
     </>
   );
@@ -204,30 +210,60 @@ export function RecordDetails({
   editable?: boolean;
   apiBase?: string;
 }) {
+  const [open, setOpen] = useState(true);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The element that opened the panel (a row button): focus goes back to it when the panel is gone.
+  const opener = useRef<Element | null>(typeof document === 'undefined' ? null : document.activeElement);
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+    },
+    [],
+  );
+  // Let the slide-out finish before the parent drops the record; focus goes back to the opener as the drawer closes.
+  const close = () => {
+    setOpen(false);
+    if (!timer.current)
+      timer.current = setTimeout(() => {
+        // The drawer restores focus itself, but a mouse click on the × can leave it on <body>.
+        if (opener.current instanceof HTMLElement && opener.current.isConnected) opener.current.focus();
+        onClose();
+      }, 300);
+  };
   return (
-    <Modal title={title} onClose={onClose}>
-      <RecordTabs row={row} apiBase={apiBase} />
-      <footer className="modal-actions">
-        {editable && (
+    <Drawer
+      open={open}
+      onOpenChange={next => !next && close()}
+      size="lg"
+      title={title}
+      closeLabel="Закрыть"
+      className="record-drawer"
+      layerClassName="record-drawer-layer"
+      footer={
+        <div className="modal-actions">
+          {editable && (
+            <Link
+              className="button"
+              prefetch={false}
+              href={'/?action=edit&id=' + encodeURIComponent(text(row.id))}
+            >
+              Редактировать
+            </Link>
+          )}
           <Link
-            className="button"
+            className="button secondary"
             prefetch={false}
-            href={'/?action=edit&id=' + encodeURIComponent(text(row.id))}
+            href={
+              '/?action=analytics&stats=card&q=' +
+              encodeURIComponent(text(row.name_en || row.name || row.name_ru, ''))
+            }
           >
-            Редактировать
+            Статистика
           </Link>
-        )}
-        <Link
-          className="button secondary"
-          prefetch={false}
-          href={
-            '/?action=analytics&stats=card&q=' +
-            encodeURIComponent(text(row.name_en || row.name || row.name_ru, ''))
-          }
-        >
-          Статистика
-        </Link>
-      </footer>
-    </Modal>
+        </div>
+      }
+    >
+      <RecordTabs row={row} apiBase={apiBase} />
+    </Drawer>
   );
 }
