@@ -1,0 +1,100 @@
+{
+ "data": [
+  {
+   "class": "Deathknight",
+   "win_rate": 52.6,
+   "pick_rate": 80.58,
+   "pct_7_plus": 9.45,
+   "num_drafts": 1365,
+   "slug": "deathknight",
+   "class_name": "Death Knight",
+   "class_ru": "Рыцарь смерти",
+   "url": "https://hsreplay.net/arena/deathknight/",
+   "winrate": "52.60%",
+   "deck_class": 1,
+   "firecrawl": {
+    "ok": true,
+    "url": "https://hsreplay.net/arena/deathknight/",
+    "final_url": "https://hsreplay.net/ru/arena/deathknight/",
+    "status_code": 200,
+    "content_length": 110486,
+    "markdown_length": 3410,
+    "credits_used": 0
+   }
+  },
+  {
+   "class": "Hunter",
+   "win_rate": 52.47,
+   "pick_rate": 48.3,
+   "pct_7_plus": 9.22,
+   "num_drafts": 781,
+   "slug": "hunter",
+   "class_name": "Hunter",
+   "class_ru": "Охотник",
+   "url": "https://hsreplay.net/arena/hunter/",
+   "winrate": "52.47%",
+   "deck_class": 3,
+   "firecrawl": {
+    "ok": true,
+    "url": "https://hsreplay.net/arena/hunter/",
+    "final_url": "https://hsreplay.net/ru/arena/hunter/",
+    "status_code": 200,
+    "content_length": 155269,
+    "markdown_length": 4793,
+    "credits_used": 0
+   }
+  },
+  {
+   "class": "Shaman",
+   "win_rate": 51.24,
+   "pick_rate": 50.07,
+   "pct_7_plus": 8.25,
+   "num_drafts": 812,
+   "slug": "shaman",
+   "class_name": "Shaman",
+   "class_ru": "Шаман",
+   "url": "https://hsreplay.net/arena/shaman/",
+   "winrate": "51.24%",
+   "deck_class": 8,
+   "firecrawl": {
+    "ok": true,
+    "url": "https://hsreplay.net/arena/shaman/",
+    "final_url": "https://hsreplay.net/ru/arena/shaman/",
+    "status_code": 200,
+    "content_length": 109851,
+    "markdown_length": 3318,
+    "credits_used": 0
+   }
+  },
+  {
+   "class": "Paladin",
+   "win_rate": 48.92,
+   "pick_rate": 40.92,
+   "pct_7_plus": 7.0,
+   "num_drafts": 657,
+   "slug": "paladin",
+   "class_name": "Paladin",
+   "class_ru": "Паладин",
+   "url": "https://hsreplay.net/arena/paladin/",
+   "winrate": "48.92%",
+   "deck_class": 5,
+   "firecrawl": {
+    "ok": true,
+    "url": "https://hsreplay.net/arena/paladin/",
+    "final_url": "https://hsreplay.net/ru/arena/paladin/",
+    "status_code": 200,
+    "content_length": 110134,
+    "markdown_length": 3370,
+    "credits_used": 0
+   }
+  }
+ ],
+ "meta": {
+  "source_id": "hsreplay_arena_class_pages_firecrawl",
+  "fetched_at": "2026-11-19T06:03:11.313760+00:00",
+  "stale": false,
+  "count": 11,
+  "limit": 4,
+  "offset": 0
+ }
+}

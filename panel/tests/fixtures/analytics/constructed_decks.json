@@ -1,0 +1,48 @@
+{
+ "data": [
+  {
+   "id": 2763,
+   "source_id": "hearthstone_decks",
+   "title": "Renathal Reno Exodia Mage #300 Legend – Unknown (Score: 9-3)",
+   "archetype": "Renathal Reno Exodia Mage",
+   "class": "Mage",
+   "format": "Wild",
+   "updated_at": "2026-11-19T06:04:07.386548+00:00",
+   "score": "9-3",
+   "url": "https://hearthstone-decks.net/renathal-reno-exodia-mage-300-legend-unknown-score-9-3/",
+   "added_at": "2026-07-09T16:01:32.547662+00:00"
+  },
+  {
+   "id": 12447,
+   "source_id": "hearthstone_decks",
+   "title": "Zoo Warlock #157 Legend – Unknown (Score: 7-4)",
+   "archetype": "Zoo Warlock",
+   "class": "Warlock",
+   "format": "Standard",
+   "updated_at": "2026-11-19T06:04:07.386548+00:00",
+   "score": "7-4",
+   "url": "https://hearthstone-decks.net/zoo-warlock-157-legend-unknown-score-7-4/",
+   "added_at": "2026-10-27T17:03:01.063468+00:00"
+  },
+  {
+   "id": 13338,
+   "source_id": "hearthstone_decks",
+   "title": "Egg Warrior #98 Legend – Unknown (Score: 8-4)",
+   "archetype": "Egg Warrior",
+   "class": "Warrior",
+   "format": "Standard",
+   "updated_at": "2026-11-19T06:04:07.386548+00:00",
+   "score": "8-4",
+   "url": "https://hearthstone-decks.net/egg-warrior-98-legend-unknown-score-8-4/",
+   "added_at": "2026-11-05T17:03:11.366523+00:00"
+  }
+ ],
+ "meta": {
+  "source_id": "multiple",
+  "fetched_at": "2026-11-19T06:04:07.386548+00:00",
+  "stale": false,
+  "count": 2777,
+  "limit": 3,
+  "offset": 0
+ }
+}

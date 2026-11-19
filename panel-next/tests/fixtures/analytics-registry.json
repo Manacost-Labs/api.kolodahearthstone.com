@@ -38,6 +38,7 @@
           "type": "enum",
           "values": [
             "all",
+            "bronze_plat",
             "diamond",
             "diamond_4to1",
             "diamond_to_legend",
@@ -55,10 +56,9 @@
           "max": 64
         },
         "min_games": {
-          "type": "int",
-          "default": 100,
-          "min": 0,
-          "max": 1000000
+          "type": "enum",
+          "values": ["10", "25", "50", "100", "250", "500", "1000", "2500", "5000"],
+          "default": "100"
         }
       }
     },
@@ -75,14 +75,14 @@
           "max": 80
         },
         "rank_range": {
-          "type": "token",
-          "default": "LEGEND",
-          "max": 80
+          "type": "enum",
+          "values": ["LEGEND", "DIAMOND_FOUR_THROUGH_DIAMOND_ONE", "DIAMOND", "BRONZE_THROUGH_GOLD"],
+          "default": "LEGEND"
         },
         "game_type": {
-          "type": "token",
-          "default": "RANKED_STANDARD",
-          "max": 80
+          "type": "enum",
+          "values": ["RANKED_STANDARD", "RANKED_WILD"],
+          "default": "RANKED_STANDARD"
         },
         "limit": {
           "type": "int",

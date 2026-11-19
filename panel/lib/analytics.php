@@ -39,9 +39,9 @@ function analytics_module_registry(): array
             'ttl' => 120,
             'params' => [
                 'format' => ['type' => 'enum', 'values' => ['standard', 'wild'], 'default' => 'standard'],
-                'rank' => ['type' => 'enum', 'values' => ['all', 'diamond', 'diamond_4to1', 'diamond_to_legend', 'legend', 'top_5k', 'top_legend', 'top_500', 'top_100'], 'default' => 'legend'],
+                'rank' => ['type' => 'enum', 'values' => ['all', 'bronze_plat', 'diamond', 'diamond_4to1', 'diamond_to_legend', 'legend', 'top_5k', 'top_legend', 'top_500', 'top_100'], 'default' => 'legend'],
                 'period' => ['type' => 'token', 'default' => 'past_day', 'max' => 64],
-                'min_games' => ['type' => 'int', 'default' => 100, 'min' => 0, 'max' => 1000000],
+                'min_games' => ['type' => 'enum', 'values' => ['10', '25', '50', '100', '250', '500', '1000', '2500', '5000'], 'default' => '100'],
             ],
         ],
         'archetypes' => [
@@ -52,8 +52,8 @@ function analytics_module_registry(): array
             'params' => [
                 'q' => ['type' => 'string', 'max' => 120],
                 'class_name' => ['type' => 'string', 'max' => 80],
-                'rank_range' => ['type' => 'token', 'default' => 'LEGEND', 'max' => 80],
-                'game_type' => ['type' => 'token', 'default' => 'RANKED_STANDARD', 'max' => 80],
+                'rank_range' => ['type' => 'enum', 'values' => ['LEGEND', 'DIAMOND_FOUR_THROUGH_DIAMOND_ONE', 'DIAMOND', 'BRONZE_THROUGH_GOLD'], 'default' => 'LEGEND'],
+                'game_type' => ['type' => 'enum', 'values' => ['RANKED_STANDARD', 'RANKED_WILD'], 'default' => 'RANKED_STANDARD'],
                 'limit' => ['type' => 'int', 'default' => 100, 'min' => 1, 'max' => 200],
                 'offset' => ['type' => 'int', 'default' => 0, 'min' => 0, 'max' => 10000],
             ],
@@ -320,6 +320,100 @@ function analytics_column(string $key, string $label, string $type = 'text'): ar
 function analytics_meta(array $payload): array
 {
     return is_array($payload['meta'] ?? null) ? $payload['meta'] : [];
+}
+
+const ANALYTICS_ROLLING_PERIODS = ['past_3_hours', 'past_6_hours', 'past_day', 'past_3_days', 'past_week', 'past_2_weeks', 'past_30_days'];
+
+/** A KPI item: label/value/tone as before, plus a stable key and a value type (date|number|text). */
+function analytics_kpi(string $key, string $label, $value, string $type, ?string $tone = null): array
+{
+    $item = ['key' => $key, 'label' => $label, 'value' => $value, 'type' => $type];
+    if ($tone !== null) {
+        $item['tone'] = $tone;
+    }
+
+    return $item;
+}
+
+/** ISO 8601 (UTC) or null when the value is not a parseable timestamp. */
+function analytics_iso_datetime($value): ?string
+{
+    if (!is_string($value) || trim($value) === '') {
+        return null;
+    }
+    $parsed = strtotime($value);
+
+    return $parsed === false ? null : gmdate(DATE_ATOM, $parsed);
+}
+
+/** Number from 12.5, "12.5" or "12.50%"; null for anything else. */
+function analytics_number($value)
+{
+    if (is_string($value)) {
+        $value = rtrim(trim($value), '%');
+    }
+    if (!is_numeric($value)) {
+        return null;
+    }
+    $number = $value + 0;
+
+    return is_float($number) && !is_finite($number) ? null : $number;
+}
+
+/**
+ * Stable numeric keys for the "top" of a mode screen: share_pct, winrate_pct, games.
+ * A missing source field gives null. Rows are ordered by share, then games, descending.
+ */
+function analytics_with_top_fields(array $rows, ?string $shareField, ?string $winrateField, ?string $gamesField): array
+{
+    foreach ($rows as &$row) {
+        if (!is_array($row)) {
+            continue;
+        }
+        $row['share_pct'] = $shareField !== null ? analytics_number($row[$shareField] ?? null) : null;
+        $row['winrate_pct'] = $winrateField !== null ? analytics_number($row[$winrateField] ?? null) : null;
+        if ($gamesField !== null) {
+            $row['games'] = analytics_number($row[$gamesField] ?? null);
+        }
+    }
+    unset($row);
+    usort($rows, static function ($left, $right): int {
+        $shareOrder = ($right['share_pct'] ?? -1) <=> ($left['share_pct'] ?? -1);
+
+        return $shareOrder !== 0 ? $shareOrder : (($right['games'] ?? -1) <=> ($left['games'] ?? -1));
+    });
+
+    return $rows;
+}
+
+/**
+ * KPI of a statistics module: data date, sample size (when the rows carry games) and a record count.
+ * Selected filters are never repeated here.
+ */
+function analytics_statistics_summary(array $fetch, array $rows, string $countLabel, ?string $gamesField = null, ?int $total = null, array $extra = []): array
+{
+    $summary = [];
+    $asOf = analytics_iso_datetime(analytics_meta($fetch['payload'])['fetched_at'] ?? null);
+    if ($asOf !== null) {
+        $summary[] = analytics_kpi('data_as_of', 'Данные на', $asOf, 'date');
+    }
+    if ($gamesField !== null) {
+        $games = 0;
+        $seen = false;
+        foreach ($rows as $row) {
+            $value = is_array($row) ? analytics_number($row[$gamesField] ?? null) : null;
+            if ($value !== null) {
+                $games += $value;
+                $seen = true;
+            }
+        }
+        if ($seen) {
+            $summary[] = analytics_kpi('games', 'Игр в выборке', $games, 'number');
+        }
+    }
+    $summary[] = analytics_kpi('rows', $countLabel, $total ?? count($rows), 'number');
+
+    return array_merge($summary, $extra);
 }
 
 function analytics_reliability_percentage($value): ?float
@@ -1642,12 +1736,15 @@ function analytics_normalize(string $module, array $definition, array $fetch): a
     if ($module === 'meta') {
         $data = is_array($payload['data'] ?? null) ? $payload['data'] : [];
         $rows = is_array($data['items'] ?? null) ? $data['items'] : [];
-        return analytics_result_shell($module, $definition, $fetch, [
-            ['label' => 'Архетипов', 'value' => count($rows)],
-            ['label' => 'Формат', 'value' => strtoupper((string)($data['format'] ?? ''))],
-            ['label' => 'Ранг', 'value' => (string)($data['rank'] ?? '')],
-            ['label' => 'Период', 'value' => (string)($data['period'] ?? '')],
-        ], [
+        $classes = is_array($fetch['class_catalog'] ?? null) ? $fetch['class_catalog'] : [];
+        foreach ($rows as &$row) {
+            $name = mb_strtolower(trim((string)($row['archetype'] ?? '')), 'UTF-8');
+            $row['class_name'] = ($classes[$name] ?? '') !== '' ? $classes[$name] : null;
+        }
+        unset($row);
+        $rows = analytics_with_top_fields($rows, 'popularity', 'winrate', 'games');
+        $periods = analytics_meta_period_options(analytics_meta($payload));
+        return analytics_result_shell($module, $definition, $fetch, analytics_statistics_summary($fetch, $rows, 'Архетипов', 'games'), [
             analytics_column('archetype', 'Архетип'),
             analytics_column('winrate', 'Винрейт', 'percent'),
             analytics_column('popularity', 'Популярность', 'percent'),
@@ -1655,15 +1752,17 @@ function analytics_normalize(string $module, array $definition, array $fetch): a
             analytics_column('turns', 'Ходы', 'number'),
             analytics_column('duration_minutes', 'Минуты', 'number'),
             analytics_column('climbing_speed', 'Скорость подъёма', 'number'),
-        ], $rows);
+        ], $rows, [
+            'options' => ['period' => $periods['values']],
+            'option_hints' => ['period' => $periods['hints']],
+        ] + (($fetch['warnings'] ?? []) !== [] ? ['warnings' => $fetch['warnings']] : []));
     }
 
     if ($module === 'archetypes') {
         $rows = is_array($payload['data'] ?? null) ? $payload['data'] : [];
-        return analytics_result_shell($module, $definition, $fetch, [
-            ['label' => 'Найдено', 'value' => count($rows)],
-            ['label' => 'Всего', 'value' => analytics_meta($payload)['count'] ?? count($rows)],
-        ], [
+        $rows = analytics_with_top_fields($rows, 'pct_of_total', 'win_rate', 'total_games');
+        $total = analytics_number(analytics_meta($payload)['count'] ?? null);
+        return analytics_result_shell($module, $definition, $fetch, analytics_statistics_summary($fetch, $rows, 'Архетипов', 'games', $total === null ? null : (int)$total), [
             analytics_column('name', 'Архетип'),
             analytics_column('class_name', 'Класс'),
             analytics_column('win_rate', 'Винрейт', 'percent'),
@@ -1684,11 +1783,11 @@ function analytics_normalize(string $module, array $definition, array $fetch): a
             $row['top_deck_win_rate'] = $decks[0]['win_rate'] ?? null;
         }
         unset($row);
-        return analytics_result_shell($module, $definition, $fetch, [
-            ['label' => 'Архетипов', 'value' => count($rows)],
-            ['label' => 'Со сборками', 'value' => count(array_filter($rows, static fn(array $row): bool => !empty($row['has_decks'])))],
-            ['label' => 'Формат', 'value' => strtoupper((string)($rows[0]['format'] ?? ''))],
-        ], [
+        $rows = analytics_with_top_fields($rows, 'popularity_pct', 'winrate', 'games');
+        $withDecks = count(array_filter($rows, static fn(array $row): bool => !empty($row['has_decks'])));
+        return analytics_result_shell($module, $definition, $fetch, analytics_statistics_summary($fetch, $rows, 'Архетипов', 'games', null, [
+            analytics_kpi('with_decks', 'Со сборками', $withDecks, 'number'),
+        ]), [
             analytics_column('archetype', 'Архетип'),
             analytics_column('class_name', 'Класс'),
             analytics_column('winrate', 'Винрейт', 'percent'),
@@ -1703,10 +1802,8 @@ function analytics_normalize(string $module, array $definition, array $fetch): a
 
     if ($module === 'decks') {
         $rows = is_array($payload['data'] ?? null) ? $payload['data'] : [];
-        return analytics_result_shell($module, $definition, $fetch, [
-            ['label' => 'Показано', 'value' => count($rows)],
-            ['label' => 'Всего', 'value' => analytics_meta($payload)['count'] ?? count($rows)],
-        ], [
+        $total = analytics_number(analytics_meta($payload)['count'] ?? null);
+        return analytics_result_shell($module, $definition, $fetch, analytics_statistics_summary($fetch, $rows, 'Колод', null, $total === null ? null : (int)$total), [
             analytics_column('archetype', 'Колода'),
             analytics_column('class', 'Класс'),
             analytics_column('source_id', 'Источник', 'code'),
@@ -1724,10 +1821,9 @@ function analytics_normalize(string $module, array $definition, array $fetch): a
             $row['best_composition_name'] = $row['best_composition']['name'] ?? '';
         }
         unset($row);
-        return analytics_result_shell($module, $definition, $fetch, [
-            ['label' => 'Героев', 'value' => count($rows)],
-            ['label' => 'Всего', 'value' => analytics_meta($payload)['count'] ?? count($rows)],
-        ], [
+        $rows = analytics_bg_hero_top_rows($rows);
+        $total = analytics_number(analytics_meta($payload)['count'] ?? null);
+        return analytics_result_shell($module, $definition, $fetch, analytics_statistics_summary($fetch, $rows, 'Героев', 'games', $total === null ? null : (int)$total), [
             analytics_column('hero', 'Герой'),
             analytics_column('tier', 'Тир', 'status'),
             analytics_column('pick_rate_value', 'Выбор', 'percent'),
@@ -1758,9 +1854,7 @@ function analytics_normalize(string $module, array $definition, array $fetch): a
 
     if ($module === 'arena') {
         $rows = is_array($payload['data'] ?? null) ? $payload['data'] : [];
-        return analytics_result_shell($module, $definition, $fetch, [
-            ['label' => 'Классов', 'value' => count($rows)],
-        ], [
+        return analytics_result_shell($module, $definition, $fetch, analytics_statistics_summary($fetch, $rows, 'Классов'), [
             analytics_column('class_ru', 'Класс'),
             analytics_column('win_rate', 'Винрейт', 'percent'),
             analytics_column('pick_rate', 'Выбор', 'percent'),
@@ -1908,12 +2002,7 @@ function analytics_constructed_cards(array $definition, array $query): array
         'source_id' => $sourceId,
         'stale' => false,
     ];
-    return analytics_result_shell('constructed_cards', $definition, $fetch, [
-        ['label' => 'Показано', 'value' => count($rows)],
-        ['label' => 'Всего', 'value' => $total],
-        ['label' => 'Формат', 'value' => strtoupper($format)],
-        ['label' => 'Срез', 'value' => strtoupper($rank) . ' · ' . strtoupper($period)],
-    ], [
+    return analytics_result_shell('constructed_cards', $definition, $fetch, analytics_statistics_summary($fetch, $rows, 'Карт', null, $total), [
         analytics_column('image_url', 'Арт', 'image'),
         analytics_column('name', 'Карта'),
         analytics_column('cardClass', 'Класс'),
@@ -1954,12 +2043,7 @@ function analytics_arena_cards(array $definition, array $query): array
         'source_id' => $sourceId,
         'stale' => false,
     ];
-    return analytics_result_shell('arena_cards', $definition, $fetch, [
-        ['label' => 'Показано', 'value' => count($rows)],
-        ['label' => 'Всего', 'value' => $total],
-        ['label' => 'Режим', 'value' => $sourceKey === 'underground' ? 'Подпольная' : 'Обычная'],
-        ['label' => 'Источник', 'value' => $sourceKey === 'hsreplay' ? 'HSReplay' : 'Firestone'],
-    ], [
+    return analytics_result_shell('arena_cards', $definition, $fetch, analytics_statistics_summary($fetch, $rows, 'Карт', null, $total), [
         analytics_column('image_url', 'Арт', 'image'),
         analytics_column('name', 'Карта'),
         analytics_column('cardClass', 'Класс'),
@@ -2004,12 +2088,7 @@ function analytics_bg_minions(array $definition, array $query): array
         'stale' => false,
     ];
 
-    return analytics_result_shell('bg_minions', $definition, $fetch, [
-        ['label' => 'Показано', 'value' => count($rows)],
-        ['label' => 'Всего', 'value' => $total],
-        ['label' => 'Источник', 'value' => 'HSReplay'],
-        ['label' => 'Раунды', 'value' => count($rows[0]['combat_rounds'] ?? [])],
-    ], [
+    return analytics_result_shell('bg_minions', $definition, $fetch, analytics_statistics_summary($fetch, $rows, 'Существ', null, $total), [
         analytics_column('image_url', 'Карта', 'image'),
         analytics_column('name', 'Существо'),
         analytics_column('tavern_tier', 'Таверна', 'number'),
@@ -2020,6 +2099,54 @@ function analytics_bg_minions(array $definition, array $query): array
         analytics_column('games_with_minion', 'Игры', 'number'),
         analytics_column('card_id', 'card_id', 'code'),
     ], $rows);
+}
+
+/**
+ * Battlegrounds heroes have no win rate: share_pct is the pick rate, winrate_pct stays null,
+ * avg_placement_value and first_place_pct carry the result. Most picked first.
+ */
+function analytics_bg_hero_top_rows(array $rows): array
+{
+    foreach ($rows as &$row) {
+        $row['avg_placement_value'] = analytics_number($row['avg_placement'] ?? null);
+        $row['first_place_pct'] = analytics_number($row['first_place'] ?? null);
+    }
+    unset($row);
+
+    return analytics_with_top_fields($rows, 'pick_rate_value', null, array_key_exists('games', $rows[0] ?? []) ? 'games' : null);
+}
+
+/**
+ * Periods the HSGuru meta accepts. The values are the raw strings of the API; a hint says which
+ * of them is the current patch (and the current window), because the raw value alone does not.
+ */
+function analytics_meta_period_options(array $remoteMeta): array
+{
+    $values = [];
+    foreach (is_array($remoteMeta['available_periods'] ?? null) ? $remoteMeta['available_periods'] : [] as $period) {
+        if (is_string($period) && $period !== '' && !in_array($period, $values, true)) {
+            $values[] = $period;
+        }
+    }
+    $patch = is_string($remoteMeta['current_patch_period'] ?? null) && $remoteMeta['current_patch_period'] !== ''
+        ? $remoteMeta['current_patch_period']
+        : null;
+    $current = is_string($remoteMeta['current_period'] ?? null) && $remoteMeta['current_period'] !== ''
+        ? $remoteMeta['current_period']
+        : null;
+    if ($values === []) {
+        $values = ANALYTICS_ROLLING_PERIODS;
+    }
+    foreach ([$patch, $current] as $required) {
+        if ($required !== null && !in_array($required, $values, true)) {
+            $values[] = $required;
+        }
+    }
+
+    return [
+        'values' => $values,
+        'hints' => ['default' => 'past_day', 'current' => $current, 'current_patch' => $patch],
+    ];
 }
 
 function analytics_bg_heroes_ratings(array $definition, array $query): array
@@ -2075,7 +2202,7 @@ function analytics_bg_heroes_ratings(array $definition, array $query): array
             'dbfId' => $known['dbfId'] ?? null,
         ];
     }
-    usort($rows, static fn(array $a, array $b): int => ((float)($a['avg_placement'] ?? 99)) <=> ((float)($b['avg_placement'] ?? 99)));
+    $rows = analytics_bg_hero_top_rows($rows);
     $total = count($rows);
     $rows = analytics_filter_rows($rows, (string)($query['q'] ?? ''), (int)($query['limit'] ?? 200));
     $fetch['payload']['meta'] = [
@@ -2084,12 +2211,7 @@ function analytics_bg_heroes_ratings(array $definition, array $query): array
         'source_id' => 'firestone_bg_heroes_mmr_' . $rating,
         'stale' => false,
     ];
-    return analytics_result_shell('bg_heroes', $definition, $fetch, [
-        ['label' => 'Героев', 'value' => count($rows)],
-        ['label' => 'Рейтинг', 'value' => $rating === '100' ? 'Все игроки' : 'Top ' . $rating . '%'],
-        ['label' => 'Период', 'value' => '3 дня'],
-        ['label' => 'Источник', 'value' => 'Firestone'],
-    ], [
+    return analytics_result_shell('bg_heroes', $definition, $fetch, analytics_statistics_summary($fetch, $rows, 'Героев', 'games', $total), [
         analytics_column('image_url', 'Арт', 'image'),
         analytics_column('hero', 'Герой'),
         analytics_column('tier', 'Тир', 'status'),
@@ -2185,6 +2307,13 @@ function analytics_card_statistics(array $definition, array $query): array
             $sources[$row['source']] = true;
         }
     }
+    $asOf = null;
+    foreach ($rows as $row) {
+        $recorded = analytics_iso_datetime($row['recorded_at'] ?? null);
+        if ($recorded !== null && ($asOf === null || $recorded > $asOf)) {
+            $asOf = $recorded;
+        }
+    }
     $cached = $responses && count(array_filter($responses, static fn(array $response): bool => !empty($response['cached']))) === count($responses);
     $staleCache = count(array_filter($responses, static fn(array $response): bool => !empty($response['stale_cache']))) > 0;
 
@@ -2193,11 +2322,11 @@ function analytics_card_statistics(array $definition, array $query): array
         'module' => 'card',
         'title' => $definition['title'] . ': ' . $name,
         'description' => $definition['description'],
-        'summary' => [
-            ['label' => 'Записей', 'value' => count($rows)],
-            ['label' => 'Источников', 'value' => count($sources)],
-            ['label' => 'Запрос', 'value' => $name],
-        ],
+        'summary' => array_values(array_filter([
+            $asOf !== null ? analytics_kpi('data_as_of', 'Данные на', $asOf, 'date') : null,
+            analytics_kpi('rows', 'Записей', count($rows), 'number'),
+            analytics_kpi('sources', 'Источников', count($sources), 'number'),
+        ])),
         'columns' => [
             analytics_column('dataset', 'Набор'),
             analytics_column('source', 'Источник', 'code'),
@@ -2455,6 +2584,78 @@ function analytics_provider_usage(array $definition, array $query): array
     ];
 }
 
+/** options: {param: [raw values]} for every enum parameter; dynamic lists (meta.period) come from the response. */
+function analytics_attach_options(array $definition, array $response): array
+{
+    $options = is_array($response['options'] ?? null) ? $response['options'] : [];
+    foreach ($definition['params'] as $name => $rule) {
+        if (($rule['type'] ?? '') === 'enum' && !isset($options[$name])) {
+            $options[$name] = array_values($rule['values'] ?? []);
+        }
+    }
+    if ($options !== []) {
+        $response['options'] = $options;
+    }
+
+    return $response;
+}
+
+/** Archetype name (lower case) => class as the HSGuru catalog gives it; null when the catalog is unavailable. */
+function analytics_hsguru_class_catalog(string $format, int $ttl): ?array
+{
+    try {
+        $fetch = analytics_fetch_json('/v1/hsguru/archetypes', ['format' => $format, 'limit' => 500], $ttl);
+    } catch (Throwable $ignored) {
+        return null;
+    }
+    $classes = [];
+    foreach (is_array($fetch['payload']['data'] ?? null) ? $fetch['payload']['data'] : [] as $archetype) {
+        if (!is_array($archetype)) {
+            continue;
+        }
+        $name = mb_strtolower(trim((string)($archetype['archetype'] ?? '')), 'UTF-8');
+        foreach (is_array($archetype['decks'] ?? null) ? $archetype['decks'] : [] as $deck) {
+            $class = is_array($deck) && is_string($deck['class'] ?? null) ? trim($deck['class']) : '';
+            if ($name !== '' && $class !== '') {
+                $classes[$name] = $class;
+                break;
+            }
+        }
+    }
+
+    return $classes;
+}
+
+function analytics_meta_module(array $definition, array $query): array
+{
+    $ttl = (int)$definition['ttl'];
+    $path = (string)$definition['path'];
+    $default = (string)$definition['params']['period']['default'];
+    $warnings = [];
+    $fetch = null;
+    $period = (string)($query['period'] ?? $default);
+    if ($period !== $default) {
+        // An unknown period would be a 422 from the API: fall back to the default one instead.
+        try {
+            $fetch = analytics_fetch_json($path, array_merge($query, ['period' => $default]), $ttl);
+            $known = analytics_meta($fetch['payload'])['available_periods'] ?? null;
+            if (is_array($known) && $known !== [] && !in_array($period, $known, true)) {
+                $warnings[] = 'Период «' . $period . '» недоступен, показан ' . $default . '.';
+                $query['period'] = $default;
+            } else {
+                $fetch = null;
+            }
+        } catch (Throwable $ignored) {
+            $fetch = null;
+        }
+    }
+    $fetch ??= analytics_fetch_json($path, $query, $ttl);
+    $fetch['warnings'] = $warnings;
+    $fetch['class_catalog'] = analytics_hsguru_class_catalog((string)($query['format'] ?? 'standard'), $ttl);
+
+    return analytics_normalize('meta', $definition, $fetch);
+}
+
 function analytics_module_response(string $module, array $input): array
 {
     $registry = analytics_module_registry();
@@ -2462,7 +2663,11 @@ function analytics_module_response(string $module, array $input): array
         throw new InvalidArgumentException('Неизвестный раздел статистики.');
     }
     $definition = $registry[$module];
-    $query = analytics_safe_query($definition, $input);
+    return analytics_attach_options($definition, analytics_module_payload($module, $definition, analytics_safe_query($definition, $input)));
+}
+
+function analytics_module_payload(string $module, array $definition, array $query): array
+{
     if (!empty($definition['composite'])) {
         if ($module === 'constructed_cards') {
             return analytics_constructed_cards($definition, $query);
@@ -2480,6 +2685,9 @@ function analytics_module_response(string $module, array $input): array
             return analytics_provider_usage($definition, $query);
         }
         return analytics_card_statistics($definition, $query);
+    }
+    if ($module === 'meta') {
+        return analytics_meta_module($definition, $query);
     }
 
     $fetch = analytics_fetch_json((string)$definition['path'], $query, (int)$definition['ttl']);
