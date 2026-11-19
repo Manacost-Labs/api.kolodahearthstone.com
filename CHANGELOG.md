@@ -55,6 +55,10 @@
   `share_pct` / `winrate_pct` и идут по убыванию доли; в строках меты есть
   `class_name` из каталога HSGuru. Старые поля не менялись. Тест
   `panel/tests/analytics_model_test.php`, снимок реестра перегенерирован.
+- Источник `hsreplay_assemble`: в русских текстах карт убран служебный маркер
+  переноса `[d]` внутри слов (10 карт, например `TIME_024`, `TIME_001`,
+  `END_016`); слово склеивается, серия неразрывных пробелов после маркера
+  не оставляет разрыва («становится», а не «ста новится»). Refs #136.
 - Источник `hsreplay_assemble` и REST `GET /v1/hsreplay/assemble` /
   `GET /v1/hsreplay/assemble/cards`: механика «Собирает» (Assemble, 13 карт
   Reign of the Black Empire). Один запрос HSReplay `assemble_choices_by_middle`
