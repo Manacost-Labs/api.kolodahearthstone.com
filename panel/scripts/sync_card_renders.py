@@ -240,7 +240,7 @@ def build_plan(
 
 def bad_backoff(attempts: int) -> timedelta:
     """1 h, 2 h, 4 h ... capped at 7 days, by consecutive failed attempts."""
-    return min(BAD_BACKOFF_BASE * 2 ** max(attempts - 1, 0), BAD_BACKOFF_MAX)
+    return min(BAD_BACKOFF_BASE * 2 ** min(max(attempts - 1, 0), 8), BAD_BACKOFF_MAX)
 
 
 def build_index(locale: str, state: dict[str, Any], now: datetime) -> dict[str, Any]:

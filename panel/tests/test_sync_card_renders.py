@@ -217,6 +217,7 @@ class SyncCardRendersTests(unittest.TestCase):
             self.assertEqual(attempt(timedelta(minutes=30)), 1, n)
             self.assertEqual(state()["bad_attempts"], n)
         self.assertEqual(sync.bad_backoff(30), timedelta(days=7))
+        self.assertEqual(sync.bad_backoff(10**6), timedelta(days=7))  # no OverflowError
         self.assertEqual(env.index()["missing"], [])
         env.responses["A"] = (200, png(), None)  # CDN recovered
         self.assertEqual(attempt(timedelta(days=7)), 1)
