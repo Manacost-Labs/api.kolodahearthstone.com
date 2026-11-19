@@ -53,8 +53,14 @@ export default async function verify(page, root) {
     const fields = await page.locator('input[name="limit"], input[name="offset"]').count();
     ensure(fields === 0, key + ': limit/offset fields are shown');
     const shares = await page
-      .locator('.analytics-main td, .stats-kpis')
+      .locator('.analytics-main td, .stats-kpis, .reliability')
       .evaluateAll(cells => cells.flatMap(cell => cell.textContent.match(/[\d., ]+\s?%/g) ?? []));
+    // The reliability tiles sit outside the table: make sure their shares are actually read.
+    if (key === 'overview')
+      ensure(
+        /\d\s?%/.test(await page.locator('.reliability').innerText()),
+        'overview: no shares read from the reliability block',
+      );
     for (const share of shares)
       ensure(percentShape.test(share.trim()), `${key}: share «${share}» is not in the common shape`);
     ensure(!/\d\.\d+\s?%/.test(shares.join(' ')), key + ': 7.98% style share');
