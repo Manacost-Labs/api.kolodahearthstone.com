@@ -214,22 +214,34 @@ test('@ keeps the first variant and {0} becomes X (CATA_131)', () => {
     'Grito de batalla: Obtienes un cristal. (¡X más!).',
   );
   assert.equal(
-    plainCardText('<b>Okrzyk bojowy:</b>\nOtrzymujesz. <i>(Jeszcze {0}!)</i>@<b>Okrzyk bojowy:</b>\nKoniec.', 'pl'),
+    plainCardText(
+      '<b>Okrzyk bojowy:</b>\nOtrzymujesz. <i>(Jeszcze {0}!)</i>@<b>Okrzyk bojowy:</b>\nKoniec.',
+      'pl',
+    ),
     'Okrzyk bojowy:\nOtrzymujesz. (Jeszcze X!)',
   );
 });
 
 test('[x] is dropped from es text and line breaks stay (LOE_006)', () => {
   assert.equal(
-    plainCardText('[x]<b>Grito de batalla:\nDescubre</b> una carta con\n<b>Último aliento</b>. Cuesta\n(1) cristal menos.', 'es'),
+    plainCardText(
+      '[x]<b>Grito de batalla:\nDescubre</b> una carta con\n<b>Último aliento</b>. Cuesta\n(1) cristal menos.',
+      'es',
+    ),
     'Grito de batalla:\nDescubre una carta con\nÚltimo aliento. Cuesta\n(1) cristal menos.',
   );
 });
 
 test('$3 is a plain number in pl and es (LOE_002)', () => {
   assert.equal(
-    plainCardText('Zadaj $3 pkt. obrażeń. Wtasuj do twojej talii „Buzującą pochodnię” zadającą 6 pkt. obrażeń.', 'pl'),
+    plainCardText(
+      'Zadaj $3 pkt. obrażeń. Wtasuj do twojej talii „Buzującą pochodnię” zadającą 6 pkt. obrażeń.',
+      'pl',
+    ),
     'Zadaj 3 pkt. obrażeń. Wtasuj do twojej talii „Buzującą pochodnię” zadającą 6 pkt. obrażeń.',
   );
-  assert.equal(plainCardText('Inflige $3 p. de daño. Mete en tu mazo una antorcha.', 'es'), 'Inflige 3 p. de daño. Mete en tu mazo una antorcha.');
+  assert.equal(
+    plainCardText('Inflige $3 p. de daño. Mete en tu mazo una antorcha.', 'es'),
+    'Inflige 3 p. de daño. Mete en tu mazo una antorcha.',
+  );
 });

@@ -242,7 +242,8 @@ export class LocaleLoader {
 
   private release() {
     const next = this.waiting.shift();
-    if (next) next.resume(); // the slot passes straight to the next request
+    if (next)
+      next.resume(); // the slot passes straight to the next request
     else this.running -= 1;
   }
 
