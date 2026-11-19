@@ -24,7 +24,8 @@ TABLES = {
 BOOKKEEPING = {
     "id", "created_at", "updated_at", "first_seen_at", "last_seen_at",
     "changed_at", "fetched_at", "wiki_fetched_at",
-    "source_payload_json", "last_checked_at", "last_error", "error", "import_run_id",
+    "source_payload_json", "source_hash", "source", "last_checked_at",
+    "last_error", "error", "import_run_id",
 }
 
 DDL = """CREATE TABLE IF NOT EXISTS catalog_card_versions (
@@ -56,7 +57,8 @@ def statements(table, columns):
     entity = TABLES[table]
     for key in columns:
         identifier(key)
-    content = [key for key in columns if key not in BOOKKEEPING]
+    content = [key for key in columns if key not in BOOKKEEPING
+               and not key.endswith(("_fetched_at", "_checked_at"))]
     if "card_id" not in content:
         raise ValueError("Catalog must have a card_id")
     snapshots = [key for key in columns if key not in {"id", "error", "last_error"}]
@@ -66,16 +68,39 @@ def statements(table, columns):
         return ("CONCAT(%s`library`, ':', %s`card_id`)" % (prefix, prefix)
                 if library else prefix + "`card_id`")
 
-    def digest(prefix):
-        return "SHA2(CAST(%s AS CHAR), 256)" % json_object(content, prefix)
+    def digest(prefix, snapshot=None):
+        def value(column):
+            if snapshot:
+                return "JSON_EXTRACT(%s, '$.%s')" % (snapshot, column)
+            return prefix + identifier(column)
+
+        pairs = []
+        for column in content:
+            expression = value(column)
+            local = {"image_url": "local_image_url", "image_gold_url": "local_gold_image_url",
+                     "crop_image_url": "local_crop_image_url"}.get(column)
+            if local in columns:
+                local_value = value(local)
+                if snapshot:
+                    present = "JSON_TYPE(%s)='STRING' AND NULLIF(JSON_UNQUOTE(%s), '') IS NOT NULL" % (local_value, local_value)
+                else:
+                    present = "NULLIF(%s, '') IS NOT NULL" % local_value
+                expression = "IF(%s, NULL, %s)" % (present, expression)
+            pairs.extend(("'%s'" % column, expression))
+        return "SHA2(CAST(JSON_OBJECT(%s) AS CHAR), 256)" % ", ".join(pairs)
+
+    def head_hash(prefix):
+        return ("(SELECT v.snapshot_hash FROM catalog_card_versions v WHERE v.entity='%s' "
+                "AND v.card_id=%s COLLATE utf8mb4_bin ORDER BY v.id DESC LIMIT 1)" %
+                (entity, key(prefix)))
 
     def insert(prefix, kind, previous="NULL", guard="", predecessor=None):
         snapshot = json_object(snapshots, prefix)
         if predecessor:
             snapshot = "JSON_MERGE_PATCH(%s, JSON_OBJECT('_previous_card_id', %s))" % (snapshot, predecessor)
         return ("INSERT INTO catalog_card_versions "
-                "(entity, card_id, observed_at, event_kind, previous_hash, snapshot_hash, snapshot_json) "
-                "SELECT '%s', %s, UTC_TIMESTAMP(6), '%s', %s, %s, %s%s;" %
+                "(entity, card_id, event_kind, previous_hash, snapshot_hash, snapshot_json) "
+                "SELECT '%s', %s, '%s', %s, %s, %s%s;" %
                 (entity, key(prefix), kind, previous, digest(prefix),
                  snapshot, guard))
 
@@ -86,19 +111,20 @@ def statements(table, columns):
     old_guard = (" WHERE NOT EXISTS (SELECT 1 FROM catalog_card_versions "
                  "WHERE entity = '%s' AND card_id = %s COLLATE utf8mb4_bin AND id = "
                  "(SELECT MAX(v.id) FROM catalog_card_versions v WHERE v.entity = '%s' "
-                 "AND v.card_id = %s COLLATE utf8mb4_bin) AND snapshot_hash = %s)" %
-                 (entity, key("OLD."), entity, key("OLD."), digest("OLD.")))
+                 "AND v.card_id = %s COLLATE utf8mb4_bin) AND %s = %s)" %
+                 (entity, key("OLD."), entity, key("OLD."),
+                  digest("", snapshot="snapshot_json"), digest("OLD.")))
     before_update = ("CREATE TRIGGER %s BEFORE UPDATE ON %s FOR EACH ROW BEGIN "
                      "IF NOT (%s <=> %s) THEN %s IF NOT (%s <=> %s) THEN %s %s ELSE %s END IF; END IF; END" %
                      (identifier("cv1_" + table + "_update"), identifier(table),
                       digest("OLD."), digest("NEW."), insert("OLD.", "baseline", guard=old_guard),
-                      key("OLD."), key("NEW."), insert("OLD.", "removed", previous=digest("OLD.")),
-                      insert("NEW.", "renamed", previous=digest("OLD."), predecessor=key("OLD.")),
-                      insert("NEW.", "changed", previous=digest("OLD."))))
+                      key("OLD."), key("NEW."), insert("OLD.", "removed", previous=head_hash("OLD.")),
+                      insert("NEW.", "renamed", previous=head_hash("OLD."), predecessor=key("OLD.")),
+                      insert("NEW.", "changed", previous=head_hash("OLD."))))
     before_delete = ("CREATE TRIGGER %s BEFORE DELETE ON %s FOR EACH ROW BEGIN %s %s END" %
                      (identifier("cv1_" + table + "_delete"), identifier(table),
                       insert("OLD.", "baseline", guard=old_guard),
-                      insert("OLD.", "removed", previous=digest("OLD."))))
+                      insert("OLD.", "removed", previous=head_hash("OLD."))))
     baseline = (insert("", "baseline")[:-1] + " FROM " + identifier(table)
                 + " WHERE NOT EXISTS (SELECT 1 FROM catalog_card_versions v "
                 "WHERE v.entity = '%s' AND v.card_id = %s COLLATE utf8mb4_bin);" % (entity, key(identifier(table) + ".")))

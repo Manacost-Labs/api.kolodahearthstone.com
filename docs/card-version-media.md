@@ -47,6 +47,38 @@ mirror. Migration `013_hsguru_deck_radar.sql` and the explicit radar shadow
 fragment preserve radar observations, snapshots and mutable event statuses in
 the mirror's transaction.
 
+## What counts as a card change
+
+The history triggers (`cv1_*`) hash only the card's content. The hash ignores
+local image mirrors (`local_image_url`, `local_gold_image_url`,
+`local_crop_image_url`: when one is set, the upstream URL it replaces is not
+hashed), `source_hash`, `source`, `source_payload_json`, and every
+`*_fetched_at` / `*_checked_at` column. Re-mirroring or re-fetching the same
+card therefore does not create a version. `previous_hash` of a new version is
+the hash of the latest stored version of the card (`head_hash`), not of the row
+before the update.
+
+## Changed images
+
+`panel/scripts/card_image_versions.py` publishes a changed image to
+`uploads/card-history-media/<sha256>.png` instead of overwriting the current
+file, so older versions keep their bytes. An image whose hash equals the current
+file is not republished. If the target name already exists with other bytes,
+`publish_image` raises `ValueError` rather than overwriting it. The BG and
+constructed image sync scripts use it; the stored path becomes
+`/uploads/card-history-media/<sha256>.png`. URLs outside `/uploads/` or on a
+foreign host fall back to the card's regular file; `..` in a path is rejected.
+Requires Python 3.11 (`hashlib.file_digest`), as on the production worker.
+
+## Upgrading triggers
+
+`install_card_history.py` refuses a trigger whose body differs from the
+reviewed definition (`History trigger needs a reviewed schema migration`).
+`--apply --upgrade-triggers --trigger-backup <new file>` replaces them with
+MariaDB `CREATE OR REPLACE TRIGGER` after writing the previous definitions to the
+backup file (never overwritten; MySQL is refused). Stored versions are kept.
+Without `--apply` the script only reads and plans.
+
 ## Deployment preservation
 
 `scripts/stage-chat-gaps-runtime.py` prepares a new candidate from the active
