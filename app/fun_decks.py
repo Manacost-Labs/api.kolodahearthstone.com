@@ -11,38 +11,45 @@ Research notes (HSGuru/d0nkey.top + community meta-detectors):
 - Weak named ladder decks (Egglock, Leyline, Zee) are NOT fun — they are just
   low-tier established packages. Gate them when title≈nearest and overlap is mid+.
 
-Detection recipe:
-1. Build META CORES = high-games catalog decks (format-aware).
-2. Score candidates by (1 - Jaccard to best same-class meta core).
-3. Boost: concept titles, rare archetype names, HL/XL shape, cheese WR bands.
-4. Hard-reject: known high-volume ladder archetype variants and generic
-   "<Aggro|Dragon|...> <class>" ladder titles that sit close to a meta core.
-5. Quality gate: a deck needs a real sample (games, win rate), at least
-   ``HS_FUN_DECK_MIN_GAMES`` games, and a 95% Wilson interval that is not
-   entirely below ``HS_FUN_DECK_MIN_CI_HIGH`` percent (a losing list is not "fun").
-6. Collapse near-identical lists (same format + class, Jaccard >= 0.6) into the
-   better sampled one and publish with Standard/Wild balance, one deck per class
-   first, then by fun score.
+Detection recipe (concept-v8):
+1. Build a CATALOG INDEX: every HSGuru list with enough games, per (format, class),
+   plus each archetype's share of its format's games. An archetype with a share
+   of at least ``HS_FUN_DECK_LADDER_SHARE_PCT`` (or a named ladder package) is a
+   LADDER archetype.
+2. Throw out ladder lists first, for both kinds and whatever the title or card
+   package says: Jaccard >= ``HS_FUN_DECK_LADDER_MEMBER_SIM`` to a ladder list, a
+   ladder-archetype title close to that archetype, a bare "<Aggro|Dude|...> <class>".
+3. ``brew``: a fun signal - a concept in the title, a spicy card package or a list
+   no other list resembles (``HS_FUN_DECK_TWIN_SIM``). ``off_meta``: no signal, but
+   the list is a variant of a named archetype that is not a ladder one.
+4. Quality gate: a deck needs a real sample (games, win rate), at least
+   ``HS_FUN_DECK_MIN_GAMES`` games, and a 95% Wilson interval that is not entirely
+   below ``HS_FUN_DECK_MIN_CI_HIGH`` percent (a losing list is not "fun").
+5. Collapse near-identical lists (same format + class, Jaccard >= 0.6) into the
+   better sampled one and publish with Standard/Wild balance: brews first (one deck
+   per class first, then by fun score), off-meta decks after them.
 """
 
 from __future__ import annotations
 
 import re
 from collections import Counter, defaultdict
-from collections.abc import Mapping
-from dataclasses import dataclass
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from math import sqrt
 from typing import Any
 
 from .config import (
     fun_deck_dedupe_jaccard,
-    fun_deck_generic_name_max_similarity,
-    fun_deck_max_meta_similarity,
+    fun_deck_ladder_member_sim,
+    fun_deck_ladder_share_pct,
     fun_deck_min_ci_high,
     fun_deck_min_games,
     fun_deck_min_score,
     fun_deck_retention_hours,
+    fun_deck_spicy_package_max_share_pct,
+    fun_deck_twin_sim,
 )
 from .deck_decode import decode_deck_code
 from .parser_control import load_resolved_public_dataset
@@ -52,7 +59,7 @@ from .sources import SOURCE_BY_ID, Source
 from .storage import load_dataset, save_dataset, save_status
 
 SOURCE_ID = "hsguru_fun_decks"
-DETECTOR_VERSION = "concept-v7"
+DETECTOR_VERSION = "concept-v8"
 CANDIDATE_SOURCE_IDS = ("hsguru_streamer_decks_legend_1000",)
 CATALOG_CANDIDATE_SOURCE_IDS = (
     "hsguru_deck_catalog_standard_all",
@@ -60,7 +67,6 @@ CATALOG_CANDIDATE_SOURCE_IDS = (
     "hsguru_deck_catalog_wild_all",
     "hsguru_deck_catalog_wild_legend",
 )
-META_CATALOG_SOURCE_IDS = CATALOG_CANDIDATE_SOURCE_IDS
 META_ARCHETYPE_SOURCE_IDS = (
     "hsreplay_meta_legend_1d_firecrawl",
     "hsreplay_meta_top_1000_legend_1d_firecrawl",
@@ -108,7 +114,7 @@ _LADDER_ARCHETYPE_RE = re.compile(
 # bare "<word> <class>" title it is only a style label.
 _GENERIC_DECK_WORDS = (
     r"aggro|midrange|control|tempo|face|burn|ramp|tokens?|zoo|secrets?|dragons?|"
-    r"elementals?|dude|big\s+spell|spell|mech|beast|pirate|undead"
+    r"elementals?|dude|big\s+spell|spell|mech|beast|pirate|undead|blood|frost|unholy"
 )
 _CLASS_NAME_WORDS = (
     r"death\s*knight|dk|demon\s*hunter|dh|druid|hunter|mage|paladin|priest|rogue|"
@@ -265,18 +271,6 @@ def detect_card_packages(cards: Counter[int]) -> tuple[str, ...]:
 
 
 @dataclass(frozen=True)
-class MetaReference:
-    deck_code: str
-    cards: Counter[int]
-    archetype: str
-    hero_class: str
-    games: int
-    format_name: str
-    source_id: str
-    win_rate: float | None = None
-
-
-@dataclass(frozen=True)
 class FunDeckScore:
     fun_score: float
     max_meta_similarity: float
@@ -288,6 +282,12 @@ class FunDeckScore:
     is_fun: bool
     concept_hit: bool = False
     rare_archetype: bool = False
+    # "brew" | "off_meta"; None when the deck was turned away.
+    kind: str | None = None
+    ladder_sim: float = 0.0
+    content_sim: float = 0.0
+    twin_sim: float = 0.0
+    content_archetype: str | None = None
 
 
 def _parse_popularity_pct(value: Any) -> float | None:
@@ -426,72 +426,335 @@ def _format_bucket(value: Any) -> str:
     return "other"
 
 
-def build_meta_references(
-    catalog_source_ids: tuple[str, ...] = META_CATALOG_SOURCE_IDS,
-    *,
-    per_source_limit: int = 350,
-) -> list[MetaReference]:
-    """High-volume decks only — the real ladder cores used for outlier detection."""
-    refs: list[MetaReference] = []
-    seen_codes: set[str] = set()
-    for source_id in catalog_source_ids:
-        rows = _catalog_rows(source_id)
-        ranked = sorted(
-            rows,
-            key=lambda row: int(_parse_games(row.get("games")) or 0),
-            reverse=True,
+# A list needs this many games to be compared against (below it the sample is noise).
+CATALOG_MIN_GAMES = 45
+
+
+@dataclass(frozen=True)
+class CatalogDeck:
+    """One HSGuru list of the catalog, as the detector compares candidates to it."""
+
+    deck_code: str
+    cards: Counter[int]
+    # Casefolded archetype name without the service prefix; "" when the list has none.
+    archetype: str
+    label: str
+    hero_class: str
+    format: str
+    games: int
+
+
+def _class_key(value: Any) -> str:
+    return re.sub(r"[^a-z]", "", str(value or "").casefold())
+
+
+class CatalogIndex:
+    """Every compared catalog list by (format, class) and each archetype's share.
+
+    ``archetype_games`` / ``format_games`` count every listed deck (also the ones
+    below ``CATALOG_MIN_GAMES``); they default to the sums over ``decks``.
+    """
+
+    def __init__(
+        self,
+        decks: Iterable[CatalogDeck],
+        *,
+        archetype_games: Mapping[tuple[str, str], int] | None = None,
+        format_games: Mapping[str, int] | None = None,
+        meta_popularity: Mapping[tuple[str, str, str], float] | None = None,
+        package_shares: Mapping[tuple[str, str], float] | None = None,
+    ) -> None:
+        self.decks = list(decks)
+        self.meta_popularity = dict(meta_popularity or {})
+        self._by_group: dict[tuple[str, str], list[CatalogDeck]] = defaultdict(list)
+        derived_arch: dict[tuple[str, str], int] = defaultdict(int)
+        derived_fmt: dict[str, int] = defaultdict(int)
+        for deck in self.decks:
+            self._by_group[(deck.format, deck.hero_class)].append(deck)
+            derived_arch[(deck.format, deck.archetype)] += deck.games
+            derived_fmt[deck.format] += deck.games
+        self.archetype_games = dict(archetype_games or derived_arch)
+        self.format_games = dict(format_games or derived_fmt)
+        self._share_floor = fun_deck_ladder_share_pct()
+        self._spicy_share_cap = fun_deck_spicy_package_max_share_pct()
+        # Archetypes the meta sources (HSReplay, HSGuru) rate as popular, by (format, class).
+        self._meta_by_group: dict[tuple[str, str], list[str]] = defaultdict(list)
+        for (fmt, class_key, name), pct in (meta_popularity or {}).items():
+            if pct >= _META_LADDER_POPULARITY_PCT:
+                self._meta_by_group[(fmt, class_key)].append(name)
+        self._ladder_cache: dict[tuple[str, str, str], bool] = {}
+        self.ladder_names: frozenset[str] = frozenset(
+            {
+                name
+                for fmt, name in self.archetype_games
+                if name and self.is_ladder_archetype(fmt, name)
+            }
+            | {
+                deck.archetype
+                for deck in self.decks
+                if deck.archetype
+                and self.is_ladder_archetype(deck.format, deck.archetype, deck.hero_class)
+            }
         )
-        kept = 0
-        for row in ranked:
-            if kept >= per_source_limit:
-                break
-            code = str(row.get("deck_code") or "").strip()
-            if not code or code in seen_codes:
-                continue
-            games = _parse_games(row.get("games")) or 0
-            fmt = _format_bucket(row.get("format"))
-            # Meta core thresholds (d0nkey public meta ≈ 200; Wild softer).
-            min_games = 180 if fmt == "standard" else 120
-            if "legend" in source_id:
-                min_games = 80 if fmt == "standard" else 60
-            if games < min_games:
-                continue
-            cards = deck_card_multiset(code)
-            if not cards:
-                continue
-            seen_codes.add(code)
-            kept += 1
-            refs.append(
-                MetaReference(
-                    deck_code=code,
-                    cards=cards,
-                    archetype=str(
-                        row.get("archetype") or row.get("title") or ""
-                    ).strip(),
-                    hero_class=str(row.get("class") or "").strip(),
-                    games=games,
-                    format_name=str(row.get("format") or "").strip(),
-                    source_id=source_id,
-                    win_rate=_parse_win_rate(row.get("win_rate")),
+        # Games of the lists carrying any marker of a spicy package, per format.
+        package_games: dict[tuple[str, str], int] = defaultdict(int)
+        compared_games: dict[str, int] = defaultdict(int)
+        for deck in self.decks:
+            compared_games[deck.format] += deck.games
+            for label in detect_card_packages(deck.cards):
+                if label in _SPICY_PACKAGES:
+                    package_games[(deck.format, label)] += deck.games
+        self._package_games = dict(package_games)
+        self._compared_games = dict(compared_games)
+        # Shares measured on a whole catalog, when `decks` is only a slice of it.
+        self._package_shares = dict(package_shares) if package_shares is not None else None
+
+    def neighbours(self, fmt: str, hero_class: str) -> list[CatalogDeck]:
+        """Compared lists of one format and class (every format when ``fmt`` is "other")."""
+        class_key = _class_key(hero_class)
+        if fmt in {"standard", "wild"}:
+            return self._by_group.get((fmt, class_key), [])
+        return [d for (f, c), decks in self._by_group.items() if c == class_key for d in decks]
+
+    def archetype_share_pct(self, fmt: str, name: str) -> float:
+        total = self.format_games.get(fmt, 0)
+        if not total or not name:
+            return 0.0
+        return round(100.0 * self.archetype_games.get((fmt, name), 0) / total, 4)
+
+    def is_ladder_archetype(self, fmt: str, name: str, hero_class: str = "") -> bool:
+        """A big archetype (share >= the ladder floor), a named ladder package, or one
+        the meta sources rate as popular for the same format and class."""
+        if not name:
+            return False
+        class_key = _class_key(hero_class)
+        key = (fmt, name, class_key)
+        cached = self._ladder_cache.get(key)
+        if cached is None:
+            cached = (
+                _ladder_archetype_name(name)
+                or self.archetype_share_pct(fmt, name) >= self._share_floor
+                or (
+                    bool(class_key)
+                    and any(
+                        _archetypes_align(name, meta_name)
+                        for meta_name in self._meta_by_group.get((fmt, class_key), ())
+                    )
                 )
             )
-    return refs
+            self._ladder_cache[key] = cached
+        return cached
+
+    def package_share_pct(self, fmt: str, label: str) -> float:
+        """Share (percent) of the compared games of a format played with a package."""
+        if self._package_shares is not None:
+            return self._package_shares.get((fmt, label), 0.0)
+        total = self._compared_games.get(fmt, 0)
+        if not total:
+            return 0.0
+        return round(100.0 * self._package_games.get((fmt, label), 0) / total, 4)
+
+    def is_neutral_package(self, fmt: str, label: str) -> bool:
+        """The format plays the package a lot: it is meta there, not a fun signal."""
+        return self.package_share_pct(fmt, label) >= self._spicy_share_cap
+
+    def sharp_packages(self, fmt: str, packages: tuple[str, ...]) -> tuple[str, ...]:
+        """The spicy packages that are still rare in the format (a fun signal)."""
+        return tuple(
+            label
+            for label in packages
+            if label in _SPICY_PACKAGES
+            and self.package_share_pct(fmt, label) < self._spicy_share_cap
+        )
 
 
-def build_archetype_volume(
-    catalog_source_ids: tuple[str, ...] = META_CATALOG_SOURCE_IDS,
-) -> dict[str, int]:
-    """Total games per archetype name — high volume ⇒ established ladder package."""
-    volume: dict[str, int] = defaultdict(int)
+# Meta sources: HSReplay / HSGuru meta tables, by the format they describe.
+_META_SOURCE_FORMAT = {
+    "hsreplay_meta_legend_1d_firecrawl": "standard",
+    "hsreplay_meta_top_1000_legend_1d_firecrawl": "standard",
+    "hsreplay_meta_diamond_4to1_1d_firecrawl": "standard",
+    "hsguru_meta_standard_legend": "standard",
+    "hsguru_meta_wild_legend": "wild",
+}
+# An archetype at least this popular (percent) in a meta source is a ladder archetype.
+_META_LADDER_POPULARITY_PCT = 1.0
+_TITLE_CLASS_SUFFIX = {
+    "dk": "deathknight",
+    "deathknight": "deathknight",
+    "dh": "demonhunter",
+    "demonhunter": "demonhunter",
+    "lock": "warlock",
+    "warlock": "warlock",
+    "druid": "druid",
+    "hunter": "hunter",
+    "mage": "mage",
+    "paladin": "paladin",
+    "priest": "priest",
+    "rogue": "rogue",
+    "shaman": "shaman",
+    "warrior": "warrior",
+}
+
+
+def build_meta_popularity(
+    source_ids: tuple[str, ...] = META_ARCHETYPE_SOURCE_IDS,
+) -> dict[tuple[str, str, str], float]:
+    """Archetype popularity (percent) by (format, class, casefolded name) from the meta sources.
+
+    HSReplay tables list archetypes per class; HSGuru tables have no class column, so
+    the class is read from the last word of the name ("Harold DK") and rows without
+    one are skipped. The highest value of a name wins.
+    """
+    popularity: dict[tuple[str, str, str], float] = {}
+
+    def add(fmt: str, class_key: str, name: str, pct: float | None) -> None:
+        if not class_key or not name or pct is None:
+            return
+        key = (fmt, class_key, name.strip().casefold())
+        popularity[key] = max(popularity.get(key, 0.0), pct)
+
+    for source_id in source_ids:
+        fmt = _META_SOURCE_FORMAT.get(source_id)
+        if fmt is None:
+            continue
+        data = (load_resolved_public_dataset(source_id) or {}).get("data") or {}
+        structured = data.get("structured") if isinstance(data, dict) else None
+        if not isinstance(structured, dict):
+            continue
+        for class_row in structured.get("classes") or []:
+            if not isinstance(class_row, dict):
+                continue
+            class_key = _class_key(class_row.get("class"))
+            for arch in class_row.get("archetypes") or []:
+                if isinstance(arch, dict):
+                    pct = _parse_popularity_pct(arch.get("popularity") or arch.get("raw_popularity"))
+                    add(fmt, class_key, str(arch.get("archetype") or ""), pct)
+        for row in structured.get("strategies") or []:
+            if not isinstance(row, dict):
+                continue
+            name = str(row.get("Archetype") or row.get("archetype") or "")
+            words = name.split()
+            class_key = _TITLE_CLASS_SUFFIX.get(_class_key(words[-1])) if words else None
+            pct = _parse_popularity_pct(row.get("Popularity") or row.get("popularity"))
+            add(fmt, class_key or "", name, pct)
+    return popularity
+
+
+def build_catalog_index(
+    catalog_source_ids: tuple[str, ...] = CATALOG_CANDIDATE_SOURCE_IDS,
+    *,
+    meta_popularity: Mapping[tuple[str, str, str], float] | None = None,
+) -> CatalogIndex:
+    """Index the whole HSGuru catalog (not only its top decks) for the detector.
+
+    A list listed by several catalogs counts once, with its largest game count.
+    """
+    best: dict[tuple[str, str], tuple[int, dict[str, Any]]] = {}
     for source_id in catalog_source_ids:
         for row in _catalog_rows(source_id):
-            name = (
-                str(row.get("archetype") or row.get("title") or "").strip().casefold()
-            )
+            code = str(row.get("deck_code") or "").strip()
+            fmt = _format_bucket(row.get("format"))
             games = _parse_games(row.get("games")) or 0
-            if name and games:
-                volume[name] += games
-    return dict(volume)
+            if not code or fmt == "other" or games <= 0:
+                continue
+            key = (fmt, code)
+            if key not in best or games > best[key][0]:
+                best[key] = (games, row)
+
+    decks: list[CatalogDeck] = []
+    archetype_games: dict[tuple[str, str], int] = defaultdict(int)
+    format_games: dict[str, int] = defaultdict(int)
+    for (fmt, code), (games, row) in best.items():
+        label = strip_format_prefix(str(row.get("archetype") or row.get("title") or "")).strip()
+        archetype_games[(fmt, label.casefold())] += games
+        format_games[fmt] += games
+        if games < CATALOG_MIN_GAMES:
+            continue
+        cards = deck_card_multiset(code)
+        if not cards:
+            continue
+        decks.append(
+            CatalogDeck(
+                deck_code=code,
+                cards=cards,
+                archetype=label.casefold(),
+                label=label,
+                hero_class=_class_key(row.get("class") or deck_hero_class(code)),
+                format=fmt,
+                games=games,
+            )
+        )
+    return CatalogIndex(
+        decks,
+        archetype_games=archetype_games,
+        format_games=format_games,
+        meta_popularity=build_meta_popularity() if meta_popularity is None else meta_popularity,
+    )
+
+
+@dataclass(frozen=True)
+class Neighbourhood:
+    """How a candidate relates to the catalog lists of its format and class."""
+
+    ladder_sim: float = 0.0
+    ladder_archetype: str | None = None
+    ladder_deck_code: str | None = None
+    # Closest list with a named archetype.
+    content_sim: float = 0.0
+    content_archetype: str | None = None
+    content_label: str | None = None
+    # Closest list of any kind.
+    twin_sim: float = 0.0
+    # The title names a ladder archetype; how close the lists of that name are.
+    title_ladder: bool = False
+    title_sim: float = 0.0
+
+
+def analyze_neighbourhood(
+    index: CatalogIndex,
+    *,
+    deck_code: str,
+    title: str,
+    fmt: str,
+    hero_class: str,
+    cards: Counter[int],
+) -> Neighbourhood:
+    title_key = strip_format_prefix(title).casefold().strip()
+    ladder_sim = content_sim = twin_sim = title_sim = 0.0
+    ladder_deck: CatalogDeck | None = None
+    content_deck: CatalogDeck | None = None
+    aligned_cache: dict[str, bool] = {}
+    title_aligned_ladder = False
+    for deck in index.neighbours(fmt, hero_class):
+        if deck.deck_code == deck_code:
+            continue
+        sim = jaccard_similarity(cards, deck.cards)
+        twin_sim = max(twin_sim, sim)
+        is_ladder = index.is_ladder_archetype(deck.format, deck.archetype, deck.hero_class)
+        if is_ladder and sim > ladder_sim:
+            ladder_sim, ladder_deck = sim, deck
+        if deck.archetype and sim > content_sim:
+            content_sim, content_deck = sim, deck
+        if deck.archetype and title_key:
+            aligned = aligned_cache.get(deck.archetype)
+            if aligned is None:
+                aligned = aligned_cache[deck.archetype] = _archetypes_align(
+                    title_key, deck.archetype
+                )
+            if aligned:
+                title_sim = max(title_sim, sim)
+                title_aligned_ladder = title_aligned_ladder or is_ladder
+    return Neighbourhood(
+        ladder_sim=ladder_sim,
+        ladder_archetype=ladder_deck.label if ladder_deck else None,
+        ladder_deck_code=ladder_deck.deck_code if ladder_deck else None,
+        content_sim=content_sim,
+        content_archetype=content_deck.archetype if content_deck else None,
+        content_label=content_deck.label if content_deck else None,
+        twin_sim=twin_sim,
+        title_ladder=_ladder_archetype_name(title_key) or title_aligned_ladder,
+        title_sim=title_sim,
+    )
 
 
 def build_archetype_popularity(
@@ -532,18 +795,6 @@ def build_archetype_popularity(
     return popularity
 
 
-def build_known_ladder_archetypes(
-    volume: dict[str, int],
-    popularity: dict[str, float],
-    *,
-    min_volume_games: int = 800,
-    min_popularity_pct: float = 1.0,
-) -> set[str]:
-    known = {name for name, games in volume.items() if games >= min_volume_games}
-    known.update(name for name, pct in popularity.items() if pct >= min_popularity_pct)
-    return known
-
-
 def _name_tokens(value: str) -> set[str]:
     stop = {"the", "a", "an", "of", "and", "deck", "hs", "xl", "hl", "std", "bu", "buu"}
     return {
@@ -566,6 +817,30 @@ def _names_align(left: str, right: str) -> bool:
     return (len(ta & tb) / max(1, min(len(ta), len(tb)))) >= 0.67
 
 
+_CLASS_TOKENS = frozenset(
+    {
+        "death", "knight", "demon", "hunter", "druid", "mage", "paladin", "priest",
+        "rogue", "shaman", "warlock", "lock", "warrior",
+    }
+)  # fmt: skip
+
+
+def _distinctive_tokens(value: str) -> set[str]:
+    return _name_tokens(value) - _CLASS_TOKENS
+
+
+def _archetypes_align(left: str, right: str) -> bool:
+    """Same archetype by its distinctive words, ignoring the class word and prefixes.
+
+    A bare class name ("Priest", "XL Shaman") has no distinctive word and aligns with
+    nothing, so it cannot make every title of the class a ladder title.
+    """
+    a, b = _distinctive_tokens(left), _distinctive_tokens(right)
+    if not a or not b:
+        return False
+    return len(a & b) / min(len(a), len(b)) >= 0.67
+
+
 def _is_known_name(name: str, known: set[str]) -> bool:
     if not name:
         return False
@@ -584,13 +859,34 @@ def _spicy_packages(packages: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(label for label in packages if label in _SPICY_PACKAGES)
 
 
-def _concept_hit(title: str) -> bool:
+# Concept words that only name a card package; backed by a package the format plays a lot,
+# such a word is no concept (Yogg in Standard).
+_WORD_PACKAGE = {
+    "yogg": "yogg_package",
+    "reno": "reno_highlander",
+    "highlander": "reno_highlander",
+    "hl": "reno_highlander",
+    "odd": "odd_even",
+    "even": "odd_even",
+    "tog": "togwaggle_mill",
+    "togwaggle": "togwaggle_mill",
+    "mill": "togwaggle_mill",
+    "mechathun": "mechathun",
+}
+
+
+def _concept_words(title: str) -> list[str]:
+    """The concept words of a title, casefolded; none for a named ladder package."""
     if _ladder_archetype_name(title) or _EGG_LADDER_RE.search(title or ""):
-        return False
-    if _CONCEPT_TITLE_RE.search(title or ""):
-        return True
-    # Off-class egg titles only count when not already ladder-gated above.
-    return bool(_EGG_TITLE_RE.search(title or "")) and not _ladder_archetype_name(title)
+        return []
+    words = [re.sub(r"[^a-z0-9]", "", m.group(1).casefold()) for m in _CONCEPT_TITLE_RE.finditer(title or "")]
+    if _EGG_TITLE_RE.search(title or ""):
+        words.append("egg")
+    return words
+
+
+def _concept_hit(title: str) -> bool:
+    return bool(_concept_words(title))
 
 
 def strip_format_prefix(title: str) -> str:
@@ -604,9 +900,18 @@ def strip_format_prefix(title: str) -> str:
     return text
 
 
+# Service prefixes of a title that say nothing about the deck: XL / HL / Highlander and the
+# rune letters of a Death Knight list (BBU, FFU, BFU...).
+_SERVICE_TITLE_PREFIX_RE = re.compile(r"^(?:(?:xl|hl|highlander|[bfu]{3})\b\s*)+", re.IGNORECASE)
+
+
 def _generic_ladder_title(title: str) -> bool:
-    """True for a bare "<Aggro|Dragon|Dude|...> <class>" name (format prefix ignored)."""
-    return bool(_GENERIC_LADDER_TITLE_RE.match(strip_format_prefix(title)))
+    """True for a bare "<Aggro|Dragon|Dude|...> <class>" name (service prefixes ignored)."""
+    text = strip_format_prefix(title)
+    return bool(
+        _GENERIC_LADDER_TITLE_RE.match(text)
+        or _GENERIC_LADDER_TITLE_RE.match(_SERVICE_TITLE_PREFIX_RE.sub("", text, count=1).strip())
+    )
 
 
 def wilson_interval(win_rate_pct: float, games: int) -> tuple[float, float]:
@@ -670,6 +975,29 @@ def evaluate_sample(
     return SampleVerdict(True, None, ci_low, ci_high)
 
 
+# Weights of the fun score; they add up to 1.0, so the score has no ceiling effect.
+SCORE_WEIGHTS = {
+    "ladder_distance": 0.40,
+    "concept": 0.20,
+    "package": 0.20,
+    "uniqueness": 0.10,
+    "meme_or_cheese": 0.10,
+}
+# The title names a ladder archetype and the list is at least this close to its lists.
+_LADDER_TITLE_SIM = 0.35
+# An off-meta deck resembles a list of a named (non-ladder) archetype at least this much.
+_OFF_META_CONTENT_SIM = 0.55
+# "far_from_ladder" is reported below this similarity to the ladder lists.
+_FAR_FROM_LADDER_SIM = 0.30
+
+
+def _package_weight(spicy: tuple[str, ...]) -> float:
+    """0.12 for one spicy package, 0.04 more for each further one, at most 0.20."""
+    if not spicy:
+        return 0.0
+    return min(SCORE_WEIGHTS["package"], 0.12 + 0.04 * (len(spicy) - 1))
+
+
 def score_fun_deck(
     *,
     deck_code: str,
@@ -679,25 +1007,15 @@ def score_fun_deck(
     hero_class: str = "",
     win_rate: float | None = None,
     catalog_games_hint: int | None = None,
-    references: list[MetaReference],
-    archetype_popularity: dict[str, float],
-    archetype_volume: dict[str, int],
-    known_ladder: set[str],
+    index: CatalogIndex,
     min_score: float | None = None,
-    max_meta_similarity: float | None = None,
-    generic_name_max_similarity: float | None = None,
+    ladder_member_sim: float | None = None,
+    twin_sim: float | None = None,
 ) -> FunDeckScore:
+    """Classify one candidate: turn it away (a gate) or call it a brew / off-meta deck."""
     threshold = fun_deck_min_score() if min_score is None else min_score
-    similarity_cap = (
-        fun_deck_max_meta_similarity()
-        if max_meta_similarity is None
-        else max_meta_similarity
-    )
-    generic_name_cap = (
-        fun_deck_generic_name_max_similarity()
-        if generic_name_max_similarity is None
-        else generic_name_max_similarity
-    )
+    member_cap = fun_deck_ladder_member_sim() if ladder_member_sim is None else ladder_member_sim
+    twin_cap = fun_deck_twin_sim() if twin_sim is None else twin_sim
     bag = cards or deck_card_multiset(deck_code)
     if not bag:
         return FunDeckScore(
@@ -712,200 +1030,117 @@ def score_fun_deck(
         )
 
     fmt = _format_bucket(format_name)
-    class_key = hero_class.casefold()
-    best_sim = -1.0
-    best_ref: MetaReference | None = None
-    exact_games = catalog_games_hint
-    for ref in references:
-        if ref.deck_code == deck_code:
-            exact_games = max(exact_games or 0, ref.games)
-        # Prefer same format + class for fairer meta distance.
-        if fmt != "other" and _format_bucket(ref.format_name) not in {fmt, "other"}:
-            continue
-        if class_key and ref.hero_class and ref.hero_class.casefold() != class_key:
-            continue
-        sim = jaccard_similarity(bag, ref.cards)
-        if sim > best_sim:
-            best_sim = sim
-            best_ref = ref
-
-    if best_sim < 0:
-        for ref in references:
-            sim = jaccard_similarity(bag, ref.cards)
-            if sim > best_sim:
-                best_sim = sim
-                best_ref = ref
-
-    similarity = max(0.0, best_sim)
     title_name = (title or "").strip()
-    nearest = (best_ref.archetype if best_ref else "") or title_name
-    pop = archetype_popularity.get(nearest.casefold()) if nearest else None
-    if pop is None and title_name:
-        pop = archetype_popularity.get(title_name.casefold())
-    volume = archetype_volume.get(title_name.casefold(), 0)
-    if nearest:
-        volume = max(volume, archetype_volume.get(nearest.casefold(), 0))
-
-    title_known = _is_known_name(title_name, known_ladder)
-    nearest_known = _is_known_name(nearest, known_ladder)
-    title_matches_nearest = _names_align(title_name, nearest)
+    hood = analyze_neighbourhood(
+        index,
+        deck_code=deck_code,
+        title=title_name,
+        fmt=fmt,
+        hero_class=hero_class,
+        cards=bag,
+    )
     packages = detect_card_packages(bag)
-    spicy = _spicy_packages(packages)
-    title_concept = _concept_hit(title_name)
-    # Only the deck's own title counts as a ladder name. Nearest-neighbor names
-    # like "Egg Priest" must not contaminate unrelated outliers.
-    ladder_named = _ladder_archetype_name(title_name) or (
-        title_matches_nearest and _ladder_archetype_name(nearest)
+    # A package that much of the format plays is meta, not a concept.
+    spicy = index.sharp_packages(fmt, _spicy_packages(packages))
+    # A word backed by a package that much of the format plays is no concept.
+    title_concept = any(
+        not (label := _WORD_PACKAGE.get(word)) or not index.is_neutral_package(fmt, label)
+        for word in _concept_words(title_name)
     )
-    # Quest/XL alone do not prove "fun" — need spicy packages or meme title cues.
     concept = title_concept or bool(spicy)
-    rare_name = (
-        bool(title_name) and volume < 250 and not title_known and not ladder_named
-    )
 
-    unique_cards = len(bag)
-    total_cards = sum(bag.values())
-    highlanderish = total_cards >= 28 and unique_cards >= 26
-    xl_shape = total_cards >= 39
+    # 1. Ladder lists are turned away first, whatever concept words or packages say.
+    gates: list[str] = []
+    if hood.ladder_sim >= member_cap:
+        gates.append("ladder_member_gate")
+    if hood.title_ladder and hood.title_sim >= _LADDER_TITLE_SIM:
+        gates.append("ladder_title_gate")
+    # "Aggro Paladin", "Dude Paladin": a bare style + class name says nothing about a
+    # concept, and a style is not a forgotten archetype either.
+    if _generic_ladder_title(title_name) and not spicy:
+        gates.append("generic_ladder_gate")
+
+    # 2-3. The kind: a fun signal makes a brew, a variant of a rare named archetype an
+    # off-meta deck; anything else is not "fun".
+    # A list that is a member of its own named archetype is a variant, not unique.
+    unique_list = hood.twin_sim < twin_cap and hood.content_sim < _OFF_META_CONTENT_SIM
+    kind: str | None = None
+    if not gates:
+        if concept or unique_list:
+            kind = "brew"
+        elif (
+            hood.content_archetype
+            and hood.content_sim >= _OFF_META_CONTENT_SIM
+            and not index.is_ladder_archetype(fmt, hood.content_archetype, hero_class)
+        ):
+            kind = "off_meta"
+        else:
+            gates.append("needs_fun_signal_gate")
 
     reasons: list[str] = []
-    # Primary signal: meta-core outlier (Advisor/MetaDetector style).
-    score = (1.0 - similarity) * 0.55
-
-    if similarity <= 0.28:
-        score += 0.20
-        reasons.append("meta_core_outlier")
-    elif similarity <= 0.38:
-        score += 0.12
-        reasons.append("low_meta_overlap")
-
+    score = SCORE_WEIGHTS["ladder_distance"] * (1.0 - hood.ladder_sim)
+    if hood.ladder_sim < _FAR_FROM_LADDER_SIM:
+        reasons.append("far_from_ladder")
     if title_concept:
-        score += 0.14
+        score += SCORE_WEIGHTS["concept"]
         reasons.append("concept_title")
     if spicy:
-        score += min(0.22, 0.10 + 0.04 * len(spicy))
+        score += _package_weight(spicy)
         reasons.append("card_package")
         reasons.extend(f"pkg:{label}" for label in spicy[:4])
     elif packages:
-        # Neutral packages (quest/xl) are logged but barely boosted.
-        score += 0.03
+        # Neutral packages (quest/xl) are logged but do not count.
         reasons.append("neutral_package")
-        reasons.extend(f"pkg:{label}" for label in packages[:3])
-    if rare_name:
-        score += 0.10
-        reasons.append("rare_archetype_name")
-    if highlanderish and spicy:
-        score += 0.06
-        reasons.append("highlander_shape")
-    if xl_shape and (spicy or title_concept):
-        score += 0.04
-        reasons.append("xl_shape")
-    # Soft tax: generic XL/HL titles are common Wild ladder niches, not unique fun.
-    title_cf = title_name.casefold()
-    if (
-        "xl" in title_cf or "highlander" in title_cf or re.search(r"\bhl\b", title_cf)
-    ) and not (
-        title_concept
-        and any(
-            k in title_cf for k in ("mill", "yogg", "exodia", "casino", "joke", "meme")
-        )
-    ):
-        score -= 0.06
-        reasons.append("xl_hl_diversity_tax")
-
-    if (
-        title_name
-        and nearest
-        and not title_matches_nearest
-        and similarity <= 0.45
-        and not ladder_named
-    ):
-        score += 0.08
-        reasons.append("title_mismatch_vs_nearest")
+        reasons.extend(f"meta_pkg:{label}" for label in packages[:3])
+    score += SCORE_WEIGHTS["uniqueness"] * (1.0 - hood.twin_sim)
+    if unique_list:
+        reasons.append("unique_list")
 
     # Cheese / dying meme winrate bands on low samples.
-    sample = exact_games if exact_games is not None else catalog_games_hint
-    if win_rate is not None and sample is not None and sample <= 120:
-        if win_rate <= 42 and (spicy or title_concept):
-            score += 0.06
+    if win_rate is not None and catalog_games_hint is not None and catalog_games_hint <= 120:
+        if win_rate <= 42 and concept:
+            score += SCORE_WEIGHTS["meme_or_cheese"]
             reasons.append("meme_low_winrate")
         elif win_rate >= 68 and concept:
-            score += 0.07
+            score += SCORE_WEIGHTS["meme_or_cheese"]
             reasons.append("cheese_high_winrate")
+    score = round(score, 4)
 
-    # Penalize established ladder packages hard.
-    if ladder_named:
-        score -= 0.45
-        reasons.append("named_ladder_archetype")
-    elif title_known and title_matches_nearest and similarity > 0.30 and not spicy:
-        score -= 0.35
-        reasons.append("known_ladder_archetype")
-    elif nearest_known and similarity > 0.42 and not concept:
-        score -= 0.20
-        reasons.append("near_known_ladder_package")
-    elif title_matches_nearest and (pop or 0) >= 0.2 and not spicy:
-        score -= 0.25
-        reasons.append("self_named_archetype")
-
-    # Standard gets a small keep-alive so Wild concept spam doesn't dominate.
-    if fmt == "standard" and not ladder_named:
-        score += 0.05
-        reasons.append("standard_balance_boost")
-    elif fmt == "wild" and concept:
-        score += 0.03
-        reasons.append("wild_concept_boost")
-
-    score = round(min(max(score, 0.0), 1.0), 4)
-
-    hard_fail = False
-    if similarity > similarity_cap:
-        hard_fail = True
-        reasons.append("similarity_gate")
-    if ladder_named and not spicy:
-        hard_fail = True
-        reasons.append("ladder_name_gate")
-    # "Aggro Paladin", "Dragon Mage": a bare style + class name that still looks like
-    # a meta core and brings no card package is just an ordinary ladder list.
-    if _generic_ladder_title(title_name) and similarity > generic_name_cap and not spicy:
-        hard_fail = True
-        reasons.append("generic_ladder_gate")
-    if title_known and title_matches_nearest and similarity > 0.30 and not spicy:
-        hard_fail = True
-        reasons.append("named_ladder_gate")
-    if title_matches_nearest and (pop or 0) >= 0.2 and not spicy and not title_concept:
-        hard_fail = True
-        reasons.append("self_named_gate")
-    if (
-        not concept
-        and not rare_name
-        and not (highlanderish and spicy)
-        and similarity > 0.36
-    ):
-        hard_fail = True
-        reasons.append("needs_concept_or_outlier_signal")
-
-    is_fun = (not hard_fail) and score >= threshold
+    reasons.extend(gates)
+    if kind == "brew" and score < threshold:
+        reasons.append("below_min_score")
+    is_fun = kind == "off_meta" or (kind == "brew" and score >= threshold)
+    content_archetype = hood.content_archetype
     return FunDeckScore(
         fun_score=score,
-        max_meta_similarity=round(similarity, 4),
-        nearest_archetype=nearest or None,
-        nearest_deck_code=best_ref.deck_code if best_ref else None,
-        catalog_games=exact_games,
-        archetype_popularity_pct=pop,
+        max_meta_similarity=round(hood.ladder_sim, 4),
+        nearest_archetype=hood.ladder_archetype,
+        nearest_deck_code=hood.ladder_deck_code,
+        catalog_games=catalog_games_hint,
+        archetype_popularity_pct=(
+            index.archetype_share_pct(fmt, content_archetype) if content_archetype else None
+        ),
         reasons=tuple(dict.fromkeys(reasons)),
         is_fun=is_fun,
         concept_hit=concept,
-        rare_archetype=rare_name,
+        rare_archetype=kind == "off_meta",
+        kind=kind,
+        ladder_sim=round(hood.ladder_sim, 4),
+        content_sim=round(hood.content_sim, 4),
+        twin_sim=round(hood.twin_sim, 4),
+        content_archetype=content_archetype,
     )
 
 
 def _candidate_rows(
     *,
-    known_ladder: set[str],
+    known_ladder: Iterable[str],
     format_focus: str | None = None,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
-    seen_codes: set[str] = set()
+    # (format, code): HSGuru lists one code in both formats' catalogs.
+    seen_codes: set[tuple[str, str]] = set()
+    known_names = set(known_ladder)
     focus = _format_bucket(format_focus) if format_focus else None
     if focus == "other":
         focus = None
@@ -913,12 +1148,12 @@ def _candidate_rows(
     for source_id in CANDIDATE_SOURCE_IDS:
         for row in _streamer_rows(source_id):
             code = str(row.get("deck_code") or "").strip()
-            if not code or code in seen_codes:
-                continue
             row_fmt = _format_bucket(row.get("Format") or row.get("format"))
+            if not code or (row_fmt, code) in seen_codes:
+                continue
             if focus and row_fmt not in {focus, "other"}:
                 continue
-            seen_codes.add(code)
+            seen_codes.add((row_fmt, code))
             enriched = dict(row)
             enriched["_candidate_source_id"] = source_id
             rows.append(enriched)
@@ -942,25 +1177,25 @@ def _candidate_rows(
         )
         for row in ranked:
             code = str(row.get("deck_code") or "").strip()
-            if not code or code in seen_codes:
+            bucket = _format_bucket(row.get("format"))
+            if not code or (bucket, code) in seen_codes:
                 continue
             games = _parse_games(row.get("games")) or 0
             if games < 45 or games > 220:
                 continue
             title = str(row.get("title") or row.get("archetype") or "").strip()
-            bucket = _format_bucket(row.get("format"))
             if bucket not in catalog_budget:
                 continue
             if catalog_kept[bucket] >= catalog_budget[bucket]:
                 continue
             concept = _concept_hit(title)
-            known = _is_known_name(title, known_ladder)
-            # Keep rare / concept brews; skip high-volume ladder names.
+            known = _is_known_name(strip_format_prefix(title), known_names)
+            # Keep rare / concept brews; skip ladder-archetype names.
             if known and not concept:
                 continue
             if not concept and games > 140:
                 continue
-            seen_codes.add(code)
+            seen_codes.add((bucket, code))
             catalog_kept[bucket] += 1
             rows.append(
                 {
@@ -1026,6 +1261,11 @@ def _normalize_fun_row(
         "archetype_popularity_pct": scored.archetype_popularity_pct,
         "concept_hit": scored.concept_hit,
         "rare_archetype": scored.rare_archetype,
+        "kind": scored.kind or "brew",
+        "ladder_sim": scored.ladder_sim,
+        "content_sim": scored.content_sim,
+        "twin_sim": scored.twin_sim,
+        "content_archetype": scored.content_archetype,
         "reasons": list(scored.reasons),
         "first_seen_at": seen_at,
         "last_seen_at": seen_at,
@@ -1040,7 +1280,7 @@ def _merge_history(
     now: datetime,
 ) -> list[dict[str, Any]]:
     cutoff = now - timedelta(hours=max(1, retention_hours))
-    by_code: dict[str, dict[str, Any]] = {}
+    by_code: dict[tuple[str, str], dict[str, Any]] = {}
 
     def _parse_ts(value: Any) -> datetime | None:
         if not value:
@@ -1055,6 +1295,7 @@ def _merge_history(
         code = str(row.get("deck_code") or "").strip()
         if not code:
             continue
+        key = (_format_bucket(row.get("format")), code)
         last_seen = _parse_ts(row.get("last_seen_at") or row.get("first_seen_at"))
         if last_seen is not None and last_seen < cutoff:
             continue
@@ -1070,36 +1311,20 @@ def _merge_history(
             )
             if not (meme_twist and _spicy_packages(pkgs)):
                 continue
-        by_code[code] = dict(row)
+        by_code[key] = dict(row)
 
     for row in fresh_rows:
         code = str(row.get("deck_code") or "").strip()
         if not code:
             continue
-        prev = by_code.get(code)
+        key = (_format_bucket(row.get("format")), code)
+        prev = by_code.get(key)
+        # The fresh run is the only truth for a deck it saw: its numbers, kind and reasons
+        # replace the remembered ones; only the first sighting survives.
+        merged = dict(row)
         if prev:
-            merged = dict(prev)
-            merged.update(row)
-            merged["first_seen_at"] = prev.get("first_seen_at") or row.get(
-                "first_seen_at"
-            )
-            merged["last_seen_at"] = row.get("last_seen_at") or prev.get("last_seen_at")
-            if float(prev.get("fun_score") or 0) > float(row.get("fun_score") or 0):
-                for key in (
-                    "fun_score",
-                    "max_meta_similarity",
-                    "nearest_archetype",
-                    "nearest_deck_code",
-                    "catalog_games",
-                    "archetype_popularity_pct",
-                    "reasons",
-                    "concept_hit",
-                    "rare_archetype",
-                ):
-                    merged[key] = prev.get(key)
-            by_code[code] = merged
-        else:
-            by_code[code] = dict(row)
+            merged["first_seen_at"] = prev.get("first_seen_at") or row.get("first_seen_at")
+        by_code[key] = merged
     return list(by_code.values())
 
 
@@ -1167,7 +1392,49 @@ def dedupe_near_duplicates(
     return kept, len(absorbed)
 
 
+def _row_key(row: dict[str, Any]) -> tuple[str, str]:
+    """A deck is its format and code: HSGuru lists one code in both formats."""
+    return (_format_bucket(row.get("format")), str(row.get("deck_code") or ""))
+
+
+def _is_off_meta(row: dict[str, Any]) -> bool:
+    # A row without `kind` (an older writer) is a brew.
+    return row.get("kind") == "off_meta"
+
+
 def _pick_diverse(
+    rows: list[dict[str, Any]],
+    *,
+    limit: int,
+    max_per_class: int = 3,
+    max_xl_hl: int = 5,
+) -> list[dict[str, Any]]:
+    """Brews first; off-meta decks after them: one per class, at most a third of the picks."""
+    picked = _pick_diverse_brews(
+        [row for row in rows if not _is_off_meta(row)],
+        limit=limit,
+        max_per_class=max_per_class,
+        max_xl_hl=max_xl_hl,
+    )
+    # off <= (brews + off) / 3  <=>  off <= brews / 2
+    room = min(limit - len(picked), len(picked) // 2)
+    seen_classes: set[str] = set()
+    off_meta: list[dict[str, Any]] = []
+    for row in sorted(
+        (row for row in rows if _is_off_meta(row)),
+        key=lambda row: -float(row.get("fun_score") or 0),
+    ):
+        cls = str(row.get("class") or "unknown").casefold()
+        if len(off_meta) >= room:
+            break
+        if cls in seen_classes:
+            continue
+        seen_classes.add(cls)
+        off_meta.append(row)
+    return picked + off_meta
+
+
+def _pick_diverse_brews(
     rows: list[dict[str, Any]],
     *,
     limit: int,
@@ -1216,11 +1483,11 @@ def _pick_diverse(
         picked.append(row)
     # If caps left holes, fill by score with a softer class cap; still respect XL/HL.
     if len(picked) < limit:
-        picked_codes = {str(r.get("deck_code") or "") for r in picked}
+        picked_codes = {_row_key(r) for r in picked}
         for row in rows:
             if len(picked) >= limit:
                 break
-            code = str(row.get("deck_code") or "")
+            code = _row_key(row)
             if code in picked_codes:
                 continue
             cls = str(row.get("class") or "unknown").casefold()
@@ -1274,9 +1541,12 @@ def _balance_and_dedupe(
                 max_xl_hl=xl_cap,
             )
         )
-    picked_codes = {str(row.get("deck_code") or "") for row in balanced}
+    picked_codes = {_row_key(row) for row in balanced}
+    # Off-meta decks only enter through `_pick_diverse`, which caps them.
     leftovers = [
-        row for row in deduped if str(row.get("deck_code") or "") not in picked_codes
+        row
+        for row in deduped
+        if _row_key(row) not in picked_codes and not _is_off_meta(row)
     ]
     leftovers.sort(key=lambda row: -float(row.get("fun_score") or 0))
     target_total = per_format_keep * 2
@@ -1358,32 +1628,58 @@ def _select_published(
     return _balance_and_dedupe(merged, per_format_keep=22)
 
 
-def _refresh_fun_decks_unlocked(
+@dataclass
+class FunDecksRun:
+    """Everything one detector run produced; nothing of it is stored yet."""
+
+    focus: str | None
+    seen_at: str
+    index: CatalogIndex
+    candidates: list[dict[str, Any]]
+    # (candidate row, verdict) for every decodable candidate, fun or not.
+    scored: list[tuple[dict[str, Any], FunDeckScore]]
+    fresh: list[dict[str, Any]]
+    published: list[dict[str, Any]]
+    rejected: int = 0
+    rejected_by_gate: dict[str, int] = field(default_factory=dict)
+    # Fun-looking decks the sample / win-rate gate turned away, by reason.
+    quality_rejected: dict[str, int] = field(default_factory=dict)
+    history_dropped: int = 0
+    near_duplicates: int = 0
+    undecodable: int = 0
+    format_counts: dict[str, int] = field(default_factory=dict)
+
+
+def compute_fun_decks(
+    format_focus: str | None,
+    previous_rows: list[dict[str, Any]],
     *,
-    scheduled: bool = False,
-    format_focus: str | None = None,
-) -> dict[str, Any]:
-    del scheduled
-    source: Source = SOURCE_BY_ID[SOURCE_ID]
-    now = datetime.now(UTC)
+    now: datetime | None = None,
+    index: CatalogIndex | None = None,
+) -> FunDecksRun:
+    """Detect, merge with ``previous_rows`` and select the published decks.
+
+    Reads the catalog datasets but writes nothing: storing the result, and the
+    locking around it, is the caller's job (`_refresh_fun_decks_unlocked`).
+    ``previous_rows`` are the rows of the last run of the same detector version.
+    """
+    now = now or datetime.now(UTC)
     seen_at = now.isoformat()
     focus = _format_bucket(format_focus) if format_focus else None
     if focus == "other":
         focus = None
 
-    references = build_meta_references()
-    popularity = build_archetype_popularity()
-    volume = build_archetype_volume()
-    known = build_known_ladder_archetypes(volume, popularity)
-    candidates = _candidate_rows(known_ladder=known, format_focus=focus)
+    index = index or build_catalog_index()
+    candidates = _candidate_rows(known_ladder=index.ladder_names, format_focus=focus)
 
+    scored_all: list[tuple[dict[str, Any], FunDeckScore]] = []
     scored_fun: list[dict[str, Any]] = []
     rejected = 0
     rejected_by_gate: Counter[str] = Counter()
-    # Fun-looking decks the sample / win-rate gate turned away, by reason.
     quality_rejected: Counter[str] = Counter()
-    # (format, code) pairs whose fresh sample failed the gate, fun or not: evicted from
-    # the history. The format matters: a --format standard run looks at Standard
+    # (format, code) pairs whose fresh sample failed the gate, or that a fresh candidate
+    # turned away (a gate or the score threshold): evicted from the history, so an old
+    # row cannot outlive a violation. A deck with no fresh candidate stays. The format matters: a --format standard run looks at Standard
     # listings only and must not touch a Wild row that happens to share the code.
     quality_blocked: set[tuple[str, str]] = set()
     undecodable = 0
@@ -1412,13 +1708,12 @@ def _refresh_fun_decks_unlocked(
             hero_class=str(row.get("class") or deck_hero_class(code) or ""),
             win_rate=_parse_win_rate(row.get("win_rate")),
             catalog_games_hint=_parse_games(row.get("games")),
-            references=references,
-            archetype_popularity=popularity,
-            archetype_volume=volume,
-            known_ladder=known,
+            index=index,
         )
+        scored_all.append((row, scored))
         if not scored.is_fun:
             # counted here only; a not-fun deck is never also a quality rejection
+            quality_blocked.add((_format_bucket(format_name), code))
             rejected += 1
             rejected_by_gate.update(r for r in scored.reasons if r.endswith("_gate"))
             continue
@@ -1427,20 +1722,6 @@ def _refresh_fun_decks_unlocked(
             continue
         scored_fun.append(_normalize_fun_row(row, scored, seen_at=seen_at, sample=sample))
         format_counts[_format_bucket(format_name)] += 1
-
-    previous = load_dataset(SOURCE_ID) or {}
-    previous_data = (
-        previous.get("data") if isinstance(previous.get("data"), dict) else {}
-    )
-    previous_rows: list[dict[str, Any]] = []
-    if isinstance(previous_data, dict):
-        structured = previous_data.get("structured") or {}
-        if (
-            isinstance(structured, dict)
-            and structured.get("detector_version") == DETECTOR_VERSION
-            and isinstance(structured.get("rows"), list)
-        ):
-            previous_rows = [row for row in structured["rows"] if isinstance(row, dict)]
 
     # Focused refresh only updates that format; keep the other side from history.
     if focus in {"standard", "wild"}:
@@ -1484,8 +1765,50 @@ def _refresh_fun_decks_unlocked(
         ],
         cards_by_code,
     )
-    published = _select_published(merged, focus=focus)
+    return FunDecksRun(
+        focus=focus,
+        seen_at=seen_at,
+        index=index,
+        candidates=candidates,
+        scored=scored_all,
+        fresh=scored_fun,
+        published=_select_published(merged, focus=focus),
+        rejected=rejected,
+        rejected_by_gate=dict(rejected_by_gate),
+        quality_rejected=dict(quality_rejected),
+        history_dropped=history_dropped,
+        near_duplicates=near_duplicates,
+        undecodable=undecodable,
+        format_counts=format_counts,
+    )
+
+
+def _previous_rows() -> list[dict[str, Any]]:
+    """Rows of the stored dataset, when the same detector version wrote them."""
+    previous = load_dataset(SOURCE_ID) or {}
+    data = previous.get("data") if isinstance(previous.get("data"), dict) else {}
+    structured = data.get("structured") if isinstance(data, dict) else None
+    if (
+        isinstance(structured, dict)
+        and structured.get("detector_version") == DETECTOR_VERSION
+        and isinstance(structured.get("rows"), list)
+    ):
+        return [row for row in structured["rows"] if isinstance(row, dict)]
+    return []
+
+
+def _refresh_fun_decks_unlocked(
+    *,
+    scheduled: bool = False,
+    format_focus: str | None = None,
+) -> dict[str, Any]:
+    del scheduled
+    source: Source = SOURCE_BY_ID[SOURCE_ID]
+    run = compute_fun_decks(format_focus, _previous_rows())
+    focus, seen_at = run.focus, run.seen_at
+    published, scored_fun = run.published, run.fresh
     published_fmt = Counter(_format_bucket(row.get("format")) for row in published)
+    published_kind = Counter(str(row.get("kind") or "brew") for row in published)
 
     dataset = {
         "source_id": SOURCE_ID,
@@ -1503,43 +1826,51 @@ def _refresh_fun_decks_unlocked(
                 "type": "hsguru_fun_decks",
                 "detector_version": DETECTOR_VERSION,
                 "theory": (
-                    "Fun decks are meta-core outliers with card-package + concept/rare signals; quest/steal cards are allowed, but named ladder archetypes (Thief Priest, Quest X, Soothsayer) are gated; "
-                    "weak named ladder archetypes are excluded. A published deck has a real sample "
-                    "(games and win rate, at least min_games) and a 95% Wilson win-rate interval whose "
-                    "upper bound is not below min_ci_high; near-identical lists of one format and class "
-                    "(Jaccard >= dedupe_jaccard) collapse into the best sampled one (variants = absorbed "
-                    "lists); every class with a candidate gets one deck before the rest is filled by fun_score."
+                    "A candidate is compared with every HSGuru catalog list of its format and class. "
+                    "Ladder lists are turned away first, whatever their title or package: a list "
+                    "that resembles a ladder-archetype list (ladder_member_gate), a ladder-archetype "
+                    "title close to its lists (ladder_title_gate) or a bare style name such as "
+                    "'Aggro Paladin' (generic_ladder_gate). A brew then needs a fun signal: a concept "
+                    "title, a spicy card package or a list no other list resembles; an off_meta deck "
+                    "is a variant of a named archetype that is not a ladder one. A published deck has "
+                    "a real sample (games and win rate, at least min_games) and a 95% Wilson win-rate "
+                    "interval whose upper bound is not below min_ci_high; near-identical lists of one "
+                    "format and class (Jaccard >= dedupe_jaccard) collapse into the best sampled one "
+                    "(variants = absorbed lists); brews are published first, one deck per class "
+                    "before the rest is filled by fun_score, and off-meta decks after them (one per "
+                    "class, at most a third of a format)."
                 ),
                 "rows": published,
                 "fresh_detected": scored_fun,
                 "filters": {
                     "min_fun_score": fun_deck_min_score(),
-                    "max_meta_similarity": fun_deck_max_meta_similarity(),
+                    "ladder_share_pct": fun_deck_ladder_share_pct(),
+                    "ladder_member_sim": fun_deck_ladder_member_sim(),
+                    "twin_sim": fun_deck_twin_sim(),
                     "retention_hours": fun_deck_retention_hours(),
                     "candidate_sources": list(CANDIDATE_SOURCE_IDS),
                     "catalog_candidate_sources": list(CATALOG_CANDIDATE_SOURCE_IDS),
-                    "meta_core_sources": list(META_CATALOG_SOURCE_IDS),
                     "per_format_keep": 26 if focus == "standard" else 22,
                     "format_focus": focus,
                     "min_games": fun_deck_min_games(),
                     "min_ci_high": fun_deck_min_ci_high(),
                     "dedupe_jaccard": fun_deck_dedupe_jaccard(),
-                    "generic_name_max_similarity": fun_deck_generic_name_max_similarity(),
                 },
                 "stats": {
-                    "candidates": len(candidates),
+                    "candidates": len(run.candidates),
                     "fun_fresh": len(scored_fun),
                     "fun_retained": len(published),
-                    "rejected": rejected,
-                    "rejected_by_gate": dict(rejected_by_gate),
-                    "quality_rejected": dict(quality_rejected),
-                    "history_dropped": history_dropped,
-                    "near_duplicates_absorbed": near_duplicates,
-                    "undecodable": undecodable,
-                    "meta_references": len(references),
-                    "known_ladder_archetypes": len(known),
-                    "fresh_by_format": format_counts,
+                    "rejected": run.rejected,
+                    "rejected_by_gate": run.rejected_by_gate,
+                    "quality_rejected": run.quality_rejected,
+                    "history_dropped": run.history_dropped,
+                    "near_duplicates_absorbed": run.near_duplicates,
+                    "undecodable": run.undecodable,
+                    "catalog_decks": len(run.index.decks),
+                    "ladder_archetypes": len(run.index.ladder_names),
+                    "fresh_by_format": run.format_counts,
                     "published_by_format": dict(published_fmt),
+                    "published_by_kind": dict(published_kind),
                     "published_by_class": dict(
                         Counter(str(row.get("class") or "unknown") for row in published)
                     ),
@@ -1561,7 +1892,8 @@ def _refresh_fun_decks_unlocked(
             "published_by_format": dict(published_fmt),
             "detail": (
                 f"Detected {len(scored_fun)} fun/concept decks; published {len(published)} "
-                f"(standard={published_fmt.get('standard', 0)}, wild={published_fmt.get('wild', 0)})"
+                f"(standard={published_fmt.get('standard', 0)}, wild={published_fmt.get('wild', 0)}, "
+                f"off_meta={published_kind.get('off_meta', 0)})"
             ),
         },
     )
@@ -1572,12 +1904,13 @@ def _refresh_fun_decks_unlocked(
         "format_focus": focus,
         "fun_fresh": len(scored_fun),
         "fun_retained": len(published),
-        "candidates": len(candidates),
-        "meta_references": len(references),
-        "fresh_by_format": format_counts,
+        "candidates": len(run.candidates),
+        "catalog_decks": len(run.index.decks),
+        "fresh_by_format": run.format_counts,
         "published_by_format": dict(published_fmt),
-        "quality_rejected": dict(quality_rejected),
-        "near_duplicates_absorbed": near_duplicates,
+        "published_by_kind": dict(published_kind),
+        "quality_rejected": run.quality_rejected,
+        "near_duplicates_absorbed": run.near_duplicates,
         "fetched_at": seen_at,
     }
 
