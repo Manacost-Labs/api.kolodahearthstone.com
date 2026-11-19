@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { ArrowSquareOutIcon } from '@phosphor-icons/react/dist/ssr/ArrowSquareOut';
 import { CaretLeftIcon } from '@phosphor-icons/react/dist/ssr/CaretLeft';
@@ -8,13 +8,16 @@ import { ChartBarIcon } from '@phosphor-icons/react/dist/ssr/ChartBar';
 import { PencilSimpleIcon } from '@phosphor-icons/react/dist/ssr/PencilSimple';
 import { SparkleIcon } from '@phosphor-icons/react/dist/ssr/Sparkle';
 import { cardDetail } from '@/lib/card-detail';
+import { fallbackNote, missingNote, shownLang, withRender, type CardLang } from '@/lib/card-locale';
 import { parseCardText } from '@/lib/card-text';
 import { text } from '@/lib/model';
 import type { Row } from '@/lib/types';
 import { Artwork } from './Artwork';
 import { CopyButton } from './CopyButton';
 import { RecordHistory, RecordTabs } from './Details';
+import { LocaleSwitch } from './LocaleSwitch';
 import { Modal } from './Modal';
+import { useCardLang, useRowLocales } from './useCardLocale';
 import { StatusBadge, Time } from './ui';
 import { Tabs } from './varylo-ui/navigation/Tabs';
 import { SegmentedControl } from './varylo-ui/navigation/SegmentedControl';
@@ -32,10 +35,10 @@ type Props = {
 };
 
 // Card text as React elements: tags never reach the DOM as markup.
-function CardText({ value }: { value: string }) {
+function CardText({ value, lang }: { value: string; lang: CardLang }) {
   const nodes: React.ReactNode[] = [];
   let offset = 0; // the position in the text is a stable key
-  for (const token of parseCardText(value)) {
+  for (const token of parseCardText(value, lang)) {
     if (token.kind === 'break') nodes.push(<br key={offset} />);
     else {
       let node: React.ReactNode = token.text;
@@ -64,7 +67,28 @@ export function CardInspector({
   const detail = cardDetail(row, cardType, tribes);
   const [golden, setGolden] = useState(false);
   const showGolden = golden && detail.images.golden.length > 0;
-  const images = showGolden ? detail.images.golden : detail.images.normal;
+  const { lang, setLang } = useCardLang();
+  const rows = useMemo(() => [row], [row]);
+  const locales = useRowLocales(rows, lang);
+  const entry = locales.of(row);
+  const translated = entry.state === 'ok' ? entry : null;
+  const shown = shownLang(lang, entry) ?? lang;
+  const title = translated ? translated.value.name : detail.name;
+  // The localised render leads the normal version; the golden one is not localised.
+  const images = showGolden ? detail.images.golden : withRender(detail.images.normal, entry);
+  const subtitle = translated ? { value: detail.name, lang: 'ru' } : { value: detail.nameEn, lang: 'en' };
+  const mainText = translated
+    ? { value: translated.value.text, lang: shown }
+    : { value: detail.text.ru, lang: 'ru' as CardLang };
+  const secondText = translated
+    ? { value: detail.text.ru, lang: 'ru' as CardLang }
+    : { value: detail.text.en, lang: 'en' as CardLang };
+  const flavor = translated ? translated.value.flavor : detail.text.flavor;
+  const note = translated?.value.fallback
+    ? fallbackNote(lang)
+    : entry.state === 'missing'
+      ? missingNote
+      : null;
   const apiId = detail.ids.find(id => id.label === 'Card ID')?.value;
 
   useEffect(() => {
@@ -86,7 +110,7 @@ export function CardInspector({
   }, [onPrev, onNext]);
 
   return (
-    <Modal title={detail.name} onClose={onClose} wide>
+    <Modal title={title} onClose={onClose} wide>
       <Tabs
         className="inspector-mode"
         label="Раздел карточки"
@@ -99,10 +123,26 @@ export function CardInspector({
       />
       {section === 'card' ? (
         <>
+          <div className="inspector-locale">
+            <LocaleSwitch lang={lang} onChange={setLang} />
+            {note && (
+              <p className="inspector-locale-note" lang="ru">
+                {note}
+              </p>
+            )}
+            {entry.state === 'error' && (
+              <p className="inspector-locale-note" lang="ru">
+                Не удалось загрузить перевод — показаны данные панели{' '}
+                <button type="button" className="link-button" onClick={locales.retry}>
+                  Повторить
+                </button>
+              </p>
+            )}
+          </div>
           <div className="inspector">
             <div className="inspector-media">
               <div className="inspector-art" data-golden={showGolden || undefined}>
-                <Artwork key={images.join('|')} urls={images} alt={detail.name} />
+                <Artwork key={images.join('|')} urls={images} alt={title} />
               </div>
               {detail.images.golden.length > 0 && (
                 <SegmentedControl
@@ -123,9 +163,9 @@ export function CardInspector({
               )}
             </div>
             <div className="inspector-body">
-              {detail.nameEn && detail.nameEn !== detail.name && (
-                <p className="inspector-subtitle" lang="en">
-                  {detail.nameEn}
+              {subtitle.value && subtitle.value !== title && (
+                <p className="inspector-subtitle" lang={subtitle.lang}>
+                  {subtitle.value}
                 </p>
               )}
               <div className="inspector-badges">
@@ -143,11 +183,11 @@ export function CardInspector({
                   ))}
                 </dl>
               )}
-              {(detail.text.ru || detail.mechanics.length > 0 || detail.text.en) && (
+              {(mainText.value || detail.mechanics.length > 0 || secondText.value || flavor) && (
                 <section className="inspector-text" aria-label="Текст карты">
-                  {detail.text.ru && (
-                    <p>
-                      <CardText value={detail.text.ru} />
+                  {mainText.value && (
+                    <p lang={mainText.lang}>
+                      <CardText value={mainText.value} lang={mainText.lang} />
                     </p>
                   )}
                   {detail.mechanics.length > 0 && (
@@ -157,12 +197,16 @@ export function CardInspector({
                       ))}
                     </ul>
                   )}
-                  {detail.text.en && (
-                    <p className="inspector-text__en" lang="en">
-                      <CardText value={detail.text.en} />
+                  {secondText.value && (
+                    <p className="inspector-text__en" lang={secondText.lang}>
+                      <CardText value={secondText.value} lang={secondText.lang} />
                     </p>
                   )}
-                  {detail.text.flavor && <p className="inspector-flavor">{detail.text.flavor}</p>}
+                  {flavor && (
+                    <p className="inspector-flavor" lang={translated ? shown : undefined}>
+                      {flavor}
+                    </p>
+                  )}
                 </section>
               )}
               {detail.ids.length > 0 && (

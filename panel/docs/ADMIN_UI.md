@@ -94,6 +94,30 @@ These three PHP adapters are reachable only through the private
   `|4(ход,хода,ходов)` resolve to the form for the number written before them.
   The text is built from React elements; markup from data is never inserted
   into the DOM.
+- Card language (catalogue and inspector): the “Язык карт” switch (RU · EN · PL
+  · ES; accessible names “Русский”, “Английский”, “Польский”, “Испанский”)
+  changes only card data: name, text, flavor and the render. The choice is
+  `?lang=en|pl|es` (Russian is the default and has no parameter), written with
+  `history.replaceState` (no navigation, no history entry) and kept by filters,
+  pages, views, search, reset and `?card=`. The preference is saved in
+  `localStorage['hs_card_lang']` (blocked storage means Russian, no errors): URL
+  first, then the saved choice, then Russian; a shared `?lang=` link does not
+  overwrite it, a choice in the switch does; an unknown value is dropped. Russian
+  is the panel's own data and makes no requests. en/pl/es come from the public
+  `GET /api/v1/card-catalog/{card_id}?locale=enUS|plPL|esES` (by
+  `/dbf/{dbf}` when the row has no card id, and once more by DBF after a 404 on
+  the card id), `credentials: 'omit'`, at most 6 requests at once, one per card,
+  an in-tab cache, cancellation when the page or language changes, a 10 s
+  timeout, a single retry of a 429 after its `Retry-After` (seconds or an
+  HTTP-date, at most 5 s; 1.5 s without one). An answer without a translation
+  (`fallback: true`) shows English with the note “Нет перевода на … — показан
+  английский”; a card the catalogue does not know shows the panel data with
+  “Нет в каталоге карт — показаны данные панели”; a network error, 5xx, timeout
+  or an invalid answer shows the panel data and one line “Не удалось загрузить
+  перевод для N карт” with “Повторить” (only the failed requests are repeated).
+  `localized.render_url`, when valid, leads the images of the normal version.
+  Plural forms `|4(…)` follow the language of the text: pl and ru differ
+  (21 is the first form in ru, the third in pl); en and es have two forms.
 - Every statistics row has “Подробнее”. The keyboard-accessible drawer exposes
   every scalar and nested source field, including all HSGuru decks and all BG
   combat rounds; raw JSON remains available for integration/debugging.

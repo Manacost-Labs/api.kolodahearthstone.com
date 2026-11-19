@@ -5,6 +5,8 @@ import { ArrowCounterClockwiseIcon } from '@phosphor-icons/react/dist/ssr/ArrowC
 import { SlidersHorizontalIcon } from '@phosphor-icons/react/dist/ssr/SlidersHorizontal';
 import { PanelLink } from './WorkspaceNavigation';
 import { useCatalogQuery } from './useCatalogQuery';
+import { useCardLang, useRowLocales } from './useCardLocale';
+import { LocaleMark, LocaleSwitch } from './LocaleSwitch';
 import { catalogHref, catalogView, pageSizes } from '@/lib/catalog-state';
 import { countLabel, formatDay } from '@/lib/format';
 import { SquaresFourIcon } from '@phosphor-icons/react/dist/ssr/SquaresFour';
@@ -23,6 +25,7 @@ import { Select } from './varylo-ui/forms/Select';
 import { SegmentedControl } from './varylo-ui/navigation/SegmentedControl';
 import { Pagination } from './varylo-ui/navigation/Pagination';
 import { cardKey, matchesCard } from '@/lib/card-detail';
+import { fallbackNote, missingNote, shownLang, withLangParam, type RowLocale } from '@/lib/card-locale';
 import { catalogColumns, type Cell } from '@/lib/catalog-columns';
 import { categories as navigationCategories } from '@/lib/navigation';
 import { normalizedCard, queryHref, entityApiBase, text } from '@/lib/model';
@@ -42,6 +45,10 @@ export function Catalog({
   focus?: Row | null;
 }) {
   const { pending, params, search, changeSearch, go, mode, view } = useCatalogQuery(query);
+  const { lang, setLang } = useCardLang();
+  const locales = useRowLocales(data.records, lang);
+  const langRef = useRef(lang);
+  langRef.current = lang;
   const [filtersOpen, setFiltersOpen] = useState(false);
   // The open card lives in the URL (?card=…), so it can be shared, reloaded and closed with Back.
   // history.pushState is synced by the Next router and needs no server round trip.
@@ -61,17 +68,23 @@ export function Catalog({
   const closeCard = () => {
     if (openedHere.current) {
       openedHere.current = false;
+      // Back returns to the entry written before the card opened; the language chosen since then stays.
+      const keep = langRef.current;
+      window.addEventListener('popstate', () => setLang(keep), { once: true });
       window.history.back();
     } else window.history.replaceState(null, '', cardUrl(null));
   };
   const type = data.cardType;
   const filterType = params.get('card_type') || '';
   const resultView = catalogView(new URLSearchParams(query).get('view'));
-  const resetHref = queryHref('', {
-    card_type: filterType,
-    view,
-    per_page: resultView === 'tiles' ? 15 : data.perPage,
-  });
+  const resetHref = withLangParam(
+    queryHref('', {
+      card_type: filterType,
+      view,
+      per_page: resultView === 'tiles' ? 15 : data.perPage,
+    }),
+    lang,
+  );
   const select = (name: string, label: string, anyLabel: string, options: Record<string, string>) => (
     <div className="filter-field">
       <span aria-hidden="true">{label}</span>
@@ -94,6 +107,19 @@ export function Catalog({
   const narrowed = activeCount > 0 || resultQuery !== '';
   const cards = data.records.map(row => normalizedCard(row, type, data.tribes));
   const columns = catalogColumns(type, data.tribes);
+  // The name in the chosen language while it loads (or when it cannot) is the panel's own name.
+  const entries = new Map(cards.map(card => [card.row, locales.of(card.row)] as const));
+  const entryOf = (row: Row): RowLocale => entries.get(row) ?? { state: 'panel' };
+  const nameOf = (card: (typeof cards)[number]) => {
+    const entry = entryOf(card.row);
+    return entry.state === 'ok' ? entry.value.name : card.name;
+  };
+  const langOf = (row: Row) => shownLang(lang, entryOf(row));
+  const noteOf = (row: Row) => {
+    const entry = entryOf(row);
+    if (entry.state === 'ok' && entry.value.fallback) return fallbackNote(lang);
+    return entry.state === 'missing' ? missingNote : '';
+  };
   const selectedIndex = cardParam ? cards.findIndex(card => matchesCard(card.row, cardParam)) : -1;
   const selected =
     selectedIndex >= 0 ? cards[selectedIndex].row : focus && matchesCard(focus, cardParam) ? focus : null;
@@ -155,7 +181,7 @@ export function Catalog({
             <PanelLink
               key={key || 'battlegrounds'}
               prefetch={false}
-              href={catalogHref(query, { card_type: key, view })}
+              href={withLangParam(catalogHref(query, { card_type: key, view }), lang)}
               aria-current={filterType === key ? 'page' : undefined}
             >
               {navigationCategories[key] || label}
@@ -213,10 +239,13 @@ export function Catalog({
               prefetch={false}
               replace
               scroll={false}
-              href={queryHref(filter.href.split('?')[1] || '', {
-                view,
-                per_page: resultView === 'tiles' ? 15 : data.perPage,
-              })}
+              href={withLangParam(
+                queryHref(filter.href.split('?')[1] || '', {
+                  view,
+                  per_page: resultView === 'tiles' ? 15 : data.perPage,
+                }),
+                lang,
+              )}
             >
               {filter.label} <XIcon size={12} aria-hidden="true" />
             </PanelLink>
@@ -256,6 +285,12 @@ export function Catalog({
             />
           </div>
         )}
+        <div className="locale-field">
+          <span className="locale-label" aria-hidden="true">
+            Язык карт
+          </span>
+          <LocaleSwitch className="locale-switch" lang={lang} onChange={setLang} />
+        </div>
         <SegmentedControl
           className="view-switch"
           aria-label="Вид каталога"
@@ -273,6 +308,17 @@ export function Catalog({
           ]}
         />
       </div>
+      {locales.failed > 0 && (
+        <p className="locale-status">
+          <span>
+            Не удалось загрузить перевод для{' '}
+            {countLabel(locales.failed, { one: 'карту', few: 'карты', many: 'карт' })}
+          </span>
+          <button type="button" className="link-button" onClick={locales.retry}>
+            Повторить
+          </button>
+        </p>
+      )}
       <div className="catalog-results" aria-busy={pending}>
         {!cards.length ? (
           <EmptyState
@@ -298,7 +344,12 @@ export function Catalog({
               : 'Записи появятся здесь после импорта или ручного добавления.'}
           </EmptyState>
         ) : resultView === 'tiles' ? (
-          <DeckTiles cards={cards.slice(0, 15)} cardType={type} onSelect={setSelected} />
+          <DeckTiles
+            cards={cards.slice(0, 15).map(card => ({ ...card, name: nameOf(card) }))}
+            cardType={type}
+            onSelect={setSelected}
+            langOf={card => langOf(card.row)}
+          />
         ) : resultView === 'grid' ? (
           <div className="card-grid">
             {cards.map((card, index) => (
@@ -310,7 +361,8 @@ export function Catalog({
                 onClick={() => setSelected(card.row)}
                 aria-label={
                   [
-                    card.name,
+                    nameOf(card),
+                    noteOf(card.row),
                     card.tier && `уровень ${card.tier}`,
                     card.attack !== '' && `атака ${card.attack}`,
                     card.health !== '' && `здоровье ${card.health}`,
@@ -333,7 +385,10 @@ export function Catalog({
                   )}
                 </span>
                 <span className="card-copy">
-                  <strong className="card-name">{card.name}</strong>
+                  <strong className="card-name" lang={langOf(card.row)}>
+                    {nameOf(card)}
+                    <LocaleMark lang={lang} entry={entryOf(card.row)} />
+                  </strong>
                   <span className="card-meta">
                     <span>{card.tribe}</span>
                     <code>{card.id}</code>
@@ -382,6 +437,10 @@ export function Catalog({
               <tbody>
                 {cards.map((card, i) => {
                   const nameEn = text(card.row.name_en || card.row.card_name_en || card.row.coin_name_en, '');
+                  const shownName = nameOf(card);
+                  // Under a translated name the panel's Russian name; in Russian, the English one as before.
+                  const second =
+                    lang === 'ru' ? { value: nameEn, lang: 'en' } : { value: card.name, lang: 'ru' };
                   return (
                     // The name button is the keyboard path; a click anywhere on the row is a mouse shortcut.
                     <tr
@@ -398,8 +457,13 @@ export function Catalog({
                             <Artwork urls={card.images} />
                           </span>
                           <span className="row-name">
-                            <strong>{card.name}</strong>
-                            {nameEn && nameEn !== card.name && <small lang="en">{nameEn}</small>}
+                            <strong lang={langOf(card.row)}>
+                              {shownName}
+                              <LocaleMark lang={lang} entry={entryOf(card.row)} />
+                            </strong>
+                            {second.value && second.value !== shownName && (
+                              <small lang={second.lang}>{second.value}</small>
+                            )}
                           </span>
                         </button>
                       </th>
