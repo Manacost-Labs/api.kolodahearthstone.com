@@ -941,6 +941,32 @@ curl -s "https://api.kolodahearthstone.com/v1/hsreplay/card-choices?card=CORE_YO
   | jq '.data | {state: .stats.state, top: [.options[:3][] | {name_ru, popularity, win_rate, undervalued}]}'
 ```
 
+## HSReplay: «Собирает» (Assemble)
+
+Подробно (запрос HSReplay и его поля, проверки публикации, сборка текста, все
+поля ответа): [HSREPLAY_ASSEMBLE.md](HSREPLAY_ASSEMBLE.md).
+
+Источник `hsreplay_assemble` (pipeline). Таймер
+`hs-data-api-docker-refresh-hsreplay-assemble.timer` каждые 6 часов читает
+`https://hsreplay.net/analytics/query/assemble_choices_by_middle/` для Стандарта и
+Вольного (Scrape.do без рендера, 1 кредит на формат, формат перечитывается,
+когда чтению больше 20 ч или оно упало; не больше 6 кредитов в сутки UTC).
+Снимок, не прошедший проверки, не публикуется: отдаётся прошлый.
+
+| Endpoint | Что возвращает |
+| --- | --- |
+| `GET /v1/hsreplay/assemble/cards` | `format` (`standard`/`wild`). 13 карт со «Собирает»: `card`, `formats`, `state` (`ok`/`no_data`/`not_collected`/`failed`), `checked_at`, `stale`, `bases_total`, `win_rate` |
+| `GET /v1/hsreplay/assemble` | `card` (id или dbf), `format`, `base` (не указан — доноры у всех баз; `top` — только у первой; dbf — только у этой). `data.card` (+ `text`, `text_ru`), `data.stats`, `data.summary`, `data.bases[]` с `offer_rate`, `win_rate`, `donors_total`, `donors[]` и у каждого донора два `options[]` (`half` `effect`/`trigger`, `text.ru`/`text.en` = `{trigger, effect}`, `pick_rate`, `win_rate`, `picks`, `low_sample`, `undervalued`) |
+
+Проценты — `float` 0–100 без округления. Не Assemble-карта или неизвестная база —
+`404`; формат без данных — `200` с `stats.state = "not_collected"`. Ответы не
+кэшируются по ETag.
+
+```bash
+curl -s "https://api.kolodahearthstone.com/v1/hsreplay/assemble?card=BE_044&base=top" \
+  | jq '.data.bases[0] | {base: .card.name_ru, offer_rate, donors: [.donors[:2][] | {donor: .card.name_ru, options: [.options[] | {half, ru: .text.ru, pick_rate, win_rate}]}]}'
+```
+
 ## Official Blizzard Leaderboards
 
 Подробно (охват, частота, вежливость к API, хранение, поля):

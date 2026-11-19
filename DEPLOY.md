@@ -229,6 +229,13 @@ Production refresh schedule:
 - `kolodahs-card-renders.timer` (installed by hand, not by `deploy-server.sh`): hourly download of localized card renders, at most 6000 requests per run; runbook in `docs/card-renders.md`.
 - `hs-data-api-freshness-check.timer`: audit at `07:45` and `18:45 Europe/Warsaw`.
 - `hs-data-api-docker-firecrawl-hsreplay-map.timer`: weekly HSReplay crawl-map/index refresh at `02:35 Europe/Warsaw` on Mondays.
+- `hs-data-api-docker-refresh-hsreplay-assemble.timer`: HSReplay Assemble
+  statistics every six hours (`00:50`, `06:50`, `12:50`, `18:50 Europe/Warsaw`);
+  a format is read (one plain Scrape.do request) when its last good read is older
+  than 20 h or failed, at most 6 credits a UTC day. First run after deploy:
+  `docker compose -f /srv/hs-data-api/docker-compose.yml run --rm api python -m app.cli refresh-hsreplay-assemble --max-requests 2`;
+  stop with `systemctl disable --now hs-data-api-docker-refresh-hsreplay-assemble.timer`.
+  Details: `docs/HSREPLAY_ASSEMBLE.md`.
 - `hs-data-api-docker-rebuild-hsreplay-index.timer`: daily derived-index rebuild at
   `19:15 Europe/Warsaw` from current cached datasets, without spending Firecrawl
   credits or waiting for the weekly URL map.
