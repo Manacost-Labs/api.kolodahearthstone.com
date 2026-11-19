@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 require_once __DIR__ . '/../lib/card_history.php';
+require_once __DIR__ . '/../lib/card_history_changes.php';
 require_once __DIR__ . '/../lib/bartender_catalog.php';
 require_once __DIR__ . '/../lib/full_card_catalog.php';
 
@@ -1655,6 +1656,8 @@ function api_index(PDO $pdo): void
         'endpoints' => [
             'GET /api/v1/bartender-skins' => 'Скины бармена.',
             'GET /api/v1/bartender-skins/{card_id}' => 'Скин бармена по card_id.',
+            'GET /api/v1/card-history/changes' => 'Карты с реальными изменениями за окно (патч): from, to (UTC, до 14 суток), entity, page, per_page; до/после, изменённые поля и архивные картинки.',
+            'GET /api/v1/card-history/waves' => 'Волны изменений карт — подсказка «вероятный патч»: since, until (UTC, до 31 суток), min_cards.',
             'GET /api/v1/card-history/{entity}/{card_id}' => 'Сохранённые версии карты.',
             'GET /api/v1/card-history/card/{card_id}/legacy' => 'Исходный журнал Полей сражений.',
             'GET /api/v1' => 'Описание API.',
@@ -3141,6 +3144,49 @@ try {
     }
     if ($path === '/api/v1/meta') {
         api_meta($pdo);
+    }
+    if ($path === '/api/v1/card-history/changes') {
+        $entity = isset($_GET['entity']) && $_GET['entity'] !== '' ? (string)$_GET['entity'] : null;
+        $entities = $entity === null ? CARD_HISTORY_CHANGES_ENTITIES : explode(',', $entity);
+        foreach ($entities as $name) {
+            if (!in_array($name, CARD_HISTORY_CHANGES_ENTITIES, true)) {
+                respond_error('invalid_parameter', 'Параметр entity: constructed_card или card.');
+            }
+        }
+        try {
+            [$from, $to] = catalog_history_changes_window($_GET);
+        } catch (InvalidArgumentException $e) {
+            respond_error('invalid_parameter', $e->getMessage());
+        }
+        $page = int_param(isset($_GET['page']) ? (string)$_GET['page'] : null, 'page', 1, 1000000) ?? 1;
+        $perPage = int_param(isset($_GET['per_page']) ? (string)$_GET['per_page'] : null, 'per_page', 1, MAX_PER_PAGE) ?? DEFAULT_PER_PAGE;
+        try {
+            $changes = catalog_card_history_changes($pdo, $entities, $from, $to, $page, $perPage);
+        } catch (LengthException $e) {
+            respond_error('window_too_large', 'В окне слишком много версий; сузьте from/to.');
+        } catch (PDOException $e) {
+            if (($e->errorInfo[0] ?? '') !== '42S02') throw $e;
+            respond_error('history_not_ready', 'История версий ещё не установлена.', 503);
+        }
+        $closed = $to->getTimestamp() < time() - 600;
+        respond_cached(['data' => $changes], $changes['coverage']['last_observed_at'], $closed ? 600 : 120);
+    }
+    if ($path === '/api/v1/card-history/waves') {
+        try {
+            [$since, $until] = catalog_history_waves_window($_GET);
+        } catch (InvalidArgumentException $e) {
+            respond_error('invalid_parameter', $e->getMessage());
+        }
+        $minCards = int_param(isset($_GET['min_cards']) ? (string)$_GET['min_cards'] : null, 'min_cards', 1, 1000) ?? 5;
+        try {
+            $waves = catalog_card_history_waves($pdo, $since, $until, $minCards);
+        } catch (LengthException $e) {
+            respond_error('window_too_large', 'За период слишком много версий; сузьте since/until.');
+        } catch (PDOException $e) {
+            if (($e->errorInfo[0] ?? '') !== '42S02') throw $e;
+            respond_error('history_not_ready', 'История версий ещё не установлена.', 503);
+        }
+        respond_cached(['data' => $waves], $waves['coverage']['last_observed_at'], 600);
     }
     if (preg_match('~^/api/v1/card-history/card/([^/]+)/legacy$~', $path, $matches)) {
         try {
