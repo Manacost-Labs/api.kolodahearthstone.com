@@ -280,7 +280,7 @@ checks.mobileDialog = await evaluate(
 );
 await pressEscape();
 await viewport(1487, 1058);
-await navigate(root + '?action=analytics', '!!document.querySelector(".data-table tbody tr")');
+await navigate(root + '?action=analytics&stats=meta', '!!document.querySelector(".data-table tbody tr")');
 await screenshot('analytics-desktop.png');
 // Row details are a right-hand drawer (role=dialog, not <dialog>): row click, keyboard, Escape, the × button, focus back.
 const drawerOpen = '!!document.querySelector(".ui-drawer[data-state=open]")';
@@ -325,7 +325,7 @@ await waitFor(drawerGone);
 checks.drawerCloseFocus = await evaluate('document.activeElement.classList.contains("row-open")');
 assert.equal(checks.drawerCloseFocus, true);
 await viewport(390, 844);
-await navigate(root + '?action=analytics', '!!document.querySelector(".data-table tbody tr")');
+await navigate(root + '?action=analytics&stats=meta', '!!document.querySelector(".data-table tbody tr")');
 await click('.data-table tbody tr:first-child .row-open');
 await waitFor(drawerOpen);
 await settle();

@@ -32,12 +32,14 @@ import { DropdownMenu } from './varylo-ui/navigation/DropdownMenu';
 import { CommandPalette } from './CommandPalette';
 import { useStatsRegistry } from './useStatsRegistry';
 import {
-  defaultStatsModule,
+  isStatsHome,
   monitoringModules,
   otherGroup,
   placeOf,
   statsGroups,
   statsHref,
+  statsHomeHref,
+  statsHomeMenuId,
 } from '@/lib/stats-sections';
 
 type ShellProps = { user: User; logoutCsrf: string; categories: Record<string, string>; children: ReactNode };
@@ -78,8 +80,9 @@ function ShellContent({ user, logoutCsrf, categories, children }: ShellProps) {
   const action = params.get('action') || 'list';
   const type = params.get('card_type') || '';
   const registry = useStatsRegistry();
-  // Same place the page itself resolves: a missing or unknown `stats` opens the default module.
-  const statsKey = params.get('stats') || defaultStatsModule;
+  // Same place the page itself resolves: no `stats` opens the summary, an unknown one the default module.
+  const statsHome = action === 'analytics' && isStatsHome(params.get('stats'));
+  const statsKey = params.get('stats') || 'meta';
   const place = placeOf(statsKey, registry);
   const { pending, catalogUrl, navigate } = useWorkspaceNavigation();
   const collectionUrl = (key: string) => catalogHref(catalogUrl.split('?')[1] || '', { card_type: key });
@@ -89,7 +92,7 @@ function ShellContent({ user, logoutCsrf, categories, children }: ShellProps) {
   const [quick, setQuick] = useState(false);
   const shortcuts: [string, string][] = [
     [catalogUrl, 'Каталог'],
-    [statsHref(defaultStatsModule), 'Статистика'],
+    [statsHomeHref, 'Статистика'],
     ['/?action=parsers', 'Источники'],
     ...monitoringModules.map(({ key, label }): [string, string] => [statsHref(key), label || key]),
     ['/?action=api_tokens', 'API-токены'],
@@ -136,22 +139,33 @@ function ShellContent({ user, logoutCsrf, categories, children }: ShellProps) {
         ? 'Мониторинг'
         : 'Управление';
   const pageName =
-    action === 'analytics' ? (place.section === 'statistics' ? place.group.label : place.label) : '';
+    action === 'analytics'
+      ? statsHome
+        ? 'Сводка'
+        : place.section === 'statistics'
+          ? place.group.label
+          : place.label
+      : '';
   const categoryName = categories[type] || 'Поля сражений';
   const active =
     action === 'list'
       ? 'cat:' + type
       : action === 'analytics'
-        ? place.section === 'statistics'
-          ? 'stats:' + place.group.key
-          : 'stats:' + statsKey
+        ? statsHome
+          ? statsHomeMenuId
+          : place.section === 'statistics'
+            ? 'stats:' + place.group.key
+            : 'stats:' + statsKey
         : action;
   const other = otherGroup(registry);
-  const statsItems = [...statsGroups, ...(other ? [other] : [])].map(item => ({
-    id: 'stats:' + item.key,
-    label: item.label,
-    href: statsHref(item.modules[0].key),
-  }));
+  const statsItems = [
+    { id: statsHomeMenuId, label: 'Сводка', href: statsHomeHref },
+    ...[...statsGroups, ...(other ? [other] : [])].map(item => ({
+      id: 'stats:' + item.key,
+      label: item.label,
+      href: statsHref(item.modules[0].key),
+    })),
+  ];
   const sections: SidebarSection[] = [
     {
       items: [
