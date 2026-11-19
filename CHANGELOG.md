@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Панель `panel-next`: Next.js 16.4.3 → 16.4.6. С 2026-11-17 сборка на 16.4.3
+  останавливалась на `SecurityFatalError` (GHSA-mfr8-8qww-v76h,
+  GHSA-vc7v-qv4w-wrv8, обе moderate, утечка кэша `use cache` между root
+  params), из-за чего не проходили `npm run check` и деплой панели.
 - `GET /api/bg/heroes` со срезами `mmr`, отличными от `TOP_50_PERCENT`
   (читаются с HSReplay по запросу): сбой чтения больше не отвечает `500`.
   Последний удачный ответ каждого среза хранится на диске; при сбое он отдаётся
