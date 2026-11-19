@@ -1,0 +1,108 @@
+/* Statistics filters, KPI row and pager (S3a). Tokens only; nothing here leaks into globals.css. */
+.stats-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--space-3) var(--space-4);
+  align-items: start;
+  margin-bottom: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+.stats-field {
+  display: grid;
+  gap: var(--space-1-5);
+  min-width: 0;
+}
+.stats-field[data-wide] {
+  grid-column: span 2;
+}
+.stats-field > label {
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-weight: 500;
+}
+.stats-field > small {
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+.stats-field .ui-field {
+  width: 100%;
+}
+.stats-reset {
+  align-self: end;
+  justify-self: start;
+}
+.stats-reset[hidden] {
+  display: none;
+}
+.stats-body {
+  transition: opacity 0.15s ease;
+}
+.stats-body[data-busy='true'] {
+  opacity: 0.6;
+}
+.summary-grid.stats-kpis {
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+.stats-pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+.stats-pager__caption {
+  color: var(--muted);
+  font-size: var(--text-md);
+  font-variant-numeric: tabular-nums;
+}
+.stats-pager__compact {
+  display: none;
+}
+@media (max-width: 640px) {
+  .stats-filters {
+    grid-template-columns: 1fr;
+  }
+  .stats-field[data-wide] {
+    grid-column: span 1;
+  }
+  .stats-reset,
+  .stats-reset .ui-button {
+    justify-self: stretch;
+    width: 100%;
+  }
+  .stats-pager {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .stats-pager__full {
+    display: none;
+  }
+  .stats-pager__compact {
+    display: flex;
+  }
+  .summary-grid.stats-kpis {
+    grid-template-columns: 1fr;
+  }
+}
+.summary-grid.stats-kpis article {
+  align-content: start;
+}
+/* The bare `input` rule of globals.css would draw a second border inside the Valyro field. */
+.stats-field .ui-field input.ui-field__input {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.stats-note {
+  margin: var(--space-3) 0 0;
+  color: var(--muted);
+  font-size: var(--text-md);
+}
