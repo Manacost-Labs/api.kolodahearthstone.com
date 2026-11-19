@@ -1,9 +1,8 @@
-import { type ClassSlug, classIconSrc } from '@/lib/archetypes';
+import type { ClassSlug } from '@/lib/archetypes';
 import { classLabel } from '@/lib/format';
+import { classIconUrl } from './class-icons';
 
-const base = process.env.NEXT_PUBLIC_PANEL_BASE_PATH || '';
-
-/** Class art from HearthPulse (public/class-icons); no class means the neutral Hearthstone swirl. */
+/** Class art from HearthPulse (assets/class-icons, bundled); no class means the neutral Hearthstone swirl. */
 export function ClassIcon({
   slug,
   size = 32,
@@ -16,7 +15,7 @@ export function ClassIcon({
   return (
     <img
       className={className}
-      src={classIconSrc(slug, size > 48 ? 96 : slug ? 64 : 96, base)}
+      src={classIconUrl(slug, size > 48 ? 96 : 64)}
       width={size}
       height={size}
       alt={slug ? classLabel(slug) : 'Класс не определён'}

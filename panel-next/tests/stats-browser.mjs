@@ -129,6 +129,19 @@ export default async function verify(page, root) {
     .locator('.data-table tbody tr', { hasText: 'Зоолок' })
     .locator('.archetype-name__icon');
   ensure((await zoolock.getAttribute('alt')) === 'Чернокнижник', 'HSGuru table icon');
+  // nginx sends only /, /api/panel and /_next/ to the panel: an icon outside /_next/ is a 404 on prod (#107).
+  const iconPaths = await page
+    .locator('.meta-top__icon, .archetype-name__icon')
+    .evaluateAll(images => images.map(image => new URL(image.src).pathname));
+  ensure(
+    iconPaths.length > 0 && iconPaths.every(path => path.startsWith('/_next/static/')),
+    'Icons outside /_next/static/: ' +
+      iconPaths.filter(path => !path.startsWith('/_next/static/')).join(', '),
+  );
+  const loaded = await page
+    .locator('.meta-top__icon')
+    .evaluateAll(images => images.every(image => image.complete && image.naturalWidth > 0));
+  ensure(loaded, 'A class icon did not load');
   checks.hsguruNamesAndIcons = true;
 
   // 5. Reset only when something differs from the defaults.
