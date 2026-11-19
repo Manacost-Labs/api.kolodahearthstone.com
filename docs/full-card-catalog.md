@@ -55,6 +55,33 @@ so a changed translation is never answered with a stale 304. The listing reads
 one page with one `LEFT JOIN`, no per-card queries. Mode endpoints
 (`/constructed-cards`, BG, ...) do not accept `locale` yet.
 
+### Card render in the requested language (`render_url`)
+
+With `?locale=` the `localized` block also has two fields about the card image
+in that locale (`images.card`, the top-level `media_verified` and the response
+without `?locale=` do not change). The render locale is always the requested one:
+it does not follow the enUS text fallback.
+
+| Case | `render_url` | `render_media_verified` |
+| --- | --- | --- |
+| Render is downloaded (id is in `renders` of the locale index) | `https://api.kolodahearthstone.com/uploads/card-renders/{locale}/512x/{id}.webp?v={v}` | `true` |
+| Not downloaded yet, type is one of `MINION`, `SPELL`, `WEAPON`, `HERO`, `HERO_POWER`, `LOCATION` | `https://art.hearthstonejson.com/v1/render/latest/{locale}/512x/{id}.png` | `false` |
+| HSJ answered 404 (id is in `missing`), the type is in `skip_types`, or it is another type without a downloaded render | `null` | `false` |
+
+`v` is the first 12 hex characters of the sha256 of the WebP file, so the URL
+changes together with the file and the CDN cache is not stale. The source of
+truth is the manifest written by the card-renders loader,
+`panel/current/var/card-renders/{locale}.index.json` (`version` 1, `renders`,
+`missing`, `skip_types`). It is read once per request; a missing, unreadable or
+invalid file (or `version` other than 1) behaves as "nothing downloaded", never
+as an error. A `v` that is not 12 lower-case hex is ignored; the id is
+URL-encoded. The render files themselves are not checked (after the S3 offload
+they are symlinks); the index is trusted.
+
+`Last-Modified` of a `?locale=` response is also not older than the mtime of that
+locale's index, and the ETag follows the body, so a newly downloaded render is
+never answered with a stale 304.
+
 ## Publication and rollback
 
 The catalog is stored in two tables written by one loader in one transaction:
@@ -126,3 +153,6 @@ harmless); nothing is dropped without the owner. The catalog table is untouched,
 so no restore is needed for the catalog itself. The earlier rule for the
 catalog table still holds: a failed batch rolls back, and the panel `current`
 symlink can be returned atomically to the previous release.
+
+Localized WebP renders of these cards are downloaded by a separate timer, see
+[card-renders.md](card-renders.md).

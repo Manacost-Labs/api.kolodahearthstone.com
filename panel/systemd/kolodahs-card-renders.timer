@@ -1,0 +1,11 @@
+[Unit]
+Description=Hourly localized card renders download
+
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=10min
+Persistent=true
+Unit=kolodahs-card-renders.service
+
+[Install]
+WantedBy=timers.target

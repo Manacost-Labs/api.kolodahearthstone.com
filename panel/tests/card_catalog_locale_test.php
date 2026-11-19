@@ -169,6 +169,8 @@ foreach (['ruRU', 'enUS', 'plPL'] as $locale) {
         json_of(get($port, "/api/v1/card-catalog?locale=$locale&q=BE_222")[1])['data'][0],
     ];
     foreach ($cards as $card) {
+        // render_url / render_media_verified are covered by card_catalog_render_test.php.
+        unset($card['localized']['render_url'], $card['localized']['render_media_verified']);
         check($card['localized'] === ['locale' => $locale, 'requested_locale' => $locale, 'fallback' => false,
             'name' => $names[$locale], 'text' => "text $locale", 'flavor' => "flavor $locale",
             'collection_text' => "collection $locale", 'how_to_earn' => "earn $locale",

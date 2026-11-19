@@ -12,6 +12,15 @@
   `share_pct` / `winrate_pct` и идут по убыванию доли; в строках меты есть
   `class_name` из каталога HSGuru. Старые поля не менялись. Тест
   `panel/tests/analytics_model_test.php`, снимок реестра перегенерирован.
+- Каталог карт на 4 языках (E24, срез рендеров): при `?locale=` блок
+  `localized` в `/api/v1/card-catalog`, `/{id}` и `/dbf/{dbf}` получает
+  `render_url` и `render_media_verified`. Скачанный рендер — ссылка на наш
+  `uploads/card-renders/{locale}/512x/{id}.webp?v=<хеш>` и `true`; ещё не
+  скачанный — ссылка HSJ той же локали (для MINION, SPELL, WEAPON, HERO,
+  HERO_POWER, LOCATION) и `false`; нет рендера (404 HSJ, ENCHANTMENT, PET) —
+  `null`. Источник — индекс загрузчика `var/card-renders/{locale}.index.json`;
+  нет или битый индекс — как «не скачан». Без `?locale=` ответы, `images.card`
+  и `API_VERSION` не меняются. `Last-Modified` учитывает время индекса.
 - Панель, «Статистика карты»: страница открывается без экрана ошибки
   (подсказка «Введите название карты»), кнопка «Статистика» в карточке
   записи передаёт карту в поле `card_name`. Модуль, который ответил ошибкой
@@ -35,6 +44,15 @@
   останавливалась на `SecurityFatalError` (GHSA-mfr8-8qww-v76h,
   GHSA-vc7v-qv4w-wrv8, обе moderate, утечка кэша `use cache` между root
   params), из-за чего не проходили `npm run check` и деплой панели.
+- Каталог карт на 4 языках (E24, фаза 2): загрузчик
+  `panel/scripts/sync_card_renders.py` и таймер `kolodahs-card-renders` (раз в час)
+  скачивают рендеры HearthstoneJSON для `ruRU`, `enUS`, `plPL`, `esES` в WebP q85
+  (`uploads/card-renders/{locale}/512x/{id}.webp`) и ведут манифест в
+  `var/card-renders/` (`{locale}.index.json`, `state`, `last-run.json`). Сначала
+  коллекционные карты, 3 запроса/с, до 6000 запросов и 40 минут за прогон, стоп при свободном месте
+  меньше 20 ГБ, при SIGTERM индекс и state дописываются; WebP `method=4`
+  (в 13 раз быстрее `method=6`, файл на 3,5% больше). API пока не меняется (поле — api#122). Юниты ставятся вручную,
+  ранбук — `docs/card-renders.md`.
 - Каталог карт на 4 языках (E24, срез данных): новая таблица
   `hearthstone_card_localizations` (`panel/sql/card_localizations.sql`) хранит
   для каждого id HearthstoneJSON полный объект карты в локалях `ruRU`, `enUS`,

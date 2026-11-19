@@ -7,7 +7,7 @@ function full_catalog_card_to_api(array $row): array
     $ru = json_decode($row['payload_ru'], true, 512, JSON_THROW_ON_ERROR);
     $en = json_decode($row['payload_en'], true, 512, JSON_THROW_ON_ERROR);
     $card = array_replace($en, $ru);
-    $renderable = in_array($card['type'] ?? '', ['MINION', 'SPELL', 'WEAPON', 'HERO', 'HERO_POWER', 'LOCATION'], true);
+    $renderable = in_array($card['type'] ?? '', FULL_CATALOG_HSJ_RENDER_TYPES, true);
     return [
         'card_id' => $row['card_id'], 'dbf' => (int)$row['dbf'],
         'collectible' => (bool)$row['collectible'], 'formats' => [],
@@ -42,6 +42,72 @@ function full_catalog_locale(array $query): ?string
     return $locale;
 }
 
+const FULL_CATALOG_HSJ_RENDER_TYPES = ['MINION', 'SPELL', 'WEAPON', 'HERO', 'HERO_POWER', 'LOCATION'];
+const FULL_CATALOG_RENDER_BASE = 'https://api.kolodahearthstone.com/uploads/card-renders/';
+
+/**
+ * Render manifest of one locale written by the card-renders loader (var/card-renders/{locale}.index.json).
+ * Read at most once per request; a missing, unreadable or invalid file is an empty index. Render files
+ * themselves are never touched (after the S3 offload they are symlinks), the index is the source of truth.
+ *
+ * @return array{renders: array<string,string>, missing: array<string,true>, skip: array<string,true>, mtime: ?int}
+ */
+function full_catalog_render_index(string $locale): array
+{
+    static $cache = [];
+    if (isset($cache[$locale])) return $cache[$locale];
+    $index = ['renders' => [], 'missing' => [], 'skip' => [], 'mtime' => null];
+    $path = dirname(__DIR__) . '/var/card-renders/' . $locale . '.index.json';
+    $handle = @fopen($path, 'rb');
+    if ($handle !== false) {
+        $stat = fstat($handle);
+        // The mtime counts even when the manifest turns out invalid: the body then changes too (HSJ fallback).
+        $index['mtime'] = is_array($stat) ? (int)$stat['mtime'] : null;
+        $raw = stream_get_contents($handle, 64 * 1024 * 1024);
+        fclose($handle);
+        $data = is_string($raw) ? json_decode($raw, true) : null;
+        if (is_array($data) && ($data['version'] ?? null) === 1
+            && ($data['locale'] ?? null) === $locale && ($data['size'] ?? null) === '512x') {
+            foreach (is_array($data['renders'] ?? null) ? $data['renders'] : [] as $id => $v) {
+                if (is_string($v) && preg_match('/^[a-f0-9]{12}$/D', $v)) $index['renders'][(string)$id] = $v;
+            }
+            foreach (is_array($data['missing'] ?? null) ? $data['missing'] : [] as $id) {
+                if (is_string($id)) $index['missing'][$id] = true;
+            }
+            foreach (is_array($data['skip_types'] ?? null) ? $data['skip_types'] : [] as $type) {
+                if (is_string($type)) $index['skip'][$type] = true;
+            }
+        }
+    }
+    return $cache[$locale] = $index;
+}
+
+/** Localized render link of the requested locale (never the text fallback locale). */
+function full_catalog_render_fields(string $cardId, ?string $type, string $locale): array
+{
+    $index = full_catalog_render_index($locale);
+    $id = rawurlencode($cardId);
+    if (isset($index['renders'][$cardId]) && !isset($index['skip'][(string)$type])) {
+        return ['render_url' => FULL_CATALOG_RENDER_BASE . $locale . '/512x/' . $id . '.webp?v=' . $index['renders'][$cardId],
+            'render_media_verified' => true];
+    }
+    if (isset($index['missing'][$cardId]) || isset($index['skip'][(string)$type])
+        || !in_array($type, FULL_CATALOG_HSJ_RENDER_TYPES, true)) {
+        return ['render_url' => null, 'render_media_verified' => false];
+    }
+    return ['render_url' => 'https://art.hearthstonejson.com/v1/render/latest/' . $locale . '/512x/' . $id . '.png',
+        'render_media_verified' => false];
+}
+
+/** Later of the current Last-Modified value and the locale index mtime (UTC datetime string). */
+function full_catalog_render_modified(?string $modified, string $locale): ?string
+{
+    $mtime = full_catalog_render_index($locale)['mtime'];
+    if ($mtime === null) return $modified;
+    $stamp = gmdate('Y-m-d H:i:s', $mtime);
+    return $modified === null || $stamp > $modified ? $stamp : $modified;
+}
+
 /** Adds the additive `localized` block; a missing or unreadable locale row falls back to enUS. */
 function full_catalog_with_localized(array $card, array $row, string $locale, ?string $payload): array
 {
@@ -61,7 +127,7 @@ function full_catalog_with_localized(array $card, array $row, string $locale, ?s
         'collection_text' => $source['collectionText'] ?? null, 'how_to_earn' => $source['howToEarn'] ?? null,
         'how_to_earn_golden' => $source['howToEarnGolden'] ?? null,
         'targeting_arrow_text' => $source['targetingArrowText'] ?? null,
-    ];
+    ] + full_catalog_render_fields((string)$row['card_id'], $card['card_type']['slug'], $locale);
     return $card;
 }
 
@@ -92,6 +158,7 @@ function full_catalog_find(PDO $pdo, string $key, string $value, ?string $locale
             if ($locale !== null) {
                 $card = full_catalog_with_localized($card, $row, $locale, $withLocale ? ($row['loc_payload'] ?? null) : null);
                 if (($row['loc_updated_at'] ?? null) !== null && $row['loc_updated_at'] > $modified) $modified = $row['loc_updated_at'];
+                $modified = full_catalog_render_modified($modified, $locale);
             }
             return $card;
         } catch (PDOException $error) {
@@ -181,6 +248,7 @@ function full_catalog_listing(PDO $pdo, array $query): array
     if ($withLocale && ($summary['loc_updated_at'] ?? null) !== null && $summary['loc_updated_at'] > $lastUpdated) {
         $lastUpdated = $summary['loc_updated_at'];
     }
+    if ($locale !== null) $lastUpdated = full_catalog_render_modified($lastUpdated, $locale);
     $cards = array_map(static function (array $row) use ($locale, $withLocale): array {
         $card = full_catalog_card_to_api($row);
         return $locale === null ? $card
