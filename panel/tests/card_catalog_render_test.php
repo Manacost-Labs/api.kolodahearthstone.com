@@ -299,4 +299,15 @@ check($hl['last-modified'] === 'Thu, 15 Oct 2026 00:00:00 GMT', 'listing Last-Mo
 $writeIndex('plPL', ['renders' => []], strtotime('2026-11-19 01:00:00 UTC'));
 check(get($port, '/api/v1/card-catalog?locale=plPL')[2]['last-modified'] === 'Thu, 19 Nov 2026 01:00:00 GMT', 'listing Last-Modified follows index mtime');
 
+// A valid index replaced by a broken, newer one: the body falls back to HSJ, so a bare If-Modified-Since must not give 304.
+$writeIndex('plPL', ['renders' => ['CS2_029' => '333333333333']], strtotime('2026-11-20 10:00:00 UTC'));
+[$s, $b, $h1] = get($port, '/api/v1/card-catalog/CS2_029?locale=plPL');
+check($s === 200 && str_contains($b, '?v=333333333333') && $h1['last-modified'] === 'Fri, 20 Nov 2026 10:00:00 GMT', 'valid index before breaking');
+file_put_contents("$indexDir/plPL.index.json", '{broken');
+touch("$indexDir/plPL.index.json", strtotime('2026-11-21 08:00:00 UTC'));
+[$s, $b, $h2] = get($port, '/api/v1/card-catalog/CS2_029?locale=plPL', ['If-Modified-Since' => $h1['last-modified']]);
+check($s === 200 && $h2['last-modified'] === 'Sat, 21 Nov 2026 08:00:00 GMT', 'broken newer index: 200 with new Last-Modified, got ' . $s);
+check(str_contains($b, HSJ . 'plPL/512x/CS2_029.png') && !str_contains($b, 'card-renders'), 'broken newer index: HSJ fallback body');
+check(get($port, '/api/v1/card-catalog/CS2_029?locale=plPL', ['If-Modified-Since' => $h2['last-modified']])[0] === 304, 'same broken index: 304');
+
 echo "OK: localized render_url (downloaded, not downloaded, 404/skip, no/broken index, no-locale snapshot, ETag)\n";

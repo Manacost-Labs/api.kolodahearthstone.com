@@ -61,6 +61,8 @@ function full_catalog_render_index(string $locale): array
     $handle = @fopen($path, 'rb');
     if ($handle !== false) {
         $stat = fstat($handle);
+        // The mtime counts even when the manifest turns out invalid: the body then changes too (HSJ fallback).
+        $index['mtime'] = is_array($stat) ? (int)$stat['mtime'] : null;
         $raw = stream_get_contents($handle, 64 * 1024 * 1024);
         fclose($handle);
         $data = is_string($raw) ? json_decode($raw, true) : null;
@@ -75,7 +77,6 @@ function full_catalog_render_index(string $locale): array
             foreach (is_array($data['skip_types'] ?? null) ? $data['skip_types'] : [] as $type) {
                 if (is_string($type)) $index['skip'][$type] = true;
             }
-            $index['mtime'] = is_array($stat) ? (int)$stat['mtime'] : null;
         }
     }
     return $cache[$locale] = $index;
