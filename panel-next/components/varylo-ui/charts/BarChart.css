@@ -1,0 +1,61 @@
+.ui-bar-chart__bar {
+  fill: var(--_color);
+  stroke: var(--ui-chart-mark-stroke, none);
+  stroke-width: var(--ui-chart-mark-stroke-width, 1);
+  /* Soft coloured glow under the bars in themes with --ui-chart-glow (SVG filter from the chart). */
+  filter: var(--ui-chart-glow, var(--_glow));
+  transform-box: fill-box;
+  transition: opacity var(--ui-duration-fast) var(--ui-ease);
+  animation: ui-chart-grow-y calc(var(--ui-duration-slow) * 2) var(--ui-ease) both;
+  animation-delay: min(calc(var(--_i, 0) * var(--ui-duration-fast) / 6), calc(var(--ui-duration-fast) * 2.5));
+}
+
+.ui-bar-chart__group {
+  transition: opacity var(--ui-duration-fast) var(--ui-ease);
+}
+
+/* Bars grow out of the baseline */
+.ui-bar-chart__bar[data-edge='top'] {
+  transform-origin: 50% 100%;
+}
+
+.ui-bar-chart__bar[data-edge='bottom'] {
+  transform-origin: 50% 0;
+}
+
+.ui-bar-chart__bar:is([data-edge='left'], [data-edge='right']) {
+  animation-name: ui-chart-grow-x;
+}
+
+.ui-bar-chart__bar[data-edge='right'] {
+  transform-origin: 0 50%;
+}
+
+.ui-bar-chart__bar[data-edge='left'] {
+  transform-origin: 100% 50%;
+}
+
+.ui-bar-chart__group[data-dimmed],
+.ui-bar-chart__bar[data-dimmed] {
+  opacity: 0.4;
+}
+
+.ui-bar-chart__hover-band {
+  fill: var(--ui-hover);
+  pointer-events: none;
+  transition: transform var(--ui-duration-fast) var(--ui-ease);
+  animation: ui-fade-in var(--ui-duration-fast) var(--ui-ease);
+}
+
+.ui-bar-chart__value {
+  fill: var(--ui-fg-muted);
+  font-size: 11px;
+  font-weight: var(--ui-weight-medium);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.ui-bar-chart__category {
+  fill: var(--ui-fg-muted);
+  font-size: 12px;
+}
