@@ -61,7 +61,11 @@ export function useCardLang(): { lang: CardLang; setLang: (lang: CardLang) => vo
       droppedAt = here();
       return;
     }
-    if (raw !== null) return;
+    if (raw !== null) {
+      // A valid language is a new step: a later visit to the dropped address restores the saved choice.
+      droppedAt = null;
+      return;
+    }
     if (droppedAt === here()) return;
     droppedAt = null;
     // A link without `lang` (menu, old bookmark) opens on the last chosen language.

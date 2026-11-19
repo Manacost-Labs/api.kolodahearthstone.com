@@ -426,6 +426,27 @@ export default async function verify(page, root, output, fixtures, live) {
       'unknown lang with a card is not Russian',
     );
     checks.unknownLangWithCard = true;
+    // Unknown lang → a valid language → Back to the same address without lang: the saved choice returns
+    // (the mark of the dropped address must not outlive the valid choice).
+    await second.evaluate(() => localStorage.removeItem('hs_card_lang'));
+    await second.goto(root + '/?card_type=constructed&view=grid');
+    await second.locator('.card-tile').first().waitFor();
+    await second.evaluate(() =>
+      history.pushState(null, '', location.pathname + location.search + '&lang=xx'),
+    );
+    await second.waitForFunction(() => !new URL(location.href).searchParams.has('lang'));
+    await choose('Польский', second.getByRole('radiogroup', { name: 'Язык карт' }).first());
+    await second.waitForFunction(() => new URL(location.href).searchParams.get('lang') === 'pl');
+    // Back only after the router committed the choice (the radio follows the address): a Back in the
+    // same instant races Next's own history update, which no person can do.
+    const polish = second.getByRole('radio', { name: 'Польский', exact: true }).first();
+    for (let i = 0; i < 30 && !(await polish.isChecked()); i++) await second.waitForTimeout(100);
+    await second.waitForTimeout(500);
+    await second.goBack();
+    await second.waitForFunction(() => new URL(location.href).searchParams.get('lang') === 'pl', null, {
+      timeout: 3000,
+    });
+    checks.unknownThenValidBack = true;
     // Opening and closing a card of a link with ?lang=es does not rewrite the saved preference.
     await second.evaluate(() => localStorage.setItem('hs_card_lang', 'pl'));
     await second.goto(root + '/?card_type=constructed&view=grid&lang=es');
