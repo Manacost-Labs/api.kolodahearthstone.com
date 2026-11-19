@@ -48,6 +48,7 @@ from .config import (
     fun_deck_min_games,
     fun_deck_min_score,
     fun_deck_retention_hours,
+    fun_deck_spicy_package_max_share_pct,
     fun_deck_twin_sim,
 )
 from .deck_decode import decode_deck_code
@@ -460,6 +461,7 @@ class CatalogIndex:
         *,
         archetype_games: Mapping[tuple[str, str], int] | None = None,
         format_games: Mapping[str, int] | None = None,
+        meta_popularity: Mapping[tuple[str, str, str], float] | None = None,
     ) -> None:
         self.decks = list(decks)
         self._by_group: dict[tuple[str, str], list[CatalogDeck]] = defaultdict(list)
@@ -472,12 +474,36 @@ class CatalogIndex:
         self.archetype_games = dict(archetype_games or derived_arch)
         self.format_games = dict(format_games or derived_fmt)
         self._share_floor = fun_deck_ladder_share_pct()
-        self._ladder_cache: dict[tuple[str, str], bool] = {}
+        self._spicy_share_cap = fun_deck_spicy_package_max_share_pct()
+        # Archetypes the meta sources (HSReplay, HSGuru) rate as popular, by (format, class).
+        self._meta_by_group: dict[tuple[str, str], list[str]] = defaultdict(list)
+        for (fmt, class_key, name), pct in (meta_popularity or {}).items():
+            if pct >= _META_LADDER_POPULARITY_PCT:
+                self._meta_by_group[(fmt, class_key)].append(name)
+        self._ladder_cache: dict[tuple[str, str, str], bool] = {}
         self.ladder_names: frozenset[str] = frozenset(
-            name
-            for fmt, name in self.archetype_games
-            if name and self.is_ladder_archetype(fmt, name)
+            {
+                name
+                for fmt, name in self.archetype_games
+                if name and self.is_ladder_archetype(fmt, name)
+            }
+            | {
+                deck.archetype
+                for deck in self.decks
+                if deck.archetype
+                and self.is_ladder_archetype(deck.format, deck.archetype, deck.hero_class)
+            }
         )
+        # Games of the lists carrying any marker of a spicy package, per format.
+        package_games: dict[tuple[str, str], int] = defaultdict(int)
+        compared_games: dict[str, int] = defaultdict(int)
+        for deck in self.decks:
+            compared_games[deck.format] += deck.games
+            for label in detect_card_packages(deck.cards):
+                if label in _SPICY_PACKAGES:
+                    package_games[(deck.format, label)] += deck.games
+        self._package_games = dict(package_games)
+        self._compared_games = dict(compared_games)
 
     def neighbours(self, fmt: str, hero_class: str) -> list[CatalogDeck]:
         """Compared lists of one format and class (every format when ``fmt`` is "other")."""
@@ -492,22 +518,122 @@ class CatalogIndex:
             return 0.0
         return round(100.0 * self.archetype_games.get((fmt, name), 0) / total, 4)
 
-    def is_ladder_archetype(self, fmt: str, name: str) -> bool:
-        """A big archetype (share >= the ladder floor) or a named ladder package."""
+    def is_ladder_archetype(self, fmt: str, name: str, hero_class: str = "") -> bool:
+        """A big archetype (share >= the ladder floor), a named ladder package, or one
+        the meta sources rate as popular for the same format and class."""
         if not name:
             return False
-        key = (fmt, name)
+        class_key = _class_key(hero_class)
+        key = (fmt, name, class_key)
         cached = self._ladder_cache.get(key)
         if cached is None:
-            cached = _ladder_archetype_name(name) or (
-                self.archetype_share_pct(fmt, name) >= self._share_floor
+            cached = (
+                _ladder_archetype_name(name)
+                or self.archetype_share_pct(fmt, name) >= self._share_floor
+                or (
+                    bool(class_key)
+                    and any(
+                        _names_align(name, meta_name)
+                        for meta_name in self._meta_by_group.get((fmt, class_key), ())
+                    )
+                )
             )
             self._ladder_cache[key] = cached
         return cached
 
+    def package_share_pct(self, fmt: str, label: str) -> float:
+        """Share (percent) of the compared games of a format played with a package."""
+        total = self._compared_games.get(fmt, 0)
+        if not total:
+            return 0.0
+        return round(100.0 * self._package_games.get((fmt, label), 0) / total, 4)
+
+    def sharp_packages(self, fmt: str, packages: tuple[str, ...]) -> tuple[str, ...]:
+        """The spicy packages that are still rare in the format (a fun signal)."""
+        return tuple(
+            label
+            for label in packages
+            if label in _SPICY_PACKAGES
+            and self.package_share_pct(fmt, label) < self._spicy_share_cap
+        )
+
+
+# Meta sources: HSReplay / HSGuru meta tables, by the format they describe.
+_META_SOURCE_FORMAT = {
+    "hsreplay_meta_legend_1d_firecrawl": "standard",
+    "hsreplay_meta_top_1000_legend_1d_firecrawl": "standard",
+    "hsreplay_meta_diamond_4to1_1d_firecrawl": "standard",
+    "hsguru_meta_standard_legend": "standard",
+    "hsguru_meta_wild_legend": "wild",
+}
+# An archetype at least this popular (percent) in a meta source is a ladder archetype.
+_META_LADDER_POPULARITY_PCT = 1.0
+_TITLE_CLASS_SUFFIX = {
+    "dk": "deathknight",
+    "deathknight": "deathknight",
+    "dh": "demonhunter",
+    "demonhunter": "demonhunter",
+    "lock": "warlock",
+    "warlock": "warlock",
+    "druid": "druid",
+    "hunter": "hunter",
+    "mage": "mage",
+    "paladin": "paladin",
+    "priest": "priest",
+    "rogue": "rogue",
+    "shaman": "shaman",
+    "warrior": "warrior",
+}
+
+
+def build_meta_popularity(
+    source_ids: tuple[str, ...] = META_ARCHETYPE_SOURCE_IDS,
+) -> dict[tuple[str, str, str], float]:
+    """Archetype popularity (percent) by (format, class, casefolded name) from the meta sources.
+
+    HSReplay tables list archetypes per class; HSGuru tables have no class column, so
+    the class is read from the last word of the name ("Harold DK") and rows without
+    one are skipped. The highest value of a name wins.
+    """
+    popularity: dict[tuple[str, str, str], float] = {}
+
+    def add(fmt: str, class_key: str, name: str, pct: float | None) -> None:
+        if not class_key or not name or pct is None:
+            return
+        key = (fmt, class_key, name.strip().casefold())
+        popularity[key] = max(popularity.get(key, 0.0), pct)
+
+    for source_id in source_ids:
+        fmt = _META_SOURCE_FORMAT.get(source_id)
+        if fmt is None:
+            continue
+        data = (load_resolved_public_dataset(source_id) or {}).get("data") or {}
+        structured = data.get("structured") if isinstance(data, dict) else None
+        if not isinstance(structured, dict):
+            continue
+        for class_row in structured.get("classes") or []:
+            if not isinstance(class_row, dict):
+                continue
+            class_key = _class_key(class_row.get("class"))
+            for arch in class_row.get("archetypes") or []:
+                if isinstance(arch, dict):
+                    pct = _parse_popularity_pct(arch.get("popularity") or arch.get("raw_popularity"))
+                    add(fmt, class_key, str(arch.get("archetype") or ""), pct)
+        for row in structured.get("strategies") or []:
+            if not isinstance(row, dict):
+                continue
+            name = str(row.get("Archetype") or row.get("archetype") or "")
+            words = name.split()
+            class_key = _TITLE_CLASS_SUFFIX.get(_class_key(words[-1])) if words else None
+            pct = _parse_popularity_pct(row.get("Popularity") or row.get("popularity"))
+            add(fmt, class_key or "", name, pct)
+    return popularity
+
 
 def build_catalog_index(
     catalog_source_ids: tuple[str, ...] = CATALOG_CANDIDATE_SOURCE_IDS,
+    *,
+    meta_popularity: Mapping[tuple[str, str, str], float] | None = None,
 ) -> CatalogIndex:
     """Index the whole HSGuru catalog (not only its top decks) for the detector.
 
@@ -548,7 +674,12 @@ def build_catalog_index(
                 games=games,
             )
         )
-    return CatalogIndex(decks, archetype_games=archetype_games, format_games=format_games)
+    return CatalogIndex(
+        decks,
+        archetype_games=archetype_games,
+        format_games=format_games,
+        meta_popularity=build_meta_popularity() if meta_popularity is None else meta_popularity,
+    )
 
 
 @dataclass(frozen=True)
@@ -589,7 +720,7 @@ def analyze_neighbourhood(
             continue
         sim = jaccard_similarity(cards, deck.cards)
         twin_sim = max(twin_sim, sim)
-        is_ladder = index.is_ladder_archetype(deck.format, deck.archetype)
+        is_ladder = index.is_ladder_archetype(deck.format, deck.archetype, deck.hero_class)
         if is_ladder and sim > ladder_sim:
             ladder_sim, ladder_deck = sim, deck
         if deck.archetype and sim > content_sim:
@@ -843,7 +974,8 @@ def score_fun_deck(
         cards=bag,
     )
     packages = detect_card_packages(bag)
-    spicy = _spicy_packages(packages)
+    # A package that much of the format plays is meta, not a concept.
+    spicy = index.sharp_packages(fmt, _spicy_packages(packages))
     title_concept = _concept_hit(title_name)
     concept = title_concept or bool(spicy)
 
@@ -860,7 +992,8 @@ def score_fun_deck(
 
     # 2-3. The kind: a fun signal makes a brew, a variant of a rare named archetype an
     # off-meta deck; anything else is not "fun".
-    unique_list = hood.twin_sim < twin_cap
+    # A list that is a member of its own named archetype is a variant, not unique.
+    unique_list = hood.twin_sim < twin_cap and hood.content_sim < _OFF_META_CONTENT_SIM
     kind: str | None = None
     if not gates:
         if concept or unique_list:
@@ -868,7 +1001,7 @@ def score_fun_deck(
         elif (
             hood.content_archetype
             and hood.content_sim >= _OFF_META_CONTENT_SIM
-            and not index.is_ladder_archetype(fmt, hood.content_archetype)
+            and not index.is_ladder_archetype(fmt, hood.content_archetype, hero_class)
         ):
             kind = "off_meta"
         else:

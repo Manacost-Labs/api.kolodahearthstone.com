@@ -1062,6 +1062,14 @@ def fun_deck_ladder_member_sim() -> float:
     return min(1.0, max(0.0, float(os.environ.get("HS_FUN_DECK_LADDER_MEMBER_SIM", "0.55"))))
 
 
+def fun_deck_spicy_package_max_share_pct() -> float:
+    """A card package is a fun signal in a format only while the lists carrying any of
+    its markers are less than this share (percent) of the catalog's games there."""
+    return min(
+        100.0, max(0.0, float(os.environ.get("HS_FUN_DECK_SPICY_PACKAGE_MAX_SHARE_PCT", "3.0")))
+    )
+
+
 def fun_deck_twin_sim() -> float:
     """A candidate whose closest list in the catalog is less similar than this is a
     unique list: that alone is a fun signal. At or above it, the list is a variant."""

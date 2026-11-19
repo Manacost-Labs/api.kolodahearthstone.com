@@ -1570,7 +1570,7 @@ def _harold(cards: Counter[int], index: CatalogIndex) -> Any:
 def test_a_small_archetype_is_not_ladder_without_meta_popularity() -> None:
     cards, index = _split_archetype_world()
 
-    assert _harold(cards, index).kind == "brew"  # 0.45 % of the games: below the share floor
+    assert _harold(cards, index).kind == "off_meta"  # 0.45 % of the games: below the share floor
 
 
 def test_an_archetype_popular_in_the_meta_sources_is_ladder() -> None:
