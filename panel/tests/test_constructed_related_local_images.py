@@ -120,6 +120,27 @@ class RelatedSyncLocalImagesTest(unittest.TestCase):
             cursor.execute("UPDATE constructed_cards SET text_ru = 'Другой' WHERE card_id = 'BE_036'")
         self.assertEqual(self.versions(), before + 2)
 
+    def set_image_url(self, url):
+        with self.conn.cursor() as cursor:
+            cursor.execute("UPDATE constructed_cards SET image_url = %s WHERE card_id = 'BE_036'", (url,))
+
+    def test_image_url_change_with_new_mirrored_bytes_creates_a_version(self):
+        self.related_sync()
+        self.mirror_publish("local_image_url", MEDIA)
+        before = self.versions()
+        self.set_image_url("https://cdn/new.png")
+        # The mirror then publishes the new bytes under their own sha path.
+        self.mirror_publish("local_image_url", "/uploads/card-history-media/" + "c" * 64 + ".png")
+        self.assertEqual(self.versions(), before + 1)
+
+    def test_image_url_change_with_same_mirrored_bytes_creates_no_version(self):
+        self.related_sync()
+        self.mirror_publish("local_image_url", MEDIA)
+        before = self.versions()
+        self.set_image_url("https://cdn/other-host/same-bytes.png")
+        self.mirror_publish("local_image_url", MEDIA)
+        self.assertEqual(self.versions(), before)
+
 
 if __name__ == "__main__":
     unittest.main()
