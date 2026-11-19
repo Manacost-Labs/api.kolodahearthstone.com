@@ -147,6 +147,7 @@ export default async function verify(page, root) {
   // 4d. Battlegrounds and Arena: a chart above the table, no empty squares, the Arena icons are the meta ones (#109).
   await open('bg_heroes');
   ensure(await page.locator('.bg-view--heroes svg').first().isVisible(), 'BG heroes: no chart');
+  await page.waitForFunction(() => document.querySelectorAll('.bg-top__row').length === 10).catch(() => {});
   const heroTop = await page.locator('.bg-top__row').count();
   ensure(heroTop === 10, 'BG heroes: top rows ' + heroTop);
   const heroOrder = await page.evaluate(() => {
@@ -236,6 +237,7 @@ export default async function verify(page, root) {
       return {
         state: link.dataset.state,
         text: ph?.textContent.trim() ?? '',
+        alt: link.querySelector('img')?.alt ?? '',
         shown: ph ? getComputedStyle(ph).display !== 'none' : false,
         size: [Math.round(box.width), Math.round(box.height)].join('x'),
       };
@@ -245,6 +247,20 @@ export default async function verify(page, root) {
   ensure(
     waiting.every(item => item.state === 'loading' && item.shown && item.text.length > 0),
     'Slow thumbnails: an empty square ' + JSON.stringify(waiting[0]),
+  );
+  // The monogram is the letters of the row's name («Prisonguard 1» → «P1»), not of the column label.
+  const letters = alt =>
+    alt
+      .trim()
+      .split(/[\s\-–—_:]+/u)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map(word => [...word][0])
+      .join('')
+      .toLocaleUpperCase('ru-RU');
+  ensure(
+    waiting.every(item => item.alt !== 'Изображение' && item.text === letters(item.alt)),
+    'Monogram is not the name: ' + JSON.stringify(waiting[0]),
   );
   ensure(
     waiting.every(item => item.size === '40x40'),
@@ -272,6 +288,17 @@ export default async function verify(page, root) {
     undefined,
     { timeout: 15000 },
   );
+  // A long table scrolled to the bottom: lazy pictures far below load on arrival, none reads «недоступно».
+  await page.locator('.data-table .value-thumb').last().scrollIntoViewIfNeeded();
+  await page.waitForFunction(
+    () =>
+      [...document.querySelectorAll('.data-table .value-thumb')].every(
+        link => link.dataset.state === 'ready',
+      ),
+    undefined,
+    { timeout: 20000 },
+  );
+  ensure((await page.locator('.data-table .value-link').count()) === 0, 'A thumbnail reads «недоступно»');
   await page.unroute('https://api.kolodahearthstone.com/uploads/**', slow);
   checks.bgViews = true;
   await open('arena');

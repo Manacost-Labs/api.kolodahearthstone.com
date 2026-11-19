@@ -21,9 +21,10 @@ const monogram = (alt: string) => {
 // to a plain link when it is broken, never an empty box.
 export function Thumb({ url, alt }: { url: string; alt: string }) {
   const [state, setState] = useState<'loading' | 'ready' | 'broken'>('loading');
-  // A cached picture can finish before React attaches onLoad: read it at mount.
+  // A cached picture can finish before React attaches onLoad: read it at mount; «broken» comes only from onError.
   const ref = useCallback((node: HTMLImageElement | null) => {
-    if (node?.complete) setState(node.naturalWidth > 0 ? 'ready' : 'broken');
+    // Only «ready» from here: a lazy picture off screen can read complete with no size, that is not an error.
+    if (node?.complete && node.naturalWidth > 0) setState('ready');
   }, []);
   const broken = state === 'broken';
   return (
