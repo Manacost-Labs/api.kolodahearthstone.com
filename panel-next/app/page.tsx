@@ -10,6 +10,7 @@ import { Parsers } from '@/components/Parsers';
 import { Tokens } from '@/components/Tokens';
 import { Editor } from '@/components/Editor';
 import { Terms } from '@/components/Terms';
+import { resolveModule } from '@/lib/stats-sections';
 import type { AnalyticsData, AnalyticsModule, Row } from '@/lib/types';
 export const dynamic = 'force-dynamic';
 export default async function Page({
@@ -38,8 +39,8 @@ export default async function Page({
       'panel',
       new URLSearchParams({ action: 'analytics_registry' }),
     );
-    const candidate = query.get('stats') || 'overview';
-    const moduleKey = registry.modules[candidate] ? candidate : 'overview';
+    // Without `stats` (or with a key the registry does not know) the page opens «Мета», not the registry.
+    const moduleKey = resolveModule(query.get('stats'), registry.modules);
     const definition = registry.modules[moduleKey];
     const { backend, page, missing } = analyticsRequest(query, moduleKey, definition);
     let data: AnalyticsData = {

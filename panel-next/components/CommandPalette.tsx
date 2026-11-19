@@ -13,6 +13,8 @@ import { TranslateIcon } from '@phosphor-icons/react/dist/ssr/Translate';
 import { cardHref, cardKey } from '@/lib/card-detail';
 import { catalogHref } from '@/lib/catalog-state';
 import { apiPath } from '@/lib/client';
+import { groupLabelOf, statsHref } from '@/lib/stats-sections';
+import { useStatsRegistry } from './useStatsRegistry';
 import { normalizedCard } from '@/lib/model';
 import type { Row } from '@/lib/types';
 import { Artwork } from './Artwork';
@@ -46,36 +48,6 @@ function SectionIcon({ item }: { item: Item }) {
   return <Icon size={16} aria-hidden="true" />;
 }
 
-// Statistics modules come from the analytics registry; one request per page load is enough.
-let registryRequest: Promise<[string, string][]> | null = null;
-function loadStatsModules(): Promise<[string, string][]> {
-  registryRequest ??= fetch(`${apiPath}?action=analytics_registry`, { cache: 'no-store' })
-    .then(response => response.json())
-    .then(payload =>
-      Object.entries((payload?.modules ?? {}) as Record<string, { title?: string }>).map(
-        ([key, module]): [string, string] => [key, module.title || key],
-      ),
-    )
-    .catch(() => {
-      registryRequest = null;
-      return [];
-    });
-  return registryRequest;
-}
-function useStatsModules(): [string, string][] {
-  const [modules, setModules] = useState<[string, string][]>([]);
-  useEffect(() => {
-    let live = true;
-    void loadStatsModules().then(list => {
-      if (live) setModules(list);
-    });
-    return () => {
-      live = false;
-    };
-  }, []);
-  return modules;
-}
-
 const quickActions: Item[] = [
   { key: 'action:new', label: 'Добавить карту', href: '/?action=new', icon: 'plus' },
   {
@@ -94,7 +66,7 @@ const quickActions: Item[] = [
   {
     key: 'action:attention',
     label: 'Статистика: требуют внимания',
-    href: '/?action=analytics&rows=attention',
+    href: '/?action=analytics&stats=overview&rows=attention',
     icon: 'warning',
   },
 ];
@@ -169,7 +141,7 @@ export function CommandPalette({
   const list = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const cards = useCardSearch(query, cardType);
-  const modules = useStatsModules();
+  const registry = useStatsRegistry();
   const needle = normalize(query);
   const trimmed = query.trim();
   const sectionItems: Item[] = [
@@ -180,11 +152,11 @@ export function CommandPalette({
       catalog: href === catalogUrl,
     })),
     // Statistics modules join once the visitor types, so the opening list stays short.
-    ...(needle ? modules : []).map(([key, title]): Item => ({
+    ...(needle ? Object.entries(registry) : []).map(([key, module]): Item => ({
       key: 'stats:' + key,
-      label: title,
-      hint: 'Статистика',
-      href: '/?action=analytics&stats=' + encodeURIComponent(key),
+      label: module.title,
+      hint: groupLabelOf(key, registry),
+      href: statsHref(key),
     })),
   ].filter(item => normalize(item.label).includes(needle));
   // With a query, offer to run it in each list that has its own search; without one, shortcuts.
@@ -207,8 +179,8 @@ export function CommandPalette({
           {
             key: 'find:stats',
             label: `Найти «${trimmed}» в реестре источников`,
-            hint: 'Статистика',
-            href: '/?action=analytics&rows_q=' + encodeURIComponent(trimmed),
+            hint: 'Мониторинг',
+            href: '/?action=analytics&stats=overview&rows_q=' + encodeURIComponent(trimmed),
             icon: 'search',
           },
         ]

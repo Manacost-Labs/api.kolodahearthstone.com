@@ -5,6 +5,8 @@ import { catalogHref } from '@/lib/catalog-state';
 import { useSearchParams } from 'next/navigation';
 import { CaretRightIcon } from '@phosphor-icons/react/dist/ssr/CaretRight';
 import { CaretUpDownIcon } from '@phosphor-icons/react/dist/ssr/CaretUpDown';
+import { CloudArrowDownIcon } from '@phosphor-icons/react/dist/ssr/CloudArrowDown';
+import { ListChecksIcon } from '@phosphor-icons/react/dist/ssr/ListChecks';
 import { ChartBarIcon } from '@phosphor-icons/react/dist/ssr/ChartBar';
 import { DatabaseIcon } from '@phosphor-icons/react/dist/ssr/Database';
 import { KeyIcon } from '@phosphor-icons/react/dist/ssr/Key';
@@ -28,6 +30,15 @@ import { AppShell, AppShellSidebarToggle, type AppShellState } from './varylo-ui
 import { Sidebar, type SidebarSection } from './varylo-ui/navigation/Sidebar';
 import { DropdownMenu } from './varylo-ui/navigation/DropdownMenu';
 import { CommandPalette } from './CommandPalette';
+import { useStatsRegistry } from './useStatsRegistry';
+import {
+  defaultStatsModule,
+  monitoringModules,
+  otherGroup,
+  placeOf,
+  statsGroups,
+  statsHref,
+} from '@/lib/stats-sections';
 
 type ShellProps = { user: User; logoutCsrf: string; categories: Record<string, string>; children: ReactNode };
 
@@ -66,6 +77,10 @@ function ShellContent({ user, logoutCsrf, categories, children }: ShellProps) {
   const params = useSearchParams();
   const action = params.get('action') || 'list';
   const type = params.get('card_type') || '';
+  const registry = useStatsRegistry();
+  // Same place the page itself resolves: a missing or unknown `stats` opens the default module.
+  const statsKey = params.get('stats') || defaultStatsModule;
+  const place = placeOf(statsKey, registry);
   const { pending, catalogUrl, navigate } = useWorkspaceNavigation();
   const collectionUrl = (key: string) => catalogHref(catalogUrl.split('?')[1] || '', { card_type: key });
   const catalogType = new URLSearchParams(catalogUrl.split('?')[1] || '').get('card_type') || '';
@@ -74,8 +89,9 @@ function ShellContent({ user, logoutCsrf, categories, children }: ShellProps) {
   const [quick, setQuick] = useState(false);
   const shortcuts: [string, string][] = [
     [catalogUrl, 'Каталог'],
-    ['/?action=analytics', 'Статистика'],
+    [statsHref(defaultStatsModule), 'Статистика'],
     ['/?action=parsers', 'Источники'],
+    ...monitoringModules.map(({ key, label }): [string, string] => [statsHref(key), label || key]),
     ['/?action=api_tokens', 'API-токены'],
     ['/?action=wiki_terms', 'Переводы Wiki'],
     ...Object.entries(categories).map(([key, name]): [string, string] => [collectionUrl(key), name]),
@@ -112,11 +128,30 @@ function ShellContent({ user, logoutCsrf, categories, children }: ShellProps) {
   // Breadcrumbs name the same group as the sidebar, so both always agree on where the page lives.
   const group = ['list', 'edit', 'new'].includes(action)
     ? 'Каталог'
-    : ['analytics', 'parsers'].includes(action)
-      ? 'Мониторинг'
-      : 'Управление';
+    : action === 'analytics'
+      ? place.section === 'statistics'
+        ? 'Статистика'
+        : 'Мониторинг'
+      : action === 'parsers'
+        ? 'Мониторинг'
+        : 'Управление';
+  const pageName =
+    action === 'analytics' ? (place.section === 'statistics' ? place.group.label : place.label) : '';
   const categoryName = categories[type] || 'Поля сражений';
-  const active = action === 'list' ? 'cat:' + type : action;
+  const active =
+    action === 'list'
+      ? 'cat:' + type
+      : action === 'analytics'
+        ? place.section === 'statistics'
+          ? 'stats:' + place.group.key
+          : 'stats:' + statsKey
+        : action;
+  const other = otherGroup(registry);
+  const statsItems = [...statsGroups, ...(other ? [other] : [])].map(item => ({
+    id: 'stats:' + item.key,
+    label: item.label,
+    href: statsHref(item.modules[0].key),
+  }));
   const sections: SidebarSection[] = [
     {
       items: [
@@ -132,6 +167,13 @@ function ShellContent({ user, logoutCsrf, categories, children }: ShellProps) {
             href: categoryUrl(key),
           })),
         },
+        {
+          id: 'stats',
+          label: 'Статистика',
+          icon: <ChartBarIcon size={16} />,
+          defaultOpen: action === 'analytics' && place.section === 'statistics',
+          items: statsItems,
+        },
       ],
     },
     {
@@ -143,12 +185,12 @@ function ShellContent({ user, logoutCsrf, categories, children }: ShellProps) {
           icon: <PlugsConnectedIcon size={16} />,
           href: '/?action=parsers',
         },
-        {
-          id: 'analytics',
-          label: 'Статистика',
-          icon: <ChartBarIcon size={16} />,
-          href: '/?action=analytics',
-        },
+        ...monitoringModules.map(({ key, label }, index) => ({
+          id: 'stats:' + key,
+          label: label || key,
+          icon: index === 0 ? <ListChecksIcon size={16} /> : <CloudArrowDownIcon size={16} />,
+          href: statsHref(key),
+        })),
       ],
     },
     {
@@ -229,7 +271,11 @@ function ShellContent({ user, logoutCsrf, categories, children }: ShellProps) {
               )}
               <CaretRightIcon size={12} aria-hidden="true" />
               <strong aria-current="page">
-                {action === 'list' ? categoryName : sectionNames[action] || 'Панель'}
+                {action === 'list'
+                  ? categoryName
+                  : action === 'analytics'
+                    ? pageName
+                    : sectionNames[action] || 'Панель'}
               </strong>
             </nav>
             <button

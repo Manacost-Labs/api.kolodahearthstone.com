@@ -103,12 +103,26 @@ These three PHP adapters are reachable only through the private
 
 ## Navigation and page states
 
-- The sidebar has three groups: **Каталог** (fifteen categories), **Мониторинг**
-  (Источники, Статистика) and **Управление** (API-токены, Переводы Wiki). The
-  catalogue group unfolds on catalogue pages only (or when opened by hand), so
-  the monitoring sections stay above the fold elsewhere. The breadcrumb names
-  the same group as the sidebar; in the card editor it links back to the
-  catalogue address the editor was opened from.
+- The sidebar has four groups: **Каталог** (fifteen categories) and
+  **Статистика** (five groups: «Стандарт и Вольный», «Поля сражений», «Арена»,
+  «Карты», «Патчи»), then **Мониторинг** (Источники, Реестр источников,
+  Провайдеры) and **Управление** (API-токены, Переводы Wiki). Catalogue and
+  statistics unfold on their own pages (or by hand), so monitoring stays above
+  the fold elsewhere. The breadcrumb names the same group and item as the
+  sidebar; in the card editor it links back to the catalogue address the
+  editor was opened from.
+- Statistics modules are placed by `panel-next/lib/stats-sections.ts`: group,
+  order and short tab names. A group page shows Valyro `Tabs` with only the
+  modules of that group (groups with one module have no tabs). The registry
+  and providers are the monitoring pages, without tabs. A registry module the
+  map does not know lands in the «Прочее» group (menu item and tabs appear on
+  their own), so it is never lost; `tests/stats-sections.test.ts` covers this.
+  `/?action=analytics` without `stats` opens «Мета»; old
+  `/?action=analytics&stats=<key>` links keep working. The page heading stays
+  the registry title of the module.
+- On the source registry (`stats=overview`) long ids wrap inside their column,
+  «Что загружается» keeps two lines (full text in «Подробнее»), and the seven
+  columns fit 1280 and 1440 px without sideways scrolling.
 - The parser page heading matches its menu item, «Источники». A planned run
   whose time has passed renders through `formatSchedule` / `ScheduleTime` as
   «просрочен на …» in the warning colour (the summary card turns warning too),
@@ -139,8 +153,9 @@ These three PHP adapters are reachable only through the private
    `analytics_module_registry()` in `lib/analytics.php`.
 2. Add a normalization branch that returns `summary`, `columns`, and `rows`.
    Keep source-specific response shapes out of the browser renderer.
-3. `panel-next` lists modules from `action=analytics_registry`, so a
-   registered module appears in navigation automatically. Add special filters
+3. `panel-next` lists modules from `action=analytics_registry`; a module
+   missing from `lib/stats-sections.ts` appears under «Прочее». Add it to a
+   group there to give it a place and a short tab name. Add special filters
    in `panel-next/components/Analytics.tsx`; prefer the existing generic table.
 4. Use a bounded `limit`, a short upstream timeout, and a cache TTL appropriate
    for the source. Never add a user-controlled upstream URL.

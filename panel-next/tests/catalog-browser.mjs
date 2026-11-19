@@ -103,7 +103,7 @@ export default async function verify(page, root, output) {
   const originalY = await page.evaluate(() => window.scrollY);
   await page
     .getByRole('navigation', { name: 'Разделы панели' })
-    .getByRole('link', { name: 'Статистика' })
+    .getByRole('link', { name: 'Реестр источников' })
     .click();
   await page.waitForFunction(
     () => location.search.includes('action=analytics') && document.querySelector('.analytics-layout'),
@@ -127,7 +127,7 @@ export default async function verify(page, root, output) {
   await search.fill('UNSENT_SEARCH');
   await page
     .getByRole('navigation', { name: 'Разделы панели' })
-    .getByRole('link', { name: 'Статистика' })
+    .getByRole('link', { name: 'Реестр источников' })
     .click();
   await page.waitForFunction(
     () => location.search.includes('action=analytics') && document.querySelector('.analytics-layout'),

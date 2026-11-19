@@ -10,6 +10,7 @@ import { ProviderUsage } from './ProviderUsage';
 import { Reliability } from './Reliability';
 import { EmptyState, KpiCard, StatusBadge, Time, Value } from './ui';
 import { ArrowClockwiseIcon } from '@phosphor-icons/react/dist/ssr/ArrowClockwise';
+import { StatsModuleTabs } from './StatsModuleTabs';
 import { Select } from './varylo-ui/forms/Select';
 export function Analytics({
   data,
@@ -55,19 +56,12 @@ export function Analytics({
         </button>
       </header>
       <div className="analytics-layout">
-        <nav className="module-nav" aria-label="Наборы статистики">
-          {Object.entries(modules).map(([key, item]) => (
-            <button
-              key={key}
-              type="button"
-              aria-current={key === module ? 'page' : undefined}
-              onClick={() => start(() => router.push('/?action=analytics&stats=' + key))}
-            >
-              {item.title}
-            </button>
-          ))}
-        </nav>
-        <div className="analytics-main">
+        <StatsModuleTabs
+          modules={modules}
+          module={module}
+          onSelect={key => start(() => router.push('/?action=analytics&stats=' + key))}
+        />
+        <div className="analytics-main" data-module={module}>
           <form
             className="filter-row"
             onSubmit={e => {
