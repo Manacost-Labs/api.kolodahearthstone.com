@@ -1819,11 +1819,14 @@ function analytics_normalize(string $module, array $definition, array $fetch): a
         $rows = is_array($payload['data'] ?? null) ? $payload['data'] : [];
         foreach ($rows as &$row) {
             $row['best_composition_name'] = $row['best_composition']['name'] ?? '';
+            $row['image_url'] = analytics_bg_hero_image_url((string)($row['id'] ?? $row['card_id'] ?? ''));
+            $row['image_kind'] = 'hero_portrait';
         }
         unset($row);
         $rows = analytics_bg_hero_top_rows($rows);
         $total = analytics_number(analytics_meta($payload)['count'] ?? null);
         return analytics_result_shell($module, $definition, $fetch, analytics_statistics_summary($fetch, $rows, 'Героев', 'games', $total === null ? null : (int)$total), [
+            analytics_column('image_url', 'Арт', 'image'),
             analytics_column('hero', 'Герой'),
             analytics_column('tier', 'Тир', 'status'),
             analytics_column('pick_rate_value', 'Выбор', 'percent'),
@@ -1854,6 +1857,12 @@ function analytics_normalize(string $module, array $definition, array $fetch): a
 
     if ($module === 'arena') {
         $rows = is_array($payload['data'] ?? null) ? $payload['data'] : [];
+        foreach ($rows as &$row) {
+            if (is_array($row)) {
+                $row['class_slug'] = analytics_class_slug($row);
+            }
+        }
+        unset($row);
         return analytics_result_shell($module, $definition, $fetch, analytics_statistics_summary($fetch, $rows, 'Классов'), [
             analytics_column('class_ru', 'Класс'),
             analytics_column('win_rate', 'Винрейт', 'percent'),
@@ -1979,6 +1988,67 @@ function analytics_filter_rows(array $rows, string $query, int $limit): array
     return array_slice($rows, 0, max(1, $limit));
 }
 
+const ANALYTICS_MEDIA_ORIGIN = 'https://api.kolodahearthstone.com';
+/** Names of HeartPulse public/class_icon/ui/<slug>-64.webp: a class_slug is always one of these or ''. */
+const ANALYTICS_CLASS_SLUGS = ['deathknight', 'demonhunter', 'druid', 'hunter', 'mage', 'paladin', 'priest', 'rogue', 'shaman', 'warlock', 'warrior'];
+
+/**
+ * Icon slug of a class row: the first of the given fields that names one of the 11 classes
+ * (case, spaces and dashes ignored: "Demon Hunter" and DEMONHUNTER both give demonhunter).
+ * Neutral, unknown or missing values give '' so the client draws no class icon.
+ */
+function analytics_class_slug(array $row, array $fields = ['slug', 'class', 'class_name', 'cardClass']): string
+{
+    foreach ($fields as $field) {
+        $value = $row[$field] ?? null;
+        if (!is_string($value)) {
+            continue;
+        }
+        $slug = preg_replace('/[^a-z]/', '', strtolower($value)) ?? '';
+        if (in_array($slug, ANALYTICS_CLASS_SLUGS, true)) {
+            return $slug;
+        }
+    }
+
+    return '';
+}
+
+/**
+ * Image of a Battlegrounds minion from the same files the catalog serves: framed art first, then
+ * the raw card. A file that is not on disk gives '' (the panel draws a placeholder instead of a
+ * broken square). The URL is absolute, because the panel may be served from another host.
+ * Without an uploads directory (a developer machine) existence cannot be checked, so the
+ * framed URL is returned as is.
+ */
+function analytics_bg_card_image_url(string $cardId): string
+{
+    if ($cardId === '' || !preg_match('/^[A-Za-z0-9_.-]+$/', $cardId) || strpos($cardId, '..') !== false) {
+        return '';
+    }
+    $configured = getenv('ANALYTICS_UPLOADS_DIR');
+    $directory = is_string($configured) && $configured !== '' ? $configured : dirname(__DIR__) . '/uploads';
+    $kinds = ['framed', 'cards'];
+    if (!is_dir($directory)) {
+        return ANALYTICS_MEDIA_ORIGIN . '/uploads/framed/' . rawurlencode($cardId) . '.png';
+    }
+    foreach ($kinds as $kind) {
+        $path = $directory . '/' . $kind . '/' . $cardId . '.png';
+        if (is_file($path) && (int)@filesize($path) > 0) {
+            return ANALYTICS_MEDIA_ORIGIN . '/uploads/' . $kind . '/' . rawurlencode($cardId) . '.png';
+        }
+    }
+
+    return '';
+}
+
+/** Hero portrait (square, 256 px) for a Battlegrounds hero card id. */
+function analytics_bg_hero_image_url(string $cardId): string
+{
+    return $cardId !== '' && preg_match('/^[A-Za-z0-9_.-]+$/', $cardId)
+        ? 'https://art.hearthstonejson.com/v1/256x/' . rawurlencode($cardId) . '.jpg'
+        : '';
+}
+
 function analytics_constructed_cards(array $definition, array $query): array
 {
     $format = (string)($query['format'] ?? 'standard');
@@ -2033,6 +2103,7 @@ function analytics_arena_cards(array $definition, array $query): array
         $cardId = (string)($row['card_id'] ?? $row['id'] ?? '');
         $row['card_id'] = $cardId;
         $row['image_url'] = $row['image_url'] ?? ($cardId !== '' ? 'https://art.hearthstonejson.com/v1/render/latest/ruRU/256x/' . rawurlencode($cardId) . '.png' : '');
+        $row['class_slug'] = analytics_class_slug($row, ['cardClass']);
     }
     unset($row);
     $total = count($rows);
@@ -2069,7 +2140,7 @@ function analytics_bg_minions(array $definition, array $query): array
         $row['card_id'] = $cardId;
         $row['dbf_id'] = $row['dbfId'] ?? $row['dbf_id'] ?? null;
         $row['name_ru'] = $row['name_ru'] ?? $row['name'] ?? $cardId;
-        $row['image_url'] = $cardId !== '' ? '/uploads/cards/' . rawurlencode($cardId) . '.png' : '';
+        $row['image_url'] = analytics_bg_card_image_url($cardId);
         $row['image_kind'] = 'card';
         $row['source_url'] = $source['url'] ?? null;
     }
@@ -2190,7 +2261,7 @@ function analytics_bg_heroes_ratings(array $definition, array $query): array
             }
         }
         $rows[] = [
-            'image_url' => 'https://art.hearthstonejson.com/v1/256x/' . rawurlencode($cardId) . '.jpg',
+            'image_url' => analytics_bg_hero_image_url($cardId),
             'image_kind' => 'hero_portrait',
             'hero' => $known['hero'] ?? $cardId,
             'tier' => $known['tier'] ?? '',
