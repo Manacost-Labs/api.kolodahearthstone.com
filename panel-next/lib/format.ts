@@ -127,6 +127,14 @@ export function formatNumber(value: unknown): string {
   return number === null ? (isBlank(value) ? '—' : String(value)) : numberFormatter.format(number);
 }
 
+const twoDecimals = new Intl.NumberFormat(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/** A plain number with exactly two decimals (`3,98`, `4,00`), e.g. an average placement; `—` for a missing value. */
+export function formatTwoDecimals(value: unknown): string {
+  const number = toNumber(value);
+  return number === null ? '—' : twoDecimals.format(number);
+}
+
 const percentFormatter = new Intl.NumberFormat(locale, {
   minimumFractionDigits: 1,
   maximumFractionDigits: 1,

@@ -355,6 +355,8 @@ URL детерминированного crop `320×64` в WebP. `images.horizon
 | --- | --- | --- | --- |
 | GET | `/api/v1/bartender-skins` | `page`, `per_page` | Справочник проверенных скинов бармена |
 | GET | `/api/v1/bartender-skins/{card_id}` | — | Скин бармена |
+| GET | `/api/v1/card-history/changes` | `from`, `to`, `entity`, `page`, `per_page` | Карты с реальными изменениями за окно (до 14 суток, UTC): до/после, поля, архивные картинки. [docs/card-history-changes.md](docs/card-history-changes.md) |
+| GET | `/api/v1/card-history/waves` | `since`, `until`, `min_cards` | Волны изменений карт — подсказка «вероятный патч» |
 | GET | `/api/v1/card-history/{entity}/{card_id}` | `page`, `per_page` | Сохранённые полные версии карты, новые сначала |
 | GET | `/api/v1/card-history/card/{card_id}/legacy` | `page`, `per_page` | Старый журнал BG с исходными payload |
 | GET | `/api/v1/constructed-cards` | `q`, `format`, `dbf`, `collectible`, `card_type`, `class`, `set`, `include`, `updated_since`, `page`, `per_page` | Карты Standard/Wild |

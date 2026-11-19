@@ -36,7 +36,7 @@ export default async function verify(page, root, output) {
   // Statistics: five groups; «Мета» is two clicks away and the tabs hold only the modules of the group.
   const groups = ['Стандарт и Вольный', 'Поля сражений', 'Арена', 'Карты', 'Патчи'];
   await sidebar.getByRole('button', { name: 'Статистика', exact: true }).click();
-  for (const name of groups)
+  for (const name of ['Сводка', ...groups])
     await sidebar.getByRole('link', { name, exact: true }).waitFor({ state: 'visible' });
   await sidebar.getByRole('link', { name: 'Стандарт и Вольный', exact: true }).click();
   await page.getByRole('heading', { level: 1, name: 'Мета Standard / Wild' }).waitFor();
@@ -55,10 +55,16 @@ export default async function verify(page, root, output) {
   ensure(page.url().includes('stats=decks'), 'A tab did not set `stats`');
   checks.statsGroupsAndTabs = true;
 
-  // `/?action=analytics` without `stats` opens «Мета»; the old `stats=<key>` links keep working.
+  // `/?action=analytics` without `stats` opens the summary (#110); the old `stats=<key>` links keep working.
   await page.goto(root + '/?action=analytics');
+  await page.getByRole('heading', { level: 1, name: 'Статистика · Сводка' }).waitFor();
+  ensure(
+    (await crumbs.innerText()).replace(/\s+/g, ' ').trim() === 'Статистика Сводка',
+    'Crumbs of the summary: ' + (await crumbs.innerText()),
+  );
+  await page.goto(root + '/?action=analytics&stats=meta');
   await page.getByRole('heading', { level: 1, name: 'Мета Standard / Wild' }).waitFor();
-  checks.defaultIsMeta = true;
+  checks.defaultIsSummary = true;
 
   // All 13 modules: breadcrumb and highlighted item name the same place the menu does.
   const expected = {

@@ -21,6 +21,10 @@ requests remain explicitly unverified or failed. The API's
 the bounded page's actual archived count. History before the first observation
 remains unknown.
 
+Cards that really changed inside a time window (a patch), with these archived
+images before and after, are listed by
+[`/api/v1/card-history/changes`](card-history-changes.md).
+
 ## Operational capture
 
 The worker's default is a read-only plan. Installation and capture require

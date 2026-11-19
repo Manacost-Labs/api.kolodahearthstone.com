@@ -36,10 +36,24 @@ try {
     await new Promise(resolve => setTimeout(resolve, 50));
   }
   if (!ready) throw Error('Standalone server did not start: ' + diagnostics);
-  const test = spawn(process.execPath, ['--test', 'tests/http.test.mjs', 'tests/analytics-smoke.test.mjs'], {
-    env: { ...process.env, PANEL_TEST_ORIGIN: origin },
-    stdio: 'inherit',
-  });
+  const test = spawn(
+    process.execPath,
+    [
+      '--test',
+      '--test-concurrency=1',
+      'tests/http.test.mjs',
+      'tests/analytics-smoke.test.mjs',
+      'tests/stats-home-smoke.test.mjs',
+    ],
+    {
+      env: {
+        ...process.env,
+        PANEL_TEST_ORIGIN: origin,
+        PANEL_FIXTURE_ORIGIN: 'http://127.0.0.1:' + server.address().port,
+      },
+      stdio: 'inherit',
+    },
+  );
   const status = await new Promise(resolve => test.once('exit', resolve));
   if (status !== 0) process.exitCode = 1;
 } finally {

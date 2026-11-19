@@ -196,6 +196,9 @@ let tokens = [
 let nonce = 1;
 let catalogErrorTriggered = false;
 const requests = [];
+// Test hooks: `/test/fail?modules=a,b` makes those analytics modules answer 502 (empty list clears it);
+// every analytics request is logged as { view: 'analytics', module, query } in `/test/requests`.
+let failingModules = new Set();
 const snapshot = {
   revision: 4,
   sections: [
@@ -266,6 +269,10 @@ export const server = http.createServer(async (req, res) => {
     res.end(JSON.stringify(data));
   };
   if (url.pathname === '/test/requests') return send(requests);
+  if (url.pathname === '/test/fail') {
+    failingModules = new Set((url.searchParams.get('modules') || '').split(',').filter(Boolean));
+    return send({ ok: true, modules: [...failingModules] });
+  }
   if (
     !String(req.headers.cookie || '')
       .split(';')
@@ -292,6 +299,14 @@ export const server = http.createServer(async (req, res) => {
       input.action === 'run' ? 202 : 200,
     );
   }
+  if (url.pathname === '/analytics.php')
+    requests.push({
+      view: 'analytics',
+      module: url.searchParams.get('module'),
+      query: url.searchParams.toString(),
+    });
+  if (url.pathname === '/analytics.php' && failingModules.has(url.searchParams.get('module')))
+    return send({ ok: false, message: 'Не удалось загрузить статистику.' }, 502);
   if (url.pathname === '/analytics.php' && req.method !== 'GET')
     return send({ ok: false, message: 'Метод не поддерживается.' }, 405);
   if (url.pathname === '/analytics.php' && live) {
