@@ -452,8 +452,11 @@ SOURCES: tuple[Source, ...] = (
         site="hsguru",
         category="fun_decks",
         description=(
-            "Off-meta / fun decks derived from streamer-deck candidates by low overlap "
-            "with HSGuru meta catalogs and niche archetype popularity. "
+            "Fun decks (concept-v8) derived from streamer-deck and HSGuru catalog candidates, "
+            "compared with every catalog list of the same format and class. Ladder lists are "
+            "turned away first (close to a ladder-archetype list, a ladder-archetype title, a "
+            "bare style name); a deck is a brew (concept, spicy package or unique list) or "
+            "off_meta (variant of a named non-ladder archetype). "
             "A published deck has a real sample (games, win rate, at least 30 games) and a "
             "95% Wilson win-rate interval not entirely below 45%; near-identical lists of one "
             "format and class collapse into one, and every class with a candidate is represented. "

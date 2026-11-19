@@ -671,9 +671,9 @@ def test_the_ladder_share_threshold_comes_from_the_environment(
 
 
 def test_ladder_title_gate_rejects_a_ladder_named_list_that_resembles_its_archetype() -> None:
-    ladder = _deck("LADDER", range(1, 16), "Dragon Druid", cls="Druid", games=LADDER_GAMES)
+    ladder = _deck("LADDER", range(1, 16), "Treant Druid", cls="Druid", games=LADDER_GAMES)
 
-    scored = _classify("STD Dragon Druid", _sharing(8), ladder, cls="Druid")
+    scored = _classify("STD Treant Druid", _sharing(8), ladder, cls="Druid")
 
     assert scored.ladder_sim == 0.3636  # well below the member gate
     assert scored.is_fun is False
@@ -682,9 +682,9 @@ def test_ladder_title_gate_rejects_a_ladder_named_list_that_resembles_its_archet
 
 
 def test_ladder_title_gate_lets_a_distant_list_with_the_same_name_through() -> None:
-    ladder = _deck("LADDER", range(1, 16), "Dragon Druid", cls="Druid", games=LADDER_GAMES)
+    ladder = _deck("LADDER", range(1, 16), "Treant Druid", cls="Druid", games=LADDER_GAMES)
 
-    scored = _classify("Dragon Druid", _sharing(6), ladder, cls="Druid")  # 0.25
+    scored = _classify("Treant Druid", _sharing(6), ladder, cls="Druid")  # 0.25
 
     assert "ladder_title_gate" not in scored.reasons
     assert scored.kind == "brew"
@@ -702,7 +702,7 @@ def test_ladder_title_gate_knows_named_ladder_packages_even_with_a_tiny_share() 
 
 def test_a_title_of_a_rare_archetype_is_not_a_ladder_title() -> None:
     rare = _deck("RARE", range(1, 16), "Imbue Druid", cls="Druid", games=60)
-    big = _deck("BIG", range(500, 515), "Dragon Druid", cls="Druid", games=LADDER_GAMES)
+    big = _deck("BIG", range(500, 515), "Treant Druid", cls="Druid", games=LADDER_GAMES)
 
     scored = _classify("Imbue Druid", _sharing(8), rare, big, cls="Druid")
 
@@ -766,8 +766,9 @@ def test_needs_fun_signal_gate_rejects_a_list_that_is_a_copy_of_an_unnamed_deck(
 
 def test_brew_by_a_concept_title() -> None:
     twin = _deck("TWIN", [*range(201, 214), 1, 2], "Casino Mill Mage", cls="Mage", games=60)
+    big = _deck("BIG", range(500, 515), "Pirate Mage", cls="Mage", games=LADDER_GAMES)
 
-    scored = _classify("Casino Yogg Mill Mage", _sharing(0, base=201), twin, cls="Mage")
+    scored = _classify("Casino Yogg Mill Mage", _sharing(0, base=201), twin, big, cls="Mage")
 
     assert scored.twin_sim >= 0.75  # not unique, still a brew by its concept
     assert scored.kind == "brew"
@@ -778,9 +779,10 @@ def test_brew_by_a_concept_title() -> None:
 
 def test_brew_by_a_spicy_package() -> None:
     twin = _deck("TWIN", [*range(201, 214), 1, 2], "Custom Warlock", cls="Warlock", games=60)
+    big = _deck("BIG", range(500, 515), "Other Warlock", cls="Warlock", games=LADDER_GAMES)
 
     scored = _classify(
-        "Custom Warlock", _sharing(0, base=201, extra=[SPICY_CARD]), twin, cls="Warlock"
+        "Custom Warlock", _sharing(0, base=201, extra=[SPICY_CARD]), twin, big, cls="Warlock"
     )
 
     assert scored.twin_sim >= 0.75
@@ -806,7 +808,7 @@ def test_brew_by_a_unique_list() -> None:
 
 def test_off_meta_is_a_rare_named_archetype_without_a_fun_signal() -> None:
     twin = _deck("TWIN", [*range(1, 14), 201, 202], "Imbue Druid", cls="Druid", games=60)  # 0.7647
-    ladder = _deck("BIG", range(500, 515), "Dragon Druid", cls="Druid", games=LADDER_GAMES)
+    ladder = _deck("BIG", range(500, 515), "Treant Druid", cls="Druid", games=LADDER_GAMES)
 
     scored = _classify("Imbue Druid", _sharing(13), twin, ladder, cls="Druid")
 
@@ -820,8 +822,9 @@ def test_off_meta_is_a_rare_named_archetype_without_a_fun_signal() -> None:
 
 def test_off_meta_does_not_need_the_brew_score_threshold() -> None:
     twin = _deck("TWIN", [*range(1, 14), 201, 202], "Imbue Druid", cls="Druid", games=60)
+    big = _deck("BIG", range(500, 515), "Treant Druid", cls="Druid", games=LADDER_GAMES)
 
-    scored = _classify("Imbue Druid", _sharing(13), twin, cls="Druid", min_score=0.99)
+    scored = _classify("Imbue Druid", _sharing(13), twin, big, cls="Druid", min_score=0.99)
 
     assert scored.kind == "off_meta"
     assert scored.is_fun is True
@@ -903,8 +906,8 @@ def test_the_score_adds_up_the_weights_without_a_ceiling() -> None:
 
 def test_the_closer_to_the_ladder_the_lower_the_score() -> None:
     ladder = _ladder()
-    far = _classify("Casino Mill Rogue", _sharing(2), ladder)
-    near = _classify("Casino Mill Rogue", _sharing(10), ladder)
+    far = _classify("Casino Mill Rogue", _sharing(2), ladder, min_score=0.1)
+    near = _classify("Casino Mill Rogue", _sharing(10), ladder, min_score=0.1)
 
     assert far.is_fun and near.is_fun
     assert far.fun_score > near.fun_score
@@ -1430,6 +1433,8 @@ def test_variants_of_a_wild_deck_survive_a_standard_run_between_two_full_runs(
             _catalog_row("Casino Mill Mage", "Mage", range(401, 416), games=100, win_rate=55.0),
         ],
         wild=[
+            # a ladder deck keeps the two Priest lists below the ladder share
+            _catalog_row("Big Wild Warrior", "Warrior", range(1, 16), games=500_000, win_rate=52.0, fmt="Wild"),
             _catalog_row("WLD Yogg Mill Priest", "Priest", range(901, 916), games=90, win_rate=50.0, fmt="Wild"),
             _catalog_row(
                 "WLD Yogg Mill Priest Alt",
@@ -1610,6 +1615,94 @@ def test_history_of_the_previous_detector_version_is_dropped(fun_deck_world: Non
     _refresh_fun_decks_unlocked()
 
     assert _structured()["rows"] == []
+
+
+# --- regression on a real catalog slice ----------------------------------------
+
+
+def _golden_verdicts(monkeypatch: pytest.MonkeyPatch) -> list[tuple[dict[str, Any], Any]]:
+    for name in (
+        "HS_FUN_DECK_MIN_SCORE",
+        "HS_FUN_DECK_LADDER_SHARE_PCT",
+        "HS_FUN_DECK_LADDER_MEMBER_SIM",
+        "HS_FUN_DECK_TWIN_SIM",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    sliced = json.loads((FIXTURES.parent / "fun_decks_catalog_slice.json").read_text())
+    golden = json.loads((FIXTURES.parent / "fun_decks_golden.json").read_text())
+    with patch("app.deck_decode.cards_by_dbfid", return_value=_AnyCardIndex()):
+        index = CatalogIndex(
+            [
+                CatalogDeck(
+                    deck_code=d["deck_code"],
+                    cards=fun_decks.deck_card_multiset(d["deck_code"]),
+                    archetype=d["archetype"].casefold(),
+                    label=d["archetype"],
+                    hero_class=d["class"],
+                    format=d["format"],
+                    games=d["games"],
+                )
+                for d in sliced["decks"]
+            ],
+            archetype_games={tuple(k.split("|", 1)): v for k, v in sliced["archetype_games"].items()},
+            format_games=sliced["format_games"],
+        )
+        return [
+            (
+                entry,
+                score_fun_deck(
+                    deck_code=entry["deck_code"],
+                    title=entry["title"],
+                    format_name=entry["format"],
+                    hero_class=entry["class"],
+                    win_rate=entry["win_rate"],
+                    catalog_games_hint=entry["games"],
+                    index=index,
+                ),
+            )
+            for entry in golden["decks"]
+        ]
+
+
+def test_real_catalog_slice_rejects_every_ladder_list_and_keeps_the_brews(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    verdicts = _golden_verdicts(monkeypatch)
+    assert len(verdicts) == 38
+
+    passed = [e["title"] for e, s in verdicts if e["expected"] == "reject" and s.is_fun]
+    lost = [e["title"] for e, s in verdicts if e["expected"] == "brew" and not (s.is_fun and s.kind == "brew")]
+    off_as_brew = [e["title"] for e, s in verdicts if e["expected"] == "off_meta" and s.kind == "brew"]
+
+    assert passed == []
+    assert lost == ["Y'Shaarj Paladin"]  # at most 2 of the 17 brews may be lost
+    assert off_as_brew == []
+    assert {e["title"] for e, s in verdicts if e["expected"] == "off_meta" and s.is_fun} == {
+        "Imbue Druid",
+        "Imbue Paladin",
+    }
+
+
+@pytest.mark.parametrize(
+    ("title", "gate"),
+    [
+        ("Garona Rogue", "ladder_member_gate"),
+        ("BBB N'Zoth Handbuff DK", "ladder_member_gate"),
+        ("Yogg Shaman", "ladder_member_gate"),
+        ("Mill Rogue", "ladder_title_gate"),
+        ("Infinity Paladin", "ladder_title_gate"),
+        ("Aggro Paladin", "generic_ladder_gate"),
+        ("Dude Paladin", "generic_ladder_gate"),
+        ("Mech Rogue", "generic_ladder_gate"),
+    ],
+)
+def test_real_catalog_slice_names_the_gate_of_each_audited_reject(
+    monkeypatch: pytest.MonkeyPatch, title: str, gate: str
+) -> None:
+    verdicts = {e["title"]: s for e, s in _golden_verdicts(monkeypatch)}
+
+    assert gate in verdicts[title].reasons
+    assert verdicts[title].is_fun is False
 
 
 # --- replay of the published concept-v6 dataset --------------------------------

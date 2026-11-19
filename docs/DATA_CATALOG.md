@@ -221,18 +221,40 @@ GET /v1/constructed/archetypes
 | `metastats_decks` | Архетип, класс, winrate, games, cards, deck code. |
 | `hsguru_streamer_decks_legend_1000` | Streamer, peak/latest rank, win-loss, format, last played, links и deck code. |
 | `hsguru_deck_radar` | SQLite история точных deckstring из опубликованных streamer snapshots: baseline без событий, затем `candidate` и `confirmed` после второго независимого наблюдения. Контракт: [HSGURU_DECK_RADAR.md](HSGURU_DECK_RADAR.md). |
-| `hsguru_fun_decks` | Off-meta / fun decks: `fun_score`, `max_meta_similarity`, nearest archetype, `reasons`, доверительный интервал винрейта; derived from streamer и catalog candidates vs meta catalogs. Правила отбора, поля и коды причин — в разделе «Фан-колоды» ниже. |
+| `hsguru_fun_decks` | Фан-колоды: `kind` (`brew`/`off_meta`), `fun_score`, `ladder_sim`, `reasons`, доверительный интервал винрейта; derived from streamer и catalog candidates vs весь каталог HSGuru. Правила отбора, поля и коды причин — в разделе «Фан-колоды» ниже. |
 
 ### Фан-колоды — `hsguru_fun_decks`
 
 Производный набор: необычные, но играбельные колоды. Кандидаты — колоды
 стримеров легенды (`hsguru_streamer_decks_legend_1000`) и каталог HSGuru с
-45–220 играми; оценка — расстояние до ближайшего ядра меты того же класса и
-формата плюс сигналы концепции. В `data.structured.detector_version` указана
-версия правил (`concept-v7`), `data.structured.rows` — опубликованные колоды.
+45–220 играми. Кандидат сравнивается со **всеми** списками каталога (4 каталога
+`hsguru_deck_catalog_*`, списки от 45 игр) того же формата и класса, а не только
+с топ-350. В `data.structured.detector_version` указана версия правил
+(`concept-v8`), `data.structured.rows` — опубликованные колоды.
 
-Правила отбора `concept-v7`. Пороги настраиваются через env, значения по
-умолчанию — в таблице.
+**Ладдерный архетип** — архетип с долей ≥ `HS_FUN_DECK_LADDER_SHARE_PCT` игр своего
+формата или именованный ладдерный пакет (Thief Priest, Quest X, Egg DK и т. п.).
+
+Классификация `concept-v8`, по порядку:
+
+1. **Отсев ладдера** (для обоих уровней, независимо от концепт-слов и пакетов):
+   `ladder_member_gate` — Jaccard к списку ладдерного архетипа ≥
+   `HS_FUN_DECK_LADDER_MEMBER_SIM`; `ladder_title_gate` — название совпадает с
+   ладдерным архетипом и список похож на его списки ≥ 0.35; `generic_ladder_gate` —
+   «Aggro/Dude/Mech/Face/Tempo… <класс>» без острого пакета при любом сходстве
+   (общие названия стилей не считаются «забытыми архетипами»).
+2. **`brew`** — есть фан-сигнал: концепт в названии, острый пакет или уникальный
+   список (ближайший любой список ближе не 0.75: `HS_FUN_DECK_TWIN_SIM`). Публикуется
+   при `fun_score` ≥ `HS_FUN_DECK_MIN_SCORE`.
+3. **`off_meta`** — сигнала нет, но список — вариант (≥ 0.55) именованного
+   неладдерного архетипа (Imbue Druid, Imbue Paladin). Порог `fun_score` не нужен.
+4. Иначе отказ `needs_fun_signal_gate`.
+
+Отбор: сначала бру (по одной лучшей колоде каждого класса, затем по `fun_score`),
+после них офф-мета — не больше одной на класс и не больше трети выдачи формата.
+Мем/сыр (`meme_low_winrate`, `cheese_high_winrate`, «Сыр») сохранены.
+
+Правила выдачи и пороги (значения по умолчанию в таблице).
 
 | Правило | Что делает | Env, по умолчанию |
 | --- | --- | --- |
@@ -240,11 +262,16 @@ GET /v1/constructed/archetypes
 | Винрейт | Доверительный интервал Уилсона 95% для `win_rate` при `games`. Колода, у которой верхняя граница интервала ниже порога, заведомо проигрывает и не публикуется. | `HS_FUN_DECK_MIN_CI_HIGH=45` |
 | Почти одинаковые списки | Внутри формата и класса при Jaccard ≥ порога по картам остаётся одна колода: с большим `games`, при равенстве — с большим `fun_score`. Остальные поглощаются и считаются в `variants`. | `HS_FUN_DECK_DEDUPE_JACCARD=0.6` |
 | Классы | В каждом формате сначала берётся по одной лучшей колоде каждого класса, у которого есть прошедший кандидат, затем набор добирается по `fun_score` с прежними лимитами на класс и XL/HL. Колоды с одним названием в разных классах или форматах дублями не считаются: одно название схлопывается только внутри формата и класса (остаётся колода с большим `fun_score`). | — |
-| Ладдерные названия | Название вида «<Aggro/Midrange/Control/Tempo/Face/Burn/Ramp/Token/Zoo/Secret/Dragon/Elemental/Dude/Big Spell/Spell/Mech/Beast/Pirate/Undead> <класс>» без карточного пакета, чей список похож на ядро меты сильнее порога, отклоняется кодом `generic_ladder_gate`. Префикс формата («STD») перед названием не мешает. | `HS_FUN_DECK_GENERIC_NAME_MAX_SIMILARITY=0.3` |
 | Название | Служебные префиксы «STD», «WLD», «Wild» в начале `title` убираются; исходное название — в `source_title`. | — |
+| Ладдерный архетип | Доля архетипа в играх формата не меньше порога — ладдерный. | `HS_FUN_DECK_LADDER_SHARE_PCT=0.5` |
+| `ladder_member_gate` | Порог сходства со списком ладдерного архетипа. | `HS_FUN_DECK_LADDER_MEMBER_SIM=0.55` |
+| Уникальный список | Ближайший любой список менее похож, чем порог — фан-сигнал. | `HS_FUN_DECK_TWIN_SIM=0.75` |
+| Порог оценки бру | Минимальный `fun_score` бру; откалиброван на эталонном наборе (`tests/fixtures/fun_decks_golden.json`). | `HS_FUN_DECK_MIN_SCORE=0.35` |
 
-Прежние пороги не изменились: `HS_FUN_DECK_MIN_SCORE=0.55`,
-`HS_FUN_DECK_MAX_META_SIMILARITY=0.42`, `HS_FUN_DECK_RETENTION_HOURS=168`.
+Прежние `HS_FUN_DECK_MAX_META_SIMILARITY` и `HS_FUN_DECK_GENERIC_NAME_MAX_SIMILARITY`
+больше не читаются. `HS_FUN_DECK_RETENTION_HOURS=168` не изменился.
+Если на сервере задан `HS_FUN_DECK_MIN_SCORE=0.55`, его нужно убрать или заменить.
+
 История колод (168 часов) переносится между прогонами только внутри одной
 версии `detector_version`: после смены версии первый прогон собирает набор
 заново, поэтому полный прогон `refresh-fun-decks` (без `--format`) нужно
@@ -265,53 +292,49 @@ GET /v1/constructed/archetypes
 | `win_rate_ci_low`, `win_rate_ci_high` | Границы 95% интервала Уилсона для `win_rate`, проценты, один знак. Всегда `win_rate_ci_low ≤ win_rate ≤ win_rate_ci_high`; у опубликованной колоды `win_rate_ci_high` не ниже порога (45). Добавлены в `concept-v7`. |
 | `variants` | Сколько почти одинаковых списков (Jaccard ≥ 0,6, тот же формат и класс) поглощено этой колодой; `0`, если таких не было. Пересчитывается прогоном, который видит кандидатов её формата: полный пересчитывает все колоды, `--format standard` — только Standard, а у Wild-колод сохраняет значение предыдущего полного прогона. Добавлено в `concept-v7`. |
 | `source_title` | Название колоды в источнике, как есть (например, «STD BFU Handbuff DK»). Добавлено в `concept-v7`. |
-| `fun_score` | Оценка «фановости» 0..1. |
-| `max_meta_similarity`, `nearest_archetype`, `nearest_deck_code`, `catalog_games`, `archetype_popularity_pct` | Сходство с ближайшим ядром меты (Jaccard по картам) и сведения об этом ядре. |
-| `concept_hit`, `rare_archetype` | Сработали сигнал концепции в названии или редкое название. |
+| `kind` | `brew` (бру, мем, «Сыр») или `off_meta` («забытый» неладдерный архетип). Добавлено в `concept-v8`; нет поля — считать `brew`. |
+| `fun_score` | Оценка «фановости» 0..1 без потолка: сумма весов 1.0 (удалённость от ладдера 0.40, концепт в названии 0.20, карточный пакет 0.20, уникальность списка 0.10, мем/сыр 0.10). |
+| `ladder_sim`, `content_sim`, `twin_sim`, `content_archetype` | Jaccard к ближайшему списку ладдерного архетипа, к ближайшему списку именованного архетипа, к ближайшему любому списку; название ближайшего именованного архетипа (в нижнем регистре). Добавлено в `concept-v8`. |
+| `max_meta_similarity`, `nearest_archetype`, `nearest_deck_code`, `catalog_games`, `archetype_popularity_pct` | С `concept-v8`: `max_meta_similarity` = `ladder_sim`, `nearest_archetype` и `nearest_deck_code` — ближайший список ладдерного архетипа; `archetype_popularity_pct` — доля архетипа `content_archetype` в играх формата, %. |
+| `concept_hit`, `rare_archetype` | `concept_hit` — есть концепт в названии или острый пакет; `rare_archetype` — `kind = off_meta`. |
 | `reasons` | Машиночитаемое объяснение, почему колода «фановая» (коды ниже). |
 | `candidate_source_id`, `streamer`, `peak`, `latest`, `worst`, `record`, `last_played`, `links` | Откуда взят кандидат; поля стримера заполнены только у колод из `hsguru_streamer_decks_legend_1000`. |
 | `first_seen_at`, `last_seen_at` | Когда колоду впервые и в последний раз находил детектор (ISO 8601 UTC). |
 
 В `data.structured.stats` — счётчики последнего прогона: `rejected_by_gate`
 (сколько кандидатов отсёк каждый гейт), `quality_rejected`
-(`missing_stats`, `too_few_games`, `losing_win_rate` — найденные «фановые»
-колоды, не прошедшие выборку и винрейт; не «фановые» кандидаты считаются только
-в `rejected`, дважды колода не считается), `near_duplicates_absorbed`,
-`history_dropped`, `published_by_class`, `published_by_format`.
-В `data.structured.filters` — действующие пороги.
+(`missing_stats`, `too_few_games`, `losing_win_rate`), `near_duplicates_absorbed`,
+`history_dropped`, `published_by_class`, `published_by_format`, `published_by_kind`,
+`catalog_decks`, `ladder_archetypes`. В `data.structured.filters` — действующие пороги.
 
 Коды `reasons`. **Показывать пользователю** — коды, которые объясняют, чем
-колода необычна; **служебные** — внутренняя арифметика оценки и причины
-отказа, в интерфейсе их показывать не нужно.
+колода необычна; **служебные** — причины отказа, в интерфейсе их показывать не нужно.
 
 | Код | Показывать | Описание |
 | --- | --- | --- |
-| `meta_core_outlier` | да | Сходство с ближайшим ядром меты ≤ 0,28: список заметно непохож на ладдерные. |
-| `low_meta_overlap` | да | Сходство с ядром меты в пределах 0,28–0,38: заметно отличается от ладдерного списка. |
+| `far_from_ladder` | да | Сходство со списками ладдерных архетипов ниже 0.30: «далеко от меты». |
+| `unique_list` | да | Ни один список каталога не похож сильнее порога: «уникальный список». |
 | `concept_title` | да | В названии есть признак концепции (Mill, Odd/Even, Highlander, Handbuff, Yogg, OTK, Rainbow и т. п.). |
 | `card_package` | да | В списке есть характерный карточный пакет (см. `pkg:*`). |
-| `pkg:reno_highlander`, `pkg:odd_even`, `pkg:mechathun`, `pkg:togwaggle_mill`, `pkg:cthun`, `pkg:whizbang`, `pkg:sathrovarr`, `pkg:yogg_package`, `pkg:steal_package` | да | Какой именно «фановый» пакет найден: Рено/Highlander, Odd/Even, Mecha'thun, Тог-милл, C'Thun, Whizbang, Sathrovar, Yogg-Saron, кража карт у соперника. |
-| `neutral_package` | да | Есть «нейтральный» пакет (квест, XL и т. п.): сам по себе почти не повышает оценку. |
+| `pkg:reno_highlander`, `pkg:odd_even`, `pkg:mechathun`, `pkg:togwaggle_mill`, `pkg:cthun`, `pkg:whizbang`, `pkg:sathrovarr`, `pkg:yogg_package`, `pkg:steal_package` | да | Какой именно «фановый» пакет найден. |
+| `neutral_package` | да | Есть «нейтральный» пакет (квест, XL и т. п.): на оценку не влияет. |
 | `pkg:quest_package`, `pkg:patches`, `pkg:galakrondish_finley`, `pkg:nzothish_darkness`, `pkg:highlander_curve`, `pkg:xl_package` | да | Нейтральные пакеты, которые сопровождают `neutral_package`. |
-| `rare_archetype_name` | да | Название редкое: у архетипа с таким именем меньше 250 игр в каталоге. |
-| `highlander_shape` | да | Форма Highlander (почти без повторов карт) вместе с «фановым» пакетом. |
-| `xl_shape` | да | XL-колода (39 карт и больше) вместе с пакетом или концептом в названии. |
-| `meme_low_winrate` | да | Концептная колода с малой выборкой и винрейтом не выше 42% — «мем», но не заведомо проигрывающий (интервал Уилсона достаёт до 45%). |
-| `cheese_high_winrate` | да | Концептная колода с малой выборкой и винрейтом от 68% — «сырная». |
-| `title_mismatch_vs_nearest` | нет | Название не совпадает с названием ближайшего ядра меты (небольшой бонус к оценке). |
-| `standard_balance_boost` | нет | Небольшой бонус Standard-колоде, чтобы Wild не вытеснял его. |
-| `wild_concept_boost` | нет | Небольшой бонус концептной Wild-колоде. |
-| `xl_hl_diversity_tax` | нет | Штраф общим XL/HL-названиям, чтобы они не забивали подборку. |
-| `named_ladder_archetype`, `known_ladder_archetype`, `near_known_ladder_package`, `self_named_archetype` | нет | Штрафы колодам, похожим на известный ладдерный архетип. |
-| `similarity_gate` | нет | Отказ: сходство с ядром меты выше `HS_FUN_DECK_MAX_META_SIMILARITY`. |
-| `ladder_name_gate`, `named_ladder_gate`, `self_named_gate` | нет | Отказ: известное ладдерное название (Thief Priest, Quest X, Egg Warlock и т. п.). |
-| `generic_ladder_gate` | нет | Отказ: общее название «<стиль> <класс>» без пакета, список похож на ядро меты. |
-| `needs_concept_or_outlier_signal` | нет | Отказ: нет ни концепта, ни заметного отличия от меты. |
+| `meme_low_winrate` | да | Концептная колода с малой выборкой и винрейтом не выше 42% — «мем». |
+| `cheese_high_winrate` | да | Концептная колода с малой выборкой и винрейтом от 68% — «Сыр». |
+| `ladder_member_gate` | нет | Отказ: список — вариант ладдерного архетипа. |
+| `ladder_title_gate` | нет | Отказ: название ладдерного архетипа, список похож на его списки. |
+| `generic_ladder_gate` | нет | Отказ: общее название «<стиль> <класс>» без пакета. |
+| `needs_fun_signal_gate` | нет | Отказ: нет фан-сигнала и это не вариант именованного неладдерного архетипа. |
+| `below_min_score` | нет | Отказ: бру с `fun_score` ниже `HS_FUN_DECK_MIN_SCORE`. |
 | `undecodable_deck` | нет | Отказ: код колоды не раскодировался. |
 
-Коды отказа (`*_gate`, `needs_concept_or_outlier_signal`, `undecodable_deck`)
-в опубликованных строках не встречаются: колода с таким кодом не публикуется,
-а отказы считаются в `stats.rejected_by_gate`.
+Коды отказа (`*_gate`, `below_min_score`, `undecodable_deck`) в опубликованных
+строках не встречаются; отказы по гейтам считаются в `stats.rejected_by_gate`.
+Коды `concept-v7` (`meta_core_outlier`, `low_meta_overlap`, `rare_archetype_name`,
+`title_mismatch_vs_nearest` и др.) больше не выдаются.
+
+Пробный прогон без записи: `scripts/fun-decks-eval.py` (см. docstring), срез
+эталона для регрессионного теста — `tests/fixtures/fun_decks_catalog_slice.json`.
 
 ### Прямые constructed-наборы
 

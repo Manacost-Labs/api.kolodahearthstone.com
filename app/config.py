@@ -1026,13 +1026,7 @@ def firecrawl_key_reset_day() -> int:
 
 
 def fun_deck_min_score() -> float:
-    return min(1.0, max(0.0, float(os.environ.get("HS_FUN_DECK_MIN_SCORE", "0.55"))))
-
-
-def fun_deck_max_meta_similarity() -> float:
-    return min(
-        1.0, max(0.0, float(os.environ.get("HS_FUN_DECK_MAX_META_SIMILARITY", "0.42")))
-    )
+    return min(1.0, max(0.0, float(os.environ.get("HS_FUN_DECK_MIN_SCORE", "0.35"))))
 
 
 def fun_deck_retention_hours() -> int:
@@ -1056,12 +1050,22 @@ def fun_deck_dedupe_jaccard() -> float:
     return min(1.0, max(0.0, float(os.environ.get("HS_FUN_DECK_DEDUPE_JACCARD", "0.6"))))
 
 
-def fun_deck_generic_name_max_similarity() -> float:
-    """A generic ladder title ("Aggro Paladin") with no package or concept signal is
-    gated when its similarity to the nearest meta core is above this value."""
-    return min(
-        1.0, max(0.0, float(os.environ.get("HS_FUN_DECK_GENERIC_NAME_MAX_SIMILARITY", "0.3")))
-    )
+def fun_deck_ladder_share_pct() -> float:
+    """An archetype with at least this share (percent) of its format's games is a
+    ladder archetype; a list that resembles one of its lists is not a fun deck."""
+    return min(100.0, max(0.0, float(os.environ.get("HS_FUN_DECK_LADDER_SHARE_PCT", "0.5"))))
+
+
+def fun_deck_ladder_member_sim() -> float:
+    """A candidate whose Jaccard similarity to a list of a ladder archetype (same
+    format and class) reaches this value is a ladder list, whatever its title says."""
+    return min(1.0, max(0.0, float(os.environ.get("HS_FUN_DECK_LADDER_MEMBER_SIM", "0.55"))))
+
+
+def fun_deck_twin_sim() -> float:
+    """A candidate whose closest list in the catalog is less similar than this is a
+    unique list: that alone is a fun signal. At or above it, the list is a variant."""
+    return min(1.0, max(0.0, float(os.environ.get("HS_FUN_DECK_TWIN_SIM", "0.75"))))
 
 
 def firecrawl_max_age_ms() -> int:

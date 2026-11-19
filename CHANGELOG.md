@@ -66,6 +66,21 @@
   `panel-next/tests/fixtures/analytics-registry.json`; `panel-check` падает,
   если PHP-реестр и снимок разошлись. Новый `panel/tests/analytics_cli.php`
   (`--registry`, `--smoke`, `--module`) — только чтение, не деплоится.
+
+- Фан-колоды `concept-v8` (api#129): кандидат сравнивается со всем каталогом HSGuru
+  (списки от 45 игр) по формату и классу, а не с топ-350. Ладдерные списки
+  отсекаются раньше любых бонусов и независимо от концепт-слов и пакетов
+  (`ladder_member_gate` ≥ 0.55, `ladder_title_gate`, `generic_ladder_gate` без
+  условия по сходству). В строках появились `kind` (`brew` / `off_meta`),
+  `ladder_sim`, `content_sim`, `twin_sim`, `content_archetype`; новые коды причин
+  `unique_list`, `far_from_ladder`. Оценка — сумма весов 1.0, без потолка 1.00.
+  Новые env: `HS_FUN_DECK_LADDER_SHARE_PCT`, `HS_FUN_DECK_LADDER_MEMBER_SIM`,
+  `HS_FUN_DECK_TWIN_SIM`; `HS_FUN_DECK_MIN_SCORE` по умолчанию 0.35 (убрать
+  `0.55` из серверного env), `HS_FUN_DECK_MAX_META_SIMILARITY` и
+  `HS_FUN_DECK_GENERIC_NAME_MAX_SIMILARITY` удалены. `compute_fun_decks` —
+  чистое вычисление без записи; `scripts/fun-decks-eval.py` — пробный прогон
+  только на чтение. После выкладки нужен полный `refresh-fun-decks` без
+  `--format`: история `concept-v7` отбрасывается.
 - Панель, инспектор карты: текст карты с форматированием — «Боевой клич»
   жирным, курсив, переносы строк; теги, `[x]`, `$`, `#` и `_` не видны,
   разбор в `panel-next/lib/card-text.ts`, без `dangerouslySetInnerHTML`.
