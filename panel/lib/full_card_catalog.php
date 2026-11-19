@@ -64,7 +64,8 @@ function full_catalog_render_index(string $locale): array
         $raw = stream_get_contents($handle, 64 * 1024 * 1024);
         fclose($handle);
         $data = is_string($raw) ? json_decode($raw, true) : null;
-        if (is_array($data) && ($data['version'] ?? null) === 1 && ($data['locale'] ?? $locale) === $locale) {
+        if (is_array($data) && ($data['version'] ?? null) === 1
+            && ($data['locale'] ?? null) === $locale && ($data['size'] ?? null) === '512x') {
             foreach (is_array($data['renders'] ?? null) ? $data['renders'] : [] as $id => $v) {
                 if (is_string($v) && preg_match('/^[a-f0-9]{12}$/D', $v)) $index['renders'][(string)$id] = $v;
             }

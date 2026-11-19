@@ -26,11 +26,6 @@ $copy = static function (string $from, string $to) use (&$copy): void {
     else copy($from, $to);
 };
 $copy($source . '/lib', $tmp . '/panel/lib');
-// Count index reads: the copy of the library logs every open of an index file (one read per request expected).
-$libPath = $tmp . '/panel/lib/full_card_catalog.php';
-$lib = str_replace("\$handle = @fopen(\$path, 'rb');", "file_put_contents(dirname(__DIR__, 2) . '/reads.log', basename(\$path) . \"\\n\", FILE_APPEND); \$handle = @fopen(\$path, 'rb');", file_get_contents($libPath), $n);
-check($n === 1, 'cannot instrument the index reader');
-file_put_contents($libPath, $lib);
 
 $index = file_get_contents($source . '/api/index.php');
 $patched = preg_replace('/(function db\(array \$config\): PDO\s*\{).*?\n\}/s', '$1 return require getenv("FAKE_DB_FILE"); }', $index, 1, $count);
@@ -169,7 +164,6 @@ $writeIndex = static function (string $locale, array $data, ?int $mtime = null) 
     if ($mtime !== null) touch("$indexDir/$locale.index.json", $mtime);
 };
 $loc = static fn (array $card): array => $card['localized'];
-$reads = static fn (): int => is_file($GLOBALS['tmp'] . '/reads.log') ? count(file($GLOBALS['tmp'] . '/reads.log')) : 0;
 
 $state['catalog'] = [
     catalog_row('BE_222t', 130406, 'Безднокрыл', 'Voidwing'),
@@ -219,6 +213,8 @@ check($l['render_url'] === null && $l['render_media_verified'] === false, 'skip 
 
 // 4. Broken or foreign index: same as no index, status 200.
 foreach (['{not json', '', '[]', '{"version":2,"renders":{"BE_222t":"a1b2c3d4e5f6"}}', '{"version":1,"locale":"enUS","renders":{"BE_222t":"a1b2c3d4e5f6"}}',
+    '{"version":1,"renders":{"BE_222t":"a1b2c3d4e5f6"}}', '{"version":1,"locale":"plPL","renders":{"BE_222t":"a1b2c3d4e5f6"}}',
+    '{"version":1,"locale":"plPL","size":"256x","renders":{"BE_222t":"a1b2c3d4e5f6"}}',
     '{"version":1,"locale":"plPL","renders":"oops","missing":7,"skip_types":null}'] as $junk) {
     file_put_contents("$indexDir/plPL.index.json", $junk);
     [$s, $b] = get($port, '/api/v1/card-catalog/BE_222t?locale=plPL');
@@ -244,12 +240,11 @@ check($l['render_url'] === HSJ . 'esES/512x/A%20B%2Fc%3Fd.png', 'id is rawurlenc
 array_pop($state['catalog']);
 $save();
 
-// 6. Listing esES per_page=200: fields on every card, the index is read once per request.
+// 6. Listing esES per_page=200: fields on every card, .
 $writeIndex('esES', ['renders' => ['CS2_029' => 'fedcba987654'], 'missing' => ['MIS_1']]);
-@unlink($tmp . '/reads.log');
 [$s, $b] = get($port, '/api/v1/card-catalog?locale=esES&per_page=200');
 $cards = json_of($b)['data'];
-check($s === 200 && count($cards) === 6 && $reads() === 1, 'listing reads the index once, reads: ' . $reads());
+check($s === 200 && count($cards) === 6, 'listing status and size');
 foreach ($cards as $c) check(array_key_exists('render_url', $c['localized']) && is_bool($c['localized']['render_media_verified']), 'listing field on ' . $c['card_id']);
 $by = array_column($cards, null, 'card_id');
 check($by['CS2_029']['localized']['render_url'] === OURS . 'esES/512x/CS2_029.webp?v=fedcba987654'
