@@ -1,0 +1,54 @@
+/* Card language switch and its notes (catalogue toolbar, inspector). */
+.locale-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.locale-switch > span {
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+.locale-note {
+  display: inline-flex;
+  align-items: center;
+  margin-left: var(--space-1-5);
+  padding: 0 var(--space-1-5);
+  border-radius: var(--radius-xs);
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: var(--text-2xs);
+  font-style: normal;
+  font-weight: 600;
+  line-height: 16px;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.locale-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  margin: 0 0 var(--space-3);
+  color: var(--warn);
+  font-size: var(--text-sm);
+}
+.inspector-locale {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-3);
+}
+.inspector-locale-note {
+  margin: 0;
+  color: var(--warn);
+  font-size: var(--text-sm);
+}
+.row-name small.row-name__panel {
+  display: block;
+}
+@media (max-width: 640px) {
+  .locale-switch > span {
+    display: none;
+  }
+}

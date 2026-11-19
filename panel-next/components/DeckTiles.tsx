@@ -7,10 +7,13 @@ export function DeckTiles({
   cards,
   cardType,
   onSelect,
+  langOf,
 }: {
   cards: ReturnType<typeof normalizedCard>[];
   cardType: string;
   onSelect: (row: Row) => void;
+  /** The language of a translated name; without it, Cyrillic means Russian and the rest English. */
+  langOf?: (card: ReturnType<typeof normalizedCard>) => string | undefined;
 }) {
   return (
     <div className="deck-grid-viewport">
@@ -33,7 +36,7 @@ export function DeckTiles({
               type="button"
               key={card.id}
               className="deck-tile"
-              lang={/[А-Яа-яЁё]/.test(card.name) ? 'ru' : 'en'}
+              lang={langOf?.(card) ?? (/[А-Яа-яЁё]/.test(card.name) ? 'ru' : 'en')}
               style={
                 {
                   '--rarity': tile.color,

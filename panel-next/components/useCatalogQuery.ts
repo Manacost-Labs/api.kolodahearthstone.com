@@ -45,7 +45,9 @@ export function useCatalogQuery(query: string) {
   const go = useCallback(
     (changes: Record<string, string | number | null>, replace = false) => {
       cancelSearch();
-      const href = catalogHref(desired.current, { q: draftSearch.current, ...changes });
+      // The card language lives in the address (replaceState), not in the server's query: keep it.
+      const lang = new URLSearchParams(window.location.search).get('lang');
+      const href = catalogHref(desired.current, { q: draftSearch.current, lang, ...changes });
       desired.current = href.slice(2);
       setDraftQuery(desired.current);
       navigate(href, { replace, scroll: false });
