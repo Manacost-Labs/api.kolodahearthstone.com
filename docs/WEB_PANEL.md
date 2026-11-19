@@ -193,7 +193,7 @@ python -m unittest panel.tests.test_constructed_related_local_images`
 **Картинки Полей сражений и `class_slug` Арены.**
 - `bg_minions[].image_url` — абсолютный адрес файла из тех же `uploads`, что отдаёт
   каталог: сначала `https://api.kolodahearthstone.com/uploads/framed/<card_id>.png`, затем
-  `.../uploads/cards/<card_id>.png`. Проверяется, что файл есть на диске и не пуст; иначе
+  `.../uploads/cards/<card_id>.png`. Наличие проверяется по записи в каталоге (`lstat`): на проде это симлинки в `uploads/.s3-storage` (S3 через rclone), цель не читается, иначе холодный прогон занимает секунды; обычный локальный файл должен быть не пуст. Нет записи —
   `image_url` — пустая строка (`""`), и панель рисует заглушку. На машине без каталога
   `uploads` (разработка) проверить нельзя, и отдаётся адрес `framed`. `image_kind` не менялся.
 - `bg_heroes[].image_url` — портрет героя 256 px

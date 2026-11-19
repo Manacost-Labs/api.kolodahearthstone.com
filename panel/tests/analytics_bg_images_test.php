@@ -52,12 +52,17 @@ file_put_contents($uploads . '/framed/BG_AB.png', 'png');
 file_put_contents($uploads . '/cards/BG_AB.png', 'png');
 file_put_contents($uploads . '/cards/BG_B.png', 'png');
 file_put_contents($uploads . '/framed/BG_EMPTY.png', '');
+// Offloaded to storage: a (dangling) symlink counts, and its target is never read.
+symlink($root . '/no-such-storage/BG_S.png', $uploads . '/framed/BG_S.png');
+symlink($root . '/no-such-storage/BG_S2.png', $uploads . '/cards/BG_S2.png');
 img_seed('/datasets/hsreplay_battlegrounds_minions', [], [
     'fetched_at' => '2026-11-19T09:00:00+00:00',
     'data' => ['structured' => ['minions' => [
         ['id' => 'BG_A', 'name' => 'A', 'tavern_tier' => 1],
         ['id' => 'BG_B', 'name' => 'B', 'tavern_tier' => 1],
         ['id' => 'BG_AB', 'name' => 'AB', 'tavern_tier' => 1],
+        ['id' => 'BG_S', 'name' => 'S', 'tavern_tier' => 1],
+        ['id' => 'BG_S2', 'name' => 'S2', 'tavern_tier' => 1],
         ['id' => 'BG_C', 'name' => 'C', 'tavern_tier' => 1],
         ['id' => 'BG_EMPTY', 'name' => 'Empty file', 'tavern_tier' => 1],
         ['id' => 'BG/../x', 'name' => 'Path', 'tavern_tier' => 1],
@@ -67,6 +72,8 @@ $minions = analytics_module_response('bg_minions', []);
 img_same(IMG_ORIGIN . '/uploads/framed/BG_A.png', img_by($minions['rows'], 'card_id', 'BG_A')['image_url'], 'framed art is preferred');
 img_same(IMG_ORIGIN . '/uploads/cards/BG_B.png', img_by($minions['rows'], 'card_id', 'BG_B')['image_url'], 'the raw card is the fallback');
 img_same(IMG_ORIGIN . '/uploads/framed/BG_AB.png', img_by($minions['rows'], 'card_id', 'BG_AB')['image_url'], 'framed beats the raw card');
+img_same(IMG_ORIGIN . '/uploads/framed/BG_S.png', img_by($minions['rows'], 'card_id', 'BG_S')['image_url'], 'an offloaded (symlinked) file counts without reading the target');
+img_same(IMG_ORIGIN . '/uploads/cards/BG_S2.png', img_by($minions['rows'], 'card_id', 'BG_S2')['image_url'], 'an offloaded raw card counts too');
 img_same('', img_by($minions['rows'], 'card_id', 'BG_C')['image_url'], 'no file: empty URL, so the panel draws a placeholder');
 img_same('', img_by($minions['rows'], 'card_id', 'BG_EMPTY')['image_url'], 'an empty file is not an image');
 img_same('', img_by($minions['rows'], 'card_id', 'BG/../x')['image_url'], 'an id with a path never reaches the file system');

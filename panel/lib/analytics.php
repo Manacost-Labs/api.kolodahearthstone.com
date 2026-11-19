@@ -2015,10 +2015,16 @@ function analytics_class_slug(array $row, array $fields = ['slug', 'class', 'cla
 
 /**
  * Image of a Battlegrounds minion from the same files the catalog serves: framed art first, then
- * the raw card. A file that is not on disk gives '' (the panel draws a placeholder instead of a
- * broken square). The URL is absolute, because the panel may be served from another host.
- * Without an uploads directory (a developer machine) existence cannot be checked, so the
- * framed URL is returned as is.
+ * the raw card. No file gives '' (the panel draws a placeholder). The URL is absolute, because
+ * the panel may be served from another host.
+ *
+ * On production uploads/framed|cards/<id>.png are symlinks into uploads/.s3-storage, an rclone
+ * FUSE mount of S3. is_file()/filesize() follow the link and read S3 (7 s cold for 275 ids, and
+ * the module result is not cached), so the entry itself is checked with lstat (is_link): the
+ * directory is local, and an offloaded file is trusted without touching its target. Only a
+ * regular local file is checked for being non-empty.
+ * Without an uploads directory (a developer machine) nothing can be checked, so the framed URL
+ * is returned as is.
  */
 function analytics_bg_card_image_url(string $cardId): string
 {
@@ -2027,13 +2033,12 @@ function analytics_bg_card_image_url(string $cardId): string
     }
     $configured = getenv('ANALYTICS_UPLOADS_DIR');
     $directory = is_string($configured) && $configured !== '' ? $configured : dirname(__DIR__) . '/uploads';
-    $kinds = ['framed', 'cards'];
     if (!is_dir($directory)) {
         return ANALYTICS_MEDIA_ORIGIN . '/uploads/framed/' . rawurlencode($cardId) . '.png';
     }
-    foreach ($kinds as $kind) {
+    foreach (['framed', 'cards'] as $kind) {
         $path = $directory . '/' . $kind . '/' . $cardId . '.png';
-        if (is_file($path) && (int)@filesize($path) > 0) {
+        if (is_link($path) || (is_file($path) && (int)@filesize($path) > 0)) {
             return ANALYTICS_MEDIA_ORIGIN . '/uploads/' . $kind . '/' . rawurlencode($cardId) . '.png';
         }
     }
