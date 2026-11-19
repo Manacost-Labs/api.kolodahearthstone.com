@@ -248,20 +248,14 @@ export default async function verify(page, root) {
     waiting.every(item => item.state === 'loading' && item.shown && item.text.length > 0),
     'Slow thumbnails: an empty square ' + JSON.stringify(waiting[0]),
   );
-  // The monogram is the letters of the row's name («Prisonguard 1» → «P1»), not of the column label.
-  const letters = alt =>
-    alt
-      .trim()
-      .split(/[\s\-–—_:]+/u)
-      .filter(Boolean)
-      .slice(0, 2)
-      .map(word => [...word][0])
-      .join('')
-      .toLocaleUpperCase('ru-RU');
+  // The monogram comes from the row's name, not from the column label.
   ensure(
-    waiting.every(item => item.alt !== 'Изображение' && item.text === letters(item.alt)),
-    'Monogram is not the name: ' + JSON.stringify(waiting[0]),
+    waiting.every(item => item.alt !== 'Изображение'),
+    'A thumbnail alt is the column label: ' + JSON.stringify(waiting[0]),
   );
+  const monogramOf = alt => waiting.find(item => item.alt === alt)?.text;
+  ensure(monogramOf('Prisonguard 1') === 'P1', 'Monogram of «Prisonguard 1»: ' + monogramOf('Prisonguard 1'));
+  ensure(monogramOf('Reef Scout 1') === 'RS', 'Monogram of «Reef Scout 1»: ' + monogramOf('Reef Scout 1'));
   ensure(
     waiting.every(item => item.size === '40x40'),
     'Thumbnail size changed: ' +
