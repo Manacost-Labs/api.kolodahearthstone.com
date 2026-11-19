@@ -179,7 +179,13 @@ export function Value({
     case 'percent':
       return <span className="value-number">{formatValue(resolved, decoded)}</span>;
     case 'image':
-      if (url) return <Thumb url={url} alt={name ? fieldLabel(name) : 'Изображение'} />;
+      if (url) {
+        // The row's own name makes a useful alt (and the monogram while loading); the column label is the fallback.
+        const title = [row?.name_ru, row?.name, row?.hero].find(
+          (item): item is string => typeof item === 'string' && item.trim() !== '',
+        );
+        return <Thumb url={url} alt={title?.trim() ?? (name ? fieldLabel(name) : 'Изображение')} />;
+      }
       break;
     case 'link':
       if (url)

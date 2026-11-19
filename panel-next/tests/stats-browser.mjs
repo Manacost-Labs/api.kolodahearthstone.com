@@ -144,6 +144,181 @@ export default async function verify(page, root) {
   ensure(loaded, 'A class icon did not load');
   checks.hsguruNamesAndIcons = true;
 
+  // 4d. Battlegrounds and Arena: a chart above the table, no empty squares, the Arena icons are the meta ones (#109).
+  await open('bg_heroes');
+  ensure(await page.locator('.bg-view--heroes svg').first().isVisible(), 'BG heroes: no chart');
+  await page.waitForFunction(() => document.querySelectorAll('.bg-top__row').length === 10).catch(() => {});
+  const heroTop = await page.locator('.bg-top__row').count();
+  ensure(heroTop === 10, 'BG heroes: top rows ' + heroTop);
+  const heroOrder = await page.evaluate(() => {
+    const view = document.querySelector('.bg-view--heroes').getBoundingClientRect();
+    const table = document.querySelector('.data-table').getBoundingClientRect();
+    return view.bottom <= table.top;
+  });
+  ensure(heroOrder, 'BG heroes: the chart is not above the table');
+  // The portraits are blocked here (remote requests abort): the name stays instead of an empty square.
+  await page.waitForFunction(() => document.querySelector('.bg-top__row .bg-art[data-state="broken"]'));
+  ensure(
+    (await page.locator('.bg-top__row .bg-art__ph b').first().innerText()) === 'Герой 1',
+    'BG hero placeholder',
+  );
+  ensure(
+    /Данные на/.test(await page.locator('.bg-view--heroes').first().innerText()),
+    'BG heroes: no data date',
+  );
+  await open('bg_minions');
+  const cards = await page.locator('.bg-card').count();
+  ensure(cards === 12, 'BG minions: cards ' + cards);
+  await page.waitForFunction(() => document.querySelector('.bg-card .bg-art[data-state="broken"]'));
+  const empty = await page.locator('.bg-card .bg-art').evaluateAll(
+    tiles =>
+      tiles.filter(tile => {
+        const loaded = tile.querySelector('img') && tile.dataset.state === 'ready';
+        const placeholder = tile.querySelector('.bg-art__ph');
+        return (
+          !loaded &&
+          (!placeholder ||
+            getComputedStyle(placeholder).display === 'none' ||
+            !placeholder.textContent.trim())
+        );
+      }).length,
+  );
+  ensure(empty === 0, 'BG minions: empty squares ' + empty);
+  ensure(
+    (await page.locator('.bg-card__tier').first().innerText()).trim().length > 0,
+    'BG minions: no tier chip',
+  );
+  // The tavern tier is a list «Все / 1…7», and the choice goes to the backend as tavern_tier=3.
+  const tierSelect = page.getByRole('combobox', { name: 'Уровень таверны', exact: true });
+  ensure((await tierSelect.innerText()).trim() === 'Все', 'Tavern tier is not a list with «Все»');
+  const tierRequest = page.waitForRequest(request => request.url().includes('tavern_tier=3'));
+  await tierSelect.click();
+  await page.getByRole('option', { name: '3', exact: true }).click();
+  await tierRequest;
+  await settled();
+  ensure(page.url().includes('tavern_tier=3'), 'The tier is not in the address: ' + page.url());
+  await tierSelect.click();
+  await page.getByRole('option', { name: 'Все', exact: true }).click();
+  await page.waitForFunction(() => !location.search.includes('tavern_tier'));
+  await settled();
+  const rows = await page.locator('.bg-card').count();
+  const cardsAt = async width => {
+    await open('bg_minions', width);
+    return page.locator('.bg-card').evaluateAll(items => {
+      const tops = items.map(item => Math.round(item.getBoundingClientRect().top));
+      const counts = {};
+      for (const top of tops) counts[top] = (counts[top] ?? 0) + 1;
+      return Object.values(counts);
+    });
+  };
+  ensure(rows === 12, 'BG minions after reset: ' + rows);
+  for (const width of [1440, 1280]) {
+    const perRow = await cardsAt(width);
+    ensure(new Set(perRow).size === 1, `BG minions at ${width}: uneven rows ${perRow}`);
+  }
+  // Slow pictures (the cold S3 mount): the table thumbnails show a monogram, never an empty square (#109).
+  const pixel = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==',
+    'base64',
+  );
+  const slow = async route => {
+    await new Promise(resolve => setTimeout(resolve, 2500));
+    await route.fulfill({ status: 200, contentType: 'image/png', body: pixel }).catch(() => {});
+  };
+  await page.route('https://api.kolodahearthstone.com/uploads/**', slow);
+  // goto waits for the load event, which waits for the slow pictures: do not wait for it.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(root + '/?action=analytics&stats=bg_minions', { waitUntil: 'commit' });
+  await page.locator('.data-table .value-thumb').first().scrollIntoViewIfNeeded();
+  const waiting = await page.locator('.data-table .value-thumb').evaluateAll(links =>
+    links.map(link => {
+      const ph = link.querySelector('.value-thumb__ph');
+      const box = link.getBoundingClientRect();
+      return {
+        state: link.dataset.state,
+        text: ph?.textContent.trim() ?? '',
+        alt: link.querySelector('img')?.alt ?? '',
+        shown: ph ? getComputedStyle(ph).display !== 'none' : false,
+        size: [Math.round(box.width), Math.round(box.height)].join('x'),
+      };
+    }),
+  );
+  ensure(waiting.length > 0, 'Slow thumbnails: none in the table');
+  ensure(
+    waiting.every(item => item.state === 'loading' && item.shown && item.text.length > 0),
+    'Slow thumbnails: an empty square ' + JSON.stringify(waiting[0]),
+  );
+  // The monogram comes from the row's name, not from the column label.
+  ensure(
+    waiting.every(item => item.alt !== 'Изображение'),
+    'A thumbnail alt is the column label: ' + JSON.stringify(waiting[0]),
+  );
+  const monogramOf = alt => waiting.find(item => item.alt === alt)?.text;
+  ensure(monogramOf('Prisonguard 1') === 'P1', 'Monogram of «Prisonguard 1»: ' + monogramOf('Prisonguard 1'));
+  ensure(monogramOf('Reef Scout 1') === 'RS', 'Monogram of «Reef Scout 1»: ' + monogramOf('Reef Scout 1'));
+  ensure(
+    waiting.every(item => item.size === '40x40'),
+    'Thumbnail size changed: ' +
+      JSON.stringify(waiting.filter(item => item.size !== '40x40').slice(0, 2)) +
+      ' of ' +
+      waiting.length,
+  );
+  // After the load: the picture is shown and the monogram is gone (checked in one go, the table can remount).
+  await page.waitForFunction(
+    () => {
+      const links = [...document.querySelectorAll('.data-table .value-thumb')].filter(
+        link => link.getBoundingClientRect().top < innerHeight,
+      );
+      return (
+        links.length > 0 &&
+        links.every(
+          link =>
+            link.dataset.state === 'ready' &&
+            link.querySelector('img').naturalWidth > 0 &&
+            getComputedStyle(link.querySelector('.value-thumb__ph')).display === 'none',
+        )
+      );
+    },
+    undefined,
+    { timeout: 15000 },
+  );
+  // A long table scrolled to the bottom: lazy pictures far below load on arrival, none reads «недоступно».
+  await page.locator('.data-table .value-thumb').last().scrollIntoViewIfNeeded();
+  await page.waitForFunction(
+    () =>
+      [...document.querySelectorAll('.data-table .value-thumb')].every(
+        link => link.dataset.state === 'ready',
+      ),
+    undefined,
+    { timeout: 20000 },
+  );
+  ensure((await page.locator('.data-table .value-link').count()) === 0, 'A thumbnail reads «недоступно»');
+  await page.unroute('https://api.kolodahearthstone.com/uploads/**', slow);
+  checks.bgViews = true;
+  await open('arena');
+  const columns = await page.locator('.arena-col').count();
+  ensure(columns > 1, 'Arena: columns ' + columns);
+  const arenaOrder = await page.evaluate(() => {
+    const view = document.querySelector('.arena-view').getBoundingClientRect();
+    const table = document.querySelector('.data-table').getBoundingClientRect();
+    return view.bottom <= table.top;
+  });
+  ensure(arenaOrder, 'Arena: the chart is not above the table');
+  // Same bundle icons as the meta (nginx serves only /_next/ to the panel, #157).
+  const arenaIcons = await page
+    .locator('.arena-col__icon')
+    .evaluateAll(images => images.map(image => new URL(image.src).pathname));
+  ensure(
+    arenaIcons.length > 1 && arenaIcons.every(path => path.startsWith('/_next/static/')),
+    'Arena icons outside /_next/static/: ' + arenaIcons.join(', '),
+  );
+  await page.waitForFunction(() =>
+    [...document.querySelectorAll('.arena-col__icon')].every(
+      image => image.complete && image.naturalWidth > 0,
+    ),
+  );
+  checks.arenaView = true;
+
   // 5. Reset only when something differs from the defaults.
   await open('meta');
   const reset = page.getByRole('button', { name: 'Сбросить' });

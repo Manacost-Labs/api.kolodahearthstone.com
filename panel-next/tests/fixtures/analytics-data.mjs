@@ -173,6 +173,8 @@ const modules = {
   bg_heroes: () => {
     const rows = make(116, 15, (i, r) => ({
       name: `Герой ${i + 1}`,
+      tier: ['A', 'B', 'C', 'D'][i % 4],
+      image_url: `https://art.hearthstonejson.com/v1/256x/BG_FIXTURE_HERO_${i + 1}.jpg`,
       first_place: 18.85441527446301 - i * 0.021 + r() * 0.01,
       pick_rate_value: round(59.56 - i * 0.4),
       avg_placement: round(3.9 + i * 0.012, 2),
@@ -194,6 +196,7 @@ const modules = {
   },
   bg_minions: () => ({
     columns: [
+      column('image_url', 'Карта', 'image'),
       column('name', 'Существо'),
       column('tavern_tier', 'Таверна', 'number'),
       column('popularity', 'Популярность', 'percent'),
@@ -204,6 +207,7 @@ const modules = {
     ],
     rows: make(250, 16, (i, r) => ({
       name: `${minions[i % minions.length]} ${1 + Math.floor(i / minions.length)}`,
+      image_url: `https://api.kolodahearthstone.com/uploads/framed/BG_FIXTURE_${i + 1}.png`,
       tavern_tier: 1 + (i % 6),
       popularity: i % 9 === 4 ? null : (7.98 - i * 0.03).toFixed(2) + '%',
       combat_winrate: (57.7 - i * 0.05).toFixed(2) + '%',

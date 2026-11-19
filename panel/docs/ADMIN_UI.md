@@ -164,6 +164,22 @@ These three PHP adapters are reachable only through the private
   (nginx sends only `/`, `/api/panel` and `/_next/` to panel-next; `public/` files 404). The
   chart colours per class are `--meta-class-*` in `stats/meta-view.css` (≥ 3:1
   against the card in both themes).
+- Battlegrounds and Arena views (#109, `components/stats/BattlegroundsView.tsx`,
+  `ArenaView.tsx`, registered in `ModuleView.tsx` for `bg_heroes`,
+  `bg_minions` and `arena`; styles `battlegrounds-view.css`, `arena-view.css`).
+  Heroes: «Топ-10 по выбору» (portrait from `image_url`, name, tier, share bar,
+  pick rate, average place, the date of the data from the `data_as_of` KPI) and
+  a bubble chart «Выбор × среднее место» (one series per tier, size = games).
+  Minions: «Топ-12 по популярности» as cards (framed card art, tavern tier chip
+  on the art, popularity, combat win rate, average place) and tier counters in
+  the header. Arena: win rate of every class as columns around the 50 % line
+  (up is green, down is red, the line sits where the data puts it; on a phone
+  they turn into rows), with `ClassIcon`, the same art as in the meta; the class
+  comes from `class_slug` (#108). Art tiles never show an empty square: the
+  name (and the tavern tier) stays under the picture while the file loads and
+  when it is missing (`ArtTile`; the table's `Thumb` is unchanged). Empty or
+  non-numeric rows are skipped; with no rows the view renders nothing. Tier and
+  chip colours are scoped tokens in the CSS files (≥ 3:1 in both themes).
 - Statistics filters (`panel-next/components/stats/`): one card above the KPI
   row. Every enum parameter, and a token parameter that the answer carries
   `options` for (the meta period, with the current patch), is a Valyro `Select`

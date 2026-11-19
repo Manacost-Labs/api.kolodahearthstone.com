@@ -225,3 +225,14 @@ test('only decks and patches page on the server', () => {
   assert.equal(isServerPaged('bg_minions', meta), false);
   assert.equal(isServerPaged('decks', noOffset), false);
 });
+
+test('a small bounded int without a default is a list; paging and defaulted ints stay fields', () => {
+  const tier = { type: 'int', min: 1, max: 7 };
+  assert.equal(isList('tavern_tier', tier, data({})), true);
+  assert.deepEqual(optionValues('tavern_tier', tier, data({}), ''), ['', '1', '2', '3', '4', '5', '6', '7']);
+  assert.equal(isList('limit', { type: 'int', default: 500, min: 1, max: 500 }, data({})), false);
+  assert.equal(isList('offset', { type: 'int', default: 0, min: 0, max: 10000 }, data({})), false);
+  assert.equal(isList('min_games', { type: 'int', default: 50, min: 50, max: 1000000 }, data({})), false);
+  assert.equal(isList('level', { type: 'int', min: 1, max: 500 }, data({})), false);
+  assert.equal(isList('level', { type: 'int' }, data({})), false);
+});

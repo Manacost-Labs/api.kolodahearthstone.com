@@ -1,0 +1,41 @@
+/* Table thumbnail (Thumb): a monogram under the picture until it loads. The 40px square comes from
+   .value-thumb img in globals.css and does not change. */
+.value-thumb {
+  position: relative;
+  display: inline-block;
+  line-height: 0;
+  vertical-align: top;
+}
+.value-thumb__ph {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  background: var(--soft);
+  color: var(--muted);
+  font-size: var(--text-md);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.02em;
+}
+.value-thumb[data-state='loading'] img {
+  opacity: 0;
+}
+.value-thumb[data-state='ready'] img {
+  position: relative;
+  animation: value-thumb-in 160ms ease-out;
+}
+.value-thumb[data-state='ready'] .value-thumb__ph {
+  display: none;
+}
+@keyframes value-thumb-in {
+  from {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .value-thumb[data-state='ready'] img {
+    animation: none;
+  }
+}
