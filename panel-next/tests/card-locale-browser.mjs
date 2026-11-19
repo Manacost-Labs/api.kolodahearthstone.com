@@ -253,6 +253,26 @@ export default async function verify(page, root, output, fixtures, live) {
     equal(await gridName('BG_FIXTURE_4').innerText(), 'ES BG_FIXTURE_4', 'retried name');
     checks.errorAndRetry = true;
 
+    // A failure that goes away by itself: leave the language and come back, the status line disappears.
+    behaviour.failServer = true;
+    await load('card_type=constructed&view=grid&lang=pl');
+    await page.getByText('Не удалось загрузить перевод для 1 карту').waitFor();
+    behaviour.failServer = false;
+    const switcher = page.getByRole('radiogroup', { name: 'Язык карт' }).first();
+    await choose('Русский', switcher);
+    await choose('Польский', switcher);
+    await page.waitForFunction(() =>
+      [...document.querySelectorAll('.card-name')].some(el => el.textContent?.includes('PL BG_FIXTURE_4')),
+    );
+    // Not a race with the re-render after the switch: the name is already translated here.
+    await page.waitForTimeout(300);
+    equal(
+      await page.getByText('Не удалось загрузить перевод').count(),
+      0,
+      'the status line outlived a successful reload',
+    );
+    checks.errorClearsAfterReload = true;
+
     const closeInspector = async () => {
       await page.keyboard.press('Escape');
       await page.getByRole('dialog').waitFor({ state: 'detached' });
@@ -384,6 +404,45 @@ export default async function verify(page, root, output, fixtures, live) {
     );
     await second.goto(root + '/?card_type=constructed&lang=xx');
     await second.waitForFunction(() => !new URL(location.href).searchParams.has('lang'));
+    // An unknown language with an open card (catalogue and inspector both read the address): Russian,
+    // not the saved choice.
+    await second.goto(root + '/?card_type=constructed&view=grid&card=BE_036&lang=xx');
+    await second.getByRole('dialog').waitFor();
+    await second.waitForFunction(() => !new URL(location.href).searchParams.has('lang'));
+    await second.waitForTimeout(500);
+    equal(
+      await second.evaluate(() => new URL(location.href).searchParams.get('lang')),
+      null,
+      'unknown lang with a card brought the saved language back',
+    );
+    equal(
+      await second.evaluate(() => new URL(location.href).searchParams.get('card')),
+      'BE_036',
+      'card lost',
+    );
+    equal(
+      await second.locator('dialog h2').innerText(),
+      'МАТРИАРХ',
+      'unknown lang with a card is not Russian',
+    );
+    checks.unknownLangWithCard = true;
+    // Opening and closing a card of a link with ?lang=es does not rewrite the saved preference.
+    await second.evaluate(() => localStorage.setItem('hs_card_lang', 'pl'));
+    await second.goto(root + '/?card_type=constructed&view=grid&lang=es');
+    await second
+      .locator('.card-tile', { has: second.locator('code', { hasText: /^BE_036$/ }) })
+      .locator('.card-name')
+      .click();
+    await second.getByRole('dialog').waitFor();
+    await second.keyboard.press('Escape');
+    await second.getByRole('dialog').waitFor({ state: 'detached' });
+    await second.waitForFunction(() => new URL(location.href).searchParams.get('lang') === 'es');
+    equal(
+      await second.evaluate(() => localStorage.getItem('hs_card_lang')),
+      'pl',
+      'closing a card rewrote the saved language',
+    );
+    checks.closeKeepsPreference = true;
     await second.close();
     checks.preference = true;
 

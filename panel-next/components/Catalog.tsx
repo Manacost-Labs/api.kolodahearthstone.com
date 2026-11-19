@@ -68,9 +68,19 @@ export function Catalog({
   const closeCard = () => {
     if (openedHere.current) {
       openedHere.current = false;
-      // Back returns to the entry written before the card opened; the language chosen since then stays.
+      // Back returns to the entry written before the card opened; the language chosen since then stays in
+      // the address only: closing a card is not a choice, so the saved preference is not touched.
       const keep = langRef.current;
-      window.addEventListener('popstate', () => setLang(keep), { once: true });
+      window.addEventListener(
+        'popstate',
+        () =>
+          window.history.replaceState(
+            null,
+            '',
+            withLangParam(window.location.pathname + window.location.search, keep),
+          ),
+        { once: true },
+      );
       window.history.back();
     } else window.history.replaceState(null, '', cardUrl(null));
   };
