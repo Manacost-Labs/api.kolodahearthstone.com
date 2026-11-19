@@ -530,4 +530,6 @@ export const server = http.createServer(async (req, res) => {
   send(data);
 });
 if (process.argv[1] === new URL(import.meta.url).pathname)
-  server.listen(18768, '127.0.0.1', () => console.log('Local panel fixture: 127.0.0.1:18768'));
+  server.listen(Number(process.env.PANEL_FIXTURE_PORT) || 18768, '127.0.0.1', () =>
+    console.log('Local panel fixture: 127.0.0.1:' + server.address().port),
+  );

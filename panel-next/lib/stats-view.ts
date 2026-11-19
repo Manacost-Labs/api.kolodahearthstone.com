@@ -1,7 +1,7 @@
 // What a statistics module shows around its table: which filters are visible, the KPI cards and the
 // page caption. Pure functions (no React), so tests run as-is.
-import { formatDay, formatNumber, formatRelative, paramLabel } from './format.ts';
-import { pageNumber, statsPageSize } from './analytics-query.ts';
+import { formatDay, formatNumber, formatRelative, knownOptionValues, paramLabel } from './format.ts';
+import { maxPage, pageNumber, statsPageSize } from './analytics-query.ts';
 import type { AnalyticsData, AnalyticsModule } from './types.ts';
 
 export type Param = AnalyticsModule['params'][string];
@@ -16,10 +16,15 @@ export const visibleParams = (definition?: AnalyticsModule): [string, Param][] =
 /** A module can be paged only when the backend takes `offset`. */
 export const pagesBackend = (definition?: AnalyticsModule) => Boolean(definition?.params.offset);
 
-/** Values for a list: what the backend offers for this answer, else the registry; the current one is never lost. */
+/**
+ * Values for a list: what the backend offers for this answer, else the registry, else (for a token
+ * the panel has wording for, like the meta period) the known values, so a failed answer without
+ * `options` still shows a list. The current value is never lost.
+ */
 export function optionValues(key: string, param: Param, data: AnalyticsData | undefined, current: string) {
   const offered = data?.options?.[key];
-  const list = (Array.isArray(offered) ? offered : (param.values ?? [])).map(String);
+  let list = (Array.isArray(offered) ? offered : (param.values ?? [])).map(String);
+  if (!list.length && param.type === 'token') list = knownOptionValues(key);
   if (current && list.length && !list.includes(current)) list.unshift(current);
   return list;
 }
@@ -33,7 +38,7 @@ export const defaultOf = (param: Param) => (param.default === undefined ? '' : S
 
 /** True when some visible filter (or the page) differs from the module's own defaults. */
 export function isChanged(definition: AnalyticsModule | undefined, query: URLSearchParams) {
-  if (pageNumber(query.get('page')) > 1) return true;
+  if (pageNumber(query.get('page'), maxPage(definition)) > 1) return true;
   return visibleParams(definition).some(
     ([key, param]) => (query.get(key) ?? defaultOf(param)) !== defaultOf(param),
   );

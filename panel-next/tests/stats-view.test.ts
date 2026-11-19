@@ -32,7 +32,7 @@ test('the period list comes from the answer and keeps the selected value', () =>
   ]);
   assert.deepEqual(optionValues('period', meta.params.period, answer, 'past_week')[0], 'past_week');
   assert.deepEqual(optionValues('format', meta.params.format, answer, 'wild'), ['standard', 'wild']);
-  assert.deepEqual(optionValues('period', meta.params.period, undefined, ''), []);
+  assert.ok(optionValues('period', meta.params.period, undefined, '').includes('past_day'));
 });
 
 test('reset shows only when a filter or the page differs from the defaults', () => {
@@ -97,4 +97,18 @@ test('the page caption counts rows from the page offset', () => {
   assert.equal(pageCaption(1, 25, 812), '1–25 из 812');
   assert.equal(pageCaption(3, 25, 2777), '51–75 из 2 777');
   assert.equal(pageCaption(1, 0, 0), '');
+});
+
+test('the period is a list even when the answer has no options (a failed load)', () => {
+  const failed = data({});
+  const values = optionValues('period', meta.params.period, failed, 'past_day');
+  assert.ok(values.length > 3 && values.includes('past_day') && values.includes('past_week'));
+  assert.ok(
+    values.every(value => value.startsWith('past_')),
+    String(values),
+  );
+  // A patch from the address is kept and listed first.
+  assert.equal(optionValues('period', meta.params.period, failed, 'patch_37.0.2')[0], 'patch_37.0.2');
+  // A token without wording stays a typed field.
+  assert.deepEqual(optionValues('source_id', { type: 'token' }, failed, ''), []);
 });

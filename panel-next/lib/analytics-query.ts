@@ -1,15 +1,25 @@
 // Pure rules for turning page parameters into a request to the analytics backend (no server-only imports).
-type ModuleDefinition = { params: Record<string, { type?: string; required?: boolean }> };
+type ModuleDefinition = { params: Record<string, { type?: string; required?: boolean; max?: number }> };
 
-/** The page number of a statistics URL: a positive integer, 1 for anything else. */
-export function pageNumber(value: string | null): number {
+/** Rows per page of a module that supports `offset` (the table's own page, so it never shows a second pager); the page number lives in the URL as `page`. */
+export const statsPageSize = 25;
+/** What the backend allows for `offset` when the registry does not say (panel/lib/analytics.php: max 10000). */
+const defaultOffsetMax = 10000;
+
+/** The last page the backend can serve: its `offset` limit divided by the page size. */
+export function maxPage(definition?: ModuleDefinition): number {
+  const limit = definition?.params.offset?.max ?? defaultOffsetMax;
+  return Math.floor(limit / statsPageSize) + 1;
+}
+
+/** The page number of a statistics URL: an integer from 1 to `max`; anything else reads as 1, a far page as the last. */
+export function pageNumber(value: string | null, max: number = maxPage()): number {
   const page = Math.floor(Number(value));
-  return Number.isFinite(page) && page >= 1 && page <= 100000 ? page : 1;
+  if (!Number.isFinite(page) || page < 1) return 1;
+  return Math.min(page, max);
 }
 
 const clientOnly = ['action', 'stats', 'rows_q', 'rows', 'page'];
-/** Rows per page of a module that supports `offset` (the table's own page, so it never shows a second pager); the page number lives in the URL as `page`. */
-export const statsPageSize = 25;
 // Modules whose search box has its own name; the inspector button and old links still pass `q`.
 const searchAliases: Record<string, string> = { card: 'card_name' };
 
@@ -39,7 +49,10 @@ export function analyticsRequest(query: URLSearchParams, moduleKey: string, defi
   // Pages: the panel speaks `page`, the backend `limit`/`offset`; a typed limit or offset never reaches it.
   if (definition?.params.offset) {
     backend.set('limit', String(statsPageSize));
-    backend.set('offset', String((pageNumber(query.get('page')) - 1) * statsPageSize));
+    const current = pageNumber(query.get('page'), maxPage(definition));
+    backend.set('offset', String((current - 1) * statsPageSize));
+    // The address the page keeps (and the pager reads) names the page that was really asked for.
+    if (query.has('page') && String(current) !== query.get('page')) page.set('page', String(current));
   } else {
     backend.delete('offset');
   }

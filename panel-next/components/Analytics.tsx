@@ -1,8 +1,8 @@
 'use client';
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { countLabel, fieldLabel, toneOf } from '@/lib/format';
-import { pageNumber } from '@/lib/analytics-query';
+import { countLabel, fieldLabel, formatNumber, toneOf } from '@/lib/format';
+import { maxPage, pageNumber, statsPageSize } from '@/lib/analytics-query';
 import { isChanged, pageCaption, pagesBackend, statsKpis, visibleParams } from '@/lib/stats-view';
 import { statsHref } from '@/lib/stats-sections';
 import { queryHref, text } from '@/lib/model';
@@ -14,6 +14,7 @@ import { Reliability } from './Reliability';
 import { EmptyState, KpiCard, StatusBadge, Time, Value } from './ui';
 import { ArrowClockwiseIcon } from '@phosphor-icons/react/dist/ssr/ArrowClockwise';
 import { StatsModuleTabs } from './StatsModuleTabs';
+import { Button } from './varylo-ui/basic/Button';
 import { ModuleView } from './stats/ModuleView';
 import { StatsFilters } from './stats/StatsFilters';
 import { StatsPager } from './stats/StatsPager';
@@ -40,8 +41,11 @@ export function Analytics({
     ([key, param]) => param.required && !(params.get(key) || '').trim(),
   );
   const kpis = statsKpis(module, data, definition);
-  const pageNo = pageNumber(params.get('page'));
+  const pageNo = pageNumber(params.get('page'), maxPage(definition));
   const total = Number(data.meta?.total) || data.rows?.length || 0;
+  // The last page the data (and the backend's `offset` limit) reaches; a page past it has no rows.
+  const lastPage = Math.max(1, Math.min(Math.ceil(total / statsPageSize), maxPage(definition)));
+  const beyond = pagesBackend(definition) && pageNo > 1 && total > 0 && !data.rows?.length;
   const extras = Object.entries(data).filter(
     ([key]) =>
       ![
@@ -124,7 +128,21 @@ export function Analytics({
               </div>
               <ModuleView module={module} data={data} />
               {'provider_usage' in data && <ProviderUsage data={data.provider_usage} />}
-              {data.rows?.length ? (
+              {beyond ? (
+                <EmptyState
+                  title="Такой страницы нет"
+                  action={
+                    <Button
+                      variant="secondary"
+                      onClick={() => go({ page: lastPage === 1 ? null : lastPage })}
+                    >
+                      Перейти на последнюю страницу
+                    </Button>
+                  }
+                >
+                  {`Данные заканчиваются на странице ${formatNumber(lastPage)}: всего ${formatNumber(total)}.`}
+                </EmptyState>
+              ) : data.rows?.length ? (
                 <DataTable key={module} rows={data.rows} columns={data.columns} onDetail={setSelected} />
               ) : 'provider_usage' in data ? null : (
                 <EmptyState title="По этим условиям данных нет">
@@ -135,7 +153,7 @@ export function Analytics({
                 <StatsPager
                   caption={pageCaption(pageNo, data.rows.length, total)}
                   page={pageNo}
-                  total={total}
+                  pageCount={lastPage}
                   onPage={next => go({ page: next === 1 ? null : next })}
                 />
               )}

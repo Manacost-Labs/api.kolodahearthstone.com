@@ -1,6 +1,5 @@
 'use client';
 import { Pagination } from '../varylo-ui/navigation/Pagination';
-import { statsPageSize } from '@/lib/analytics-query';
 import './stats-filters.css';
 
 const labels = {
@@ -14,15 +13,14 @@ const labels = {
 export function StatsPager({
   caption,
   page,
-  total,
+  pageCount,
   onPage,
 }: {
   caption: string;
   page: number;
-  total: number;
+  pageCount: number;
   onPage: (page: number) => void;
 }) {
-  const pageCount = Math.ceil(total / statsPageSize);
   return (
     <div className="stats-pager">
       <span className="stats-pager__caption">{caption}</span>

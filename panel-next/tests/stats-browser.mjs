@@ -110,6 +110,20 @@ export default async function verify(page, root) {
   await page.waitForFunction(() => location.search.includes('q=Aggro') && !location.search.includes('page='));
   checks.pager = true;
 
+  // 6b. A direct address past the last page (or past the backend offset limit): the page is honest.
+  for (const far of ['402', '99999', '40']) {
+    await open('decks&page=' + far);
+    await page.getByRole('heading', { name: 'Такой страницы нет' }).waitFor();
+    ensure((await page.locator('.stats-pager__caption').count()) === 0, 'A range is printed for page ' + far);
+    ensure((await page.locator('table').count()) === 0, 'Rows are shown for page ' + far);
+    await page.getByRole('button', { name: 'Перейти на последнюю страницу' }).click();
+    await page.waitForFunction(() => location.search.includes('page=33'));
+    await page.waitForFunction(
+      () => document.querySelector('.stats-pager__caption')?.textContent === '801–812 из 812',
+    );
+  }
+  checks.pageBeyondRange = true;
+
   // 7. Search by Enter; one field, no «Применить».
   ensure(!(await page.getByRole('button', { name: 'Применить' }).count()), '«Применить» is back');
   checks.searchByEnter = true;
@@ -125,6 +139,25 @@ export default async function verify(page, root) {
   await page.waitForFunction(() => location.search.includes('card_name='));
   await page.locator('.analytics-main tbody tr').first().waitFor();
   checks.cardWithoutName = true;
+
+  // 8b. A failed load keeps the period a list with Russian wording, never a slug in a text field.
+  await open('meta&fixture_fail=1');
+  const failedPeriod = page.getByRole('combobox', { name: 'Период', exact: true });
+  ensure(
+    (await failedPeriod.innerText()).trim() === '24 часа',
+    'Period after a failure: ' + (await failedPeriod.innerText()),
+  );
+  ensure(!(await page.locator('input[name="period"]').count()), 'The period is a free field after a failure');
+  const failedText = await visible();
+  for (const word of forbidden) ensure(!word.test(failedText), `failed meta: «${word}» in visible text`);
+  await failedPeriod.click();
+  const failedLabels = (await page.getByRole('option').allInnerTexts()).map(text => text.trim());
+  ensure(
+    failedLabels.includes('7 дней') && !failedLabels.some(label => /_/.test(label)),
+    'Failed period list: ' + failedLabels,
+  );
+  await page.keyboard.press('Escape');
+  checks.failedLoadKeepsLists = true;
 
   // 9. The phone and the narrow desktop: nothing scrolls sideways, the pager turns compact.
   for (const width of [1280, 390]) {

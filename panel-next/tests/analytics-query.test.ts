@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { analyticsRequest, missingHint, responseMessage } from '../lib/analytics-query.ts';
+import {
+  analyticsRequest,
+  maxPage,
+  missingHint,
+  pageNumber,
+  responseMessage,
+} from '../lib/analytics-query.ts';
 
 const card = { params: { card_name: { type: 'string', required: true } } };
 const meta = { params: { format: { type: 'enum' } } };
@@ -71,4 +77,29 @@ test('page becomes limit and offset for a module that pages, and never reaches o
   const flat = analyticsRequest(new URLSearchParams('stats=meta&page=3&offset=5'), 'meta', meta);
   assert.equal(flat.backend.has('offset'), false);
   assert.equal(flat.backend.has('page'), false);
+});
+
+test('page stays inside what the backend offset allows (default 10000, or the registry max)', () => {
+  assert.equal(maxPage(), 401);
+  assert.equal(maxPage({ params: { offset: { max: 100 } } }), 5);
+  for (const bad of [null, '', 'abc', '0', '-3', 'NaN', 'Infinity'])
+    assert.equal(pageNumber(bad), 1, String(bad));
+  assert.equal(pageNumber('1.9'), 1);
+  assert.equal(pageNumber('400'), 400);
+  assert.equal(pageNumber('401'), 401);
+  assert.equal(pageNumber('402'), 401);
+  assert.equal(pageNumber('100000'), 401);
+  assert.equal(pageNumber('9', 5), 5);
+});
+
+test('a page past the offset limit asks for the last servable offset and says so in the address', () => {
+  const paged = { params: { limit: { type: 'int' }, offset: { type: 'int', max: 10000 } } };
+  const far = analyticsRequest(new URLSearchParams('stats=decks&page=402'), 'decks', paged);
+  assert.equal(far.backend.get('offset'), '10000');
+  assert.equal(far.page.get('page'), '401');
+  const edge = analyticsRequest(new URLSearchParams('stats=decks&page=401'), 'decks', paged);
+  assert.equal(edge.backend.get('offset'), '10000');
+  assert.equal(edge.page.get('page'), '401');
+  const small = { params: { offset: { type: 'int', max: 100 } } };
+  assert.equal(analyticsRequest(new URLSearchParams('page=50'), 'x', small).backend.get('offset'), '100');
 });

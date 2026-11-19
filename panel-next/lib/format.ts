@@ -476,6 +476,12 @@ export function paramLabel(key: string): string {
   return paramLabels[key] ?? fieldLabel(key);
 }
 
+/** Values the panel has wording for, in display order; rolling periods only, patches come from the data. */
+export function knownOptionValues(param: string): string[] {
+  const values = Object.keys(optionLabels[param] ?? {});
+  return param === 'period' ? values.filter(value => value.startsWith('past_')) : values;
+}
+
 /** The Russian wording of a filter value: "past_day" → «24 часа», "patch_37.0.2" → «Патч 37.0.2». */
 export function optionLabel(param: string, value: string): string {
   const raw = String(value);
