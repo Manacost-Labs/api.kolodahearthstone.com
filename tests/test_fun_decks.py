@@ -2113,6 +2113,66 @@ def test_a_standard_run_updates_its_row_and_leaves_the_wild_row_of_the_same_code
     assert (rows["Wild"]["games"], rows["Wild"]["win_rate"]) == (90, 62.0)  # untouched
 
 
+# --- the fresh run wins over the remembered score (F8 review) --------------------------
+
+
+def test_merge_history_with_a_higher_remembered_score_keeps_one_fresh_row() -> None:
+    old = _both_formats_row(
+        "Standard",
+        fun_score=0.95,
+        kind="brew",
+        reasons=["concept_title"],
+        ladder_sim=0.1,
+        first_seen_at="2026-10-20T00:00:00+00:00",
+        last_seen_at="2026-10-28T00:00:00+00:00",
+    )
+    fresh = _both_formats_row(
+        "Standard",
+        fun_score=0.4,
+        kind="off_meta",
+        reasons=["far_from_ladder"],
+        ladder_sim=0.3,
+        first_seen_at="2026-10-29T00:00:00+00:00",
+        last_seen_at="2026-10-29T00:00:00+00:00",
+    )
+
+    merged = _merge_history([old], [fresh], retention_hours=10**6, now=datetime(2026, 10, 29, tzinfo=UTC))
+
+    assert len(merged) == 1
+    row = merged[0]
+    assert (row["fun_score"], row["kind"], row["reasons"], row["ladder_sim"]) == (0.4, "off_meta", ["far_from_ladder"], 0.3)
+    assert row["first_seen_at"] == "2026-10-20T00:00:00+00:00"
+    assert row["last_seen_at"] == "2026-10-29T00:00:00+00:00"
+    assert set(row) == set(fresh)
+
+
+def test_two_refreshes_in_a_row_do_not_multiply_rows_or_variants(
+    fun_deck_world: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HS_FUN_DECK_RETENTION_HOURS", "100000")
+    _save_world(
+        standard=[
+            _catalog_row("Dragon Warrior", "Warrior", range(1, 16), games=500_000, win_rate=52.0),
+            _catalog_row("Casino Mill Mage", "Mage", range(401, 416), games=100, win_rate=55.0),
+            _catalog_row("Casino Mill Mage Alt", "Mage", [*range(401, 413), 501, 502, 503], games=60, win_rate=52.0),
+        ]
+    )
+    # remembered with a score above anything the run can give now
+    _save_history([_both_formats_row("Standard", fun_score=2.0, games=70, win_rate=50.0)])
+
+    first = _refresh_fun_decks_unlocked()
+    rows_after_first = _structured()["rows"]
+    second = _refresh_fun_decks_unlocked()
+    rows_after_second = _structured()["rows"]
+
+    assert len(rows_after_first) == 1 and len(rows_after_second) == 1
+    assert (first["fun_retained"], second["fun_retained"]) == (1, 1)
+    assert rows_after_first[0]["variants"] == rows_after_second[0]["variants"] == 1
+    assert rows_after_second[0]["fun_score"] < 2.0  # the fresh score, not the remembered one
+    assert rows_after_second[0]["games"] == 100
+    assert set(rows_after_second[0]) == set(rows_after_first[0])
+
+
 # --- regression on a real catalog slice ----------------------------------------
 
 
