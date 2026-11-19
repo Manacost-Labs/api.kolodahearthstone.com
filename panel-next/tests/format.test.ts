@@ -11,6 +11,8 @@ import {
   formatRelative,
   formatSchedule,
   formatValue,
+  knownOptionValues,
+  normalizeShares,
   inferKind,
   optionLabel,
   paramLabel,
@@ -295,4 +297,19 @@ test('filter values read in Russian, never as slugs', () => {
   assert.equal(optionLabel('mode', 'duos'), 'Дуо');
   // Paging is the panel's own affair: it has no wording of limit and offset.
   assert.equal(paramLabel('limit'), 'Limit');
+});
+
+test('shares inside text and the finite filter sets read in the common way', () => {
+  assert.equal(normalizeShares('98,19%'), '98,2\u00a0%');
+  assert.equal(normalizeShares('цель 99% и 7.98 %'), 'цель 99,0\u00a0% и 8,0\u00a0%');
+  assert.equal(normalizeShares('Попыток: 1 234'), 'Попыток: 1 234');
+  const classes = knownOptionValues('class_name');
+  assert.equal(classes[0], '');
+  assert.ok(
+    classes.includes('DEMONHUNTER') && classes.includes('DEATHKNIGHT') && !classes.includes('NEUTRAL'),
+  );
+  assert.deepEqual(knownOptionValues('format_name'), ['', 'standard', 'wild']);
+  assert.equal(optionLabel('class_name', 'DEMONHUNTER'), 'Охотник на демонов');
+  assert.equal(optionLabel('class_name', ''), 'Все');
+  assert.equal(optionLabel('format_name', 'wild'), 'Вольный');
 });

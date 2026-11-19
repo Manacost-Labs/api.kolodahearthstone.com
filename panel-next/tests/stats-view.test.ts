@@ -1,6 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isChanged, optionValues, pageCaption, statsKpis, visibleParams } from '../lib/stats-view.ts';
+import {
+  isChanged,
+  isList,
+  optionHints,
+  optionValues,
+  pageCaption,
+  statsKpis,
+  visibleParams,
+} from '../lib/stats-view.ts';
 import type { AnalyticsData, AnalyticsModule } from '../lib/types.ts';
 
 const meta: AnalyticsModule = {
@@ -111,4 +119,29 @@ test('the period is a list even when the answer has no options (a failed load)',
   assert.equal(optionValues('period', meta.params.period, failed, 'patch_37.0.2')[0], 'patch_37.0.2');
   // A token without wording stays a typed field.
   assert.deepEqual(optionValues('source_id', { type: 'token' }, failed, ''), []);
+});
+
+test('class and format strings are lists with «Все» first; the source stays a field', () => {
+  const decks = {
+    class_name: { type: 'string' },
+    format_name: { type: 'string' },
+    source_id: { type: 'token' },
+  };
+  assert.equal(isList('class_name', decks.class_name, data({})), true);
+  assert.equal(optionValues('class_name', decks.class_name, data({}), '')[0], '');
+  assert.deepEqual(optionValues('format_name', decks.format_name, data({}), ''), ['', 'standard', 'wild']);
+  assert.equal(isList('source_id', decks.source_id, data({})), false);
+  assert.equal(isList('q', { type: 'string' }, data({})), false);
+});
+
+test('period hints name the current patch and the default', () => {
+  const answer = data({
+    option_hints: { period: { default: 'past_day', current: 'black_empire', current_patch: 'patch_37.0.2' } },
+  });
+  assert.deepEqual(optionHints('period', answer), {
+    past_day: 'По умолчанию',
+    'patch_37.0.2': 'Текущий патч',
+  });
+  assert.deepEqual(optionHints('period', data({})), {});
+  assert.deepEqual(optionHints('format', answer), {});
 });

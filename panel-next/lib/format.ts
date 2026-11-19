@@ -476,15 +476,35 @@ export function paramLabel(key: string): string {
   return paramLabels[key] ?? fieldLabel(key);
 }
 
-/** Values the panel has wording for, in display order; rolling periods only, patches come from the data. */
+/**
+ * Finite value sets the panel can offer when the answer carries no `options`: rolling periods (patches
+ * come from the data), classes and formats. Class and format filters start with «Все» (empty = no filter).
+ * The class values are the upper-case spelling both backends accept (HSReplay matches it exactly, the
+ * decks table compares case-insensitively).
+ */
 export function knownOptionValues(param: string): string[] {
+  if (param === 'class_name')
+    return [
+      '',
+      ...Object.keys(classLabels)
+        .filter(key => key !== 'neutral')
+        .map(key => key.toUpperCase()),
+    ];
+  if (param === 'format_name') return ['', 'standard', 'wild'];
   const values = Object.keys(optionLabels[param] ?? {});
   return param === 'period' ? values.filter(value => value.startsWith('past_')) : values;
+}
+
+/** Text that may hold shares ("98,19%", "цель 99%") written in the one shape of `formatPercent`. */
+export function normalizeShares(text: string): string {
+  return text.replace(/(\d+(?:[.,]\d+)?)\s?%/g, (_, number: string) => formatPercent(number));
 }
 
 /** The Russian wording of a filter value: "past_day" → «24 часа», "patch_37.0.2" → «Патч 37.0.2». */
 export function optionLabel(param: string, value: string): string {
   const raw = String(value);
+  if (raw === '' && (param === 'class_name' || param === 'format_name')) return 'Все';
+  if (param === 'class_name') return classLabel(raw);
   const known = optionLabels[param]?.[raw] ?? optionLabels[param]?.[raw.toLowerCase()];
   if (known) return known;
   if (param === 'period' || param === 'card_period') {

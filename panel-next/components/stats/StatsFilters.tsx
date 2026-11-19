@@ -2,7 +2,7 @@
 import { useId, useRef, type FocusEvent, type KeyboardEvent } from 'react';
 import { MagnifyingGlassIcon } from '@phosphor-icons/react/dist/ssr/MagnifyingGlass';
 import { optionLabel, paramLabel } from '@/lib/format';
-import { defaultOf, isList, optionValues, visibleParams, type Param } from '@/lib/stats-view';
+import { defaultOf, isList, optionHints, optionValues, visibleParams, type Param } from '@/lib/stats-view';
 import type { AnalyticsData, AnalyticsModule } from '@/lib/types';
 import { Button } from '../varylo-ui/basic/Button';
 import { Select } from '../varylo-ui/forms/Select';
@@ -88,9 +88,11 @@ export function StatsFilters({
                 aria-labelledby={`${id}-label`}
                 value={current(key, param)}
                 onValueChange={value => onChange({ [key]: value, page: null })}
+                placeholder="Все"
                 options={optionValues(key, param, data, current(key, param)).map(value => ({
                   value,
                   label: optionLabel(key, value),
+                  description: optionHints(key, data)[value],
                 }))}
               />
             ) : (

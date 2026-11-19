@@ -5,6 +5,10 @@ import { readFileSync } from 'node:fs';
 import { promisify } from 'node:util';
 import { moduleAnswer } from './fixtures/analytics-data.mjs';
 const run = promisify(execFile);
+// A captured `parsing_reliability` answer: shares arrive as `98,19%` strings, as the backend writes them.
+const reliability = JSON.parse(
+  readFileSync(new URL('./fixtures/parsing-reliability.json', import.meta.url), 'utf8'),
+);
 // Mirror of analytics_module_registry() as the PHP adapter exposes it; panel/tests/analytics_registry_snapshot_test.php keeps it current.
 const registry = JSON.parse(
   readFileSync(new URL('./fixtures/analytics-registry.json', import.meta.url), 'utf8'),
@@ -83,6 +87,7 @@ function fixtureAnalytics(module, search) {
         stale: false,
       },
       ...(answer?.options && !answer.legacy ? { options: answer.options } : {}),
+      ...(answer?.hints && !answer.legacy ? { option_hints: answer.hints } : {}),
     },
     200,
   ];
@@ -375,7 +380,7 @@ export const server = http.createServer(async (req, res) => {
         })),
       ],
       meta: { total: 2, updated_at: '2026-10-02T12:00:00Z', cached: false, stale: false },
-      parsing_reliability: { windows: [], message: 'Накапливаем статистику' },
+      parsing_reliability: reliability,
     });
   if (url.pathname !== '/next-data.php') return send({ ok: false, message: 'Unknown endpoint' }, 404);
   let input;

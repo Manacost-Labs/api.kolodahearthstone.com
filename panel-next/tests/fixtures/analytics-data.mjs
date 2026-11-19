@@ -80,6 +80,7 @@ const modules = {
       rows,
       total: 53,
       summary: [date, games(sum(rows, 'games')), count('Архетипов', 53)],
+      hints: { period: { default: 'past_day', current: 'black_empire', current_patch: 'patch_37.0.2' } },
       options: {
         period: [
           'past_3_hours',

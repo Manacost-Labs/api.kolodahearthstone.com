@@ -31,13 +31,26 @@ export default async function verify(page, root) {
   const settled = () => page.waitForFunction(() => !document.querySelector('.stats-body[data-busy="true"]'));
   const visible = () => page.locator('#panel-main').innerText();
   const percentShape = /^\d{1,3}( \d{3})*,\d{1,2} %$/u;
-  const forbidden = [/past_day/, /\blegend\b/, /STANDARD/, /RANKED_/, /Записей/, /Смещение/, /<b>/];
+  const forbidden = [
+    /past_day/,
+    /\blegend\b/,
+    /STANDARD/,
+    /RANKED_/,
+    /Записей/,
+    /Смещение/,
+    /<b>/,
+    /Options/,
+    /Option hints/,
+    /option_hints/,
+  ];
 
   // 1. Every module: no raw slugs, no paging fields, every share in one shape.
   for (const key of modules) {
     await open(key + (key === 'card' ? '&card_name=Тестовая карта' : ''));
     const text = await visible();
     for (const word of forbidden) ensure(!word.test(text), `${key}: «${word}» in visible text`);
+    if (key === 'overview')
+      ensure((await page.locator('.reliability').count()) === 1, 'overview: no reliability block');
     const fields = await page.locator('input[name="limit"], input[name="offset"]').count();
     ensure(fields === 0, key + ': limit/offset fields are shown');
     const shares = await page
@@ -56,13 +69,20 @@ export default async function verify(page, root) {
   const period = page.getByRole('combobox', { name: 'Период', exact: true });
   ensure((await period.innerText()).trim() === '24 часа', 'Default period: ' + (await period.innerText()));
   await period.click();
-  const labels = (await page.getByRole('option').allInnerTexts()).map(text => text.trim());
+  const labels = (await page.getByRole('option').allInnerTexts()).map(text => text.split('\n')[0].trim());
   ensure(labels.includes('Патч 37.0.2') && labels.includes('7 дней'), 'Period list: ' + labels);
   ensure(labels.includes('Чёрная империя') && labels.includes('Баны'), 'Period list: ' + labels);
   await page.getByRole('option', { name: '7 дней', exact: true }).click();
   await settled();
   await page.waitForFunction(() => location.search.includes('period=past_week'));
   checks.metaFilters = true;
+
+  // 2b. The hint of the meta period list comes from the answer's `option_hints`.
+  await page.getByRole('combobox', { name: 'Период', exact: true }).click();
+  const hinted = await page.getByRole('option', { name: /Патч 37\.0\.2/ }).innerText();
+  ensure(/Текущий патч/.test(hinted), 'The current patch has no hint: ' + hinted);
+  await page.keyboard.press('Escape');
+  checks.periodHints = true;
 
   // 3. KPI: date, games, archetypes, without echoing the chosen filters.
   const kpi = (await page.locator('.stats-kpis').innerText()).replace(/\s+/g, ' ');
@@ -124,6 +144,45 @@ export default async function verify(page, root) {
   }
   checks.pageBeyondRange = true;
 
+  // 6c. Deck filters: class and format are lists starting with «Все»; the source stays a typed field.
+  await open('decks');
+  const classList = page.getByRole('combobox', { name: 'Класс', exact: true });
+  const formatList = page.getByRole('combobox', { name: 'Формат', exact: true });
+  ensure(
+    (await classList.innerText()).trim() === 'Все',
+    'Class list starts at ' + (await classList.innerText()),
+  );
+  ensure(
+    (await formatList.innerText()).trim() === 'Все',
+    'Format list starts at ' + (await formatList.innerText()),
+  );
+  await classList.click();
+  const classLabels = (await page.getByRole('option').allInnerTexts()).map(text =>
+    text.split('\n')[0].trim(),
+  );
+  ensure(
+    classLabels[0] === 'Все' &&
+      classLabels.includes('Охотник на демонов') &&
+      classLabels.includes('Рыцарь смерти'),
+    'Class list: ' + classLabels,
+  );
+  ensure(!classLabels.some(label => /^[A-Z_]+$/.test(label)), 'A class slug in the list: ' + classLabels);
+  await page.getByRole('option', { name: 'Маг', exact: true }).click();
+  await page.waitForFunction(() => location.search.includes('class_name=MAGE'));
+  await settled();
+  ensure(
+    (await page.getByRole('combobox', { name: 'Класс', exact: true }).innerText()).trim() === 'Маг',
+    'Class not kept',
+  );
+  await page.getByRole('combobox', { name: 'Класс', exact: true }).click();
+  await page.getByRole('option', { name: 'Все', exact: true }).click();
+  await page.waitForFunction(() => !location.search.includes('class_name='));
+  ensure(
+    (await page.getByRole('textbox', { name: 'Источник', exact: true }).count()) === 1,
+    'Source is not a field',
+  );
+  checks.deckFilterLists = true;
+
   // 7. Search by Enter; one field, no «Применить».
   ensure(!(await page.getByRole('button', { name: 'Применить' }).count()), '«Применить» is back');
   checks.searchByEnter = true;
@@ -151,7 +210,9 @@ export default async function verify(page, root) {
   const failedText = await visible();
   for (const word of forbidden) ensure(!word.test(failedText), `failed meta: «${word}» in visible text`);
   await failedPeriod.click();
-  const failedLabels = (await page.getByRole('option').allInnerTexts()).map(text => text.trim());
+  const failedLabels = (await page.getByRole('option').allInnerTexts()).map(text =>
+    text.split('\n')[0].trim(),
+  );
   ensure(
     failedLabels.includes('7 дней') && !failedLabels.some(label => /_/.test(label)),
     'Failed period list: ' + failedLabels,

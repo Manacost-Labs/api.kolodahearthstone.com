@@ -58,6 +58,9 @@ export function Analytics({
         'rows',
         'meta',
         'provider_usage',
+        // The filters already use them (lists and the hints beside the period).
+        'options',
+        'option_hints',
       ].includes(key),
   );
   return (

@@ -62,6 +62,8 @@ export interface AnalyticsData {
   summary: { key?: string; label: string; value: string | number; type?: string; tone?: string }[];
   /** Values of the list filters (#104); the period list comes from the data, so it is never in the registry. */
   options?: Record<string, string[]>;
+  /** Descriptions for some list values, e.g. the meta period: `{default, current, current_patch}`. */
+  option_hints?: Record<string, Record<string, string>>;
   meta: Row;
   [key: string]: unknown;
 }

@@ -16,6 +16,9 @@ export const visibleParams = (definition?: AnalyticsModule): [string, Param][] =
 /** A module can be paged only when the backend takes `offset`. */
 export const pagesBackend = (definition?: AnalyticsModule) => Boolean(definition?.params.offset);
 
+/** String filters whose values are a known finite set (see `knownOptionValues`). */
+const catalogued = ['class_name', 'format_name'];
+
 /**
  * Values for a list: what the backend offers for this answer, else the registry, else (for a token
  * the panel has wording for, like the meta period) the known values, so a failed answer without
@@ -24,9 +27,20 @@ export const pagesBackend = (definition?: AnalyticsModule) => Boolean(definition
 export function optionValues(key: string, param: Param, data: AnalyticsData | undefined, current: string) {
   const offered = data?.options?.[key];
   let list = (Array.isArray(offered) ? offered : (param.values ?? [])).map(String);
-  if (!list.length && param.type === 'token') list = knownOptionValues(key);
+  // A token the panel has wording for (the period), or a class/format string: a list even without `options`.
+  if (!list.length && (param.type === 'token' || catalogued.includes(key))) list = knownOptionValues(key);
   if (current && list.length && !list.includes(current)) list.unshift(current);
   return list;
+}
+
+/** Descriptions of list values from the answer's `option_hints` (the meta period: current patch, default). */
+export function optionHints(key: string, data?: AnalyticsData): Record<string, string> {
+  const hints = data?.option_hints?.[key];
+  const out: Record<string, string> = {};
+  if (key !== 'period' || !hints) return out;
+  if (hints.default) out[hints.default] = 'По умолчанию';
+  if (hints.current_patch) out[hints.current_patch] = 'Текущий патч';
+  return out;
 }
 
 /** Whether the field is a list (an `enum`, or a token the backend answered with a list for). */
