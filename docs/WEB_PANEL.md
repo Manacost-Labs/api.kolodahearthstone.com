@@ -190,6 +190,23 @@ python -m unittest panel.tests.test_constructed_related_local_images`
 (модуль меты при этом работает). Каталог знает архетипы с ≥ 50 играми, поэтому при
 `min_games` 10 и 25 часть редких архетипов остаётся без класса.
 
+**Картинки Полей сражений и `class_slug` Арены.**
+- `bg_minions[].image_url` — абсолютный адрес файла из тех же `uploads`, что отдаёт
+  каталог: сначала `https://api.kolodahearthstone.com/uploads/framed/<card_id>.png`, затем
+  `.../uploads/cards/<card_id>.png`. Наличие проверяется по записи в каталоге (`lstat`): на проде это симлинки в `uploads/.s3-storage` (S3 через rclone), цель не читается, иначе холодный прогон занимает секунды; обычный локальный файл должен быть не пуст. Нет записи —
+  `image_url` — пустая строка (`""`), и панель рисует заглушку. На машине без каталога
+  `uploads` (разработка) проверить нельзя, и отдаётся адрес `framed`. `image_kind` не менялся.
+- `bg_heroes[].image_url` — портрет героя 256 px
+  (`https://art.hearthstonejson.com/v1/256x/<card_id>.jpg`) в режимах `solo` и `duos`
+  (раньше в `duos` картинки не было, в `columns` добавлен `image_url`); без `card_id` — `""`.
+- `arena[].class_slug` — имя иконки класса HeartPulse (`public/class_icon/ui/<slug>-64.webp`):
+  `deathknight`, `demonhunter`, `druid`, `hunter`, `mage`, `paladin`, `priest`, `rogue`,
+  `shaman`, `warlock`, `warrior`. Берётся из `slug`, `class`, `class_name`; незнакомый класс — `""`.
+  `arena_cards[].class_slug` считается так же из `cardClass`; для нейтральных карт — `""`.
+- `arena_cards[].image_url` при непустом `card_id` — `https://art.hearthstonejson.com/v1/render/latest/ruRU/256x/<card_id>.png`
+  (адрес из источника без `/render/` отдаёт 404); значение источника остаётся только у строки без `card_id`
+  и только если это `https://`-адрес. `bg_heroes` в режиме `duos` не передаёт в API пустые необязательные параметры (пустой `q=` давал 422).
+
 ### Смоук статистики после деплоя
 
 После выкладки `panel-next`: `/` отвечает `307` на вход, `/api/panel` — `401`.
