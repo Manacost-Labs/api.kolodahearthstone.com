@@ -19,6 +19,7 @@ import shutil
 import signal
 import sys
 import time
+import http.client
 import urllib.error
 import urllib.request
 import uuid
@@ -131,7 +132,7 @@ def http_fetch(url: str) -> tuple[int, bytes, str | None]:
             return response.status, response.read(MAX_BODY + 1), None
     except urllib.error.HTTPError as exc:
         return exc.code, b"", exc.headers.get("Retry-After")
-    except (urllib.error.URLError, OSError, TimeoutError) as exc:
+    except (urllib.error.URLError, http.client.HTTPException, OSError, TimeoutError) as exc:
         raise FetchError(str(exc)) from exc
 
 

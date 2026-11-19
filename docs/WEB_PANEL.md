@@ -72,6 +72,25 @@
 - вид **«Плитки»** подстраивает число колонок под ширину окна: одна на
   телефоне, пять при ширине 1440 px.
 
+### История карт и локальные копии картинок
+
+Версия в `catalog_card_versions` пишется триггерами `cv1_*`; хэш версии
+включает `local_image_url`, `local_gold_image_url` и `local_crop_image_url`.
+Поэтому у этих полей должен быть один владелец:
+
+- `mirror_constructed_images.py` (через `card_image_versions.py`) — владелец
+  `local_image_url` и `local_gold_image_url`; публикует картинку под
+  `/uploads/card-history-media/<sha256>.png`;
+- `sync_constructed_related_cards.py` только заполняет пустые `local_image_url`
+  и `local_crop_image_url` и никогда не перезаписывает непустое значение
+  (раньше возвращал путь `/uploads/constructed-related/<id>.png`, и каждый
+  такой возврат становился ложной версией).
+
+Метрика «доля переходов, где изменились только `local_*`» — в описании
+issue #100; уже записанные версии не удаляются. Тест: `RUN_CARD_HISTORY_DOCKER_TESTS=1
+python -m unittest panel.tests.test_constructed_related_local_images`
+(одноразовая MariaDB 10.11 в docker).
+
 ### Ручные правки карт Полей сражений
 
 Импорт HearthstoneJSON перезаписывает карты при каждом запуске. Поля, которые
