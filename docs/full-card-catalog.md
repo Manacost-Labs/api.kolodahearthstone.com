@@ -126,3 +126,6 @@ harmless); nothing is dropped without the owner. The catalog table is untouched,
 so no restore is needed for the catalog itself. The earlier rule for the
 catalog table still holds: a failed batch rolls back, and the panel `current`
 symlink can be returned atomically to the previous release.
+
+Localized WebP renders of these cards are downloaded by a separate timer, see
+[card-renders.md](card-renders.md).
