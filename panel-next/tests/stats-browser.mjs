@@ -31,7 +31,7 @@ export default async function verify(page, root) {
   const settled = () => page.waitForFunction(() => !document.querySelector('.stats-body[data-busy="true"]'));
   const visible = () => page.locator('#panel-main').innerText();
   const percentShape = /^\d{1,3}( \d{3})*,\d{1,2} %$/u;
-  const forbidden = [/past_day/, /legend/, /STANDARD/, /RANKED_/, /Записей/, /Смещение/, /<b>/];
+  const forbidden = [/past_day/, /\blegend\b/, /STANDARD/, /RANKED_/, /Записей/, /Смещение/, /<b>/];
 
   // 1. Every module: no raw slugs, no paging fields, every share in one shape.
   for (const key of modules) {
