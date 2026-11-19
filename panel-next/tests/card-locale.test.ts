@@ -10,6 +10,7 @@ import {
   parseLocalization,
   requestUrl,
   resolveLang,
+  retryAfterMs,
   rowLookup,
   shownLang,
   withLangParam,
@@ -215,6 +216,42 @@ test('loader: 429 is retried once after a pause, then it is an error', async () 
   const always = loaderWith(() => json({}, 429));
   assert.equal((await always.loader.load('pl', { id: 'A', dbf: null })).state, 'error');
   assert.equal(always.calls.length, 2);
+});
+
+test('Retry-After: delta-seconds and HTTP-date, capped at 5 s, otherwise the default pause', () => {
+  const now = Date.parse('2026-11-19T15:00:00Z');
+  assert.equal(retryAfterMs('2', now, 1500), 2000);
+  assert.equal(retryAfterMs(' 3 ', now, 1500), 3000);
+  assert.equal(retryAfterMs('120', now, 1500), 5000, 'capped');
+  assert.equal(retryAfterMs('Thu, 19 Nov 2026 15:00:04 GMT', now, 1500), 4000, 'HTTP-date in the future');
+  assert.equal(retryAfterMs('Thu, 19 Nov 2026 15:10:00 GMT', now, 1500), 5000, 'HTTP-date capped');
+  assert.equal(retryAfterMs('Thu, 19 Nov 2026 14:59:00 GMT', now, 1500), 1500, 'past date');
+  assert.equal(retryAfterMs('0', now, 1500), 1500);
+  assert.equal(retryAfterMs('soon', now, 1500), 1500);
+  assert.equal(retryAfterMs('', now, 1500), 1500);
+  assert.equal(retryAfterMs(null, now, 1500), 1500);
+});
+
+test('loader: 429 waits for an HTTP-date Retry-After before the single retry', async () => {
+  const waits: number[] = [];
+  const realSetTimeout = globalThis.setTimeout;
+  // Record every pause; only the capped retry pause is shortened, the request timeout stays real.
+  globalThis.setTimeout = ((callback: () => void, ms?: number) => {
+    waits.push(ms ?? 0);
+    return realSetTimeout(callback, ms === 5000 ? 0 : ms);
+  }) as typeof setTimeout;
+  try {
+    const date = new Date(Date.now() + 60_000).toUTCString();
+    let hits = 0;
+    const { loader, calls } = loaderWith(() =>
+      ++hits === 1 ? json({}, 429, { 'retry-after': date }) : json(fixture('be036-plPL')),
+    );
+    assert.equal((await loader.load('pl', { id: 'A', dbf: null })).state, 'ok');
+    assert.equal(calls.length, 2);
+    assert.ok(waits.includes(5000), `server pause honoured and capped, got ${waits.join(',')}`);
+  } finally {
+    globalThis.setTimeout = realSetTimeout;
+  }
 });
 
 test('loader: same request in flight is merged; abort is neither cached nor an error', async () => {

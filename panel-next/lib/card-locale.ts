@@ -118,6 +118,16 @@ export type LoaderOptions = {
   rateLimitDelayMs?: number;
 };
 
+const maxRateLimitDelayMs = 5000;
+
+/** Pause before retrying a 429: `Retry-After` as delta-seconds or an HTTP-date, at most 5 s. */
+export function retryAfterMs(header: string | null | undefined, now: number, fallbackMs: number): number {
+  const value = (header ?? '').trim();
+  // Digits first: Date.parse would read a bare number as a year.
+  const ms = /^\d+$/.test(value) ? Number(value) * 1000 : Date.parse(value) - now;
+  return Number.isFinite(ms) && ms > 0 ? Math.min(ms, maxRateLimitDelayMs) : fallbackMs;
+}
+
 const abortError = () => new DOMException('Aborted', 'AbortError');
 export const isAbort = (error: unknown) => error instanceof DOMException && error.name === 'AbortError';
 
@@ -277,8 +287,7 @@ export class LocaleLoader {
     }
     if (response.status === 404) return { state: 'missing' };
     if (response.status === 429 && attempt === 0) {
-      const wait = Number(response.headers?.get?.('Retry-After'));
-      const delay = Number.isFinite(wait) && wait > 0 ? Math.min(wait * 1000, 5000) : this.rateLimitDelayMs;
+      const delay = retryAfterMs(response.headers?.get?.('Retry-After'), Date.now(), this.rateLimitDelayMs);
       await new Promise<void>((resolve, reject) => {
         const timer = setTimeout(() => {
           signal.removeEventListener('abort', onAbort);

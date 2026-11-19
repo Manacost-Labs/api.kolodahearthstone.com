@@ -108,7 +108,8 @@ These three PHP adapters are reachable only through the private
   `/dbf/{dbf}` when the row has no card id, and once more by DBF after a 404 on
   the card id), `credentials: 'omit'`, at most 6 requests at once, one per card,
   an in-tab cache, cancellation when the page or language changes, a 10 s
-  timeout, a single retry of a 429. An answer without a translation
+  timeout, a single retry of a 429 after its `Retry-After` (seconds or an
+  HTTP-date, at most 5 s; 1.5 s without one). An answer without a translation
   (`fallback: true`) shows English with the note “Нет перевода на … — показан
   английский”; a card the catalogue does not know shows the panel data with
   “Нет в каталоге карт — показаны данные панели”; a network error, 5xx, timeout
