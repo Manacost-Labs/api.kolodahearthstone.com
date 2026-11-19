@@ -20,6 +20,23 @@ class HistorySchemaTest(unittest.TestCase):
             self.assertIn("NEW.`" + field + "`", triggers[1])
         self.assertIn("v.card_id = `constructed_cards`.`card_id`", baseline)
 
+    def test_hash_ignores_local_mirrors_and_source_bookkeeping(self):
+        columns = ["card_id", "image_url", "local_image_url", "source_hash", "source",
+                   "image_fetched_at", "image_checked_at", "text_ru"]
+        triggers, _ = statements("constructed_cards", columns)
+        comparison = triggers[1].split(" THEN ", 1)[0]
+        for field in ("source_hash", "source", "image_fetched_at", "image_checked_at"):
+            self.assertNotIn("NEW.`" + field + "`", comparison)
+        # A mirrored image hides the upstream URL from the hash, so remirroring
+        # the same card does not create a new version.
+        self.assertIn("NULLIF(NEW.`local_image_url`, '') IS NOT NULL", comparison)
+        self.assertNotIn("NEW.`local_image_url`'", comparison.replace("NULLIF(NEW.`local_image_url`, '')", ""))
+
+    def test_previous_hash_is_history_head(self):
+        triggers, _ = statements("constructed_cards", ["card_id", "text_ru"])
+        self.assertIn("ORDER BY v.id DESC LIMIT 1", triggers[1])
+        self.assertIn("ORDER BY v.id DESC LIMIT 1", triggers[2])
+
     def test_library_identity_includes_library(self):
         triggers, baseline = statements("battlegrounds_library_cards", ["library", "card_id", "name_ru"])
         self.assertIn("CONCAT(OLD.`library`, ':', OLD.`card_id`)", triggers[1])
