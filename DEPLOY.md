@@ -222,6 +222,16 @@ sudo ./scripts/merge-env-example.sh /etc/hs-data-api.env
 ./scripts/audit.sh
 ```
 
+Docker jobs that run every five minutes or more often (`run-convergence`,
+`plan-convergence`, `reconcile-schedule-ledger`, `refresh-hsguru-streamers`)
+execute in the running `hs-data-api` container with `docker exec`, bounded by
+`timeout` inside it; the other jobs start their own container with
+`docker compose run`. A container per minute created and removed veth
+interfaces in three networks, and headless Chrome on the host dropped page
+loads with `net::ERR_NETWORK_CHANGED` (#163). Stopping such a unit terminates
+the job inside the container (`pkill` by its command line); a deploy recreates
+the container and ends running jobs with it.
+
 Production refresh schedule:
 
 - `hs-data-api-refresh.timer`: full parser run at `07:00 Europe/Warsaw`.

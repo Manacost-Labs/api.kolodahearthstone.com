@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -408,3 +409,46 @@ def test_job_units_remove_their_container_on_stop_and_timeout(tmp_path: Path) ->
         assert timeout_stop in ([], ["TimeoutStopSec=30s"], ["TimeoutStopSec=1min"]), (
             unit.name
         )
+
+
+FREQUENT_JOB_UNITS = {
+    "hs-data-api-docker-run-convergence": ("24m", "25min"),
+    "hs-data-api-docker-plan-convergence": ("4m", "5min"),
+    "hs-data-api-docker-reconcile-schedule-ledger": ("4m", "5min"),
+    "hs-data-api-docker-refresh-hsguru-streamers": ("34m", "35min"),
+}
+
+
+def test_frequent_jobs_run_inside_the_api_container_without_new_networks() -> None:
+    """A `docker run` per job created and removed veth interfaces in three
+    networks every minute; headless Chrome on the host reported each change as
+    net::ERR_NETWORK_CHANGED and dropped page loads (#163). Jobs that run every
+    five minutes or more often execute in the running API container instead,
+    bounded there and terminated there when the unit stops."""
+
+    frequent_timers = sorted(
+        path.name.removesuffix(".timer")
+        for path in (ROOT / "systemd").glob("hs-data-api-docker-*.timer")
+        if re.search(r"OnCalendar=\S+ \*:(\*|\d\d/[1-5]):", path.read_text(encoding="utf-8"))
+    )
+    assert frequent_timers == sorted(FREQUENT_JOB_UNITS)
+
+    for name, (limit, unit_limit) in FREQUENT_JOB_UNITS.items():
+        lines = (ROOT / "systemd" / f"{name}.service").read_text(encoding="utf-8").splitlines()
+        exec_start = [line for line in lines if line.startswith("ExecStart=")]
+        assert len(exec_start) == 1, name
+        assert exec_start[0].startswith(
+            f"ExecStart=/usr/bin/docker exec hs-data-api timeout --kill-after=30s {limit} python -m app."
+        ), name
+        job = exec_start[0].removeprefix("ExecStart=/usr/bin/docker exec hs-data-api ")
+        # The same job, found by the start of its command line (the schedule
+        # id stays out of it: ledger parity reads the first --schedule-id).
+        for directive in ("ExecStartPre", "ExecStopPost"):
+            terminate = [line for line in lines if line.startswith(
+                f'{directive}=-/usr/bin/docker exec hs-data-api pkill -TERM -f "^timeout --kill-after=30s {limit} python -m app.')]
+            assert len(terminate) == 1, (name, directive)
+            assert job.startswith(terminate[0].split('"^', 1)[1].removesuffix('"')), (name, directive)
+        commands = [line for line in lines if line.startswith("Exec")]
+        assert not any(" compose " in line or "docker run" in line for line in commands), name
+        timeouts = [line for line in lines if line.startswith("TimeoutStartSec=")]
+        assert timeouts == [f"TimeoutStartSec={unit_limit}"], name
