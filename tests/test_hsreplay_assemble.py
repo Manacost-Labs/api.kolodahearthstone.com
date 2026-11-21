@@ -704,8 +704,11 @@ def test_a_concurrent_run_is_skipped(isolated, base) -> None:
 
 
 @pytest.fixture()
-def client(isolated, base):
+def client(isolated, base, monkeypatch):
     _refresh(base, FakeHsReplay(base))
+    # The answers are read at the moment of the refresh: freshness is judged
+    # against the clock, so a fixed one keeps the 48-hour window from expiring.
+    monkeypatch.setattr("app.hsreplay_assemble._now", lambda: NOW)
     from app.main import app
 
     return TestClient(app)
